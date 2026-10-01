@@ -23,6 +23,10 @@ export function onZtermVerificationDownload(listener: (target: ZtermVerification
   };
 }
 
+export function peekZtermVerificationDownload(): ZtermVerificationDownloadTarget | null {
+  return pendingDownloadTarget;
+}
+
 export function claimZtermVerificationDownload(): ZtermVerificationDownloadTarget | null {
   const target = pendingDownloadTarget;
   pendingDownloadTarget = null;

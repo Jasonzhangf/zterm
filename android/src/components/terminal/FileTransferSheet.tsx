@@ -33,6 +33,10 @@ import {
   writeLocalEditCopyState,
 } from "../../lib/file-transfer-local-edit-copy-storage";
 import {
+  claimZtermVerificationDownload,
+  onZtermVerificationDownload,
+} from "../../lib/zterm-verification-queue";
+import {
   sendBoundedFileUploadChunks,
 } from "../../lib/file-transfer-throughput-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
@@ -1170,8 +1174,8 @@ export function FileTransferSheet({
   ]);
 
   // Verification fast-path automation used only for installed-app download
-  // replay evidence. It is intentionally scoped to an explicit window event so
-  // normal user flows are unaffected.
+  // replay evidence. The sheet owns the one-shot claim so launch-time intent
+  // cannot be consumed before the file browser is mounted.
   const [fastPathTarget, setFastPathTarget] = useState<{
     remotePath: string;
     fileName: string;
@@ -1179,33 +1183,28 @@ export function FileTransferSheet({
   } | null>(null);
 
   useEffect(() => {
-    const handleDownloadEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{
-        remotePath?: string;
-        fileName?: string;
-        size?: number;
-      }>).detail;
-      if (!detail?.fileName) {
-        return;
-      }
-      setFastPathTarget({
-        remotePath: detail.remotePath || remoteCwd,
-        fileName: detail.fileName,
-        size: detail.size,
-      });
-    };
-    window.addEventListener('zterm:file-transfer-download', handleDownloadEvent);
-    return () => {
-      window.removeEventListener('zterm:file-transfer-download', handleDownloadEvent);
-    };
-  }, [remoteCwd]);
-
-  useEffect(() => {
     if (!open) {
       setFastPathTarget(null);
       return;
     }
   }, [open, remoteCwd]);
+
+  useEffect(() => {
+    const handleVerificationIntent = () => {
+      const target = claimZtermVerificationDownload();
+      if (!target?.fileName) {
+        return;
+      }
+      setFastPathTarget({
+        remotePath: target.remotePath || remoteCwd,
+        fileName: target.fileName,
+        size: target.size,
+      });
+    };
+
+    handleVerificationIntent();
+    return onZtermVerificationDownload(handleVerificationIntent);
+  }, [remoteCwd]);
 
   useEffect(() => {
     if (!open || !fastPathTarget) {

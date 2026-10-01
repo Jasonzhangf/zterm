@@ -14,6 +14,10 @@ import { createFileBrowserSessionPort } from "../../lib/plugin-file-browser/file
 import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
 import { createFileTransferDownloadStore } from "../../lib/file-transfer-native-store-port";
 import type { FileTransferDownloadStore } from "../../lib/file-transfer-native-store-port";
+import {
+  claimZtermVerificationDownload,
+  setZtermVerificationDownload,
+} from "../../lib/zterm-verification-queue";
 import type { ReactElement } from "react";
 
 const FileTransferSheet = ProductionFileTransferSheet as any;
@@ -114,6 +118,7 @@ if (!HTMLElement.prototype.scrollIntoView) {
 
 afterEach(() => {
   cleanup();
+  claimZtermVerificationDownload();
   window.localStorage.clear();
   vi.mocked(StoragePermissionPlugin.check).mockResolvedValue({
     granted: true,
@@ -226,6 +231,43 @@ describe("FileTransferSheet", () => {
         }),
       });
     });
+  });
+
+  it("claims a pending verification download when the sheet mounts and starts it once", async () => {
+    const sendJson = vi.fn();
+    setZtermVerificationDownload({
+      remotePath: "/tmp",
+      fileName: "zterm-rtfp-50mb-3171.bin",
+      size: 52428800,
+    });
+
+    render(
+      <FileTransferSheet
+        open
+        mode="browser"
+        remoteCwd="/tmp"
+        daemonFileScopeId="verification-scope"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(
+        sendJson.mock.calls.filter(([message]) => message?.type === "file-download-request"),
+      ).toHaveLength(1);
+    });
+
+    const request = sendJson.mock.calls.find(
+      ([message]) => message?.type === "file-download-request",
+    )?.[0];
+    expect(request.payload).toMatchObject({
+      remotePath: "/tmp/zterm-rtfp-50mb-3171.bin",
+      fileName: "zterm-rtfp-50mb-3171.bin",
+      totalBytes: 52428800,
+    });
+    expect(claimZtermVerificationDownload()).toBeNull();
   });
 
   it("does not re-request the same remote directory only because parent passed a new sendJson callback identity", async () => {

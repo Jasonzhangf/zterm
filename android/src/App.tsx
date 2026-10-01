@@ -28,11 +28,13 @@ import { useSessionOpenActions } from './hooks/useSessionOpenActions';
 import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { useRelayDeviceStream } from './hooks/useRelayDeviceStream';
-import { useZtermVerificationIntent } from './hooks/useZtermVerificationIntent';
 import { buildVerificationSessionTarget, useVerificationSessionOpen, type VerificationSessionOpenOptions } from './hooks/useVerificationSessionOpen';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
 import { upsertBridgeServer } from './lib/bridge-settings';
-import { setZtermVerificationDownload } from './lib/zterm-verification-queue';
+import {
+  setZtermVerificationDownload,
+  type ZtermVerificationDownloadTarget,
+} from './lib/zterm-verification-queue';
 import { parseZtermVerificationDownloadLink } from './lib/zterm-verification-download-link';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
@@ -411,21 +413,20 @@ export function AppContent({
           fileName: fileName || '',
           size,
         });
-        openVerificationSessionRef.current?.({
-          hosts,
-          sessionName: 'default',
-          onOpenSession: (host, sessionName) => {
-            handleOpenSingleTmuxSessionRef.current?.(buildVerificationSessionTarget(host), sessionName);
-          },
-          onError: (message) => {
-            setAppDialog({
-              tone: 'error',
-              title: '验证下载失败',
-              message,
-            });
-          },
+        setPendingVerificationSessionTarget((current) => {
+          if (
+            current?.remotePath === remoteCwd
+            && current.fileName === fileName
+            && current.size === size
+          ) {
+            return current;
+          }
+          return {
+            remotePath: remoteCwd,
+            fileName: fileName || '',
+            size,
+          };
         });
-        ensureTerminalPageVisible();
         return;
       }
       const deepLink = parseAndroidNotificationDeepLink(url);
@@ -513,7 +514,7 @@ export function AppContent({
   const openSessionDeepLinkRef = useRef<((targetKey: string, channelId: string, sessionName: string) => void) | null>(null);
   const handleOpenSingleTmuxSessionRef = useRef<((target: BridgeTarget, sessionName: string) => void) | null>(null);
   const openVerificationSessionRef = useRef<((options: VerificationSessionOpenOptions) => void) | null>(null);
-  useZtermVerificationIntent();
+  const [pendingVerificationSessionTarget, setPendingVerificationSessionTarget] = useState<ZtermVerificationDownloadTarget | null>(null);
 
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
@@ -834,6 +835,37 @@ export function AppContent({
   const { openVerificationSession } = useVerificationSessionOpen();
   openVerificationSessionRef.current = openVerificationSession;
   handleOpenSingleTmuxSessionRef.current = handleOpenSingleTmuxSession;
+
+  useEffect(() => {
+    if (!hostsLoaded || !pendingVerificationSessionTarget?.fileName) {
+      return;
+    }
+    const openVerificationSession = openVerificationSessionRef.current;
+    if (!openVerificationSession) {
+      return;
+    }
+    setPendingVerificationSessionTarget(null);
+    openVerificationSession({
+      hosts,
+      sessionName: 'default',
+      onOpenSession: (host, sessionName) => {
+        handleOpenSingleTmuxSessionRef.current?.(buildVerificationSessionTarget(host), sessionName);
+      },
+      onError: (message) => {
+        setAppDialog({
+          tone: 'error',
+          title: '验证下载失败',
+          message,
+        });
+      },
+    });
+    ensureTerminalPageVisible();
+  }, [
+    ensureTerminalPageVisible,
+    hosts,
+    hostsLoaded,
+    pendingVerificationSessionTarget,
+  ]);
 
   // Wire the session-stopped notification tap handler to the latest
   // session-open actions (avoid stale closures from the mount-only listener).

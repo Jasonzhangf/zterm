@@ -7,6 +7,7 @@ import { buildConnectionConfigShareLink } from '@zterm/shared';
 import App from './App';
 import { STORAGE_KEYS } from './lib/types';
 import { createNetworkIdentityRuntime } from './lib/network-identity';
+import { claimZtermVerificationDownload } from './lib/zterm-verification-queue';
 
 function makeSession(id: string, revision: number) {
   return {
@@ -930,6 +931,7 @@ describe('App dynamic refresh matrix', () => {
   afterEach(() => {
     vi.useRealTimers();
     cleanup();
+    claimZtermVerificationDownload();
     if (originalVisibilityState) {
       Object.defineProperty(document, 'visibilityState', originalVisibilityState);
     }
@@ -1397,7 +1399,7 @@ describe('App dynamic refresh matrix', () => {
     expect(sessionHarness.switchSession).toHaveBeenCalledTimes(1);
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
     expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
-    expect(openTerminalPageSpy).not.toHaveBeenCalled();
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
   });
 
   it('projects active Sessions on Home without reviving group management or tab persistence', async () => {
@@ -2135,6 +2137,54 @@ describe('App dynamic refresh matrix', () => {
       { id: 'sc-1', label: 'Ctrl+C', sequence: '\x03', order: 0, row: 'bottom-scroll' },
     ]);
     await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('Imported Mac'));
+  });
+
+  it('defers verification deep-link session open until saved hosts are loaded', async () => {
+    capacitorCoreHarness.setNative(true);
+    hostHarness.setLoaded(false);
+    hostHarness.setHosts([]);
+    const setBridgeSettings = makeBridgeSettingsSetter();
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={setBridgeSettings} />,
+    );
+
+    await waitFor(() => expect(capacitorAppHarness.eventCallCount('appUrlOpen')).toBeGreaterThan(0));
+    sessionHarness.createSession.mockClear();
+    act(() => {
+      capacitorAppHarness.emitUrlOpen(
+        'zterm://file-download-verification/p/tmp/zterm-rtfp-50mb-3172.bin/52428800',
+      );
+    });
+
+    expect(sessionHarness.createSession).not.toHaveBeenCalled();
+
+    hostHarness.setHosts([{
+      id: 'verification-host',
+      createdAt: 1,
+      name: 'Verification host',
+      bridgeHost: '192.168.0.3',
+      bridgePort: 3333,
+      sessionName: 'default',
+      authToken: 'token-a',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+      autoCommand: '',
+    }]);
+    hostHarness.setLoaded(true);
+    view.rerender(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={setBridgeSettings} />,
+    );
+
+    await waitFor(() => expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '192.168.0.3',
+        bridgePort: 3333,
+        authToken: 'token-a',
+      }),
+      expect.objectContaining({ activate: false }),
+    ));
   });
 
   it('does not report connection import success when bridge persistence fails', async () => {

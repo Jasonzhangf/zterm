@@ -1,10 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import {
   claimZtermVerificationDownload,
+  peekZtermVerificationDownload,
   setZtermVerificationDownload,
 } from './zterm-verification-queue';
 
 describe('zterm verification queue', () => {
+  it('peeks at a pending target without consuming it', () => {
+    setZtermVerificationDownload({
+      remotePath: '/tmp',
+      fileName: 'zterm-rtfp-50mb-3112.bin',
+      size: 52428800,
+    });
+
+    expect(peekZtermVerificationDownload()).toEqual({
+      remotePath: '/tmp',
+      fileName: 'zterm-rtfp-50mb-3112.bin',
+      size: 52428800,
+    });
+    expect(claimZtermVerificationDownload()).toEqual({
+      remotePath: '/tmp',
+      fileName: 'zterm-rtfp-50mb-3112.bin',
+      size: 52428800,
+    });
+    expect(peekZtermVerificationDownload()).toBeNull();
+  });
+
   it('keeps the deep-link verification target until the sheet is mounted', () => {
     setZtermVerificationDownload({
       remotePath: '/tmp',

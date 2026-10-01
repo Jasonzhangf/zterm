@@ -68,6 +68,7 @@ import {
   type TerminalDebugOverlaySlot,
 } from '../lib/plugin-debug-console/debug-console-contract';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
+import { useZtermVerificationIntent } from '../hooks/useZtermVerificationIntent';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { resolveTerminalFontSizePx, type TerminalFontSize, type TerminalShellSkin } from '../lib/bridge-settings';
 import {
@@ -2105,6 +2106,11 @@ function TerminalPageComponent({
     setFileTransferRemoteCwd(remoteCwd);
     setFileTransferOpen(true);
   }, []);
+
+  const handleVerificationIntent = useCallback((target: { remotePath: string }) => {
+    handleQuickBarOpenFileTransfer('browser', target.remotePath || '/tmp');
+  }, [handleQuickBarOpenFileTransfer]);
+  useZtermVerificationIntent(handleVerificationIntent);
 
   useEffect(() => {
     const handler = (event: Event) => {

@@ -1,26 +1,20 @@
 import { useEffect } from 'react';
-import { claimZtermVerificationDownload } from '../lib/zterm-verification-queue';
+import {
+  onZtermVerificationDownload,
+  peekZtermVerificationDownload,
+  type ZtermVerificationDownloadTarget,
+} from '../lib/zterm-verification-queue';
 
-export function useZtermVerificationIntent(): void {
+export function useZtermVerificationIntent(
+  onIntent: (target: ZtermVerificationDownloadTarget) => void,
+): void {
   useEffect(() => {
-    const flush = () => {
-      const target = claimZtermVerificationDownload();
+    const handleIntent = (target: ZtermVerificationDownloadTarget | null) => {
       if (!target?.fileName) return;
-      window.dispatchEvent(new CustomEvent('zterm:open-file-transfer', {
-        detail: { mode: 'browser', remoteCwd: target.remotePath || '/tmp' },
-      }));
-      window.dispatchEvent(new CustomEvent('zterm:file-transfer-download', {
-        detail: {
-          remotePath: target.remotePath,
-          fileName: target.fileName,
-          size: target.size,
-        },
-      }));
+      onIntent(target);
     };
-    const handleTerminalPageVisible = () => flush();
-    window.addEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
-    return () => {
-      window.removeEventListener('zterm:terminal-page-visible', handleTerminalPageVisible);
-    };
-  }, []);
+
+    handleIntent(peekZtermVerificationDownload());
+    return onZtermVerificationDownload(handleIntent);
+  }, [onIntent]);
 }
