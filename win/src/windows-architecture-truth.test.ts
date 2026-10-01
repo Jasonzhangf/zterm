@@ -33,6 +33,34 @@ describe('windows desktop shell architecture truth', () => {
     expect(read('electron/main.ts')).toContain("path.join(__dirname, 'preload.cjs')");
   });
 
+  it('builds workspace gateway packages before the packaged main process', () => {
+    const packageJson = JSON.parse(read('package.json'));
+    expect(packageJson.scripts['build:main']).toContain('packages/runtime-contracts run build');
+    expect(packageJson.scripts['build:main']).toContain('packages/desktop-gateway run build');
+    expect(packageJson.scripts['build:main']).toContain('tsc -p tsconfig.node.json');
+    expect(packageJson.scripts['build:main']).toContain(
+      'esbuild electron/preload.cts --bundle --platform=node --format=cjs --target=node20 --external:electron --outfile=dist-electron/electron/preload.cjs',
+    );
+  });
+
+  it('declares every packaged main-process runtime import as a production dependency', () => {
+    const packageJson = JSON.parse(read('package.json'));
+    const runtimeSources = [read('electron/main.ts'), read('electron/windows-file-system.ts')].join('\n');
+    const specifiers = [...runtimeSources.matchAll(/(?:from|import)\s+'([^']+)'/g)].map((match) => match[1]!);
+    const nodeBuiltins = new Set(['url', 'path', 'fs', 'fs/promises', 'crypto', 'os']);
+    const runtimePackages = specifiers
+      .filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('node:') && !nodeBuiltins.has(specifier))
+      // Electron is provided by the packaged runtime binary, not by node_modules.
+      .filter((specifier) => specifier !== 'electron')
+      .map((specifier) => (specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0]!));
+
+    expect(runtimePackages).toContain('@zterm/desktop-gateway');
+    for (const name of runtimePackages) {
+      expect(Object.keys(packageJson.dependencies)).toContain(name);
+      expect(Object.keys(packageJson.devDependencies)).not.toContain(name);
+    }
+  });
+
   it('locks Windows installer, icon, and generic update channel metadata', () => {
     const packageJson = JSON.parse(read('package.json'));
     expect(packageJson.build.win.icon).toBe('build/icon.ico');

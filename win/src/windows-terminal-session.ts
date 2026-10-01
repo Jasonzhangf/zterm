@@ -164,8 +164,10 @@ export function createWindowsTerminalSession(): WindowsTerminalSession {
       return () => listeners.delete(listener);
     },
     connect: (target) => {
-      disconnect();
-      const currentGeneration = generation;
+      const currentGeneration = ++generation;
+      const previous = socket;
+      socket = null;
+      if (previous && previous.readyState < WebSocket.CLOSING) previous.close(1000, 'windows shell disconnect');
       update({ status: 'connecting' });
       const openRequestId = crypto.randomUUID();
       const connectionSocket = openBridgeConnection({
@@ -193,6 +195,7 @@ export function createWindowsTerminalSession(): WindowsTerminalSession {
           if (generation === currentGeneration && snapshot.status !== 'idle') update({ status: 'error', error: reason });
         },
       });
+      socket = connectionSocket;
     },
     disconnect,
     sendInput: (data) => {

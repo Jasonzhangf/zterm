@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5175 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5175 electron .\"",
     "build:renderer": "vite build",
-    "build:main": "tsc -p tsconfig.node.json",
+    "build:main": "pnpm --dir ../packages/runtime-contracts run build && pnpm --dir ../packages/desktop-gateway run build && tsc -p tsconfig.node.json && esbuild electron/preload.cts --bundle --platform=node --format=cjs --target=node20 --external:electron --outfile=dist-electron/electron/preload.cjs",
     "build": "pnpm run build:renderer && pnpm run build:main",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@jsonstudio/wtermmod-react": "^0.1.9",
+    "@zterm/desktop-gateway": "workspace:^",
     "@zterm/shared": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -29,11 +30,11 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "@zterm/desktop-gateway": "workspace:^",
     "concurrently": "^9.0.1",
     "cross-env": "^7.0.3",
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3",
+    "esbuild": "^0.21.5",
     "jsdom": "29.0.2",
     "typescript": "^5.4.0",
     "vite": "^5.2.0",
