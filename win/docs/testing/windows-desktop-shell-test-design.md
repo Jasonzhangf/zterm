@@ -1,8 +1,8 @@
-# Windows desktop shell test design
+# Windows remote-access client test design
 
 ## Scope
 
-- Feature: `windows.desktop_shell`
+- Feature: `windows.remote_access_client`
 - Status: multi-session workspace and local file browser packaged Windows gates passed; installer/update-channel metadata implementation is in progress.
 - Resource path: `resource.platform_terminal_surface -> resource.ui_projection`, with terminal data consumed through existing shared `resource.session_transport -> resource.client_sparse_buffer -> resource.renderer_window` owners.
 - Shell owner: `win/` Electron entry, preload/platform bridge, packaging, and Windows-only integration.
@@ -10,10 +10,11 @@
 
 ## Ownership boundary
 
-The Windows shell may own:
+The Windows remote-access shell may own:
 
 - Electron main-process window lifecycle and application menus.
 - A typed Windows preload bridge for filesystem/window/platform operations.
+- Profile/session sidebar projection, workspace split/tab projection, statusbar projection.
 - Windows packaging metadata, installer configuration, and packaged smoke entry.
 - Composition of existing shared workspace, pane stage, connection, and terminal renderer modules.
 
@@ -28,8 +29,8 @@ The Windows shell must not own:
 
 1. Electron main creates one Windows application window and loads the renderer entry.
 2. Preload exposes one typed, least-privilege Windows platform bridge.
-3. Renderer creates the desktop shell and shared workspace projection.
-4. Session transport connects to the configured daemon through the existing shared protocol.
+3. Renderer creates the remote-access shell, profile/session sidebar, statusbar, and shared workspace projection.
+4. Session transport connects to the selected profile target through the existing shared protocol.
 5. Shared sparse-buffer truth feeds the shared terminal renderer inside the active pane.
 6. Window close disposes renderer subscriptions and platform listeners without closing daemon/backend truth.
 
@@ -72,7 +73,8 @@ The Windows shell must not own:
 
 ## Module black-box gates
 
-- Renderer entry mounts the Windows desktop shell as the only production entrypoint.
+- Renderer entry mounts the Windows remote-access shell as the only production entrypoint.
+- Sidebar can select a profile and project daemon sessions without owning daemon session truth.
 - Shell can open a configured daemon session and render a supplied shared terminal projection.
 - Shell can list, create, select, and close daemon sessions through the existing control protocol, with no Windows-only daemon protocol fork.
 - Visible-range requests are blocked until the first daemon `buffer-sync` has made the mirror ready; connecting state must not emit `buffer-sync-request`.
@@ -99,4 +101,4 @@ The Windows shell must not own:
 
 ## Completion signal
 
-The Windows package-channel slice is complete only when maps and symbols agree, local package verification passes, and the real Windows installed-app smoke passes. Authenticode signing and Ctrl+C console-control semantics remain separate follow-up features.
+The Windows remote-access package-channel slice is complete only when DAGPipe graph, local package verification, and the real Windows installed-app smoke agree. Authenticode signing and Ctrl+C console-control semantics remain separate follow-up features.

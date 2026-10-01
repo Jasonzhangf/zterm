@@ -1377,7 +1377,6 @@
         "../win/README.md",
         "../win/docs/spec.md",
         "../win/docs/architecture.md",
-        "../win/docs/function-map.md",
         "../win/task.md",
         "../win/MEMORY.md",
         "note.md",
@@ -1788,8 +1787,8 @@
       ]
     },
     {
-      "feature_id": "windows.desktop_shell",
-      "title": "Windows desktop shell architecture and packaging",
+      "feature_id": "windows.remote_access_client",
+      "title": "Windows remote-access client architecture and packaging",
       "domain": "desktop-windows",
       "owners": [
         "../win/electron/main.ts",
@@ -1810,9 +1809,7 @@
         "../win/task.md",
         "../win/docs/spec.md",
         "../win/docs/architecture.md",
-        "../win/docs/function-map.md",
-        "../win/docs/testing/windows-desktop-shell-test-design.md",
-        "../win/docs/windows-desktop-shell-manifest.json",
+        "docs/dagpipe/windows-remote-access-client.graph.json",
         "packages/shared/src/terminal/mac-terminal-view.tsx",
         "packages/shared/src/react/pane-stage.tsx",
         "docs/function-map.md",
@@ -1831,16 +1828,14 @@
         "../win/src/windows-terminal-session.test.ts",
         "../win/tsconfig.json",
         "../win/tsconfig.node.json",
-        "../win/docs/testing/windows-desktop-shell-test-design.md",
-        "../win/docs/windows-desktop-shell-manifest.json",
+        "docs/dagpipe/windows-remote-access-client.graph.json",
         "src/lib/feature-registry-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts"
       ],
       "truth_sources": [
         "../win/docs/spec.md",
         "../win/docs/architecture.md",
-        "../win/docs/function-map.md",
-        "../win/docs/testing/windows-desktop-shell-test-design.md"
+        "docs/dagpipe/windows-remote-access-client.graph.json"
       ]
     },
     {

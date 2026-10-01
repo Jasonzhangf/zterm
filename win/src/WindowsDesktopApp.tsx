@@ -3,7 +3,6 @@ import {
   MacTerminalView,
   PaneStage,
   PaneTabs,
-  resolveActiveTab,
   resolvePaneProfile,
   type PaneSlotDefinition,
   type PaneTabDescriptor,
@@ -35,9 +34,8 @@ import {
   type WindowsWorkspaceState,
   type WindowsWorkspaceTab,
 } from './windows-workspace';
-
-const STORAGE_KEY = 'zterm:windows:target.v1';
-const DEFAULT_TARGET: WindowsTerminalTarget = { bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'zterm' };
+import { WindowsConnectionStateIndicator, WindowsStatusBar } from './WindowsStatusBar';
+import { createWindowsProfileStore, validateWindowsProfile, type WindowsConnectionProfile } from './windows-profile-store';
 
 interface WindowsPaneContextMenuState {
   paneId: string;
@@ -55,14 +53,76 @@ function hasWindowsWorkspaceTab(
   )));
 }
 
-function readTarget() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '') as Partial<WindowsTerminalTarget>;
-    if (!parsed.bridgeHost || !parsed.sessionName || !Number.isFinite(parsed.bridgePort)) return DEFAULT_TARGET;
-    return { ...DEFAULT_TARGET, ...parsed };
-  } catch {
-    return DEFAULT_TARGET;
-  }
+export function WindowsSidebar({
+  store,
+  controlSnapshot,
+  activeProfileId,
+  newSessionName,
+  filter,
+  onActiveProfileChange,
+  onNewSessionNameChange,
+  onFilterChange,
+  onRefresh,
+  onCreateSession,
+  onOpenSession,
+  onCloseSession,
+}: {
+  store: ReturnType<typeof createWindowsProfileStore>;
+  controlSnapshot: { status: 'idle' | 'loading' | 'error'; error: string; sessions: string[] };
+  activeProfileId: string | null;
+  newSessionName: string;
+  filter: string;
+  onActiveProfileChange: (profileId: string) => void;
+  onNewSessionNameChange: (value: string) => void;
+  onFilterChange: (value: string) => void;
+  onRefresh: () => void;
+  onCreateSession: () => void;
+  onOpenSession: (sessionName: string) => void;
+  onCloseSession: (sessionName: string) => void;
+}) {
+  const visibleSessions = controlSnapshot.sessions.filter((sessionName) =>
+    sessionName.toLowerCase().includes(filter.trim().toLowerCase()),
+  );
+  return (
+    <aside className="windows-sidebar" aria-label="连接与 Session" data-testid="windows-sidebar">
+      <div className="sidebar-section">
+        <div className="sidebar-title">Hosts</div>
+        {store.getSnapshot().profiles.map((profile) => (
+          <label key={profile.id} className={`profile-row${profile.id === activeProfileId ? ' active' : ''}`}>
+            <input
+              type="radio"
+              name="windows-profile"
+              checked={profile.id === activeProfileId}
+              onChange={() => onActiveProfileChange(profile.id)}
+            />
+            <span>{profile.name}</span>
+            <span>{profile.bridgeHost}:{profile.bridgePort}</span>
+          </label>
+        ))}
+      </div>
+      <div className="sidebar-section">
+        <div className="sidebar-title">
+          <span>Sessions</span>
+          <button className="secondary small" disabled={controlSnapshot.status === 'loading'} onClick={onRefresh}>刷新</button>
+        </div>
+        {controlSnapshot.error ? <div className="control-error">{controlSnapshot.error}</div> : null}
+        <input aria-label="搜索 Session" placeholder="filter sessions" value={filter} onChange={(event) => onFilterChange(event.target.value)} />
+        <div className="session-create-row">
+          <input aria-label="新建 Session" placeholder="new-session" value={newSessionName} onChange={(event) => onNewSessionNameChange(event.target.value)} />
+          <button className="secondary small" disabled={!normalizeWindowsNewSessionName(newSessionName) || controlSnapshot.status === 'loading'} onClick={onCreateSession}>新建</button>
+        </div>
+        <div className="session-list" aria-label="Session 列表">
+          {visibleSessions.length === 0 ? <div className="session-empty">{controlSnapshot.status === 'loading' ? '加载中' : '未加载'}</div> : null}
+          {visibleSessions.map((sessionName) => (
+            <div className="session-row" key={sessionName}>
+              <button className="session-name" onClick={() => onOpenSession(sessionName)}>{sessionName}</button>
+              <button className="session-close" aria-label={`关闭 ${sessionName}`} onClick={() => onCloseSession(sessionName)}>×</button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
 }
 
 function WindowsTerminalPane({
@@ -76,6 +136,7 @@ function WindowsTerminalPane({
   onActivatePane,
   onEmptyPaneClick,
   onContextMenuTab,
+  onNewPaneTab,
 }: {
   pane: WorkspacePane<WindowsWorkspaceTab>;
   paneIndex: number;
@@ -87,6 +148,7 @@ function WindowsTerminalPane({
   onActivatePane: () => void;
   onEmptyPaneClick: () => void;
   onContextMenuTab: (tabId: string, anchor: { left: number; top: number }) => void;
+  onNewPaneTab: () => void;
 }) {
   const profile = resolvePaneProfile({ platform: 'desktop', splitVisible });
   const snapshot = useSyncExternalStore(
@@ -114,6 +176,7 @@ function WindowsTerminalPane({
         onCloseTab={onCloseTab}
         onActivatePane={onActivatePane}
         onContextMenuTab={onContextMenuTab}
+        plusButton={{ onQuickNew: onNewPaneTab, onOpenTabManager: onNewPaneTab }}
       />
       <div className="terminal-stage">
         {snapshot?.error ? <div className="error-banner">{snapshot.error}</div> : null}
@@ -142,12 +205,18 @@ export function WindowsWorkspaceStage({
   onChange,
   onEmptyPaneSelect,
   onTabContextMenu,
+  onSplitCurrentTab,
+  onSplitNewSession,
+  onNewPaneTab,
 }: {
   workspace: WindowsWorkspaceState;
   registry: ReturnType<typeof createWindowsTerminalRegistry>;
   onChange: (next: WindowsWorkspaceState) => void;
   onEmptyPaneSelect: (paneId: string) => void;
   onTabContextMenu: (paneId: string, tabId: string, anchor: { left: number; top: number }) => void;
+  onSplitCurrentTab: (paneId: string, tabId: string) => void;
+  onSplitNewSession: () => void;
+  onNewPaneTab: (paneId: string) => void;
 }) {
   const slots: PaneSlotDefinition[] = workspace.panes.map((pane, paneIndex) => {
     const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0]!;
@@ -170,19 +239,29 @@ export function WindowsWorkspaceStage({
           onActivatePane={() => onChange(activateWindowsWorkspacePane(workspace, pane.id))}
           onEmptyPaneClick={() => onEmptyPaneSelect(pane.id)}
           onContextMenuTab={(tabId, anchor) => onTabContextMenu(pane.id, tabId, anchor)}
+          onNewPaneTab={() => onNewPaneTab(pane.id)}
         />
       ),
     };
   });
   return (
-    <PaneStage
-      platform="desktop"
-      splitVisible={workspace.panes.length > 1}
-      slots={slots}
-      onActivatePane={(paneId) => onChange(activateWindowsWorkspacePane(workspace, paneId))}
-      onPaneRatioChange={({ sourcePaneId, targetPaneId, ratio }) =>
-        onChange(resizeWindowsWorkspacePanes(workspace, sourcePaneId, targetPaneId, ratio))}
-    />
+    <section className="windows-workspace" data-testid="windows-workspace">
+      <div className="windows-pane-toolbar">
+        <span className="workspace-toolbar-label">Panes</span>
+        <div className="workspace-toolbar-actions">
+          <button type="button" className="secondary small" data-testid="windows-split-current-tab" title="Split current session into a new pane" aria-label="Split current session into a new pane" disabled={!workspace.panes.some((pane) => pane.id === workspace.activePaneId && pane.tabs.some((tab) => tab.id === pane.activeTabId && tab.target))} onClick={() => { const pane = workspace.panes.find((candidate) => candidate.id === workspace.activePaneId)!; const tab = pane.tabs.find((candidate) => candidate.id === pane.activeTabId && candidate.target); if (tab) onSplitCurrentTab(pane.id, tab.id); }}>分屏当前 Session</button>
+          <button type="button" className="secondary small" data-testid="windows-split-new-session" title="Open a new empty pane and choose a session" aria-label="Open a new empty pane and choose a session" onClick={onSplitNewSession}>新建分屏</button>
+        </div>
+      </div>
+      <PaneStage
+        platform="desktop"
+        splitVisible={workspace.panes.length > 1}
+        slots={slots}
+        onActivatePane={(paneId) => onChange(activateWindowsWorkspacePane(workspace, paneId))}
+        onPaneRatioChange={({ sourcePaneId, targetPaneId, ratio }) =>
+          onChange(resizeWindowsWorkspacePanes(workspace, sourcePaneId, targetPaneId, ratio))}
+      />
+    </section>
   );
 }
 
@@ -190,27 +269,17 @@ export function WindowsDesktopApp() {
   const registry = useMemo(() => createWindowsTerminalRegistry(), []);
   const sessionControl = useMemo(() => createWindowsSessionControl(), []);
   const controlSnapshot = useSyncExternalStore(sessionControl.subscribe, sessionControl.getSnapshot, sessionControl.getSnapshot);
+  const profileStore = useMemo(() => createWindowsProfileStore(), []);
+  const profileSnapshot = useSyncExternalStore(profileStore.subscribe, profileStore.getSnapshot, profileStore.getSnapshot);
   const [workspace, setWorkspace] = useState(createWindowsWorkspaceState);
   const [registryRevision, setRegistryRevision] = useState(0);
-  const [target, setTarget] = useState<WindowsTerminalTarget>(readTarget);
   const [newSessionName, setNewSessionName] = useState('');
-  const [settingsOpen, setSettingsOpen] = useState(true);
+  const [sessionFilter, setSessionFilter] = useState('');
+  const [profileDraft, setProfileDraft] = useState<WindowsConnectionProfile | null>(null);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<WindowsPaneContextMenuState | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const [pendingSessionReplacement, setPendingSessionReplacement] = useState<{ paneId: string; tabId: string } | null>(null);
-  const closeSettingsPanel = () => {
-    setPendingSessionReplacement(null);
-    setSettingsOpen(false);
-  };
-  const toggleSettingsPanel = () => {
-    setSettingsOpen((open) => {
-      if (open) {
-        setPendingSessionReplacement(null);
-      }
-      return !open;
-    });
-  };
 
   useEffect(() => {
     const tabs = listWindowsWorkspaceRuntimeTabs(workspace);
@@ -260,57 +329,67 @@ export function WindowsDesktopApp() {
     }
   }, [pendingSessionReplacement, workspace]);
 
-  const activeTab = resolveActiveTab(workspace);
-  const controlTarget = { bridgeHost: target.bridgeHost, bridgePort: target.bridgePort, authToken: target.authToken };
-  const validTarget = Boolean(target.bridgeHost.trim() && target.sessionName.trim() && target.bridgePort > 0);
-  const targetForSession = (sessionName: string): WindowsTerminalTarget => ({ ...target, sessionName });
+  const activeProfile = profileSnapshot.profiles.find((profile) => profile.id === profileSnapshot.activeProfileId)
+    ?? profileSnapshot.profiles[0]
+    ?? null;
+  const target = activeProfile ? profileStore.resolveTarget(activeProfile) : null;
+  const controlTarget = target ? { bridgeHost: target.bridgeHost, bridgePort: target.bridgePort, authToken: target.authToken } : null;
+  const validTarget = Boolean(target && !validateWindowsProfile(target));
+  const draftError = profileDraft ? validateWindowsProfile(profileDraft) : null;
+  const canConnect = profileDraft ? !draftError : validTarget;
+  const targetForSession = (sessionName: string): WindowsTerminalTarget => target ? { ...target, sessionName } : target!;
   const openTarget = (split: boolean) => {
-    if (!validTarget) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(target));
+    let selectedTarget: WindowsTerminalTarget | null = null;
+    if (profileDraft) {
+      if (validateWindowsProfile(profileDraft)) return;
+      const saved = profileStore.saveProfile(profileDraft);
+      selectedTarget = profileStore.resolveTarget(saved);
+      setProfileDraft(null);
+    } else if (target) {
+      selectedTarget = target;
+    }
+    if (!selectedTarget || validateWindowsProfile(selectedTarget)) return;
     setWorkspace((current) => {
       if (!split && hasWindowsWorkspaceTab(current, pendingSessionReplacement)) {
         return changeWindowsWorkspaceTabSession(
           current,
           pendingSessionReplacement!.paneId,
           pendingSessionReplacement!.tabId,
-          target,
+          selectedTarget,
         );
       }
-      return split ? splitWindowsWorkspace(current, target) : openWindowsWorkspaceTab(current, target);
+      return split ? splitWindowsWorkspace(current, selectedTarget) : openWindowsWorkspaceTab(current, selectedTarget);
     });
     setPendingSessionReplacement(null);
-    setSettingsOpen(false);
   };
   const openSessionInActivePane = (sessionName: string) => {
     const nextTarget = targetForSession(sessionName);
-    setTarget(nextTarget);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextTarget));
+    if (!target) return;
     setWorkspace((current) => {
-      if (hasWindowsWorkspaceTab(current, pendingSessionReplacement)) {
+      const replacement = pendingSessionReplacement;
+      if (replacement && hasWindowsWorkspaceTab(current, replacement)) {
         return changeWindowsWorkspaceTabSession(
           current,
-          pendingSessionReplacement!.paneId,
-          pendingSessionReplacement!.tabId,
+          replacement.paneId,
+          replacement.tabId,
           nextTarget,
         );
       }
       return openWindowsWorkspaceTabInPane(current, current.activePaneId, nextTarget);
     });
     setPendingSessionReplacement(null);
-    setSettingsOpen(false);
   };
   const handleEmptyPaneSelect = (paneId: string) => {
     setPendingSessionReplacement(null);
     setWorkspace((current) => activateWindowsWorkspacePane(current, paneId));
-    setSettingsOpen(true);
   };
   const handleChangeContextSession = () => {
     const current = contextMenu;
     if (!current) return;
     setPendingSessionReplacement({ paneId: current.paneId, tabId: current.tabId });
+    setProfileDraft(activeProfile);
     setWorkspace((workspace) => activateWindowsWorkspacePane(workspace, current.paneId));
     setContextMenu(null);
-    setSettingsOpen(true);
   };
   const handleMoveContextTab = (targetPaneId: string) => {
     const current = contextMenu;
@@ -318,41 +397,72 @@ export function WindowsDesktopApp() {
     setWorkspace((workspace) => moveWindowsWorkspaceTab(workspace, current.paneId, current.tabId, targetPaneId));
     setContextMenu(null);
   };
-  const refreshSessions = () => void sessionControl.refresh(controlTarget);
+  const refreshSessions = () => {
+    if (controlTarget) void sessionControl.refresh(controlTarget);
+  };
   const createSession = () => {
     const sessionName = normalizeWindowsNewSessionName(newSessionName);
     if (!sessionName) return;
+    if (!controlTarget || !activeProfile) return;
     void sessionControl.create(controlTarget, sessionName).then(() => {
-      setTarget((current) => ({ ...current, sessionName }));
+      profileStore.saveProfile({ ...activeProfile, sessionName });
       setNewSessionName('');
     });
   };
   const closeSession = (sessionName: string) => {
+    if (!controlTarget || !target) return;
     void sessionControl.close(controlTarget, sessionName).then(() => {
       setWorkspace((current) => closeWindowsWorkspaceTarget(current, { ...target, sessionName }));
     });
   };
-
   return (
     <main className="windows-shell" data-platform={window.ztermWindows?.platform || 'browser'}>
       <header className="titlebar">
         <div className="brand">ZTerm</div>
-        <div className="connection-state">
-          <span className="state-dot" />
-          {activeTab?.target?.sessionName ?? 'No session'}
-        </div>
+        <WindowsConnectionStateIndicator registry={registry} workspace={workspace} />
         <div className="titlebar-actions">
           <button className="title-command" onClick={() => setFileBrowserOpen((open) => !open)}>Files</button>
-          <button className="icon-button" title="连接设置" aria-label="连接设置" onClick={toggleSettingsPanel}>⚙</button>
+          <button className="icon-button" title="连接设置" aria-label="连接设置" onClick={() => setProfileDraft(activeProfile)}>⚙</button>
         </div>
       </header>
-      <WindowsWorkspaceStage
+      <div className="windows-body">
+        <WindowsSidebar
+          store={profileStore}
+          controlSnapshot={controlSnapshot}
+          activeProfileId={profileSnapshot.activeProfileId}
+          newSessionName={newSessionName}
+          filter={sessionFilter}
+          onActiveProfileChange={profileStore.setActiveProfile}
+          onNewSessionNameChange={setNewSessionName}
+          onFilterChange={setSessionFilter}
+          onRefresh={refreshSessions}
+          onCreateSession={createSession}
+          onOpenSession={openSessionInActivePane}
+          onCloseSession={closeSession}
+        />
+        <WindowsWorkspaceStage
         workspace={workspace}
         registry={registry}
         onChange={setWorkspace}
         onEmptyPaneSelect={handleEmptyPaneSelect}
         onTabContextMenu={(paneId, tabId, anchor) => setContextMenu({ paneId, tabId, left: anchor.left, top: anchor.top })}
-      />
+        onSplitCurrentTab={(paneId, tabId) => {
+          const pane = workspace.panes.find((candidate) => candidate.id === paneId);
+          const tab = pane?.tabs.find((candidate) => candidate.id === tabId);
+          const target = tab?.target;
+          if (pane && target) {
+            setWorkspace((current) => splitWindowsWorkspace(current, target));
+          }
+        }}
+        onSplitNewSession={() => {
+          setPendingSessionReplacement(null);
+          setWorkspace((current) => splitWindowsWorkspaceEmpty(current));
+        }}
+        onNewPaneTab={(paneId) => {
+          setPendingSessionReplacement(null);
+          setWorkspace((current) => activateWindowsWorkspacePane(current, paneId));
+        }}
+        />
       {contextMenu ? (
         <div ref={contextMenuRef} className="windows-pane-context-menu" data-testid="windows-pane-context-menu" role="menu" style={{ left: contextMenu.left, top: contextMenu.top }}>
           <button type="button" role="menuitem" onClick={handleChangeContextSession}>
@@ -367,36 +477,29 @@ export function WindowsDesktopApp() {
             ))}
         </div>
       ) : null}
+        <WindowsStatusBar
+          profile={activeProfile}
+          registry={registry}
+          workspace={workspace}
+          controlError={controlSnapshot.error}
+        />
+      </div>
       <WindowsFileBrowserPanel open={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} />
-      {settingsOpen ? (
-        <aside className="connection-panel" aria-label="连接设置">
-          <div className="panel-title">连接</div>
-          <label>主机<input value={target.bridgeHost} onChange={(event) => setTarget({ ...target, bridgeHost: event.target.value })} /></label>
-          <label>端口<input type="number" value={target.bridgePort} onChange={(event) => setTarget({ ...target, bridgePort: Number(event.target.value) })} /></label>
-          <label>Session<input value={target.sessionName} onChange={(event) => setTarget({ ...target, sessionName: event.target.value })} /></label>
-          <label>Token<input type="password" value={target.authToken || ''} onChange={(event) => setTarget({ ...target, authToken: event.target.value || undefined })} /></label>
-          <div className="session-control" aria-label="Session 管理">
-            <div className="session-control-header"><span>Sessions</span><button className="secondary small" disabled={controlSnapshot.status === 'loading'} onClick={refreshSessions}>刷新</button></div>
-            {controlSnapshot.error ? <div className="control-error">{controlSnapshot.error}</div> : null}
-            <div className="session-create-row">
-              <input aria-label="新建 Session" placeholder="new-session" value={newSessionName} onChange={(event) => setNewSessionName(event.target.value)} />
-              <button className="secondary small" disabled={!normalizeWindowsNewSessionName(newSessionName) || controlSnapshot.status === 'loading'} onClick={createSession}>新建</button>
-            </div>
-            <div className="session-list" aria-label="Session 列表">
-              {controlSnapshot.sessions.length === 0 ? <div className="session-empty">{controlSnapshot.status === 'loading' ? '加载中' : '未加载'}</div> : null}
-              {controlSnapshot.sessions.map((sessionName) => (
-                <div className="session-row" key={sessionName}>
-                  <button className="session-name" onClick={() => openSessionInActivePane(sessionName)}>{sessionName}</button>
-                  <button className="session-close" aria-label={`关闭 ${sessionName}`} onClick={() => closeSession(sessionName)}>×</button>
-                </div>
-              ))}
-            </div>
-          </div>
+      {profileDraft ? (
+        <aside className="connection-panel" aria-label="连接设置" role="complementary">
+          <div className="panel-title">连接 Profile</div>
+          <label>名称<input value={profileDraft.name} onChange={(event) => setProfileDraft({ ...profileDraft, name: event.target.value })} /></label>
+          <label>主机<input value={profileDraft.bridgeHost} onChange={(event) => setProfileDraft({ ...profileDraft, bridgeHost: event.target.value })} /></label>
+          <label>端口<input type="number" value={profileDraft.bridgePort} onChange={(event) => setProfileDraft({ ...profileDraft, bridgePort: Number(event.target.value) })} /></label>
+          <label>Session<input value={profileDraft.sessionName} onChange={(event) => setProfileDraft({ ...profileDraft, sessionName: event.target.value })} /></label>
+          <label>Token<input type="password" value={profileDraft.authToken || ''} onChange={(event) => setProfileDraft({ ...profileDraft, authToken: event.target.value || undefined })} /></label>
+          {draftError ? <div className="control-error">{draftError}</div> : null}
           <div className="panel-actions">
             <button className="secondary" type="button" onClick={() => setWorkspace((current) => splitWindowsWorkspaceEmpty(current))}>空分屏</button>
-            <button className="secondary" disabled={!validTarget} onClick={() => openTarget(true)}>分屏连接</button>
-            <button className="secondary" type="button" onClick={closeSettingsPanel}>取消</button>
-            <button className="primary" disabled={!validTarget} onClick={() => openTarget(false)}>连接</button>
+            <button className="secondary" disabled={!canConnect} onClick={() => openTarget(true)}>分屏连接</button>
+            <button className="primary" disabled={!canConnect} onClick={() => openTarget(false)}>连接</button>
+            <button className="secondary" type="button" onClick={() => setProfileDraft(null)}>取消</button>
+            <button className="primary" disabled={Boolean(draftError)} onClick={() => { if (draftError) return; profileStore.saveProfile(profileDraft); setProfileDraft(null); }}>保存</button>
           </div>
         </aside>
       ) : null}

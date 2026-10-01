@@ -3,6 +3,7 @@ import { applyBufferSyncToSessionBuffer, createSessionBufferState } from '@zterm
 import {
   canRequestWindowsVisibleRange,
   createWindowsSessionControl,
+  createWindowsTerminalSession,
   projectWindowsTerminalBuffer,
   type WindowsTerminalSnapshot,
 } from './windows-terminal-session';
@@ -99,6 +100,16 @@ describe('windows session control owner', () => {
 });
 
 describe('windows terminal session shared buffer binding', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('crypto', { randomUUID: () => 'open-request-id' });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('projects shared sparse-buffer truth without copying renderer semantics', () => {
     const initial = createSessionBufferState({ lines: [], cols: 80, rows: 24, cacheLines: 3000 });
     const next = applyBufferSyncToSessionBuffer(initial, {
@@ -119,6 +130,41 @@ describe('windows terminal session shared buffer binding', () => {
     expect(projection.startIndex).toBe(0);
     expect(projection.endIndex).toBe(1);
   });
+
+  it('accepts the connected frame from the generation it just opened', () => {
+    const session = createWindowsTerminalSession();
+    session.connect({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'default' });
+    const socket = MockWebSocket.latest();
+    socket.open();
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'session-ticket',
+        payload: { openRequestId: 'open-request-id', sessionTransportToken: 'ticket-1', sessionName: 'default' },
+      }),
+    });
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'connected',
+        payload: { sessionId: 'session-1' },
+      }),
+    });
+
+    expect(session.getSnapshot()).toMatchObject({ status: 'connected', sessionId: 'session-1', error: '' });
+    expect(socket.sent).toContain(JSON.stringify({ type: 'buffer-head-request' }));
+  });
+
+  it('routes terminal input over the connected bridge socket', () => {
+    const session = createWindowsTerminalSession();
+    session.connect({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'default' });
+    const socket = MockWebSocket.latest();
+    socket.open();
+    socket.onmessage?.({ data: JSON.stringify({ type: 'session-ticket', payload: { openRequestId: 'open-request-id', sessionTransportToken: 'ticket-1', sessionName: 'default' } }) });
+    socket.onmessage?.({ data: JSON.stringify({ type: 'connected', payload: { sessionId: 'session-1' } }) });
+    socket.sent = [];
+
+    expect(session.sendInput('ls\n')).toBe(true);
+    expect(socket.sent).toContain('ls\n');
+  });
 });
 
 describe('windows terminal visible range request gate', () => {
@@ -130,7 +176,18 @@ describe('windows terminal visible range request gate', () => {
       status: 'connected',
       error: '',
       sessionId: 's1',
-      buffer: { ...emptyBuffer, revision: 1 },
+      buffer: {
+        ...emptyBuffer,
+        revision: 1,
+        lines: [{
+          i: 0,
+          cells: [],
+          width: 0,
+          scrollable: false,
+          erasable: false,
+          continuation: false,
+        }],
+      },
     };
 
     expect(canRequestWindowsVisibleRange(connecting)).toBe(false);

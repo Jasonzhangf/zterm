@@ -1,5 +1,10 @@
 # zterm Windows Memory
 
+## Current governance marker: 2026-09-28
+
+- Current Windows client governance is `windows.remote_access_client`, anchored in `android/docs/dagpipe/windows-remote-access-client.graph.json`, `android/docs/feature-registry.json`, and `.agents/skills/zterm-windows-dev/SKILL.md`.
+- Older packaged Windows shell/session/workspace/file-browser evidence is retained below as historical context, not as a separate active feature owner.
+
 ## 2026-07-11 Windows starts from daemon backend truth
 
 - Windows client work must not start by copying terminal runtime, daemon mirror, buffer protocol, or renderer logic into `win/`.
