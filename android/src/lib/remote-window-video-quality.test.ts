@@ -172,7 +172,7 @@ describe('remote-window-video-quality', () => {
     });
   });
 
-  it('steps smooth mode by halving bitrate while keeping the 30fps cadence', () => {
+  it('degrades smooth mode with a bounded 3M -> 2.5M -> 1M bitrate ladder before cutting fps', () => {
     const first = buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 1 });
     const second = buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 });
     expect(first).toMatchObject({ maxBitrateBps: 2_500_000, maxFrameRateFps: 30 });
