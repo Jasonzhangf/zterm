@@ -3,10 +3,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetClientDebugSnapshotForTests } from '../lib/client-debug-snapshot';
+import { useCallback, useRef, useState } from 'react';
 import type { ComponentProps } from 'react';
-import type { Session } from '../lib/types';
+import { STORAGE_KEYS, type Host, type Session } from '../lib/types';
+import type { BridgeSettings } from '../lib/bridge-settings';
 import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
 import { resolveSessionGroupBoundaryProjection } from '../lib/session-group-viewport';
+import { useSessionHistoryStorage } from '../hooks/useSessionHistoryStorage';
+import { auditOpenTabsAgainstRemoteSessions } from '../lib/remote-tab-audit';
 import {
   TerminalPage as TerminalPageBase,
   resolveTerminalSessionGroupSlotReplacement,
@@ -175,6 +179,80 @@ function makeRelayDevice(overrides: Partial<{
   };
 }
 
+function LiveCatalogDrawerHarness({
+  sessions,
+  liveSessionNames,
+}: {
+  sessions: Session[];
+  liveSessionNames: string[] | null;
+}) {
+  const [auditCompletionCount, setAuditCompletionCount] = useState(0);
+  const { sessionGroups, pruneSessionGroupSelectionToRemoteTruth } = useSessionHistoryStorage([]);
+  const sessionGroupsRef = useRef(sessionGroups);
+  const sessionsRef = useRef(sessions);
+  const prioritySessionIdsRef = useRef(sessions.map((session) => session.id));
+  const openTabStateRef = useRef({ tabs: [], activeSessionId: sessions[0]?.id ?? null });
+  const bridgeSettingsRef = useRef({
+    targetHost: '127.0.0.1',
+    targetPort: 8080,
+    signalUrl: '',
+    turnServerUrl: '',
+    turnUsername: '',
+    turnCredential: '',
+    transportMode: 'auto',
+  } as BridgeSettings);
+  const hostsRef = useRef<Host[]>([]);
+  const remoteOpenTabAuditTokenRef = useRef(0);
+  sessionGroupsRef.current = sessionGroups;
+  sessionsRef.current = sessions;
+  prioritySessionIdsRef.current = sessions.map((session) => session.id);
+
+  const onAuditRemoteSessions = useCallback(async (reason: 'drawer-open') => {
+    try {
+      await auditOpenTabsAgainstRemoteSessions(reason, {
+        openTabStateRef,
+        sessionGroups: sessionGroupsRef.current,
+        bridgeSettingsRef,
+        hostsRef,
+        sessionsRef,
+        prioritySessionIdsRef,
+        manageTmuxSessionsOnOpenTransport: async () => liveSessionNames,
+        remoteOpenTabAuditTokenRef,
+        pruneSessionGroupSelectionToRemoteTruth,
+      });
+    } finally {
+      setAuditCompletionCount((count) => count + 1);
+    }
+  }, [liveSessionNames, pruneSessionGroupSelectionToRemoteTruth]);
+
+  return (
+    <>
+      <div data-testid="harness-session-group-count">
+        {sessionGroups.reduce((total, group) => total + group.sessionNames.length, 0)}
+      </div>
+      <div data-testid="harness-audit-completion-count">{auditCompletionCount}</div>
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={sessionGroups}
+        activeSession={sessions[0] ?? null}
+        onAuditRemoteSessions={onAuditRemoteSessions}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />
+    </>
+  );
+}
+
 describe('TerminalPage portrait session drawer', () => {
   beforeEach(() => {
     const storageBacking = new Map<string, string>();
@@ -287,6 +365,177 @@ describe('TerminalPage portrait session drawer', () => {
 
     fireEvent.click(await screen.findByTestId(`terminal-session-drawer-select-${targetSessionId}`));
     expect(onSwitchSession).toHaveBeenCalledWith(targetSessionId);
+  });
+
+  it('audits remote session truth once per drawer open transition', async () => {
+    const session = makeSession('s1');
+    session.daemonHostId = 'daemon-a';
+    const onAuditRemoteSessions = vi.fn(async () => undefined);
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        sessionGroups={[]}
+        activeSession={session}
+        onAuditRemoteSessions={onAuditRemoteSessions}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(onAuditRemoteSessions).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('terminal-portrait-session-drawer-button'));
+    await waitFor(() => expect(onAuditRemoteSessions).toHaveBeenCalledWith('drawer-open'));
+    expect(onAuditRemoteSessions).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-close'));
+    fireEvent.click(screen.getByTestId('terminal-portrait-session-drawer-button'));
+    await waitFor(() => expect(onAuditRemoteSessions).toHaveBeenCalledTimes(2));
+  });
+
+  it('reconciles stale session groups to the confirmed live catalog on drawer open', async () => {
+    const liveSessionNames = Array.from(
+      { length: 34 },
+      (_, index) => `live-${String(index + 1).padStart(2, '0')}`,
+    );
+    const staleSessionNames = [
+      'collab-repro-a',
+      'collab-repro-b',
+      'collab-repro-c',
+      'collab-repro-d',
+      'collab-repro-e',
+      'collab-repro-f',
+      'collabdiag',
+      'collabtest',
+    ];
+    localStorage.setItem(STORAGE_KEYS.SESSION_GROUPS, JSON.stringify([{
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: [...liveSessionNames, ...staleSessionNames],
+      lastOpenedAt: 1,
+    }]));
+
+    const transportAnchor = makeSession('transport-anchor');
+    transportAnchor.daemonHostId = 'daemon-a';
+    transportAnchor.bridgeHost = '100.127.23.27';
+    transportAnchor.bridgePort = 3333;
+    transportAnchor.sessionName = 'transport-anchor';
+    transportAnchor.title = 'transport-anchor';
+
+    render(
+      <LiveCatalogDrawerHarness
+        sessions={[transportAnchor]}
+        liveSessionNames={liveSessionNames}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('harness-session-group-count').textContent).toBe('42');
+    });
+
+    fireEvent.click(screen.getByTestId('terminal-portrait-session-drawer-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('harness-session-group-count').textContent).toBe('34');
+      expect(screen.getAllByTestId(/^terminal-session-drawer-row-(?!chip-)/)).toHaveLength(34);
+    });
+
+    for (const sessionName of liveSessionNames) {
+      expect(screen.getByText(sessionName)).toBeTruthy();
+    }
+    for (const sessionName of staleSessionNames) {
+      expect(screen.queryByText(sessionName)).toBeNull();
+    }
+  });
+
+  it('preserves stale session groups when the drawer-open catalog fetch is unknown', async () => {
+    localStorage.setItem(STORAGE_KEYS.SESSION_GROUPS, JSON.stringify([{
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['live-1', 'stale-1'],
+      lastOpenedAt: 1,
+    }]));
+
+    const transportAnchor = makeSession('transport-anchor');
+    transportAnchor.daemonHostId = 'daemon-a';
+    transportAnchor.bridgeHost = '100.127.23.27';
+    transportAnchor.bridgePort = 3333;
+
+    render(
+      <LiveCatalogDrawerHarness
+        sessions={[transportAnchor]}
+        liveSessionNames={null}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('harness-session-group-count').textContent).toBe('2');
+    });
+
+    fireEvent.click(screen.getByTestId('terminal-portrait-session-drawer-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('harness-audit-completion-count').textContent).toBe('1');
+    });
+    expect(screen.getByTestId('harness-session-group-count').textContent).toBe('2');
+    expect(screen.getByText('live-1')).toBeTruthy();
+    expect(screen.getByText('stale-1')).toBeTruthy();
+  });
+
+  it('prunes stale session groups when the drawer-open catalog is confirmed empty', async () => {
+    localStorage.setItem(STORAGE_KEYS.SESSION_GROUPS, JSON.stringify([{
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['live-1', 'stale-1'],
+      lastOpenedAt: 1,
+    }]));
+
+    const transportAnchor = makeSession('transport-anchor');
+    transportAnchor.daemonHostId = 'daemon-a';
+    transportAnchor.bridgeHost = '100.127.23.27';
+    transportAnchor.bridgePort = 3333;
+
+    render(
+      <LiveCatalogDrawerHarness
+        sessions={[transportAnchor]}
+        liveSessionNames={[]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('harness-session-group-count').textContent).toBe('2');
+    });
+
+    fireEvent.click(screen.getByTestId('terminal-portrait-session-drawer-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('harness-audit-completion-count').textContent).toBe('1');
+    });
+    expect(screen.getByTestId('harness-session-group-count').textContent).toBe('0');
+    expect(screen.queryByText('live-1')).toBeNull();
+    expect(screen.queryByText('stale-1')).toBeNull();
   });
 
   it('renders only the plugin-provided session drawer slot render callback', () => {

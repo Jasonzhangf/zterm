@@ -551,6 +551,7 @@ interface TerminalPageProps {
   onShortcutUse?: (shortcutId: string) => void;
   sessionDrawerFilterConfig?: SessionDrawerFilterConfig;
   onSessionDrawerFilterConfigChange?: (config: SessionDrawerFilterConfig) => void;
+  onAuditRemoteSessions?: (reason: 'drawer-open') => Promise<void> | void;
 }
 
 interface ScheduleComposerTarget {
@@ -636,6 +637,7 @@ function TerminalPageComponent({
   terminalSessionGroupLayoutMode = 'auto',
   onTerminalWidthModeChange,
   resolveFileBrowserSessionPort,
+  onAuditRemoteSessions,
   shortcutSmartSort,
   shortcutFrequencyMap,
   onShortcutUse,
@@ -687,6 +689,16 @@ function TerminalPageComponent({
     nonce: number;
   } | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const previousSessionDrawerOpenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = previousSessionDrawerOpenRef.current;
+    previousSessionDrawerOpenRef.current = sessionDrawerOpen;
+    if (!wasOpen && sessionDrawerOpen) {
+      void Promise.resolve(onAuditRemoteSessions?.('drawer-open')).catch((error) => {
+        console.error('[TerminalPage] Failed to audit remote session truth on drawer open:', error);
+      });
+    }
+  }, [onAuditRemoteSessions, sessionDrawerOpen]);
   const [drawerCloseDialog, setDrawerCloseDialog] = useState<{
     sessionId: string;
     sessionName: string;
@@ -4109,6 +4121,7 @@ function terminalPagePropsEqual(
     && prev.terminalSessionGroupLayoutMode === next.terminalSessionGroupLayoutMode
     && prev.sessionDrawerFilterConfig === next.sessionDrawerFilterConfig
     && prev.onSessionDrawerFilterConfigChange === next.onSessionDrawerFilterConfigChange
+    && prev.onAuditRemoteSessions === next.onAuditRemoteSessions
     && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
     && prev.resolveFileBrowserSessionPort === next.resolveFileBrowserSessionPort
     && prev.renderDebugConsole === next.renderDebugConsole

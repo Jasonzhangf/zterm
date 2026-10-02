@@ -259,9 +259,9 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
-}): Promise<Map<string, string[]>> {
+}): Promise<Map<string, string[] | null>> {
   const traversalSettings = buildTraversalSettings(options.bridgeSettings);
-  const sessionNamesByTarget = new Map<string, string[]>();
+  const sessionNamesByTarget = new Map<string, string[] | null>();
   const resolvedTargets = resolveRemoteSessionOwnerTargets({
     targets: options.targets,
     hosts: options.hosts,
@@ -327,8 +327,8 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
     }
   }
 
-  // Mark failed targets to distinguish "confirmed empty" from "fetch failed"
-  // Empty string array signals "fetch failed / unknown" - audit must NOT use this to close tabs
+  // null marks failed/unknown targets so callers can distinguish them from a
+  // confirmed empty catalog.
   for (const resolvedTarget of resolvedTargets) {
     const targetKey = buildRemoteSessionOwnerKey({
       daemonHostId: resolvedTarget.daemonHostId,
@@ -337,7 +337,7 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
       terminalBackend: resolvedTarget.terminalBackend,
     });
     if (!fetchedOwnerKeys.has(targetKey) && !sessionNamesByTarget.has(targetKey)) {
-      sessionNamesByTarget.set(targetKey, []);
+      sessionNamesByTarget.set(targetKey, null);
     }
   }
 
@@ -364,7 +364,7 @@ function buildTraversalSettings(settings: TraversalSettings): TraversalSettings 
 
 export function filterRestorableOpenTabsByRemoteSessionNames(options: {
   tabs: PersistedOpenTab[];
-  sessionNamesByTarget: ReadonlyMap<string, ReadonlySet<string> | readonly string[]>;
+  sessionNamesByTarget: ReadonlyMap<string, ReadonlySet<string> | readonly string[] | null>;
 }): RestoreTabAvailabilityResult {
   return {
     restorableTabs: options.tabs,
