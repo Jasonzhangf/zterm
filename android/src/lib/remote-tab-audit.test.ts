@@ -45,8 +45,8 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
     };
 
     deps.openTabStateRef.current.tabs = [tab];
-    // Simulate: fetch returned empty array (could be failed fetch or genuinely empty)
-    const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', []]]));
+    // Simulate: fetch failed/timed out and reported an unknown catalog.
+    const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', null]]));
 
     vi.resetModules();
     vi.doMock('./open-tab-restore', () => ({
@@ -126,6 +126,34 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
         missingSessionNames: [],
       }];
       const fetchMock = vi.fn().mockResolvedValue(new Map());
+
+      vi.resetModules();
+      vi.doMock('./open-tab-restore', () => ({
+        fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+      }));
+      vi.doMock('./runtime-debug', () => ({
+        runtimeDebug: vi.fn(),
+      }));
+
+      const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+      await audit('drawer-open', deps);
+
+      expect(pruneSessionGroupSelectionToRemoteTruth).not.toHaveBeenCalled();
+  });
+
+  it('does not prune session groups during drawer-open when the catalog fetch is unknown', async () => {
+      deps.sessionGroups = [{
+        id: 'group-1',
+        name: 'group',
+        bridgeHost: '192.168.1.100',
+        bridgePort: 8080,
+        daemonHostId: 'daemon-1',
+        authToken: 'token',
+        sessionNames: ['live-1', 'stale-1'],
+        lastOpenedAt: Date.now(),
+        missingSessionNames: [],
+      }];
+      const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', null]]));
 
       vi.resetModules();
       vi.doMock('./open-tab-restore', () => ({
