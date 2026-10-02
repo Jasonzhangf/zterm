@@ -55,6 +55,10 @@ export interface WindowGroupLayoutProps {
   secondaryPlacement?: 'before' | 'after';
   secondaryWrap?: 'wrap' | 'nowrap';
   secondaryItemFlex?: CSSProperties['flex'];
+  // Bounded cross-axis size for the secondary rail. The default plan splits
+  // the group 3:1, which lets a top sibling row eat a quarter of a phone
+  // screen; callers that show a compact thumbnail band pass a fixed size.
+  secondaryRailSize?: CSSProperties['flex'];
   secondaryOverflowX?: CSSProperties['overflowX'];
   className?: string;
   testId?: string;
@@ -71,6 +75,7 @@ export function WindowGroupLayout({
   secondaryPlacement = 'after',
   secondaryWrap = 'wrap',
   secondaryItemFlex,
+  secondaryRailSize,
   secondaryOverflowX,
   className,
   testId,
@@ -104,7 +109,7 @@ export function WindowGroupLayout({
   };
 
   const secondaryRailStyle: CSSProperties = {
-    flex: plan.secondaryFlex || 0,
+    flex: secondaryRailSize ?? (plan.secondaryFlex || 0),
     minWidth: 0,
     minHeight: 0,
     display: 'flex',

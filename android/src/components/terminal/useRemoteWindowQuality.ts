@@ -41,7 +41,10 @@ export interface UseRemoteWindowQualityOptions {
   targetId: string | null;
   mediaPlan: RemoteWindowStreamQualityRequestPayload['mediaPlan'] | null;
   streamReady: boolean;
-  focusStreamActive: boolean;
+  // The stream id sent to the daemon is the one that owns quality. Readiness
+  // of that exact stream is enough; comparing it to a secondary focus ref made
+  // the first/active stream unable to accept quality changes.
+  qualityStreamActive: boolean;
   videoPreference: RemoteWindowVideoPreference;
   bitrateMultiplier?: RemoteWindowVideoBudgetMultiplier;
   maxFrameRateFps?: RemoteWindowQualityMaxFrameRate;
@@ -79,7 +82,7 @@ export function useRemoteWindowQuality({
   targetId,
   mediaPlan,
   streamReady,
-  focusStreamActive,
+  qualityStreamActive,
   videoPreference,
   bitrateMultiplier,
   maxFrameRateFps = 30,
@@ -248,7 +251,7 @@ export function useRemoteWindowQuality({
   }, []);
 
   useEffect(() => {
-    if (!streamReady || !focusStreamActive || !activeSessionId || !streamId || !targetId) {
+    if (!streamReady || !qualityStreamActive || !activeSessionId || !streamId || !targetId) {
       return;
     }
     requestAcknowledgedQuality({
@@ -258,10 +261,10 @@ export function useRemoteWindowQuality({
       qualityKey: buildQualityKey({ sessionId: activeSessionId, streamId, targetId, videoProfile: desiredProfile }),
       videoProfile: desiredProfile,
     });
-  }, [activeSessionId, desiredProfile, focusStreamActive, requestAcknowledgedQuality, streamId, streamReady, targetId]);
+  }, [activeSessionId, desiredProfile, qualityStreamActive, requestAcknowledgedQuality, streamId, streamReady, targetId]);
 
   useEffect(() => {
-    if (!streamReady || !focusStreamActive || !activeSessionId || !streamId || !targetId) {
+    if (!streamReady || !qualityStreamActive || !activeSessionId || !streamId || !targetId) {
       return;
     }
     let stopped = false;
@@ -290,7 +293,7 @@ export function useRemoteWindowQuality({
       stopped = true;
       window.clearInterval(timer);
     };
-  }, [activeSessionId, collectStatsRef, focusStreamActive, streamId, streamReady, targetId]);
+  }, [activeSessionId, collectStatsRef, qualityStreamActive, streamId, streamReady, targetId]);
 
   return {
     activeProfile: qualityApplyState.phase === 'applied' ? qualityApplyState.applied : desiredProfile,

@@ -158,6 +158,11 @@ import { styles } from './remote-window-overlay-styles';
 import { AmbientButton } from '../ambient';
 import { RemoteWindowDeveloperDiagnostics } from './RemoteWindowDeveloperDiagnostics';
 import { RemoteWindowLockedToolbar } from './RemoteWindowLockedToolbar';
+import {
+  RemoteWindowCompositeStrip,
+  findCompositeStripTarget,
+  resolveCompositeStripWindowIds,
+} from './RemoteWindowCompositeStrip';
 import { RemoteWindowTargetPicker } from './RemoteWindowTargetPicker';
 import { RemoteWindowAppSwitch } from './RemoteWindowAppSwitch';
 import { RemoteWindowMorePanel } from './RemoteWindowMorePanel';
@@ -561,7 +566,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     targetId: qualityTargetId,
     mediaPlan: streamCapability?.mediaPlan ?? null,
     streamReady: state.phase === 'targetLocked' && Boolean(state.streamStarted),
-    focusStreamActive: Boolean(qualityStreamId && activeFocusStreamIdRef.current === qualityStreamId),
+    // state.streamId is the active stream that receives input/resize/status.
+    // The old strict focus-ref equality dropped quality updates for the first
+    // stream whenever focus projection lagged the committed active stream.
+    qualityStreamActive: state.phase === 'targetLocked' && Boolean(qualityStreamId && state.streamStarted),
     videoPreference,
     bitrateMultiplier: budgetMultiplier,
     maxFrameRateFps,
@@ -2864,50 +2872,21 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       >
         <div data-testid="remote-window-video-content" style={videoContentStyle}>{lockedVideoContent}</div>
       </div>
-      {compositeLayout ? (
-        <div data-testid="remote-window-composite-strip" data-no-drag="true" style={styles.compositeStrip}>
-          <div
-            data-testid="remote-window-composite-thumbnails"
-            style={styles.compositeThumbRow}
-            onPointerDown={(event) => event.stopPropagation()}
-            onPointerMove={(event) => event.stopPropagation()}
-          >
-            {compositeLayout.windows.slice(1).map((slot) => (
-              <AmbientButton
-                key={slot.windowId}
-                type="button"
-                data-testid={`remote-window-composite-thumb-${slot.windowId}`}
-                data-focused={focusedWindowSlot?.windowId === slot.windowId ? 'true' : undefined}
-                onClick={() => {
-                  const focusTarget = state.targets.find(
-                    (item) => item.videoTarget.windowId === slot.windowId,
-                  ) ?? null;
-                  switchRemoteWindowFocus({
-                    target: focusTarget,
-                    targetId: focusTarget?.streamTargetId || slot.windowId,
-                    windowId: slot.windowId,
-                  });
-                }}
-                style={{
-                  ...styles.compositeThumbButton,
-                  ...(focusedWindowSlot?.windowId === slot.windowId ? styles.compositeThumbButtonFocused : null),
-                }}
-              >
-                <canvas
-                  ref={(node) => {
-                    compositeThumbCanvasRefs.current.set(slot.windowId, node);
-                  }}
-                  width={slot.windowId === focusedWindowSlot?.windowId ? 160 : 96}
-                  height={slot.windowId === focusedWindowSlot?.windowId ? 120 : 72}
-                  style={styles.compositeThumbCanvas}
-                />
-                <span style={styles.compositeThumbLabel}>
-                  {slot.windowId === state.target.videoTarget.windowId ? '主' : '子'}
-                </span>
-              </AmbientButton>
-            ))}
-          </div>
-        </div>
+      {compositeLayout && !lockedAppWindowGroup ? (
+        <RemoteWindowCompositeStrip
+          windowIds={resolveCompositeStripWindowIds(compositeLayout.windows)}
+          activeWindowId={state.target.videoTarget.windowId}
+          focusedWindowId={focusedWindowSlot?.windowId ?? null}
+          canvasRefs={compositeThumbCanvasRefs}
+          onFocusWindow={(windowId) => {
+            const focusTarget = findCompositeStripTarget(state.targets, windowId);
+            switchRemoteWindowFocus({
+              target: focusTarget,
+              targetId: focusTarget?.streamTargetId || windowId,
+              windowId,
+            });
+          }}
+        />
       ) : null}
       {screenshotFeedback ? (
         <div
@@ -2986,9 +2965,12 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
               <div style={styles.videoWindowGroupThumb}>
                 <canvas
                   ref={(node) => {
-                    compositeThumbCanvasRefs.current.set(target.streamTargetId, node);
+                    // The daemon canvas owner keys thumbnails by window id, so a
+                    // stream-target key here left every sibling tile blank.
+                    compositeThumbCanvasRefs.current.set(target.videoTarget.windowId, node);
                   }}
                   data-testid={`remote-window-video-window-thumbnail-${target.streamTargetId}`}
+                  data-window-id={target.videoTarget.windowId}
                   width={160}
                   height={120}
                   style={styles.videoWindowGroupThumbImage}
@@ -3012,7 +2994,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         primaryItemId={state.target.streamTargetId}
         secondaryPlacement="before"
         secondaryWrap="nowrap"
-        secondaryItemFlex="0 0 min(30%, 160px)"
+        secondaryItemFlex="0 0 min(28%, 112px)"
+        secondaryRailSize="0 0 104px"
         secondaryOverflowX="auto"
         testId="remote-window-video-window-switcher"
         style={groupStyle}
@@ -3041,6 +3024,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onMaxFrameRateChange={handleMaxFrameRateChange}
       streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS`}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
+      onDismiss={() => setStreamStatusOpen(false)}
       browserMode={state.phase === 'targetLocked' && isRemoteWindowChromeTarget(state.target)}
       browserUserAgent={browserUserAgent}
       browserUserAgentStatus={browserUserAgentStatus}

@@ -58,7 +58,7 @@ function renderQualityHook(options: {
     targetId: 'target',
     mediaPlan: 'single-focus',
     streamReady: true,
-    focusStreamActive: true,
+    qualityStreamActive: true,
     videoPreference: props.preference,
     bitrateMultiplier: props.bitrateMultiplier,
     maxFrameRateFps: props.maxFrameRateFps,
@@ -102,7 +102,7 @@ describe('useRemoteWindowQuality owner', () => {
 
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalledTimes(1));
     expect(updateStreamQuality.mock.calls[0][1].videoProfile).toMatchObject({
-      maxBitrateBps: 4_000_000,
+      maxBitrateBps: 6_000_000,
       maxFrameRateFps: 60,
     });
   });

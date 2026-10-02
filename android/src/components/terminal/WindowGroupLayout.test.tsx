@@ -92,4 +92,26 @@ describe('WindowGroupLayout', () => {
     expect(rail?.getAttribute('style')).toContain('overflow-x: auto');
     expect(root.firstElementChild?.contains(screen.getByTestId('window-b'))).toBe(true);
   });
+
+  it('bounds the secondary rail so a top preview row cannot take a quarter of the group', () => {
+    render(
+      <WindowGroupLayout
+        testId="window-group-bounded"
+        landscape={false}
+        primaryItemId="a"
+        secondaryPlacement="before"
+        secondaryWrap="nowrap"
+        secondaryRailSize="0 0 104px"
+        items={[
+          { id: 'a', node: <div data-testid="window-a">a</div> },
+          { id: 'b', node: <div data-testid="window-b">b</div> },
+        ]}
+      />,
+    );
+
+    const root = screen.getByTestId('window-group-bounded');
+    expect((root.firstElementChild as HTMLElement).style.flex).toBe('0 0 104px');
+    // The primary pane still absorbs the remaining height.
+    expect((root.lastElementChild as HTMLElement).style.flex).toBe('3 1 0%');
+  });
 });

@@ -2465,6 +2465,7 @@
         "src/components/terminal/RemoteWindowAppSwitch.test.tsx",
         "src/components/terminal/RemoteWindowMorePanel.tsx",
         "src/components/terminal/RemoteWindowMorePanel.test.tsx",
+        "src/components/terminal/RemoteWindowCompositeStrip.tsx",
         "src/components/terminal/RemoteWindowVideoContent.tsx",
         "src/components/terminal/RemoteWindowVideoContent.test.tsx",
         "src/components/terminal/useRemoteWindowDisplayQualityControls.ts",

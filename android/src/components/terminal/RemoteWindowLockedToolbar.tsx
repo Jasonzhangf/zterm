@@ -154,12 +154,10 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           <RemoteWindowIcon name="more" />
         </AmbientButton>
       </div>
-      {mode === 'fullscreen' ? (
-        <div data-testid="remote-window-toolbar-status" role="status" style={styles.compactStatusLine}>
-          <span>{streamStatusText}</span>
-        </div>
-      ) : null}
-      <div data-testid="remote-window-gesture-guide" data-mode={mode} style={styles.gestureGuide}>{gestureGuide}</div>
+      <div data-testid="remote-window-toolbar-status" role="status" style={styles.compactStatusLine}>
+        {mode === 'fullscreen' ? <span>{streamStatusText}</span> : null}
+        <span data-testid="remote-window-gesture-guide" data-mode={mode} style={styles.gestureGuideInline}>{gestureGuide}</span>
+      </div>
       {moreOpen ? moreContent : null}
     </div>
   );

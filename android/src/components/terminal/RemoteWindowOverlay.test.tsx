@@ -442,6 +442,12 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-video-window-option-app-main')).toBeNull();
     expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
     expect(screen.getByTestId('remote-window-video-window-thumbnail-app-child')).toBeTruthy();
+    // The sibling rail is a bounded band, and its thumbnail canvas is keyed by
+    // the daemon window id so the composite canvas owner can actually draw it.
+    expect((videoGroup.firstElementChild as HTMLElement).style.flex).toBe('0 0 104px');
+    expect(screen.getByTestId('remote-window-video-window-thumbnail-app-child').getAttribute('data-window-id')).toBe('window-2');
+    // One switcher only: the overlay must not stack a second in-video strip.
+    expect(screen.queryByTestId('remote-window-composite-strip')).toBeNull();
 
     expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
   });
@@ -530,7 +536,10 @@ describe('RemoteWindowOverlay', () => {
       expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(0, 1);
     });
 
+    // Selecting a stream setting dismisses the sheet; each new intent reopens it.
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-max-frame-rate-select'), { target: { value: '60' } });
     expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBe('4');
     expect(window.localStorage.getItem('zterm:remote-window:quality-max-frame-rate-v1')).toBe('60');
@@ -548,7 +557,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     await waitFor(() => expect(startStream).toHaveBeenCalledTimes(2));
     expect(startStream.mock.calls[1]?.[3].videoProfile).toMatchObject({
-      maxBitrateBps: 4_000_000,
+      maxBitrateBps: 6_000_000,
       maxFrameRateFps: 60,
     });
   });
@@ -576,7 +585,7 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => expect(startStream).toHaveBeenCalledTimes(1));
 
     expect(startStream.mock.calls[0]?.[3].videoProfile).toMatchObject({
-      maxBitrateBps: 2_000_000,
+      maxBitrateBps: 3_000_000,
       maxFrameRateFps: 30,
     });
     fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
@@ -585,6 +594,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '1' } });
     expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBe('1');
 
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
     expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBeNull();
   });
@@ -616,33 +626,39 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-video');
     capabilityStatus.publishCapabilityStatus(startStream.mock.calls[0]![2] as string);
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalled());
+    // The first/active stream owns quality: the request must bind to the exact
+    // started stream id instead of waiting for a focus ref to catch up.
+    expect(updateStreamQuality.mock.calls.at(-1)![1].streamId).toBe(startStream.mock.calls[0]![2]);
     const autoQualityBitrate = updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps;
-    expect(autoQualityBitrate).toBe(2_000_000);
+    expect(autoQualityBitrate).toBe(3_000_000);
 
     fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '1' } });
     await waitFor(() => {
-      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(1_000_000);
+      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(1_500_000);
     });
 
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
     await waitFor(() => {
-      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(2_000_000);
+      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(3_000_000);
     });
 
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
     fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-bitrate'));
     await waitFor(() => expect(startStream).toHaveBeenCalledTimes(2));
-    expect(startStream.mock.calls[1]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 4_000_000 });
+    expect(startStream.mock.calls[1]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 6_000_000 });
 
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
     fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-bitrate'));
     await waitFor(() => expect(startStream).toHaveBeenCalledTimes(3));
-    expect(startStream.mock.calls[2]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 2_000_000 });
+    expect(startStream.mock.calls[2]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 3_000_000 });
   });
 
   it('opens an active app-title switch list and switches to another target without reopening the picker', async () => {
