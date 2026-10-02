@@ -918,6 +918,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     resetCatalog();
     setItermPaneTargetsExpanded(false);
     setAppSwitchOpen(false);
+    setStreamStatusOpen(false);
     floatingResizeRef.current = null;
     clearSurfacePointerState();
     screenshotController.reset();
@@ -1038,9 +1039,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     lastReportedInputContextKeyRef.current = inputContextKey;
     onInputContextChange?.(inputContext);
   }, [inputContext, inputContextKey, onInputContextChange]);
-  const handleFullscreen = useCallback(() => { publishRemoteWindowInputContext(); resetFullscreenViewport(); setState((current) => enterRemoteWindowFullscreen(current)); }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
+  const handleFullscreen = useCallback(() => { publishRemoteWindowInputContext(); resetFullscreenViewport(); setStreamStatusOpen(false); setState((current) => enterRemoteWindowFullscreen(current)); }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
   const handleShrink = useCallback(() => {
     resetFullscreenViewport();
+    // The More sheet is portalled to the body and re-measured against the
+    // toolbar anchor; leaving it open across a mode transition would let the
+    // floating sheet survive (and re-anchor) into fullscreen or shrink.
+    setStreamStatusOpen(false);
     if (embedded) {
       embeddedFullscreenPromotionPendingRef.current = false;
       suppressEmbeddedFullscreenPromotionRef.current = true;

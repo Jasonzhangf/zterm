@@ -415,6 +415,51 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
   });
 
+  it('dismisses the portalled More sheet on fullscreen, shrink, and close transitions', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-more-transition-1',
+      targets: [makeTarget('app-more-transition', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-more-transition" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-target-app-more-transition')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId('remote-window-target-app-more-transition'));
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+
+    // Floating -> fullscreen: the body-portalled sheet must not survive and
+    // re-anchor against the fullscreen toolbar.
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect(screen.getByTestId('remote-window-more-portal')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+    expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
+    expect(screen.queryByTestId('remote-window-stream-status-panel')).toBeNull();
+
+    // Fullscreen -> shrink (Back): the sheet must stay dismissed.
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect(screen.getByTestId('remote-window-more-portal')).toBeTruthy();
+    backListeners[0]?.();
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+    expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
+
+    // Floating -> close: the sheet must be gone with the overlay.
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect(screen.getByTestId('remote-window-more-portal')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+    });
+    expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
+  });
+
   it('keeps the fullscreen overlay explicitly viewport-sized after a resize event', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-rotation-1',
