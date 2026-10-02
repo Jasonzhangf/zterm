@@ -399,9 +399,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       if (previousActiveSessionId !== normalizedSessionId) {
         return current;
       }
-      if (nextOpenTabState.tabs.length === 0) {
-        return openTerminalPage();
-      }
       return openTerminalPage();
     });
 
