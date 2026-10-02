@@ -12,15 +12,26 @@ description: "zterm Mac 客户端开发工作流 - Electron 壳、terminal rende
 
 ---
 
-## 一、必读顺序
+## 一、节点笔记与真源读取顺序
+
+先审计本任务已有节点笔记和证据，判明当前状态与缺口，再按受影响范围读取真源；已记录且未失效的事实不重复读取、不重复验证。
+
+```
+0. 任务独占 run notes        → 当前节点状态与已有证据（先读）
 1. `~/.codex/AGENTS.md`
 2. `~/.codex/USER.md`
 3. `coding-principals/SKILL.md`
-4. `android/docs/decisions/0001-cross-platform-layout-profile.md`
-5. `android/docs/architecture.md`
-6. `android/docs/dev-workflow.md`
-7. `mac/MEMORY.md`
-8. 本 `SKILL.md`
+4. 本任务受影响的项目真源（按域选读，不要求全量重读）：
+   `android/docs/decisions/0001-cross-platform-layout-profile.md`
+   `android/docs/architecture.md`
+   `android/docs/dev-workflow.md`
+   `mac/MEMORY.md`
+5. 本 `SKILL.md`
+```
+
+重读触发仅限：代码、输入、配置、依赖、产物或必要环境变化，证据缺失/冲突/过期，或需刷新 main/远端/PID/runtime 等可变状态；换轮、换 agent、单纯不放心不触发重读。
+
+节点笔记是阶段状态唯一载体：开发/修复/重构的每个流程节点完成、失败或阻塞时立即写 `时间/节点｜结论或状态｜证据路径｜输入版本及必要环境｜下一步`；未证实的判断标假设，失败保留原错。进入下一节点、重试、恢复或交接前先读笔记再动作。
 
 ---
 
@@ -75,7 +86,9 @@ description: "zterm Mac 客户端开发工作流 - Electron 壳、terminal rende
 任何 Mac 改动，默认按下面顺序闭环；**没走完，不要向 Jason 报“可以手测”**。
 
 ```text
-改代码
+读任务 run notes / 已有证据（有效则直接复用，只补失效缺口）
+  -> 改代码
+  -> 每个节点结束时写 run note（时间/节点/结论/证据/环境/下一步）
   -> type-check
   -> build
   -> package（若影响 packaged 行为）

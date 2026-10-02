@@ -24,26 +24,36 @@ description: "审计、开发和验证 zterm Android 客户端；按当前架构
 
 ---
 
-## 一、必读文档顺序
+## 一、节点笔记与真源读取顺序
 
-每次开发前必须按顺序阅读：
+先审计本任务已有节点笔记和证据，判明当前状态、已完成节点与缺口，再按受影响范围读取真源；已记录且未失效的事实不重复读取或推导。
 
 ```
+0. 任务独占 run notes        → 当前节点状态与已有证据（先读）
 1. ~/.codex/AGENTS.md               → 全局入口、硬护栏
 2. ~/.codex/USER.md                 → 用户偏好（称呼 Jason）
-3. coding-principals/SKILL.md       → 开发方法论
-4. android/docs/spec.md     → 项目范围与验收
-5. android/docs/architecture.md → 模块边界与数据流
+3. coding-principals/SKILL.md       → 开发方法论、节点笔记格式
+4. 本任务受影响的项目真源（按域选读，不要求全量重读）：
+   android/docs/spec.md     → 产品范围与验收
+   android/docs/architecture.md → 模块边界与数据流
    android/docs/audits/2026-07-02-architecture-boundary-remediation.md → owner 边界
    android/docs/decisions/2026-09-05-runtime-memory-truth.md → 当前实现与最新目标
    android/memory/index.md → 相关最新条目与 source_refs
-6. android/docs/decisions/0001-cross-platform-layout-profile.md → 跨尺寸布局 / Mac 共享壳决策
-7. android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md → terminal head / sparse buffer / render / UI 真源
-8. android/docs/dev-workflow.md → 执行门禁与验证
-9. android/task.md          → 当前任务板
-10. android/docs/ui-slices.md → 页面切片与 ownership
-11. 本 SKILL.md                     → 项目约束、可复用门禁
+   android/docs/decisions/0001-cross-platform-layout-profile.md → 跨尺寸布局 / Mac 共享壳决策
+   android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md → terminal head / sparse buffer / render / UI 真源
+   android/docs/dev-workflow.md → 执行门禁与验证
+   android/task.md          → 当前任务板
+   android/docs/ui-slices.md → 页面切片与 ownership
+5. 本 SKILL.md                     → 项目约束、可复用门禁
 ```
+
+重读触发仅限：代码、输入、配置、依赖、产物或必要环境变化，证据缺失/冲突/过期，或需要刷新 main/远端/PID/runtime 等可变状态；换轮、换 agent、单纯不放心不触发重读。
+
+### 1.1 节点笔记
+
+- 开发/修复/重构的每个流程节点完成、失败或阻塞时，立即写任务独占 run notes：`时间/节点｜结论或状态｜证据路径｜输入版本及必要环境｜下一步`；未证实的判断标假设，失败保留原错，不复制原始日志。
+- 进入下一节点、重试、恢复或交接前，先读相关节点笔记与证据再决定动作；上下文、记忆摘要和口头完成声明不替代落盘事实。
+- 同一事实确认一次即落盘并复用。已有有效证据不得反复检查、反复测试；只补因变化或缺口而失效的受影响项。
 
 ---
 
@@ -502,9 +512,11 @@ Android / daemon / shared / Mac 任一 terminal 主链改动，都必须按影�
 └─────────┘    └─────────┘    └─────────┘    └─────────┘    └─────────┘
      │              │              │              │              │
      ▼              ▼              ▼              ▼              ▼
- 更新task/CACHE 读skill        运行验证       Git commit    更新skill
- 定义成功       最小切片       证据记录       检查清单      经验沉淀
+ 读笔记+task   读skill        补失效验证     Git commit    按需沉淀
+ 定义成功       最小切片       写节点笔记     检查清单      经验沉淀
 ```
+
+每个节点结束（含失败/阻塞）都落一条 run note；下一节点先读笔记再动，不重复同一事实的验证。
 
 ### 3.2 Phase 1: 规划阶段
 
@@ -512,7 +524,7 @@ Android / daemon / shared / Mac 任一 terminal 主链改动，都必须按影�
 
 #### 规划输出模板
 
-每次任务开始前，必须先更新 `android/task.md` 和 `android/CACHE.md`：
+每次任务开始前，先审计本任务 run notes 与 `android/task.md`，复用仍有效证据；再更新 `android/task.md` 和 `android/CACHE.md`：
 
 ```markdown
 ## Task-XXX
@@ -782,19 +794,19 @@ feat: 添加 HostList 组件和 useHostStorage hook
 
 ### 3.7 回归验证（下次启动）
 
-每次开发前执行：
+先读任务独占 run notes 与已有证据；下述命令只补失效/缺失项，不因新一轮或换 agent 无条件全跑：
 
 ```bash
-# 1. 检查上次提交状态
+# 1. 仅在需要确认当前分支/工作树真源时
 git log --oneline -5
 
-# 2. 运行基础验证
+# 2. 仅在代码/依赖变化或该证据失效时
 pnpm --dir android run type-check
 
-# 3. 本地启动验证
+# 3. 仅在需要真实入口验证且该证据缺失/失效时
 pnpm --dir android run dev
 
-# 4. 如有 Android 项目
+# 4. 仅在需要真机/模拟器安装态证据时
 pnpm --dir android run run:android
 ```
 

@@ -32,9 +32,11 @@
 ## Hard Rules
 - 不在本仓库复制或内嵌 runtime 源码
 - runtime 问题改 `../wterm`，app 问题改 `zterm`
-- 先验证，后结论；无证据不宣称完成
+- 先审计节点笔记，再验证；无证据不宣称完成。有效证据直接复用，不重复确认/验证；只有代码、输入、配置、依赖、产物或必要环境变化，或证据缺失/冲突/过期，才重查受影响节点。
+- 开发/修复/重构的每个流程节点完成、失败或阻塞时，立即在任务独占 run notes 记录：时间/节点｜结论/状态｜证据路径｜输入版本与必要环境｜下一步。假设明确标注，失败保留原错。
+- 下游执行、重试、恢复、交接先读相关节点笔记与证据，不凭聊天上下文重建事实。
 - Android APK / terminal / renderer / IME / session transport / OTA 任一影响真机行为的改动，必须先跑 `.agents/skills/zterm-mobile-dev/SKILL.md` 的 Android L5 真机硬门禁；单测、`vitest`、`tsc`、`daemon:mirror:close-loop`、本机 `dev` 浏览器或 local daemon preview 都不能冒充真机交付。缺 emulator/15T 截图、logcat、buildNumber 或 OTA/安装态证据时，按 `UNVERIFIED`/`INCOMPLETE` 处理。
-- 每次开发 / 修复 / 重构必须先读架构真源，再读代码：
+- 每次开发 / 修复 / 重构先审计本任务节点笔记；已记录且未失效的事实不重复读取/推导，再读受影响架构真源，再读代码：
   - 先读 `android/docs/architecture.md`
   - 再读 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`
   - 再按任务域读对应 decision / DAGPipe graph / skill
