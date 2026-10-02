@@ -142,7 +142,7 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
     try {
       localStorage.setItem(
         STORAGE_KEYS.ACTIVE_PAGE,
-        JSON.stringify(resolvePersistedPageStateTruth(pageState, runtimeActiveSessionId)),
+        JSON.stringify(resolvePersistedPageStateTruth(pageState)),
       );
     } catch (error) {
       console.error('[App] Failed to persist page state:', error);

@@ -14,7 +14,7 @@ import {
   buildOpenTabSessionCreateOptions,
 } from '../lib/open-tab-open-policy';
 import { createForegroundRefreshRuntime } from '../lib/app-foreground-refresh';
-import { openConnectionsPage, openTerminalPage, type AppPageState } from '../lib/page-state';
+import { openTerminalPage, type AppPageState } from '../lib/page-state';
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch';
 import type { BridgeSettings } from '../lib/bridge-settings';
@@ -374,13 +374,22 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     const previousActiveSessionId = openTabStateRef.current.activeSessionId;
 
     closedOpenTabSessionIdsRef.current.add(normalizedSessionId);
-    applyOpenTabState(nextOpenTabState);
+    const closingActiveSession = previousActiveSessionId === normalizedSessionId;
+    const shouldResumeSurvivor = closingActiveSession && nextOpenTabState.activeSessionId !== null;
+
+    // Close the outgoing runtime before switching to the survivor. Otherwise
+    // the survivor becomes active while its channel is still closed, and the
+    // resize effect can race into a closed mux channel.
+    if (closeOptions?.closeRuntimeSession) {
+      closeSession(normalizedSessionId);
+    }
+    applyOpenTabState(
+      nextOpenTabState,
+      shouldResumeSurvivor ? { switchRuntime: 'explicit-resume' } : undefined,
+    );
 
     if (closeOptions?.clearDraft) {
       clearSessionDraft(normalizedSessionId);
-    }
-    if (closeOptions?.closeRuntimeSession) {
-      closeSession(normalizedSessionId);
     }
 
     setPageState((current) => {
@@ -391,7 +400,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
         return current;
       }
       if (nextOpenTabState.tabs.length === 0) {
-        return openConnectionsPage();
+        return openTerminalPage();
       }
       return openTerminalPage();
     });

@@ -257,6 +257,32 @@ describe('TerminalPage tab isolation', () => {
     expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
   });
 
+  it('keeps the terminal stage empty when the last session is closed', () => {
+    render(
+      <TerminalPage
+        sessions={[]}
+        activeSession={null}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-stage-shell')).toBeTruthy();
+    expect(screen.getByTestId('terminal-empty-pane-pane-main')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-pane-shell')).toBeNull();
+    expect(screen.getByText('选择 session')).toBeTruthy();
+  });
+
   it('routes input/resize/viewport callbacks with explicit sessionId', async () => {
     const sessions = [makeSession('s1'), makeSession('s2')];
     const onTerminalInput = vi.fn();

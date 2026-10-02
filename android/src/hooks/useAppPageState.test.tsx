@@ -3,6 +3,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppPageState } from './useAppPageState';
+import { openTerminalPage } from '../lib/page-state';
 import { STORAGE_KEYS } from '../lib/types';
 
 const appListenerMock = vi.hoisted(() => ({
@@ -142,6 +143,40 @@ describe('useAppPageState', () => {
 
     expect(result.current.pageState.kind).toBe('terminal');
     expect(ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
+      kind: 'terminal',
+    });
+  });
+
+  it('persists the live terminal page kind when the last runtime session closes', () => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+
+    const { result, rerender } = renderHook(
+      ({ sessions, runtimeActiveSessionId }) => useAppPageState({
+        hosts: [],
+        sessions,
+        runtimeActiveSessionId,
+        addHost: vi.fn(),
+        updateHost: vi.fn(),
+        deleteHost: vi.fn(),
+        ensureTerminalPageVisible: vi.fn(),
+      }),
+      {
+        initialProps: {
+          sessions: [sessionS1] as any[],
+          runtimeActiveSessionId: 's1' as string | null,
+        },
+      },
+    );
+
+    expect(result.current.pageState.kind).toBe('terminal');
+
+    // The last tab closes: the runtime session disappears while the empty
+    // terminal page remains the live page (openTerminalPage() re-render).
+    rerender({ sessions: [], runtimeActiveSessionId: null });
+    act(() => result.current.setPageState(openTerminalPage()));
+
+    expect(result.current.pageState.kind).toBe('terminal');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
     });
