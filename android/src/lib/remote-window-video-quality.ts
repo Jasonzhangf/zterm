@@ -11,7 +11,9 @@ export const REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY = 'zterm:remote-wind
 export const REMOTE_WINDOW_VIDEO_PREFERENCES: readonly RemoteWindowVideoPreference[] = ['smooth', 'quality'];
 export type RemoteWindowVideoQualityTier = 'smooth-720' | 'quality-1080' | 'ultra-2160';
 export const REMOTE_WINDOW_VIDEO_QUALITY_TIERS = Object.freeze({
-  'smooth-720': { shortEdge: 720, baseBitrateBps: 1_000_000 },
+  // Default streaming budget. 2 Mbps at 720p left remote desktop text visibly
+  // soft on a phone; the per-preference baseline is 1.5 Mbps x 2 = 3 Mbps.
+  'smooth-720': { shortEdge: 720, baseBitrateBps: 1_500_000 },
   'quality-1080': { shortEdge: 1080, baseBitrateBps: 2_000_000 },
   'ultra-2160': { shortEdge: 2160, baseBitrateBps: 8_000_000 },
 } as const);
@@ -330,7 +332,7 @@ export function buildRemoteWindowVideoProfile(
     }
     return {
       ...base,
-      maxBitrateBps: cause === 'network' ? 2_000_000 : 2_500_000,
+      maxBitrateBps: 2_500_000,
       maxFrameRateFps: 30,
       maxCaptureWidth: 720,
       maxCaptureHeight: 720,

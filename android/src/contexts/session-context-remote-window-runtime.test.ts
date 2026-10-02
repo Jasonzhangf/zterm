@@ -727,7 +727,7 @@ describe('session context remote window runtime', () => {
       mediaPlan: options.mediaPlan,
       bitrate: options.videoProfile.maxBitrateBps,
     }))).toEqual([
-      { streamId: 'canvas-stream', purpose: 'preview', mediaPlan: 'single-focus' as const, bitrate: 2_000_000 },
+      { streamId: 'canvas-stream', purpose: 'preview', mediaPlan: 'single-focus' as const, bitrate: 3_000_000 },
       { streamId: 'focus-stream', purpose: 'focus', mediaPlan: 'single-focus' as const, bitrate: 8_000_000 },
     ]);
   });

@@ -377,6 +377,89 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-stream-status-panel')).toBeNull();
   });
 
+  it('renders the More sheet outside the clipping floating overlay so every control stays reachable', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-more-portal-1',
+      targets: [makeTarget('app-more-portal', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-more-portal" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-target-app-more-portal')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId('remote-window-target-app-more-portal'));
+
+    const overlay = screen.getByTestId('remote-window-locked-overlay');
+    expect((overlay as HTMLElement).style.overflow).toBe('hidden');
+
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    const portal = screen.getByTestId('remote-window-more-portal');
+    const panel = screen.getByTestId('remote-window-stream-status-panel');
+
+    // The sheet escapes the floating overlay's overflow:hidden clip by
+    // portalling to the body, so the whole panel is reachable.
+    expect(portal.parentElement).toBe(document.body);
+    expect(overlay.contains(portal)).toBe(false);
+    expect(portal.contains(panel)).toBe(true);
+    expect((portal as HTMLElement).style.position).toBe('fixed');
+
+    expect(screen.getByTestId('remote-window-video-preference-select')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-bitrate-multiplier-select')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-max-frame-rate-select')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-user-stream-status')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-more-close')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('remote-window-more-close'));
+    expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
+  });
+
+  it('dismisses the portalled More sheet on fullscreen, shrink, and close transitions', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-more-transition-1',
+      targets: [makeTarget('app-more-transition', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-more-transition" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-target-app-more-transition')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId('remote-window-target-app-more-transition'));
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+
+    // Floating -> fullscreen: the body-portalled sheet must not survive and
+    // re-anchor against the fullscreen toolbar.
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect(screen.getByTestId('remote-window-more-portal')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+    expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
+    expect(screen.queryByTestId('remote-window-stream-status-panel')).toBeNull();
+
+    // Fullscreen -> shrink (Back): the sheet must stay dismissed.
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect(screen.getByTestId('remote-window-more-portal')).toBeTruthy();
+    backListeners[0]?.();
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+    expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
+
+    // Floating -> close: the sheet must be gone with the overlay.
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    expect(screen.getByTestId('remote-window-more-portal')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+    });
+    expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
+  });
+
   it('keeps the fullscreen overlay explicitly viewport-sized after a resize event', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-rotation-1',
@@ -442,6 +525,12 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-video-window-option-app-main')).toBeNull();
     expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
     expect(screen.getByTestId('remote-window-video-window-thumbnail-app-child')).toBeTruthy();
+    // The sibling rail is a bounded band, and its thumbnail canvas is keyed by
+    // the daemon window id so the composite canvas owner can actually draw it.
+    expect((videoGroup.firstElementChild as HTMLElement).style.flex).toBe('0 0 104px');
+    expect(screen.getByTestId('remote-window-video-window-thumbnail-app-child').getAttribute('data-window-id')).toBe('window-2');
+    // One switcher only: the overlay must not stack a second in-video strip.
+    expect(screen.queryByTestId('remote-window-composite-strip')).toBeNull();
 
     expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
   });
@@ -530,7 +619,10 @@ describe('RemoteWindowOverlay', () => {
       expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(0, 1);
     });
 
+    // Selecting a stream setting dismisses the sheet; each new intent reopens it.
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-max-frame-rate-select'), { target: { value: '60' } });
     expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBe('4');
     expect(window.localStorage.getItem('zterm:remote-window:quality-max-frame-rate-v1')).toBe('60');
@@ -548,7 +640,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     await waitFor(() => expect(startStream).toHaveBeenCalledTimes(2));
     expect(startStream.mock.calls[1]?.[3].videoProfile).toMatchObject({
-      maxBitrateBps: 4_000_000,
+      maxBitrateBps: 6_000_000,
       maxFrameRateFps: 60,
     });
   });
@@ -576,7 +668,7 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => expect(startStream).toHaveBeenCalledTimes(1));
 
     expect(startStream.mock.calls[0]?.[3].videoProfile).toMatchObject({
-      maxBitrateBps: 2_000_000,
+      maxBitrateBps: 3_000_000,
       maxFrameRateFps: 30,
     });
     fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
@@ -585,6 +677,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '1' } });
     expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBe('1');
 
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
     expect(window.localStorage.getItem('zterm:remote-window:quality-bitrate-multiplier-v1')).toBeNull();
   });
@@ -616,33 +709,39 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-video');
     capabilityStatus.publishCapabilityStatus(startStream.mock.calls[0]![2] as string);
     await waitFor(() => expect(updateStreamQuality).toHaveBeenCalled());
+    // The first/active stream owns quality: the request must bind to the exact
+    // started stream id instead of waiting for a focus ref to catch up.
+    expect(updateStreamQuality.mock.calls.at(-1)![1].streamId).toBe(startStream.mock.calls[0]![2]);
     const autoQualityBitrate = updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps;
-    expect(autoQualityBitrate).toBe(2_000_000);
+    expect(autoQualityBitrate).toBe(3_000_000);
 
     fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '1' } });
     await waitFor(() => {
-      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(1_000_000);
+      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(1_500_000);
     });
 
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
     await waitFor(() => {
-      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(2_000_000);
+      expect(updateStreamQuality.mock.calls.at(-1)![1].videoProfile.maxBitrateBps).toBe(3_000_000);
     });
 
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
     fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-bitrate'));
     await waitFor(() => expect(startStream).toHaveBeenCalledTimes(2));
-    expect(startStream.mock.calls[1]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 4_000_000 });
+    expect(startStream.mock.calls[1]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 6_000_000 });
 
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
     fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: 'auto' } });
     fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-bitrate'));
     await waitFor(() => expect(startStream).toHaveBeenCalledTimes(3));
-    expect(startStream.mock.calls[2]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 2_000_000 });
+    expect(startStream.mock.calls[2]?.[3].videoProfile).toMatchObject({ maxBitrateBps: 3_000_000 });
   });
 
   it('opens an active app-title switch list and switches to another target without reopening the picker', async () => {
