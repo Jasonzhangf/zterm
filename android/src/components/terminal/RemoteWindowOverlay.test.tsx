@@ -377,6 +377,44 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-stream-status-panel')).toBeNull();
   });
 
+  it('renders the More sheet outside the clipping floating overlay so every control stays reachable', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-more-portal-1',
+      targets: [makeTarget('app-more-portal', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-more-portal" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-target-app-more-portal')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId('remote-window-target-app-more-portal'));
+
+    const overlay = screen.getByTestId('remote-window-locked-overlay');
+    expect((overlay as HTMLElement).style.overflow).toBe('hidden');
+
+    fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+    const portal = screen.getByTestId('remote-window-more-portal');
+    const panel = screen.getByTestId('remote-window-stream-status-panel');
+
+    // The sheet escapes the floating overlay's overflow:hidden clip by
+    // portalling to the body, so the whole panel is reachable.
+    expect(portal.parentElement).toBe(document.body);
+    expect(overlay.contains(portal)).toBe(false);
+    expect(portal.contains(panel)).toBe(true);
+    expect((portal as HTMLElement).style.position).toBe('fixed');
+
+    expect(screen.getByTestId('remote-window-video-preference-select')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-bitrate-multiplier-select')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-max-frame-rate-select')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-user-stream-status')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-more-close')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('remote-window-more-close'));
+    expect(screen.queryByTestId('remote-window-more-portal')).toBeNull();
+  });
+
   it('keeps the fullscreen overlay explicitly viewport-sized after a resize event', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-rotation-1',

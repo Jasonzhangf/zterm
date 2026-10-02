@@ -639,7 +639,9 @@ export const styles: Record<string, CSSProperties> = {
     zIndex: 120,
     display: 'grid',
     gap: 3,
-    maxHeight: 'min(56vh, 420px)',
+    // The portal host caps this to the space below the toolbar so every
+    // control stays reachable by scrolling inside the sheet.
+    maxHeight: 'var(--zterm-remote-window-more-max-height, min(56vh, 420px))',
     overflowY: 'auto',
     WebkitOverflowScrolling: 'touch',
     overscrollBehavior: 'contain',
@@ -654,6 +656,13 @@ export const styles: Record<string, CSSProperties> = {
     lineHeight: 1.35,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
+  },
+  morePanelPortal: {
+    // Zero-height fixed host: it escapes the floating overlay's overflow clip
+    // and transform, while the sheet anchors itself to the toolbar bottom.
+    position: 'fixed',
+    height: 0,
+    zIndex: 130,
   },
   morePanelHeader: {
     display: 'flex',

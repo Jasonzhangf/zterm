@@ -1,8 +1,15 @@
-import { forwardRef, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
+import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type HTMLAttributes, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { RemoteWindowIcon } from './remote-window-icons';
 import { styles } from './remote-window-overlay-styles';
 import type { RemoteWindowVideoStatsSample } from '../../lib/remote-window-video-quality';
 import { AmbientButton } from '../ambient';
+
+interface RemoteWindowMoreAnchor {
+  top: number;
+  left: number;
+  width: number;
+}
 
 export interface RemoteWindowStreamDebugInfo {
   frameSize: { width: number; height: number } | null;
@@ -66,8 +73,57 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   onToggleInputMode,
   onToggleMore,
 }, ref) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const setRootRef = useCallback((node: HTMLDivElement | null) => {
+    rootRef.current = node;
+    if (typeof ref === 'function') {
+      ref(node);
+    } else if (ref) {
+      ref.current = node;
+    }
+  }, [ref]);
+  const [moreAnchor, setMoreAnchor] = useState<RemoteWindowMoreAnchor | null>(null);
+  const measureMoreAnchor = useCallback(() => {
+    const node = rootRef.current;
+    if (!node) {
+      return;
+    }
+    const rect = node.getBoundingClientRect();
+    const next = {
+      top: Math.round(rect.bottom),
+      left: Math.round(rect.left),
+      width: Math.round(rect.width),
+    };
+    setMoreAnchor((current) => (
+      current && current.top === next.top && current.left === next.left && current.width === next.width
+        ? current
+        : next
+    ));
+  }, []);
+  // The floating overlay is bottom-anchored and clips with overflow:hidden, so
+  // the settings sheet is portalled to the body and anchored to the toolbar.
+  // Re-measure on every render (drag updates the overlay transform) and on
+  // viewport scroll/resize.
+  useLayoutEffect(() => {
+    if (!moreOpen) {
+      setMoreAnchor((current) => (current === null ? current : null));
+      return;
+    }
+    measureMoreAnchor();
+  });
+  useEffect(() => {
+    if (!moreOpen) {
+      return;
+    }
+    window.addEventListener('resize', measureMoreAnchor);
+    window.addEventListener('scroll', measureMoreAnchor, true);
+    return () => {
+      window.removeEventListener('resize', measureMoreAnchor);
+      window.removeEventListener('scroll', measureMoreAnchor, true);
+    };
+  }, [moreOpen, measureMoreAnchor]);
   return (
-    <div ref={ref} data-testid="remote-window-locked-toolbar" style={styles.lockedToolbar}>
+    <div ref={setRootRef} data-testid="remote-window-locked-toolbar" style={styles.lockedToolbar}>
       <div {...dragHandleProps} data-testid="remote-window-drag-handle" style={styles.lockedTopBar}>
         <div style={styles.lockedTitle}>
             <span style={styles.targetKind}>{targetKindLabel}</span>
@@ -158,7 +214,24 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
         {mode === 'fullscreen' ? <span>{streamStatusText}</span> : null}
         <span data-testid="remote-window-gesture-guide" data-mode={mode} style={styles.gestureGuideInline}>{gestureGuide}</span>
       </div>
-      {moreOpen ? moreContent : null}
+      {moreOpen && moreAnchor && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              data-testid="remote-window-more-portal"
+              data-no-drag="true"
+              style={{
+                ...styles.morePanelPortal,
+                top: moreAnchor.top,
+                left: moreAnchor.left,
+                width: moreAnchor.width,
+                ['--zterm-remote-window-more-max-height' as string]: `calc(100dvh - ${moreAnchor.top + 8}px)`,
+              } as CSSProperties}
+            >
+              {moreContent}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 });
