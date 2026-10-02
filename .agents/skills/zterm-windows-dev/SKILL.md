@@ -5,13 +5,22 @@ description: zterm Windows Electron 客户端与 WezTerm daemon 开发闭环，�
 
 # zterm Windows Dev
 
-## 必读
+## 节点笔记与必读
 
+先审计本任务已有节点笔记和证据，判明当前状态与缺口，再按受影响范围读取真源；已记录且未失效的事实不重复读取、不重复验证。
+
+```
+0. 任务独占 run notes        → 当前节点状态与已有证据（先读）
 1. `win/docs/architecture.md`
 2. `android/docs/dagpipe/windows-remote-access-client.graph.json`
 3. `android/docs/dagpipe/README.md`
 4. `win/docs/testing/windows-desktop-shell-test-design.md`
 5. `win/MEMORY.md`
+```
+
+重读触发仅限：代码、输入、配置、依赖、产物或必要环境变化，证据缺失/冲突/过期，或需刷新 main/远端/PID/runtime 等可变状态；换轮、换 agent、单纯不放心不触发重读。
+
+节点笔记是阶段状态唯一载体：开发/修复/重构的每个流程节点完成、失败或阻塞时立即写 `时间/节点｜结论或状态｜证据路径｜输入版本及必要环境｜下一步`；未证实的判断标假设，失败保留原错。进入下一节点、重试、恢复或交接前先读笔记再动作；已有有效证据直接复用，不重复检查。
 
 ## 边界
 
