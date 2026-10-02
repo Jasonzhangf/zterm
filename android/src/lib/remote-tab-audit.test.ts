@@ -71,7 +71,8 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
     expect(missingLogs).toHaveLength(0);
   });
 
-  it('does not prune session groups during drawer-open because the catalog owner already refreshed them', async () => {
+  it('prunes stale session groups during drawer-open against the confirmed live catalog', async () => {
+      const liveSessionNames = Array.from({ length: 34 }, (_, index) => `live-${index + 1}`);
       deps.sessionGroups = [{
         id: 'group-1',
         name: 'group',
@@ -79,11 +80,52 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
         bridgePort: 8080,
         daemonHostId: 'daemon-1',
         authToken: 'token',
-        sessionNames: ['my-session'],
+        sessionNames: [
+          ...liveSessionNames,
+          'collab-repro-a',
+          'collab-repro-b',
+          'collab-repro-c',
+          'collab-repro-d',
+          'collab-repro-e',
+          'collab-repro-f',
+          'collabdiag',
+          'collabtest',
+        ],
         lastOpenedAt: Date.now(),
         missingSessionNames: [],
       }];
-      const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', []]]));
+      const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', liveSessionNames]]));
+
+      vi.resetModules();
+      vi.doMock('./open-tab-restore', () => ({
+        fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+      }));
+      vi.doMock('./runtime-debug', () => ({
+        runtimeDebug: vi.fn(),
+      }));
+
+      const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+      await audit('drawer-open', deps);
+
+      expect(pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+        expect.objectContaining({ daemonHostId: 'daemon-1' }),
+        liveSessionNames,
+      );
+  });
+
+  it('does not prune session groups when the confirmed catalog has no entry for the owner', async () => {
+      deps.sessionGroups = [{
+        id: 'group-1',
+        name: 'group',
+        bridgeHost: '192.168.1.100',
+        bridgePort: 8080,
+        daemonHostId: 'daemon-1',
+        authToken: 'token',
+        sessionNames: ['live-1', 'stale-1'],
+        lastOpenedAt: Date.now(),
+        missingSessionNames: [],
+      }];
+      const fetchMock = vi.fn().mockResolvedValue(new Map());
 
       vi.resetModules();
       vi.doMock('./open-tab-restore', () => ({
@@ -99,7 +141,7 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
       expect(pruneSessionGroupSelectionToRemoteTruth).not.toHaveBeenCalled();
   });
 
-  it('does not let drawer-open tab auditing prune the catalog-owned session group', async () => {
+  it('keeps drawer-open group reconciliation active when an open tab is also audited', async () => {
       deps.openTabStateRef.current.tabs = [{
         sessionId: 'session-1',
         hostId: 'host-1',
@@ -118,11 +160,11 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
         bridgePort: 8080,
         daemonHostId: 'daemon-1',
         authToken: 'token',
-        sessionNames: ['my-session'],
+        sessionNames: ['my-session', 'stale-session'],
         lastOpenedAt: Date.now(),
         missingSessionNames: [],
       }];
-      const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', []]]));
+      const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', ['my-session']]]));
 
       vi.resetModules();
       vi.doMock('./open-tab-restore', () => ({
@@ -135,7 +177,10 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
       const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
       await audit('drawer-open', deps);
 
-      expect(pruneSessionGroupSelectionToRemoteTruth).not.toHaveBeenCalled();
+      expect(pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+        expect.objectContaining({ daemonHostId: 'daemon-1' }),
+        ['my-session'],
+      );
   });
 
   // ── FORWARD TEST: closes tabs only when session is positively confirmed missing ──

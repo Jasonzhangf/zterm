@@ -1187,6 +1187,7 @@ export function AppContent({
             onOpenDrawerRemoteSession={handleOpenGroupSession}
             onRenameRemoteSession={handleRenameRemoteSession}
             onCloseDrawerRemoteSession={handleCloseGroupSession}
+            onAuditRemoteSessions={auditOpenTabsAgainstRemoteSessions}
             relayDevices={relayDevices}
             serverIdentityAliasInputs={homeSavedConnections}
             sessionPickerDebugMode={pickerMode}

@@ -51,12 +51,7 @@ function shouldAuditSessionGroups(reason: string) {
   return reason !== 'visibilitychange'
     && reason !== 'resume'
     && reason !== 'appStateChange'
-    && reason !== 'online'
-    // Drawer/session-picker refresh already has an authoritative catalog
-    // response and updates the group through its catalog owner. Re-running a
-    // name-only audit here creates a race that can prune the freshly refreshed
-    // group when that parallel request is still unknown.
-    && reason !== 'drawer-open';
+    && reason !== 'online';
 }
 
 export async function auditOpenTabsAgainstRemoteSessions(
