@@ -24,15 +24,13 @@ export const openTerminalPage = (): AppPageState => ({
   kind: 'terminal',
 });
 
-export const resolvePersistedPageStateTruth = (
-  pageState: AppPageState,
-  activeSessionId: string | null,
-): AppPageState => {
+// Persisted ACTIVE_PAGE may only express the current page kind
+// (2026-04-28 terminal transport/session lifecycle truth). Restore eligibility
+// is decided by the read guard in useAppPageState, not by rewriting the live
+// kind here; that keeps the empty TerminalPage state durable.
+export const resolvePersistedPageStateTruth = (pageState: AppPageState): AppPageState => {
   if (pageState.kind !== 'terminal') {
     return pageState;
-  }
-  if (!activeSessionId) {
-    return openConnectionsPage();
   }
   return openTerminalPage();
 };

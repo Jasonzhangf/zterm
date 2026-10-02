@@ -345,7 +345,47 @@ describe('useOpenTabRuntime explicit resume gating', () => {
     expect(updater(currentState)).toBe(currentState);
   });
 
-  it('leaves the terminal page when the active tab is closed and tabs remain', () => {
+  it('closes the outgoing runtime before explicitly resuming the surviving active tab', () => {
+    const closeSession = vi.fn();
+    const switchSession = vi.fn();
+    const setPageState = vi.fn();
+    const { result } = renderHook(() => useOpenTabRuntime({
+      bridgeSettings: { servers: [] } as any,
+      hosts: [],
+      hostsLoaded: true,
+      restoreSwitchReason: 'restore-sync' as const,
+      sessions: [buildSession('s1', 'connected'), buildSession('s2', 'connected')],
+      sessionGroups: [],
+      runtimeActiveSessionId: 's1',
+      createSession: vi.fn(() => 's2'),
+      closeSession,
+      switchSession,
+      moveSession: vi.fn(),
+      renameSession: vi.fn(),
+      reconnectSession: vi.fn(),
+      resumeActiveSessionTransport: vi.fn(() => true),
+      notifyTargetNetworkSignal: vi.fn(),
+      reportTargetNetworkProbeError: vi.fn(),
+      clearSessionDraft: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+      setPageState,
+      pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
+    }));
+
+    act(() => {
+      result.current.handleCloseSession('s1', 'terminal-session-drawer-close-button');
+    });
+
+    expect(closeSession).toHaveBeenCalledWith('s1');
+    expect(switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
+    expect(closeSession.mock.invocationCallOrder[0]).toBeLessThan(switchSession.mock.invocationCallOrder[0]);
+
+    const updater = setPageState.mock.calls.at(-1)?.[0] as (current: { kind: 'terminal' }) => { kind: 'terminal' };
+    expect(updater({ kind: 'terminal' })).toEqual({ kind: 'terminal' });
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+  });
+
+  it('keeps the terminal page when the active tab is closed and tabs remain', () => {
     const setPageState = vi.fn();
     const { result } = renderHook(() => useOpenTabRuntime({
       bridgeSettings: { servers: [] } as any,
@@ -378,5 +418,54 @@ describe('useOpenTabRuntime explicit resume gating', () => {
 
     const updater = setPageState.mock.calls.at(-1)?.[0] as (current: { kind: 'terminal' }) => { kind: 'terminal' };
     expect(updater({ kind: 'terminal' })).toEqual({ kind: 'terminal' });
+  });
+
+  it('keeps the terminal page and clears active state when the last tab is closed', () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 's1',
+        hostId: 'host-s1',
+        connectionName: 'conn-s1',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'session-s1',
+        authToken: 'token-s1',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 's1');
+
+    const setPageState = vi.fn();
+    const { result } = renderHook(() => useOpenTabRuntime({
+      bridgeSettings: { servers: [] } as any,
+      hosts: [],
+      hostsLoaded: true,
+      restoreSwitchReason: 'restore-sync' as const,
+      sessions: [buildSession('s1', 'connected')],
+      sessionGroups: [],
+      runtimeActiveSessionId: 's1',
+      createSession: vi.fn(() => 's1'),
+      closeSession: vi.fn(),
+      switchSession: vi.fn(),
+      moveSession: vi.fn(),
+      renameSession: vi.fn(),
+      reconnectSession: vi.fn(),
+      resumeActiveSessionTransport: vi.fn(() => true),
+      notifyTargetNetworkSignal: vi.fn(),
+      reportTargetNetworkProbeError: vi.fn(),
+      clearSessionDraft: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+      setPageState,
+      pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
+    }));
+
+    act(() => {
+      result.current.handleCloseSession('s1', 'terminal-session-drawer-close-button');
+    });
+
+    const updater = setPageState.mock.calls.at(-1)?.[0] as (current: { kind: 'terminal' }) => { kind: 'terminal' };
+    expect(updater({ kind: 'terminal' })).toEqual({ kind: 'terminal' });
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
   });
 });
