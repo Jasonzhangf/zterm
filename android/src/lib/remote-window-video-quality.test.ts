@@ -72,7 +72,7 @@ describe('remote-window-video-quality', () => {
 
   it('uses target dimensions for portrait and landscape profiles', () => {
     expect(buildRemoteWindowVideoProfile('smooth', { target: makeTarget(1920, 1080) }))
-      .toMatchObject({ maxCaptureWidth: 1280, maxCaptureHeight: 720, maxBitrateBps: 2_000_000 });
+      .toMatchObject({ maxCaptureWidth: 1280, maxCaptureHeight: 720, maxBitrateBps: 3_000_000 });
     expect(buildRemoteWindowVideoProfile('quality', { target: makeTarget(1440, 2560) }))
       .toMatchObject({ maxCaptureWidth: 1080, maxCaptureHeight: 1920, maxBitrateBps: 8_000_000 });
   });
@@ -89,7 +89,7 @@ describe('remote-window-video-quality', () => {
     expect(resolveDefaultRemoteWindowVideoPreference(makeTarget(1920, 1080))).toBe('smooth');
     expect(buildRemoteWindowVideoProfile('smooth')).toEqual({
       preference: 'smooth',
-      maxBitrateBps: 2_000_000,
+      maxBitrateBps: 3_000_000,
       maxFrameRateFps: 30,
       maxCaptureWidth: 720,
       maxCaptureHeight: 720,
@@ -113,7 +113,7 @@ describe('remote-window-video-quality', () => {
     expect(resolveRemoteWindowBitrateMultiplier(1)).toBe(1);
     expect(buildRemoteWindowVideoProfile('smooth', {
       budgetMultiplier: resolveRemoteWindowBitrateMultiplier(REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO),
-    })).toMatchObject({ maxBitrateBps: 2_000_000 });
+    })).toMatchObject({ maxBitrateBps: 3_000_000 });
     expect(buildRemoteWindowVideoProfile('quality', {
       budgetMultiplier: resolveRemoteWindowBitrateMultiplier(REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO),
     })).toMatchObject({ maxBitrateBps: 8_000_000 });
@@ -158,7 +158,7 @@ describe('remote-window-video-quality', () => {
 
   it('keeps smooth interaction at 30fps and uses a half-resolution capture', () => {
     expect(buildRemoteWindowVideoProfile('smooth', { interactionActive: true })).toMatchObject({
-      maxBitrateBps: 2_000_000,
+      maxBitrateBps: 3_000_000,
       maxFrameRateFps: 30,
       maxCaptureWidth: 720,
       maxFrameAgeMs: 80,
@@ -172,10 +172,10 @@ describe('remote-window-video-quality', () => {
     });
   });
 
-  it('steps smooth mode by halving bitrate while keeping the 30fps cadence', () => {
+  it('degrades smooth mode with a bounded 3M -> 2.5M -> 1M bitrate ladder before cutting fps', () => {
     const first = buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 1 });
     const second = buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 });
-    expect(first).toMatchObject({ maxBitrateBps: 2_000_000, maxFrameRateFps: 30 });
+    expect(first).toMatchObject({ maxBitrateBps: 2_500_000, maxFrameRateFps: 30 });
     expect(second).toMatchObject({ maxBitrateBps: 1_000_000, maxFrameRateFps: 15 });
     expect(buildRemoteWindowVideoProfile('smooth', { cause: 'network', level: 2 }).maxFrameRateFps)
       .toBe(15);

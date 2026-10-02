@@ -19,6 +19,7 @@ export interface RemoteWindowMorePanelProps {
   streamStatusText: string;
   networkStatusText: string;
   developerDiagnostics: ReactNode;
+  onDismiss?: () => void;
   onToggleFullscreenDisplayMode: () => void;
   onVideoPreferenceChange: (preference: RemoteWindowVideoPreference) => void;
   displayOrientation?: RemoteWindowOrientationPolicy;
@@ -40,6 +41,7 @@ export function RemoteWindowMorePanel({
   streamStatusText,
   networkStatusText,
   developerDiagnostics,
+  onDismiss = () => {},
   onToggleFullscreenDisplayMode,
   onVideoPreferenceChange,
   displayOrientation = 'follow-device',
@@ -56,6 +58,19 @@ export function RemoteWindowMorePanel({
 }: RemoteWindowMorePanelProps) {
   return (
     <div data-testid="remote-window-stream-status-panel" data-no-drag="true" style={styles.streamStatusPanel}>
+      <div style={styles.morePanelHeader}>
+        <span>串流设置</span>
+        <AmbientButton
+          type="button"
+          data-testid="remote-window-more-close"
+          aria-label="关闭串流设置"
+          title="关闭串流设置"
+          onClick={onDismiss}
+          style={styles.morePanelCloseButton}
+        >
+          关闭
+        </AmbientButton>
+      </div>
       {fullscreen ? (
         <AmbientButton
           type="button"
@@ -72,7 +87,10 @@ export function RemoteWindowMorePanel({
           aria-label="远程窗口串流偏好"
           data-testid="remote-window-video-preference-select"
           value={videoPreference}
-          onChange={(event) => onVideoPreferenceChange(event.currentTarget.value as RemoteWindowVideoPreference)}
+          onChange={(event) => {
+            onVideoPreferenceChange(event.currentTarget.value as RemoteWindowVideoPreference);
+            onDismiss();
+          }}
           style={styles.bitrateSelect}
         >
           <option value="smooth">流畅优先</option>
@@ -86,7 +104,10 @@ export function RemoteWindowMorePanel({
             aria-label="远程窗口显示方向"
             data-testid="remote-window-display-orientation-select"
             value={displayOrientation}
-            onChange={(event) => onDisplayOrientationChange?.(event.currentTarget.value as RemoteWindowOrientationPolicy)}
+            onChange={(event) => {
+              onDisplayOrientationChange?.(event.currentTarget.value as RemoteWindowOrientationPolicy);
+              onDismiss();
+            }}
             style={styles.bitrateSelect}
           >
             <option value="portrait">竖屏</option>
@@ -101,11 +122,14 @@ export function RemoteWindowMorePanel({
           aria-label="远程窗口码率倍数"
           data-testid="remote-window-bitrate-multiplier-select"
           value={bitrateMultiplierSelection}
-          onChange={(event) => onBitrateMultiplierChange?.(
-            event.currentTarget.value === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
-              ? REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
-              : Number(event.currentTarget.value) as RemoteWindowVideoBudgetMultiplier,
-          )}
+          onChange={(event) => {
+            onBitrateMultiplierChange?.(
+              event.currentTarget.value === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
+                ? REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
+                : Number(event.currentTarget.value) as RemoteWindowVideoBudgetMultiplier,
+            );
+            onDismiss();
+          }}
           style={styles.bitrateSelect}
         >
           <option value="auto">默认</option>
@@ -120,7 +144,10 @@ export function RemoteWindowMorePanel({
           aria-label="远程窗口帧率上限"
           data-testid="remote-window-max-frame-rate-select"
           value={maxFrameRateFps}
-          onChange={(event) => onMaxFrameRateChange?.(Number(event.currentTarget.value) as RemoteWindowQualityMaxFrameRate)}
+          onChange={(event) => {
+            onMaxFrameRateChange?.(Number(event.currentTarget.value) as RemoteWindowQualityMaxFrameRate);
+            onDismiss();
+          }}
           style={styles.bitrateSelect}
         >
           {REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS.map((frameRate) => (
@@ -136,7 +163,10 @@ export function RemoteWindowMorePanel({
             data-testid="remote-window-browser-user-agent-select"
             value={browserUserAgent}
             disabled={browserUserAgentStatus === 'pending'}
-            onChange={(event) => onBrowserUserAgentChange(event.currentTarget.value as RemoteWindowBrowserUserAgent)}
+            onChange={(event) => {
+              onBrowserUserAgentChange(event.currentTarget.value as RemoteWindowBrowserUserAgent);
+              onDismiss();
+            }}
             style={styles.bitrateSelect}
           >
             <option value="desktop">桌面版</option>

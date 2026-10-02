@@ -56,6 +56,50 @@ describe('RemoteWindowMorePanel view owner', () => {
     expect(onMaxFrameRateChange).toHaveBeenCalledWith(60);
   });
 
+  it('dismisses the settings sheet after a select change and via the close button', () => {
+    const onDismiss = vi.fn();
+    const onVideoPreferenceChange = vi.fn();
+    const onBitrateMultiplierChange = vi.fn();
+    const onMaxFrameRateChange = vi.fn();
+    const onBrowserUserAgentChange = vi.fn();
+    render(<RemoteWindowMorePanel
+      fullscreen
+      videoPreference="smooth"
+      streamStatusText="串流：已连接"
+      networkStatusText="网络：4g"
+      developerDiagnostics={null}
+      onDismiss={onDismiss}
+      onToggleFullscreenDisplayMode={vi.fn()}
+      onVideoPreferenceChange={onVideoPreferenceChange}
+      bitrateMultiplierSelection="auto"
+      onBitrateMultiplierChange={onBitrateMultiplierChange}
+      maxFrameRateFps={30}
+      onMaxFrameRateChange={onMaxFrameRateChange}
+      browserMode
+      browserUserAgent="mobile"
+      onBrowserUserAgentChange={onBrowserUserAgentChange}
+    />);
+
+    fireEvent.change(screen.getByTestId('remote-window-video-preference-select'), { target: { value: 'quality' } });
+    expect(onVideoPreferenceChange).toHaveBeenCalledWith('quality');
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
+    expect(onBitrateMultiplierChange).toHaveBeenCalledWith(4);
+    expect(onDismiss).toHaveBeenCalledTimes(2);
+
+    fireEvent.change(screen.getByTestId('remote-window-max-frame-rate-select'), { target: { value: '60' } });
+    expect(onMaxFrameRateChange).toHaveBeenCalledWith(60);
+    expect(onDismiss).toHaveBeenCalledTimes(3);
+
+    fireEvent.change(screen.getByTestId('remote-window-browser-user-agent-select'), { target: { value: 'desktop' } });
+    expect(onBrowserUserAgentChange).toHaveBeenCalledWith('desktop');
+    expect(onDismiss).toHaveBeenCalledTimes(4);
+
+    fireEvent.click(screen.getByTestId('remote-window-more-close'));
+    expect(onDismiss).toHaveBeenCalledTimes(5);
+  });
+
   it('keeps the orientation select out of floating mode and offers the auto bitrate baseline', () => {
     render(<RemoteWindowMorePanel
       fullscreen={false}
