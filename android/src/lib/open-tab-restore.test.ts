@@ -562,12 +562,37 @@ describe('open-tab restore truth', () => {
       },
     });
 
-    expect(result.get('daemon:daemon-a')).toEqual([]);
+    expect(result.get('daemon:daemon-a')).toBeNull();
     expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
       'live-session-a',
       { type: 'list-sessions' },
     );
     expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves a confirmed empty catalog as an empty array', async () => {
+    fetchTmuxSessionsMock.mockResolvedValueOnce([]);
+
+    const { fetchRemoteTmuxSessionNamesByOwner } = await import('./open-tab-restore');
+
+    const result = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: [{
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+      }],
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.get('daemon:daemon-a')).toEqual([]);
   });
 
   it('does not fallback to legacy tmux fetch when existing open-target management fails', async () => {
@@ -604,7 +629,7 @@ describe('open-tab restore truth', () => {
       },
     });
 
-    expect(result.get('daemon:daemon-a')).toEqual([]);
+    expect(result.get('daemon:daemon-a')).toBeNull();
     expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
   });
 

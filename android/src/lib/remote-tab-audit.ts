@@ -51,12 +51,7 @@ function shouldAuditSessionGroups(reason: string) {
   return reason !== 'visibilitychange'
     && reason !== 'resume'
     && reason !== 'appStateChange'
-    && reason !== 'online'
-    // Drawer/session-picker refresh already has an authoritative catalog
-    // response and updates the group through its catalog owner. Re-running a
-    // name-only audit here creates a race that can prune the freshly refreshed
-    // group when that parallel request is still unknown.
-    && reason !== 'drawer-open';
+    && reason !== 'online';
 }
 
 export async function auditOpenTabsAgainstRemoteSessions(
@@ -102,7 +97,7 @@ export async function auditOpenTabsAgainstRemoteSessions(
     }
     prunedOwnerKeys.add(ownerKey);
     const remoteSessionNames = sessionNamesByTarget.get(ownerKey);
-    if (!remoteSessionNames) {
+    if (remoteSessionNames == null) {
       continue;
     }
     deps.pruneSessionGroupSelectionToRemoteTruth({
@@ -119,8 +114,9 @@ export async function auditOpenTabsAgainstRemoteSessions(
   const missingTabs = currentTabs.filter((tab) => {
     const canonicalTab = canonicalizeAuditTarget(tab, deps.relayDevices || []);
     const remoteSessionNames = sessionNamesByTarget.get(buildAuditOwnerKey(canonicalTab));
-    // If no entry in map at all, or entry is empty array, treat as "unknown" - do NOT close tabs
-    if (!remoteSessionNames || remoteSessionNames.length === 0) {
+    // A missing/null entry is unknown, and an empty confirmed catalog cannot
+    // prove a saved tab is missing either.
+    if (remoteSessionNames == null || remoteSessionNames.length === 0) {
       return false;
     }
     // Only flag as missing if we have a non-empty confirmed session list AND our tab is not in it
