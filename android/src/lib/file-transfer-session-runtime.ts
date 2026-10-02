@@ -55,7 +55,20 @@ export interface FileTransferDownloadProbe {
 export interface FileTransferSessionRuntimeDeps {
   now?: () => number;
   randomId?: () => string;
+  binaryPath?: 'lan' | 'tailscale';
   downloadStore?: FileTransferDownloadStore;
+  fetchBinaryFile?: (options: {
+    requestId: string;
+    remotePath: string;
+    fileName: string;
+    totalBytes: number;
+    destination: FileTransferDownloadDestination;
+    signal: AbortSignal;
+    onProgress: (progress: {
+      receivedBytes: number;
+      expectedBytes: number;
+    }) => void;
+  }) => Promise<void>;
 }
 
 interface UploadProgressWaiter {
@@ -152,6 +165,7 @@ function updateTransfer(
 }
 
 export function createFileTransferSessionRuntime(deps?: FileTransferSessionRuntimeDeps) {
+  const binaryDownloadEnabled = deps?.binaryPath === 'lan' || deps?.binaryPath === 'tailscale';
   let state = createDefaultState();
   let activeListRequestId: string | null = null;
   let sessionGeneration = 0;
@@ -432,6 +446,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       if (intent.scopeId !== sessionScopeId) {
         throw new Error('download scope changed');
       }
+      const downloadPath = remotePath === '/' ? `/${entry.name}` : `${remotePath}/${entry.name}`;
       const resolvedDestination = deps?.downloadStore?.createDestination({
         requestId,
         scopeId: intent.scopeId,
@@ -464,17 +479,21 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           },
         ],
       };
-      return {
-        requestId,
-        message: {
-          type: 'file-download-request' as const,
+      const requestBase: {
+        requestId: string;
+        waitForDone: () => Promise<void>;
+        isCurrentSession: () => boolean;
+        message?: {
+          type: 'file-download-request';
           payload: {
-            requestId,
-            remotePath: remotePath === '/' ? `/${entry.name}` : `${remotePath}/${entry.name}`,
-            fileName: entry.name,
-            totalBytes: entry.size,
-          },
-        },
+            requestId: string;
+            remotePath: string;
+            fileName: string;
+            totalBytes: number;
+          };
+        };
+      } = {
+        requestId,
         waitForDone: () => new Promise<void>((resolve, reject) => {
           const transfer = findTransfer(requestId);
           if (transfer?.status === 'done') {
@@ -491,6 +510,88 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           sessionGeneration === sessionGenerationAtStart
           && sessionScopeId === intent.scopeId
         ),
+      };
+      if (resolvedDestination && binaryDownloadEnabled && deps?.fetchBinaryFile) {
+        const binaryController = new AbortController();
+        void deps.fetchBinaryFile({
+          requestId,
+          remotePath: downloadPath,
+          fileName: entry.name,
+          totalBytes: entry.size,
+          destination: resolvedDestination,
+          signal: binaryController.signal,
+          onProgress: ({ receivedBytes }) => {
+            state = {
+              ...state,
+              transfers: updateTransfer(state.transfers, requestId, (current) => ({
+                ...current,
+                transferredBytes: receivedBytes,
+              })),
+            };
+            emitStateChange();
+          },
+        }).then(() => {
+          if (sessionGeneration !== sessionGenerationAtStart || sessionScopeId !== intent.scopeId) {
+            return;
+          }
+          void deps.downloadStore?.complete({
+            destination: resolvedDestination,
+            totalBytes: entry.size,
+          }).then(() => {
+            if (sessionGeneration !== sessionGenerationAtStart || sessionScopeId !== intent.scopeId) {
+              return;
+            }
+            state = {
+              ...state,
+              transfers: updateTransfer(state.transfers, requestId, (current) => ({
+                ...current,
+                transferredBytes: entry.size,
+                status: 'done',
+              })),
+            };
+            emitStateChange();
+            settleDownloadWaiter(requestId);
+          }).catch((completeError) => {
+            const message = completeError instanceof Error ? completeError.message : String(completeError);
+            state = {
+              ...state,
+              transfers: updateTransfer(state.transfers, requestId, (current) => ({
+                ...current,
+                status: 'error',
+                error: message,
+              })),
+            };
+            emitStateChange();
+            settleDownloadWaiter(requestId, new Error(message));
+          });
+        }).catch((error) => {
+          if (sessionGeneration === sessionGenerationAtStart && sessionScopeId === intent.scopeId) {
+            const message = error instanceof Error ? error.message : String(error);
+            state = {
+              ...state,
+              transfers: updateTransfer(state.transfers, requestId, (current) => ({
+                ...current,
+                status: 'error',
+                error: message,
+              })),
+            };
+            emitStateChange();
+            settleDownloadWaiter(requestId, new Error(message));
+          }
+        });
+        return requestBase;
+      }
+      return {
+        ...requestBase,
+        message: {
+          type: 'file-download-request' as const,
+          payload: {
+            requestId,
+            remotePath: downloadPath,
+            fileName: entry.name,
+            totalBytes: entry.size,
+          },
+        },
       };
     },
 

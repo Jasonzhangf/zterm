@@ -754,6 +754,7 @@ function TerminalPageComponent({
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [resourceInitialTab, setResourceInitialTab] = useState<'files' | 'web' | 'stream'>('files');
   const [fileTransferMode, setFileTransferMode] = useState<"browser" | "sync">("browser");
+  const [fileTransferRemoteCwd, setFileTransferRemoteCwd] = useState('');
   const [resourceWebUrl, setResourceWebUrl] = useState('');
   const [remoteWindowQuickBarSuppressed, setRemoteWindowQuickBarSuppressed] = useState(false);
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
@@ -2098,11 +2099,22 @@ function TerminalPageComponent({
     });
   }, [onRequestScheduleList, terminalActionSessionId]);
 
-  const handleQuickBarOpenFileTransfer = useCallback((mode: "browser" | "sync" = "browser") => {
+  const handleQuickBarOpenFileTransfer = useCallback((mode: "browser" | "sync" = "browser", remoteCwd = '') => {
     setResourceInitialTab('files');
     setFileTransferMode(mode);
-    setFileTransferOpen((current) => (current && fileTransferMode === mode ? false : true));
-  }, [fileTransferMode]);
+    setFileTransferRemoteCwd(remoteCwd);
+    setFileTransferOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ mode?: 'browser' | 'sync'; remoteCwd?: string }>).detail;
+      if (!detail) return;
+      handleQuickBarOpenFileTransfer(detail.mode ?? 'browser', detail.remoteCwd ?? '');
+    };
+    window.addEventListener('zterm:open-file-transfer', handler);
+    return () => window.removeEventListener('zterm:open-file-transfer', handler);
+  }, [handleQuickBarOpenFileTransfer]);
 
   const handleOpenResourceDrawer = useCallback((tab: 'web' | 'stream') => {
     setResourceInitialTab(tab);
@@ -3917,7 +3929,7 @@ function TerminalPageComponent({
           }) : null}
           renderFileBrowser={(open) => renderFileBrowser({
             open,
-            remoteCwd: '',
+            remoteCwd: fileTransferRemoteCwd,
             mode: fileTransferMode,
             embedded: true,
             daemonFileScopeId: fileBrowserSessionPort.daemonFileScopeId,

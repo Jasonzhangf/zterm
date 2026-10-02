@@ -61,7 +61,7 @@ export function formatConnectionRouteLabel(session: Session) {
       return isPrivateLanIpv4Host(endpointHost) ? '局域网' : 'IPv4';
     }
     case 'rtc-relay':
-      return session.resolvedRelayTransport === 'turn' ? 'Relay/TURN' : 'Relay';
+      return session.resolvedRelayTransport === 'turn' ? 'Relay/TURN（降级）' : 'Relay（降级）';
     default:
       return session.state === 'connected' ? '连接中' : '未连接';
   }

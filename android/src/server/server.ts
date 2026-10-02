@@ -49,6 +49,7 @@ import { createTerminalAttachmentMessageRuntime } from './terminal-attachment-me
 import { createTerminalChannelMuxRuntime } from './terminal-channel-mux-runtime';
 import { createDaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import { createTerminalHttpRuntime } from './terminal-http-runtime';
+import { resolveFileTransferListPath } from './file-transfer-path';
 import { createAttachmentDeliveryRuntime } from './attachment-delivery-runtime';
 import {
   createTerminalScheduleRuntime,
@@ -592,6 +593,7 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   handleClientDebugSnapshot,
   logTimePrefix,
   attachmentDeliveryRuntime,
+  resolveFileTransferDownloadPath: (requestedPath) => resolveFileTransferListPath(requestedPath, () => ''),
   connections,
   sendTransportMessage,
 });

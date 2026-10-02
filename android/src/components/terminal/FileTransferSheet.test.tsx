@@ -613,8 +613,13 @@ describe("FileTransferSheet", () => {
 
   it("keeps an in-flight download alive across sheet unmount and remount through the stable session port", async () => {
     let dispatch: ((message: any) => void) | undefined;
-    let releasePersist: (() => void) | undefined;
     const sendJson = vi.fn();
+    const originalFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([111, 108, 100]), {
+      status: 200,
+      headers: { "content-length": "3" },
+    })) as unknown as typeof fetch;
+    globalThis.fetch = fetchMock as typeof fetch;
     const subscribe = vi.fn((handler: (message: any) => void) => {
       dispatch = handler;
       return vi.fn();
@@ -625,9 +630,9 @@ describe("FileTransferSheet", () => {
         targetPath: `${input.downloadDir}/${input.fileName}`,
         stagingPath: `${input.downloadDir}/.${input.requestId}.part`,
       })),
-      persist: vi.fn(() => new Promise<void>((resolve) => {
-        releasePersist = resolve;
-      })),
+      persist: vi.fn(async ({ chunksBase64 }) => {
+        expect(chunksBase64).toEqual(["b2xk"]);
+      }),
       complete: vi.fn(async () => undefined),
       abort: vi.fn(async () => undefined),
     };
@@ -637,6 +642,7 @@ describe("FileTransferSheet", () => {
         daemonHostId: "daemon-sheet",
         bridgeHost: "127.0.0.1",
         bridgePort: 3333,
+        resolvedPath: "tailscale",
       },
       send: sendJson,
       subscribe,
@@ -669,41 +675,17 @@ describe("FileTransferSheet", () => {
     await waitFor(() => expect(screen.getByText("old.bin")).toBeTruthy());
     fireEvent.click(screen.getByText("old.bin"));
     fireEvent.click(screen.getByText("下载 1 项"));
-
-    const downloadRequest = sendJson.mock.calls.find(
-      (call) => call[1]?.type === "file-download-request",
-    )?.[1];
-    expect(downloadRequest).toBeTruthy();
     cleanup();
 
-    dispatch?.({
-      type: "file-download-chunk",
-      payload: {
-        requestId: downloadRequest.payload.requestId,
-        fileName: "old.bin",
-        chunkIndex: 0,
-        totalChunks: 1,
-        dataBase64: "b2xk",
-      },
-    });
-    dispatch?.({
-      type: "file-download-complete",
-      payload: {
-        requestId: downloadRequest.payload.requestId,
-        fileName: "old.bin",
-        totalBytes: 3,
-      },
-    });
-    await Promise.resolve();
-    expect(store.persist).toHaveBeenCalledTimes(1);
-    expect(store.complete).not.toHaveBeenCalled();
-
-    releasePersist?.();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() => expect(store.persist).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(store.complete).toHaveBeenCalledTimes(1));
 
     renderSheet();
     await waitFor(() => expect(subscribe).toHaveBeenCalledTimes(1));
     await port.dispose();
+    globalThis.fetch = originalFetch;
+
   });
 
   it("uploads local files by reading native file chunks without materializing the whole file in WebView", async () => {

@@ -108,9 +108,8 @@ export function selectBestTraversalRoute(options: SelectTraversalRouteOptions): 
 
   const selectableDiagnostics = diagnostics.filter((diagnostic) => diagnostic.selectable);
   const selectionPool = selectableDiagnostics.length > 0 ? selectableDiagnostics : diagnostics;
-  // Tier order is the authoritative business decision; health only orders
-  // candidates inside one tier and cannot promote a lower tier over a
-  // healthy higher tier.
+  // Tier order is the authoritative business decision; health/lease is
+  // only a tie-breaker inside one tier.
   const selectedDiagnostic = [...selectionPool]
     .sort(
       (left, right) =>

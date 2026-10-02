@@ -10,9 +10,32 @@ import type { FileTransferDownloadStore } from '../file-transfer-native-store-po
 import { createFileTransferSessionRuntime } from '../file-transfer-session-runtime';
 import { StoragePermissionPlugin } from '../../plugins/StoragePermissionPlugin';
 import type { FileTransferMessage } from '../file-transfer-message-runtime';
+import { createFileTransferBinaryDownload } from '../file-transfer-binary-download-runtime';
+
+function parseBridgeHost(value: string): string {
+  const raw = value.trim();
+  const bracketMatch = raw.match(/^\[([^\]]+)\]:\d+$/);
+  if (bracketMatch) return bracketMatch[1]!;
+  if (raw.includes(']:')) return raw.split(']:').shift()!.replace(/^\[/u, '');
+  return raw.split(':').shift()!;
+}
+
+function isPrivateLanBridgeHost(value: string): boolean {
+  const host = parseBridgeHost(value);
+  const parts = host.split('.').map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  return (
+    parts[0] === 127
+    || parts[0] === 10
+    || parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31
+    || parts[0] === 192 && parts[1] === 168
+  );
+}
 
 export function createFileBrowserSessionPort(input: {
-  session: Pick<Session, 'id' | 'daemonHostId' | 'bridgeHost' | 'bridgePort'> | undefined;
+  session: Pick<Session, 'id' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'resolvedPath'> | undefined;
   send: (sessionId: string, message: FileBrowserCommand) => void;
   subscribe: FileBrowserSessionPort['onFileTransferMessage'];
   downloadStore?: FileTransferDownloadStore;
@@ -20,10 +43,25 @@ export function createFileBrowserSessionPort(input: {
   if (!input.session?.id.trim()) throw new Error('file browser session is required');
   if (typeof input.send !== 'function') throw new Error('file browser send capability is required');
   if (typeof input.subscribe !== 'function') throw new Error('file browser subscription capability is required');
-  const { id, daemonHostId, bridgeHost, bridgePort } = input.session;
+  const { id, daemonHostId, bridgeHost, bridgePort, authToken, resolvedPath } = input.session;
+  const directDownloadPath = resolvedPath === 'lan' || resolvedPath === 'tailscale'
+    ? resolvedPath
+    : undefined;
+  const effectiveBinaryPath = directDownloadPath
+    || (bridgeHost && isPrivateLanBridgeHost(bridgeHost) ? 'lan' as const : undefined);
   const { send, subscribe } = input;
+  const downloadStore = input.downloadStore ?? createFileTransferDownloadStore(StoragePermissionPlugin);
+  const binaryDownloader = createFileTransferBinaryDownload({
+    resolvedPath: effectiveBinaryPath,
+    host: bridgeHost,
+    port: bridgePort,
+    token: authToken,
+    store: downloadStore,
+  });
   const runtime = createFileTransferSessionRuntime({
-    downloadStore: input.downloadStore ?? createFileTransferDownloadStore(StoragePermissionPlugin),
+    binaryPath: effectiveBinaryPath,
+    downloadStore,
+    fetchBinaryFile: async (options) => { await binaryDownloader(options); },
   });
   const messageListeners = new Set<(message: FileTransferMessage) => void>();
   const stateListeners = new Set<() => void>();

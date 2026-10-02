@@ -46,6 +46,16 @@ describe('TerminalConnectionStatusStrip', () => {
     expect(screen.getByTestId('terminal-connection-status-backend').textContent).toBe('tmux');
   });
 
+  it('labels relay routes as degraded fallback', () => {
+    render(
+      <TerminalConnectionStatusStrip
+        session={makeSession({ resolvedPath: 'rtc-relay', resolvedRelayTransport: 'turn' })}
+        topInsetPx={0}
+      />,
+    );
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('Relay/TURN（降级）');
+  });
+
   it('keeps route, session, backend, and rates in the first portrait top row', () => {
     render(
       <TerminalConnectionStatusStrip

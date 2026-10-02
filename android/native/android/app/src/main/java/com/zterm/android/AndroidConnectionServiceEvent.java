@@ -1,5 +1,7 @@
 package com.zterm.android;
 
+import java.util.List;
+
 /**
  * Internal typed events the {@link AndroidConnectionStateMachine} consumes.
  * These are an internal vocabulary — user-facing inputs are
@@ -40,6 +42,7 @@ public final class AndroidConnectionServiceEvent {
     public final String resolvedRelayTransport;
     public final String resolvedEndpoint;
     public final String selectedIcePairJson;
+    public final List<AndroidConnectionServiceSnapshot.RouteDiagnostic> routeDiagnostics;
 
     private AndroidConnectionServiceEvent(Builder b) {
         this.type = b.type;
@@ -56,6 +59,7 @@ public final class AndroidConnectionServiceEvent {
         this.resolvedRelayTransport = b.resolvedRelayTransport;
         this.resolvedEndpoint = b.resolvedEndpoint;
         this.selectedIcePairJson = b.selectedIcePairJson;
+        this.routeDiagnostics = b.routeDiagnostics;
     }
 
     public static AndroidConnectionServiceEvent bindTarget(AndroidConnectionServiceTarget target) {
@@ -116,8 +120,14 @@ public final class AndroidConnectionServiceEvent {
         return new Builder(Type.HEARTBEAT_MISSED).generation(generation).build();
     }
 
-    public static AndroidConnectionServiceEvent transportFailure(String generation, String message) {
-        return new Builder(Type.TRANSPORT_FAILURE).generation(generation).message(message).build();
+    public static AndroidConnectionServiceEvent transportFailure(
+        String generation, String message,
+        List<AndroidConnectionServiceSnapshot.RouteDiagnostic> routeDiagnostics) {
+        return new Builder(Type.TRANSPORT_FAILURE)
+            .generation(generation)
+            .message(message)
+            .routeDiagnostics(routeDiagnostics)
+            .build();
     }
 
     public static AndroidConnectionServiceEvent authenticationFailure(String generation, String message) {
@@ -151,6 +161,7 @@ public final class AndroidConnectionServiceEvent {
         private String resolvedRelayTransport;
         private String resolvedEndpoint;
         private String selectedIcePairJson;
+        private List<AndroidConnectionServiceSnapshot.RouteDiagnostic> routeDiagnostics;
 
         public Builder(Type type) { this.type = type; }
 
@@ -167,6 +178,7 @@ public final class AndroidConnectionServiceEvent {
         public Builder resolvedRelayTransport(String v) { this.resolvedRelayTransport = v; return this; }
         public Builder resolvedEndpoint(String v) { this.resolvedEndpoint = v; return this; }
         public Builder selectedIcePairJson(String v) { this.selectedIcePairJson = v; return this; }
+        public Builder routeDiagnostics(List<AndroidConnectionServiceSnapshot.RouteDiagnostic> v) { this.routeDiagnostics = v; return this; }
 
         public AndroidConnectionServiceEvent build() {
             if (generation == null && (type == Type.TRANSPORT_OPENING

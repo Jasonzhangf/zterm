@@ -35,6 +35,7 @@ import {
   sendBoundedFileUploadChunks,
 } from "../../lib/file-transfer-throughput-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
+import { takeZtermVerificationDownload } from "../../lib/zterm-verification-queue";
 import { FILE_TRANSFER_WIRE_CHUNK_BYTES, FILE_TRANSFER_WIRE_FRAME_MAX_CHARS } from "@zterm/shared/protocol";
 import { AmbientButton, AmbientTextarea } from "../ambient";
 import {
@@ -1052,7 +1053,7 @@ export function FileTransferSheet({
           { generation: batchGeneration },
         );
         forceRuntimeTick((value) => value + 1);
-        sendJson?.(request.message);
+        if (request.message) sendJson?.(request.message);
         try {
           await request.waitForDone();
         } catch (error) {
@@ -1168,6 +1169,131 @@ export function FileTransferSheet({
     requestRemoteList,
   ]);
 
+  // Verification fast-path automation used only for installed-app download
+  // replay evidence. It is intentionally scoped to an explicit window event so
+  // normal user flows are unaffected.
+  const [fastPathTarget, setFastPathTarget] = useState<{
+    remotePath: string;
+    fileName: string;
+    size?: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      const pending = takeZtermVerificationDownload();
+      if (pending?.fileName) {
+        setFastPathTarget(pending);
+      }
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      setFastPathTarget(null);
+      return;
+    }
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        remotePath?: string;
+        fileName?: string;
+        size?: number;
+      }>).detail;
+      if (!detail?.fileName) {
+        return;
+      }
+      setFastPathTarget({
+        remotePath: detail.remotePath || remoteCwd,
+        fileName: detail.fileName,
+        size: detail.size,
+      });
+    };
+    window.addEventListener('zterm:file-transfer-download', handler);
+    return () => {
+      window.removeEventListener('zterm:file-transfer-download', handler);
+    };
+  }, [open, remoteCwd]);
+
+  useEffect(() => {
+    if (!open || !fastPathTarget || remoteLoading) {
+      return;
+    }
+    if (typeof fastPathTarget.size === 'number') {
+      setFastPathTarget(null);
+      void (async () => {
+        const batchGeneration =
+          fileTransferRuntimeRef.current.getCurrentDownloadGeneration();
+        const request = fileTransferRuntimeRef.current.startDownload(
+          { name: fastPathTarget.fileName, size: fastPathTarget.size! },
+          fastPathTarget.remotePath,
+          {
+            scopeId: daemonFileScopeId,
+            downloadDir: normalizeLocalDisplayPath(
+              localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
+            ),
+          },
+          { generation: batchGeneration },
+        );
+        forceRuntimeTick((value) => value + 1);
+        if (request.message) {
+          sendJson?.(request.message);
+        }
+        await request.waitForDone();
+        forceRuntimeTick((value) => value + 1);
+      })().catch((error: unknown) => {
+        console.error('[FileTransferSheet] fast-path download failed', error);
+      });
+      return;
+    }
+    if (fastPathTarget.remotePath !== remotePath) {
+      requestRemoteList(fastPathTarget.remotePath);
+      return;
+    }
+    const entry = remoteEntries.find((candidate) => (
+      candidate.name === fastPathTarget.fileName
+    ));
+    if (!entry || entry.type !== 'file') {
+      const retry = window.setTimeout(() => {
+        requestRemoteList(remotePath);
+      }, 350);
+      return () => {
+        window.clearTimeout(retry);
+      };
+    }
+    setFastPathTarget(null);
+    void (async () => {
+      const batchGeneration =
+        fileTransferRuntimeRef.current.getCurrentDownloadGeneration();
+      const request = fileTransferRuntimeRef.current.startDownload(
+        { name: entry.name, size: entry.size },
+        remotePath,
+        {
+          scopeId: daemonFileScopeId,
+          downloadDir: normalizeLocalDisplayPath(
+            localPathRef.current || DEFAULT_LOCAL_DOWNLOAD_DIR,
+          ),
+        },
+        { generation: batchGeneration },
+      );
+      forceRuntimeTick((value) => value + 1);
+      if (request.message) {
+        sendJson?.(request.message);
+      }
+      await request.waitForDone();
+      forceRuntimeTick((value) => value + 1);
+    })().catch((error: unknown) => {
+      console.error('[FileTransferSheet] fast-path download failed', error);
+    });
+  }, [
+    daemonFileScopeId,
+    fastPathTarget,
+    open,
+    remoteEntries,
+    remoteLoading,
+    remotePath,
+    requestRemoteList,
+    sendJson,
+  ]);
+
   if (!open) return null;
 
   return (
@@ -1268,6 +1394,32 @@ export function FileTransferSheet({
               flex: "none",
             }}
           >
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label="进入 /tmp"
+              data-testid="file-transfer-remote-cwd-nav"
+              onClick={() => requestRemoteList("/tmp")}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  requestRemoteList("/tmp");
+                }
+              }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid var(--zterm-skeu-divider)",
+                background: "var(--zterm-panel-muted)",
+                color: SHEET_TEXT,
+              }}
+            >
+              <span aria-hidden="true">📁</span>
+              <span style={{ fontWeight: 700 }}>进入 /tmp</span>
+            </div>
             {remoteLoading ? (
               <div
                 style={{
