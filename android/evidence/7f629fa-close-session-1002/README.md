@@ -1,6 +1,7 @@
 # 7f629fa close-session crash - L5 device evidence index
 
-Candidate branch `codex/7f629fa-close-session-1002`, base
+Candidate branch `codex/7f629fa-close-session-1002`, folded onto latest
+`origin/main` `6a223bc5ca635b9aca442e6a033dd4ca28f4e997`; original base
 `fc9f390fede5648c584501f74c83f34188c10d0a`.
 Raw JSON/logcat/screenshot stay in the local ignored evidence store
 (`evidence/` is not committed, per `android/evidence/README.md`); this index
@@ -29,10 +30,11 @@ tab); no reload/unmount side effects outside the session lifecycle owner.
 
 ## Candidate artifact
 
-- versionName `0.1.3.3202`, versionCode `1100032020`, buildNumber `3202`
-- APK `android/update-dist/zterm-0.1.3.3202.apk`
-- sha256 `e89018a5ed76ddc1bde7acaa21c41bd13cf0add84dd4ea8dfed10819e37a0420`
-- build entrypoint `bash android/scripts/build-android-debug.sh --resume-build 3202`
+- versionName `0.1.3.3204`, versionCode `1100032040`, buildNumber `3204`
+- APK `android/update-dist/zterm-0.1.3.3204.apk`
+- sha256 `5cc39623c2fe7238b640bc0b9b92b3e7f2a6d88a103bfda8344992ece8eef782`
+- build entrypoint `bash android/scripts/build-android-debug.sh` after merging
+  `origin/main` `6a223bc5` (3204 allocated on top of main's 3203 to avoid reuse);
   (local update channel verified; Relay publish intentionally skipped,
   `ZTERM_PUBLISH_RELAY` unset)
 
@@ -57,8 +59,8 @@ clicking the real drawer close buttons.
   stale terminal ACTIVE_PAGE cleared, so cold-start protection is intact.
 
 Raw local evidence (ignored store):
-`~/.collab/runs/p1-7f629fa-close-session-1002-r1/evidence/close-flows-3202.json`,
-`close-flows-3202.logcat.txt`, `close-last-tab-3202.png`.
+`~/.collab/runs/p1-7f629fa-close-session-1002-r1/evidence/close-flows-3204.json`,
+`close-flows-3204.logcat.txt`, `close-last-tab-3204.png`.
 
 ## Local gates
 
