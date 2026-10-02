@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process';
 
 const sourceScript = join(dirname(fileURLToPath(import.meta.url)), 'bump-build-version.mjs');
 const buildScript = join(dirname(fileURLToPath(import.meta.url)), 'build-android-debug.sh');
+const apkNativeLibrary = 'lib/arm64-v8a/libzterm_dagpipe.so';
 const fixtures = [];
 
 afterEach(() => {
@@ -107,4 +108,54 @@ test('keeps normal and resume allocation safe under macOS Bash nounset mode', ()
     source,
     /if \[\[ -n "\$RESUME_BUILD_NUMBER" \]\]; then\s+node \.\/scripts\/bump-build-version\.mjs --resume "\$RESUME_BUILD_NUMBER"\s+else\s+node \.\/scripts\/bump-build-version\.mjs\s+fi/,
   );
+});
+
+test('does not fail the APK content check on SIGPIPE from grep -q', () => {
+  const listing = [
+    'Archive:  app-normal-debug.apk',
+    `   123456  2026-10-02 00:00   ${apkNativeLibrary}`,
+    ...Array.from({ length: 200_000 }, (_, index) => `       0  2026-10-02 00:00   padding/${index}`),
+    '---------                     -------',
+  ].join('\n');
+  const fixture = mkdtempSync(join(tmpdir(), 'zterm-apk-sigpipe-'));
+  fixtures.push(fixture);
+  const contentsPath = join(fixture, 'app-normal-debug-contents.txt');
+  writeFileSync(contentsPath, `${listing}\n`);
+  const originalPipeline = spawnSync(
+    'bash',
+    [
+      '-o',
+      'pipefail',
+      '-c',
+      'cat "$1" | grep -q "$2"',
+      'bash',
+      contentsPath,
+      apkNativeLibrary,
+    ],
+    { encoding: 'utf8' },
+  );
+
+  assert.equal(
+    originalPipeline.status,
+    141,
+    'the old listing | grep -q pipeline must fail on truncated consumer output',
+  );
+
+  const regularFileCheck = spawnSync('grep', ['-Fq', apkNativeLibrary, contentsPath], {
+    encoding: 'utf8',
+  });
+
+  assert.equal(regularFileCheck.status, 0, regularFileCheck.stderr);
+
+  const source = readFileSync(buildScript, 'utf8');
+  const ownedContentsPath = source.indexOf('APK_CONTENTS_PATH="$APK_WORK_DIR/app-normal-debug-contents.txt"');
+  const writeListing = source.indexOf('unzip -l "$NORMAL_APK_PATH" > "$APK_CONTENTS_PATH"');
+  const grepListing = source.indexOf('grep -Fq \'lib/arm64-v8a/libzterm_dagpipe.so\' "$APK_CONTENTS_PATH"');
+
+  assert.notEqual(ownedContentsPath, -1);
+  assert.notEqual(writeListing, -1);
+  assert.notEqual(grepListing, -1);
+  assert.ok(ownedContentsPath < writeListing);
+  assert.ok(writeListing < grepListing);
+  assert.doesNotMatch(source, /unzip -l "\$NORMAL_APK_PATH" \| grep -q/);
 });
