@@ -203,3 +203,79 @@ quality-capability result when stock `setParameters()` rejects. It may apply
 the selected profile at stream creation/capture setup, but must not claim
 runtime bitrate/FPS adaptation until an explicitly authorized compatible native
 binding is installed. No fallback media path or silent downgrade is allowed.
+
+## 2026-10-02 execution proposal: independent limits and operable zoom
+
+Status: design candidate only. The historical clauses above remain the active
+runtime contract until this task's implementation, paired black-box/live
+evidence and independent architecture review pass and the verified candidate
+is integrated. This section does not claim a native binding capability change.
+
+Design carrier: `2026-10-02-stream-control-design.md`; execution plan is the
+reviewed `remote-window-stream-execution-plan-2026-10-03.md`. The four proposed
+start/quality/input-delivery/stop graphs model independent control requests.
+They are not yet registered executable Operators. Existing Phase4 graph and
+consumer are admission/parity scope, not proof of the four live object flows.
+
+Proposed replacement of the zoomed Direct Touch clauses:
+
+- At zoomed floating and fullscreen scale, an explicit remote-operation mode
+  supports tap, 250 ms hold-drag, stationary 500 ms right click, and bounded
+  realtime one-finger scroll. It uses the selected rendered crop and local
+  viewport transform; outside-content touches still map to no point.
+- Local hand/pan mode is explicit, exclusive with remote operation, and keeps
+  one-finger local panning without emitting remote actions. Prefer reusing the
+  existing hand/pan affordance; do not create another gesture owner.
+- Two-finger pinch and same-direction scroll remain mutually exclusive and
+  latched for the pointer sequence. Pointer cancel/up reliably releases an
+  emitted remote down. Duration does not invalidate release.
+- The embedded half-sheet remains passive. Its visible promotion affordance
+  enters embedded fullscreen through the actual drawer lifecycle; no private
+  handler, input-context shortcut or double-tap promotion is introduced.
+
+Proposed replacement of the reliable per-record wait boundary:
+
+- Reliable actions remain ordered and deduplicated. The first repair retains
+  the current single-flight owner, removes proved synchronous native focus
+  cost, and prevents reliable records from expiring merely because they waited
+  in the queue. A finite in-flight window requires separate high-RTT/target-side
+  evidence and design admission; it is not a mandatory speculative change.
+- A barrier flushes preceding continuous deltas, waits for prior required
+  delivery outcomes, and blocks following dependent actions. Unrelated media
+  work must not own input delivery progress.
+- A bounded retry retains the delivery sequence of the same user action.
+  Missing ACK/NACK produces an explicit delivery failure; it must not silently
+  invent success or hide release in an unreachable queue. Stop/transport
+  teardown owns release of this stream's held input, not another stream's.
+- Move is latest-wins; scroll preserves accumulated deltas. Existing age/rate
+  admission and stable dedupe continue to apply.
+
+Independent quality limits:
+
+- Preference, explicit Mbps cap and FPS ceiling are separate control values.
+  Preference changes retain manual limits; saved FPS is inherited. Settings
+  edit a draft; Cancel applies and persists nothing; Apply is one transaction.
+- Requested, last acknowledged applied and trustworthy actual stats have
+  distinct projections. Pending, rejected, unsupported or disconnected cannot
+  overwrite the last acknowledged value or appear as successfully applied.
+- Pressure bitrate must not exceed either the user cap or last acknowledged
+  cap; the sum of lane allocations stays within the stream cap. Recovery has
+  stable confirmation and never raises a user ceiling.
+- Runtime support must be established from the canonical binding and real
+  ACK/encoder output. This proposal cannot override a typed unsupported result.
+
+Required paired gates replace the affected historical no-op/stop-and-wait
+expectations only after the semantics above pass design review: zoom tap/drag,
+exclusive local pan, two-finger arbitration and cancel release; real high-RTT
+ordered delivery/barriers/stable retry/dedupe/release; independent Mbps/FPS,
+latest-wins ACK/NACK and actual caps; first visible target marker and local
+exit/stop-failure resource results. Exact commands and external assertions
+remain D0 admission requirements, not claims that tests already exist or pass.
+
+R2 field/owner freeze is recorded in `2026-10-02-stream-control-design.md`:
+reuse the current quality request/result identities and profiles; retain the
+last exact ACK within the existing quality owner; typed unsupported remains a
+rejected wire result with an explicit capability code. Client-local delivery
+settle/cancel outcomes do not forge daemon ACK/receive timestamps. Native focus
+optimization, client delivery termination, daemon held-input release, and
+destructive window-close results remain separately scoped admission items.

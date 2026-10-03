@@ -41,6 +41,24 @@ Phase 4 static graphs:
 
 - `remote-window-stream-overlay.graph.json`
 
+Phase 4 stream-control design candidates (2026-10-02):
+
+- `remote-window-start.graph.json`: one start request -> first visible target
+  or explicit start/cleanup failure.
+- `remote-window-quality.graph.json`: one quality transaction -> real
+  applied/rejected/unsupported outcome, independent from video payload.
+- `remote-window-input-delivery.graph.json`: one action delivery -> ordered
+  target-side result or explicit delivery failure.
+- `remote-window-stop.graph.json`: one stop request -> remote/local resource
+  result, retaining failures after UI exit.
+
+These four graphs are design candidates only; their named Operators are not
+registered in `phase4_core.rs` or wired to runtime. Static topology validation
+does not prove SDK compilation, media/input behavior, or coding admission.
+See `../decisions/2026-10-02-stream-control-design.md`. The existing
+`remote-window-stream-overlay` graph retains its ARC admission/parity consumer
+contract; it does not demonstrate a live batch completing independent requests.
+
 Phase 5 static graphs:
 
 - `android-session-shell-lifecycle.graph.json`
