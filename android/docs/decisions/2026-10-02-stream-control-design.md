@@ -117,6 +117,21 @@ I1a允许native脚本及其直接helper/测试和现有公开live-input probe；
 
 R2局部黑盒：独立cap同值切换偏好保持上限；Cancel零wire/存储副作用，Apply经UI实际single-flight只一事务；quality reject/typed unsupported保留上一ACK及可见错误。输入用相同owned target/native IME字符串及Enter、真实OS marker/文本和matching结果验证完整且仅一次；A/B/A记录候选内容、canonical运行主体及实际焦点；高RTT在公开控制传输的外部有界delay proxy验证排队输入不被年龄丢弃，ACK丢失有显式failed/unconfirmed。代理必须转发真实消息而非mock backend，端口/进程归属并清理。媒体网络扰动仍属P1独立能力，不用控制代理冒充UDP视频丢包。
 
+### R3：I1b client-local结果接口与真实consumer冻结
+
+本段仅补D0-R2的R2-B1；Q2与I1a已准入的语义、四图拓扑不变。I1b编码前仍需本段独立复核。
+
+- 类型规范位置是`android/src/lib/remote-window-message-runtime.ts`导出的`RemoteWindowInputDeliveryOutcomeV1`；沿用R2字段，`source`增加`client-send`以准确表达同步派发失败，不把它冒充timeout。它是client-local control type，禁止加入`RemoteWindowControlMessage`、`ServerMessage`或shared wire union。第一切片只为可靠输入产生此结果；连续sample继续既有合并/过龄边界，不把每个被合并sample伪装成可靠事务。
+- 唯一producer是`createRemoteWindowMessageRuntime`的现有delivery owner。增加公开`subscribeInputOutcome(handler: (outcome: RemoteWindowInputDeliveryOutcomeV1) => void): () => void`，使用与server-message subscribers物理分离的callback集合；返回函数只解除自己的订阅。emit仅由同owner的`settleReliableInput`调用。listener失败经typed listener-error回调显式暴露，不改变已settle投递结果、不重发业务输入。
+- settle身份为`streamId + sequence`，沿用当前队列/单飞记录及单调sequence，不新增无界历史缓存。每条pending record只settle一次，先标settled/移出pending再emit；重复/迟到ACK没有matching pending则不产生第二outcome。所有终点（matching daemon ACK、client-send失败、ACK重试耗尽、stream/transport teardown、dispose）只调用同一settle出口。可靠队列等待不使用绝对action deadline拒绝/删除；已有legacy deadline字段按现行wire校验保留，不增大常数，也不作可靠入队/派发/重试的age判据。ACK timeout从实际派发开始，保留4s、最多2次同sequence attempt与daemon dedupe。
+- accepted ACK→`delivered/daemon-ack/confirmed`。NACK→`failed/daemon-ack`，只有已有typed拒绝边界明确证明未派发才可标`not-dispatched`，否则`unconfirmed`；helper异常不能声称没有OS副作用。发送函数抛错→`failed/client-send`，传输若不能证明零submission同样`unconfirmed`，不能从异常文字推断未派发。retry耗尽→`failed/client-timeout/unconfirmed`。queued取消→`cancelled/client-teardown/not-dispatched`；已attempted/in-flight取消→`cancelled/client-teardown/unconfirmed`。
+- `stopStream`先关闭本stream的client输入准入并逐条settle，再发既有stop request；stop请求失败不得把已settle cancelled复活成delivered或重新派发。dispose/transport teardown先settle并通知仍注册的consumer，最后清订阅/定时器。client取消不替代daemon-held release；后者保持单独blocked。stream的新生命周期须用新streamId，不能重用已结束identity。
+- 唯一订阅接线在`SessionContext.tsx`现有runtime ref公开facade，增加`onRemoteWindowInputOutcome`到`session-context-core.ts`、`session-context-public-facade-runtime.ts`等现有facade类型及必要assembly传递；不另建runtime。`App.tsx`只透传该接口给`TerminalPage.tsx`。TerminalPage订阅并按当前stream/target过滤，维护最新结果投影，失败/取消显示用户可见提示；不从debug日志或原ACK-shaped debug ref重建业务结果。不建议自动重做`unconfirmed`动作。现有wire ACK订阅继续只承担真实wire资料/resize结果等语义，不接收synthetic ACK。可靠结果diagnostic改消费同一local outcome，避免duplicate ACK重复计数。
+- 本次允许writer：message-runtime及对应tests、上述context/facade/必要assembly、App/TerminalPage接线与page tests；U1 overlay/controller/MorePanel仍归U1，不并发同写。UI失败提示可在TerminalPage现有提示投影owner实现，不能新增第二delivery缓存/副作用。shared协议、daemon/native、quality和版本文件只读。
+- 新公开consumer文件为`android/scripts/remote-window-client-delivery-live-probe.ts`，必须直接import并调用真实`createRemoteWindowMessageRuntime`公开方法与`subscribeInputOutcome`；使用真实WS→canonical daemon及自有命名TextEdit测试文档，依现有public catalog/start/answer/stop接口，读取真实AX正文/窗口身份。它不复制或改写既有AppKit probe巨型fixture，不模拟daemon ACK，不访问pending map/private React。自有窗口创建/关闭必须核验精确标题/PID/windowID/正文owner，只关闭本probe文档，不动已有用户文档。成功输入可见文本和Enter，匹配outcome与OS文本，只一次副作用。
+- 负向外部边界是任务独占的真实WS delay/drop proxy：只延迟或丢弃本run matching ACK，其他消息真实转发，视频RTC不受代理。`--case queued-cancel`：首个无held副作用的focus action ACK有界延迟，其后排队文字动作，立即公开stop；断言queued outcome cancelled/not-dispatched、没有文字wire/OS副作用，首项最多一个unconfirmed cancelled。`--case ack-drop`：仅丢首个focus action的真实ACK，保留两次同seq retry，断言唯一failed/client-timeout/unconfirmed，随后late ACK不二次settle；真实daemon去重/OS结果独立记录。`--case high-rtt-burst`：原完整文本/Enter经实际client delivery owner排队并确认，等待超过旧8s的项仍派发、完整文本仅一次。`--case baseline-burst`：无代理同入口正常完整输入。时序由真实proxy参数/实际wire回执报告，不能改产品timeout或假时钟取得PASS。
+- consumer拟定命令：`pnpm --dir android exec tsx scripts/remote-window-client-delivery-live-probe.ts --case baseline-burst|queued-cancel|ack-drop|high-rtt-burst --output-dir <owned-evidence>`。每次只有一个case串行；nonzero是明确失败，报告候选/runtime/target/stream/sequence/outcome、原始wire及host文本，完整清自己的proxy/文档/forward/tmp。新脚本尚未实现，本段冻结可执行公开边界及预期，作者实现阶段补harness并真实运行后才功能完成。
+
 ## 黑盒入口及未完成能力
 
 真实业务用例：安装app→选择真实窗口→正文标记可见→独立设置Mbps/FPS→确认实际ACK及sender→放大操作与文字输入→取消草稿→逐层返回→本地退出→再次进入。失败用例：quality reject/unsupported、断线、ACK延迟/丢失、stop失败、远端关闭取消/确认/失败。只对自有测试窗口演练副作用。
