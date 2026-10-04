@@ -9,6 +9,7 @@ describe('weak-network fix: cadence RTT-aware', () => {
     Object.defineProperty(navigator, 'connection', { configurable: true, value: undefined });
     const cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(33);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(1000);
     expect(cadence.pullRequestStaleMs).toBe(1500);
     Object.defineProperty(navigator, 'connection', { configurable: true, value: original });
   });
@@ -21,6 +22,7 @@ describe('weak-network fix: cadence RTT-aware', () => {
     });
     const cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(120);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(700);
     expect(cadence.pullRequestStaleMs).toBe(2500);
     Object.defineProperty(navigator, 'connection', { configurable: true, value: original });
   });
@@ -33,6 +35,7 @@ describe('weak-network fix: cadence RTT-aware', () => {
     });
     const cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(66);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(900);
     expect(cadence.pullRequestStaleMs).toBe(2000);
     Object.defineProperty(navigator, 'connection', { configurable: true, value: original });
   });

@@ -207,9 +207,24 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       if (this.disposed) {
         return;
       }
-      this.reportFailure(
-        `AndroidConnectionService command rejected: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      // A rejected command is a fact about that one command, never about the
+      // physical service projection. The native service already reports the
+      // same rejection through `androidConnectionError`; tearing the whole
+      // socket down here removed every listener while the service-owned
+      // transport was still healthy, which is the foreground-resume stall
+      // (`No listeners found`). Only close the exact channel the command
+      // targeted so the session owner reopens it against current tmux truth.
+      const channelId = readCommandChannelId(command);
+      if (
+        channelId
+        && (this.projectedChannelIds.has(channelId) || this.readyChannelIds.has(channelId))
+      ) {
+        this.dispatchProjectedChannelClosed(
+          channelId,
+          error instanceof Error ? error.message : String(error),
+          'native_command_rejected',
+        );
+      }
     });
   }
 
@@ -525,6 +540,12 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readCommandChannelId(command: NonNullable<ReturnType<typeof mapFrameToCommand>>) {
+  return 'channelId' in command && typeof command.channelId === 'string' && command.channelId
+    ? command.channelId
+    : null;
 }
 
 function mapFrameToCommand(frame: Record<string, unknown>) {

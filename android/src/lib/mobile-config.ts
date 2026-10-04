@@ -19,6 +19,11 @@ export const BRIDGE_URL_PLACEHOLDER = `ws://host:${DEFAULT_BRIDGE_PORT}`;
 import { resolveTerminalRequestWindowLines as sharedResolveRequestWindowLines } from '@zterm/shared/terminal/viewport-utils';
 
 export const TERMINAL_CACHE_SCREENS = 3;
+// The active tick only decides how often the cadence gate is evaluated; the
+// `headStalePingMs` gate below owns the actual `buffer-head-request` rate.
+// Normal live body refresh is daemon push (`buffer-sync`); head requests are
+// only for resume / reconnect / stale probe / health check, so an idle session
+// must not poll several times per second.
 export const ACTIVE_HEAD_REFRESH_TICK_MS = 33;
 
 export interface TerminalRefreshCadence {
@@ -78,7 +83,7 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
     return {
       headTickMs: 120,
       minTailRefreshGapMs: 120,
-      headStalePingMs: 520,
+      headStalePingMs: 1000,
       pullRequestStaleMs: 2500,
       readingSyncDelayMs: 72,
     };
@@ -90,7 +95,7 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
     return {
       headTickMs: 16,
       minTailRefreshGapMs: 16,
-      headStalePingMs: 160,
+      headStalePingMs: 1000,
       pullRequestStaleMs: 1200,
       readingSyncDelayMs: 16,
     };
@@ -100,7 +105,7 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
     return {
       headTickMs: 120,
       minTailRefreshGapMs: 120,
-      headStalePingMs: 520,
+      headStalePingMs: 700,
       pullRequestStaleMs: 2500,
       readingSyncDelayMs: 72,
     };
@@ -110,7 +115,7 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
     return {
       headTickMs: 66,
       minTailRefreshGapMs: 66,
-      headStalePingMs: 360,
+      headStalePingMs: 900,
       pullRequestStaleMs: 2000,
       readingSyncDelayMs: 48,
     };
@@ -120,7 +125,7 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
     return {
       headTickMs: 120,
       minTailRefreshGapMs: 120,
-      headStalePingMs: 520,
+      headStalePingMs: 1000,
       pullRequestStaleMs: 2200,
       readingSyncDelayMs: 72,
     };
@@ -130,7 +135,7 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
     return {
       headTickMs: 66,
       minTailRefreshGapMs: 66,
-      headStalePingMs: 320,
+      headStalePingMs: 900,
       pullRequestStaleMs: 1800,
       readingSyncDelayMs: 48,
     };
@@ -139,7 +144,7 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
   return {
     headTickMs: ACTIVE_HEAD_REFRESH_TICK_MS,
     minTailRefreshGapMs: ACTIVE_HEAD_REFRESH_TICK_MS,
-    headStalePingMs: 200,
+    headStalePingMs: 1000,
     pullRequestStaleMs: 1500,
     readingSyncDelayMs: 24,
   };

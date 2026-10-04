@@ -71,3 +71,14 @@ evidence/
 - 设备身份：15t `100.104.163.65:5555`（PLZ110）安装 `0.1.3.3069`，`firstInstallTime 2026-09-18 12:20:15` 保留，安装态 APK sha256 `da63181c...` 与 host 完全一致。
 - 最终产物复测（真实 `zterm-3` → Finder `app-window:29243:37285`，解码视频 `readyState 4`、`987x719`、`currentTime` 推进）：A 缩放后全屏单指真实 swipe 后 rect `dx=dy=dw=dh=0` 且远端输入 0；B 真实双击后 rect 不变；C 双指同向产生 9 条 `remote-window-input`（`kind=scroll`，start+8 update）；D pinch out 精确还原 `{8,239,331,515}`；E 1x 单击恰好 1 条 `kind=click`/`button=left`；F 工具栏「缩小」`fullscreen→floating`、「关闭」使 overlay 与 bottom sheet 同时消失，无需杀 App。全部 PASS。
 - 观测层与限制：远端输入在真实传输边界（`Capacitor.nativePromise`/`toNative`，plugin `AndroidConnectionService`）取证；adb tap 在无关 `com.oplus.ota` 窗口抢占输入焦点期间不达 WebView，故 1x 单击与两个工具栏点击改由 CDP touch 驱动（仍走真实 pointer runtime），A/B 使用真实 `adb shell input`。
+
+## latency-1003 连接/输入延迟修复索引
+
+候选 `52aa458e`（`codex/connection-input-latency-1003`，base `b18dcf91` = origin/main，PR #158）修复 native 命令拒绝把整个 socket 投影拆掉（返回台 `No listeners found` 卡死）以及 idle head 轮询过密；原始记录保留在本地 ignored 目录 `android/evidence/latency-1003-fixed/`。
+
+- 改动点：`android-connection-service-socket.ts` 命令拒绝改为 channel-scoped（仅关闭命中 channel，投影存活；无法归 channel 的拒绝不再触发整链 `reportFailure`）；`mobile-config.ts` `headStalePingMs` 抬到 700–1000（约 1Hz）。
+- 聚焦测试：`tsc --noEmit` PASS；`test:feature-registry` 13 文件/107 PASS；定向 vitest 11 文件/297 PASS（含 `android-connection-service-socket.test.ts` 新增 2 条 promise-reject 用例）。
+- 产物：`0.1.3.3206` / `versionCode 1100032060` / `buildNumber 3206`；APK sha256 `50b189d8a8b68792404e74717d675855797c0d2dba965cec34fea7e053ef4157`；rollback `0.1.3.3206.1` sha256 `f351df4b964d7396e0dd0cf21a4f1fa4ac832a36de68772edebfb95dbe841449`。
+- 安装态 / OTA：`~/.zterm/updates/latest.json` 指向 `0.1.3.3206`（同 sha256、size 77507455、channel stable）；emulator-5554 安装 `0.1.3.3206`，`firstInstallTime 2026-09-29 19:28:42` 保留（`adb install -r`）。
+- 真机/模拟器回放（真实 daemon `mac-studio` → tmux `_collab_test`）：HOME 后台再回前台，连接服务在后台 `androidConnectionChannelClosed`、回前台 `list-sessions -> openChannel -> body-subscription -> buffer-head-request` 全部送达，`androidConnectionChannelOpened/Message` 持续通知，连接服务未出现 `No listeners found`（仅 `Capacitor/AppPlugin` 的 pause/resume 事件无监听，与本修复无关）。证据 `latency-1003-fixed/logcat-bgfg.txt`；listener 计数 `removeListener=0 noListeners=0 headRate15s=14`（约 1Hz，`bgfg-listener-count.txt`）；daemon `/debug/runtime` health `sessions 1/1/1`、`mirrors 1/1/1`、performanceTrace `recordCount 2118 lastRevision 90`（`daemon-runtime-debug.json`）。
+- 未覆盖 / 声明不适用：本轮无在线真机，按 `zterm-mobile-dev` 用 emulator 完成运行态验证；promise-reject 分支（native 命令调用本身拒绝，如 Android 12+ 后台前台服务启动限制）无法在 emulator 上确定性触发，不做设备侧强制复现，改由 `android-connection-service-socket.test.ts` 的 mock 拒绝用例 + 上述真实后台/前台端到端存活证据覆盖。公开 Relay OTA 发布为 merge 后独立授权步骤。

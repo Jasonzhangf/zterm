@@ -43,7 +43,9 @@ describe('session-runtime-cadence', () => {
       recentPayloadBytes: 1200,
       hasRecentProgress: true,
     });
-    expect(resolveTerminalRefreshCadence({ runtimeTransport }).headTickMs).toBe(16);
+    const cadence = resolveTerminalRefreshCadence({ runtimeTransport });
+    expect(cadence.headTickMs).toBe(16);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(1000);
   });
 
   it('maps socket backlog into slow-lane cadence input without changing payload semantics', () => {
