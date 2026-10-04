@@ -77,7 +77,6 @@ evidence/
 候选 `52aa458e`（`codex/connection-input-latency-1003`，base `b18dcf91` = origin/main，PR #158）修复 native 命令拒绝把整个 socket 投影拆掉（返回台 `No listeners found` 卡死）以及 idle head 轮询过密；原始记录保留在本地 ignored 目录 `android/evidence/latency-1003-fixed/`。
 
 - 改动点：`android-connection-service-socket.ts` 命令拒绝改为 channel-scoped（仅关闭命中 channel，投影存活；无法归 channel 的拒绝不再触发整链 `reportFailure`）；`mobile-config.ts` `headStalePingMs` 抬到 700–1000（约 1Hz）。
-- 设计图：`android/docs/dagpipe/android-connection-service.graph.json` 增加 `retire_rejected_channel` 节点与 `arc.command_gate -> arc.channel_rejection` 边，把命令拒绝 -> channel 退役事实接入 collect；`node ./android/scripts/validate-dagpipe-graphs.mjs` PASS（26 图）。
 - 聚焦测试：`tsc --noEmit` PASS；`test:feature-registry` 13 文件/107 PASS；定向 vitest 11 文件/297 PASS（含 `android-connection-service-socket.test.ts` 新增 2 条 promise-reject 用例）。
 - 产物：`0.1.3.3206` / `versionCode 1100032060` / `buildNumber 3206`；APK sha256 `50b189d8a8b68792404e74717d675855797c0d2dba965cec34fea7e053ef4157`；rollback `0.1.3.3206.1` sha256 `f351df4b964d7396e0dd0cf21a4f1fa4ac832a36de68772edebfb95dbe841449`。
 - 安装态 / OTA：`~/.zterm/updates/latest.json` 指向 `0.1.3.3206`（同 sha256、size 77507455、channel stable）；emulator-5554 安装 `0.1.3.3206`，`firstInstallTime 2026-09-29 19:28:42` 保留（`adb install -r`）。
