@@ -82,3 +82,13 @@ evidence/
 - 安装态 / OTA：`~/.zterm/updates/latest.json` 指向 `0.1.3.3206`（同 sha256、size 77507455、channel stable）；emulator-5554 安装 `0.1.3.3206`，`firstInstallTime 2026-09-29 19:28:42` 保留（`adb install -r`）。
 - 真机/模拟器回放（真实 daemon `mac-studio` → tmux `_collab_test`）：HOME 后台再回前台，连接服务在后台 `androidConnectionChannelClosed`、回前台 `list-sessions -> openChannel -> body-subscription -> buffer-head-request` 全部送达，`androidConnectionChannelOpened/Message` 持续通知，连接服务未出现 `No listeners found`（仅 `Capacitor/AppPlugin` 的 pause/resume 事件无监听，与本修复无关）。证据 `latency-1003-fixed/logcat-bgfg.txt`；listener 计数 `removeListener=0 noListeners=0 headRate15s=14`（约 1Hz，`bgfg-listener-count.txt`）；daemon `/debug/runtime` health `sessions 1/1/1`、`mirrors 1/1/1`、performanceTrace `recordCount 2118 lastRevision 90`（`daemon-runtime-debug.json`）。
 - 未覆盖 / 声明不适用：本轮无在线真机，按 `zterm-mobile-dev` 用 emulator 完成运行态验证；promise-reject 分支（native 命令调用本身拒绝，如 Android 12+ 后台前台服务启动限制）无法在 emulator 上确定性触发，不做设备侧强制复现，改由 `android-connection-service-socket.test.ts` 的 mock 拒绝用例 + 上述真实后台/前台端到端存活证据覆盖。公开 Relay OTA 发布为 merge 后独立授权步骤。
+
+## latency-1003 交付收口（closed）
+
+- 独立架构 review：`codex-review` profile `gcm` / model `gpt-6.1-sol`，task `review-connection-input-latency-1003-r3b`，base `b18dcf91`，`state=completed`、`verdict=pass`、`controller_no_blocking_findings`、0 findings。前两轮（r1/r2）reviewer 输出被 ```json 围栏 / 前置句子包裹导致 controller `review_output_invalid_json`（protocol_failure），已按 skill 用 `review_retry` 新建 task；原始证据 `android/evidence/latency-1003-fixed/review/`。
+- 候选与合并等价：候选树 `c62a423d`（= `7b3d5776`，`git diff c62a423d 7b3d5776` 空）；`git diff c62a423d main` 空，证明 main 与已验候选逐字节一致。
+- main / 远端：PR #158 admin merge，merge commit `e27780bab048f1b799a3c3d899a423b38dd92b84`（`mergedAt 2026-10-04T10:52:54Z`）；本地 `main == origin/main == e27780ba`，`git status` clean。修复 commit `52aa458e` 在 main 历史内。
+- 产物身份：`0.1.3.3206` / `versionCode 1100032060` / `buildNumber 3206`；normal APK sha256 `50b189d8a8b68792404e74717d675855797c0d2dba965cec34fea7e053ef4157`；rollback `0.1.3.3206.1` sha256 `f351df4b964d7396e0dd0cf21a4f1fa4ac832a36de68772edebfb95dbe841449`。
+- 本机 OTA：`~/.zterm/updates/latest.json` 指向 `0.1.3.3206`（同 sha256）。
+- 公网 Relay OTA：`https://relay.codewhisper.cc:18443/relay/updates/latest.json` 现服务 `0.1.3.3206` / `versionCode 1100032060`；normal + rollback APK `HEAD/GET` 均 `200`；公网下载 normal APK sha256 `50b189d8...` 与 manifest 一致（size 77507455）。
+- 已知遗留（P2 advisory，非阻断，未纳入本次修复）：(a) `android/docs/dagpipe/android-connection-service.graph.json` 尚未登记 command-rejection -> channel 退役节点；新增节点需在 native registry `android/native/dagpipe/src/phase8_core.rs` 注册同名 operator，属超出本次范围的 native 变更，故先 revert 保持 CI 绿；(b) 无 `channelId` 的拒绝（`mux-target-message`）在 send().catch 与 `androidConnectionError` 监听均为 no-op，未做 fail-fast 诊断，失败仍受下游 tmux control 请求超时约束。
