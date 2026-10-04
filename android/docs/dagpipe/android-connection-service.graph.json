@@ -419,14 +419,39 @@
       "iterator": "Whole"
     },
     {
-      "id": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "id": "retire_rejected_channel",
+      "operator": "client.connection_service.retire_rejected_channel",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.command_gate",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.channel_rejection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse,arc.channel_rejection",
       "operator": "dagpipe.result.collect",
       "operator_version": "0.1",
       "inputs": [
         "arc.service_snapshot",
         "arc.notification_actions",
         "arc.session_open_request",
-        "arc.notification_pulse"
+        "arc.notification_pulse",
+        "arc.channel_rejection"
       ],
       "output": {
         "id": "arc.result",
@@ -455,6 +480,16 @@
       "from": "validate_service_command",
       "to": "release_desired_target",
       "arc_id": "arc.command_gate"
+    },
+    {
+      "from": "validate_service_command",
+      "to": "retire_rejected_channel",
+      "arc_id": "arc.command_gate"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "retire_rejected_channel",
+      "arc_id": "arc.service_policy"
     },
     {
       "from": "bind_desired_target",
@@ -603,23 +638,28 @@
     },
     {
       "from": "project_service_snapshot",
-      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse,arc.channel_rejection",
       "arc_id": "arc.service_snapshot"
     },
     {
       "from": "project_notification_actions",
-      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse,arc.channel_rejection",
       "arc_id": "arc.notification_actions"
     },
     {
       "from": "handle_session_deep_link",
-      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse,arc.channel_rejection",
       "arc_id": "arc.session_open_request"
     },
     {
       "from": "pulse_stopped_session",
-      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse,arc.channel_rejection",
       "arc_id": "arc.notification_pulse"
+    },
+    {
+      "from": "retire_rejected_channel",
+      "to": "dagpipe.collect.arc.service_snapshot,arc.notification_actions,arc.session_open_request,arc.notification_pulse,arc.channel_rejection",
+      "arc_id": "arc.channel_rejection"
     }
   ],
   "outputs": [
