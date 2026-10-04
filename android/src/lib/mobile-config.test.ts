@@ -22,6 +22,9 @@ describe('mobile-config refresh cadence', () => {
     const cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(33);
     expect(cadence.minTailRefreshGapMs).toBe(33);
+    // Idle `buffer-head-request` polling is a health probe, not live body
+    // refresh: it must stay at ~1Hz instead of the old ~5Hz flood.
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(1000);
     expect(cadence.readingSyncDelayMs).toBe(24);
   });
 
@@ -30,6 +33,7 @@ describe('mobile-config refresh cadence', () => {
     const cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(66);
     expect(cadence.minTailRefreshGapMs).toBe(66);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(900);
     expect(cadence.readingSyncDelayMs).toBe(48);
   });
 
@@ -38,6 +42,7 @@ describe('mobile-config refresh cadence', () => {
     let cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(120);
     expect(cadence.minTailRefreshGapMs).toBe(120);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(1000);
     expect(cadence.readingSyncDelayMs).toBe(72);
 
     mockConnection('4g', true);
@@ -58,6 +63,7 @@ describe('mobile-config refresh cadence', () => {
 
     expect(cadence.headTickMs).toBe(16);
     expect(cadence.minTailRefreshGapMs).toBe(16);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(1000);
   });
 
   it('keeps fast cadence for high-throughput runtime progress without backpressure', () => {
@@ -74,6 +80,7 @@ describe('mobile-config refresh cadence', () => {
 
     expect(cadence.headTickMs).toBe(16);
     expect(cadence.minTailRefreshGapMs).toBe(16);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(1000);
   });
 
   it('uses slow lane when runtime transport reports backpressure even on 4g', () => {
@@ -89,5 +96,6 @@ describe('mobile-config refresh cadence', () => {
 
     expect(cadence.headTickMs).toBeGreaterThanOrEqual(120);
     expect(cadence.minTailRefreshGapMs).toBeGreaterThanOrEqual(120);
+    expect(cadence.headStalePingMs).toBeGreaterThanOrEqual(1000);
   });
 });
