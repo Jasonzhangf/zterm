@@ -156,6 +156,9 @@ jobs:
       - name: DAGpipe phase1 gates
         run: pnpm --dir android run test:dagpipe-phase1
 
+      - name: Verify wrtc packaging contract
+        run: pnpm --dir android run test:daemon-wrtc-packaging
+
       - name: Materialize CI wrtc release input
         run: |
           MANIFEST_PATH="$(node android/scripts/prepare-daemon-ci-wrtc-input.mjs \

@@ -40,6 +40,7 @@ const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const androidRoot = resolve(scriptsDir, '..');
 const repoRoot = resolve(androidRoot, '..');
 const helperCli = join(scriptsDir, 'prepare-daemon-release-wrtc-input.mjs');
+const ciInputCli = join(scriptsDir, 'prepare-daemon-ci-wrtc-input.mjs');
 const verifierCli = join(scriptsDir, 'verify-release-assets.mjs');
 
 const MANIFEST_SCHEMA = 'zterm.daemon.wrtc-release-input/v1';
@@ -447,10 +448,154 @@ function runVerifierScenarios(tmpRoot) {
   }
 }
 
+function makeSyntheticPackages(root, { platformVersion, includeAddon }) {
+  const scope = join(root, 'node_modules/@roamhq');
+  mkdirSync(join(scope, 'wrtc'), { recursive: true });
+  mkdirSync(join(scope, 'wrtc-darwin-arm64'), { recursive: true });
+  writeJson(join(scope, 'wrtc/package.json'), { name: '@roamhq/wrtc', version: PACKAGE_VERSION });
+  writeJson(join(scope, 'wrtc-darwin-arm64/package.json'), {
+    name: '@roamhq/wrtc-darwin-arm64',
+    version: platformVersion,
+  });
+  if (includeAddon) {
+    writeFileSync(join(scope, 'wrtc-darwin-arm64/wrtc.node'), Buffer.from('synthetic-addon'));
+  }
+  return root;
+}
+
+// Drives the CI packaging dry-run producer through the strict stage helper, so
+// the public CI entry point and its declaration survive packaging.
+function runCiInputScenarios(tmpRoot) {
+  console.log('\n[ci-input] CI packaging dry-run input');
+  const ciOut = join(tmpRoot, 'ci-input');
+  const ci = runCli(ciInputCli, ['--output-dir', ciOut]);
+  check('ci-input: exits 0', ci.status === 0, `rc=${ci.status} ${ci.stderr.trim()}`);
+  const manifestPath = ci.stdout.trim().split('\n').pop();
+  check('ci-input: prints the manifest path', manifestPath === join(ciOut, 'manifest.json'), manifestPath);
+
+  if (ci.status === 0 && existsSync(manifestPath)) {
+    const manifest = readJson(manifestPath);
+    check('ci-input: manifest schema', manifest.schema === MANIFEST_SCHEMA, String(manifest.schema));
+    check(
+      'ci-input: declares the dry-run input kind',
+      manifest.inputKind === 'ci-prebuilt-dry-run',
+      String(manifest.inputKind),
+    );
+    check(
+      'ci-input: declares the addon origin',
+      manifest.addon?.origin === 'npm-prebuilt',
+      String(manifest.addon?.origin),
+    );
+    check(
+      'ci-input: declares the build host triple',
+      `${manifest.platform}-${manifest.arch}` === TARGET_TRIPLE,
+      `${manifest.platform}-${manifest.arch}`,
+    );
+    check(
+      'ci-input: packageVersion is the installed pinned version',
+      manifest.packageVersion === PACKAGE_VERSION,
+      String(manifest.packageVersion),
+    );
+    check('ci-input: sourcePin is the pinned commit', manifest.sourcePin === PINNED_SOURCE_PIN);
+    check('ci-input: patchSha256 is a 64-hex digest', /^[0-9a-f]{64}$/.test(String(manifest.patchSha256)));
+    check(
+      'ci-input: copies the installed platform addon bytes',
+      sha256File(join(ciOut, manifest.addon.file)) === BASELINE_ADDON_SHA256,
+      sha256File(join(ciOut, manifest.addon.file)),
+    );
+    check(
+      'ci-input: manifest declares the copied addon digest',
+      manifest.addon.sha256 === BASELINE_ADDON_SHA256,
+      String(manifest.addon.sha256),
+    );
+
+    const real = resolveRealPackageDirs();
+    const ciRuntime = join(tmpRoot, 'ci-runtime');
+    mkdirSync(join(ciRuntime, 'node_modules/@roamhq'), { recursive: true });
+    cpSync(real.mainPkg, join(ciRuntime, 'node_modules/@roamhq/wrtc'), {
+      recursive: true,
+      dereference: true,
+    });
+    cpSync(real.platformPkg, join(ciRuntime, 'node_modules/@roamhq/wrtc-darwin-arm64'), {
+      recursive: true,
+      dereference: true,
+    });
+    const staged = runCli(helperCli, ['--manifest', manifestPath, '--runtime-dir', ciRuntime]);
+    check(
+      'ci-input: strict helper accepts the CI manifest',
+      staged.status === 0,
+      `rc=${staged.status} ${staged.stderr.trim()}`,
+    );
+    if (staged.status === 0) {
+      const provenance = readJson(join(ciRuntime, 'wrtc-provenance.json'));
+      check(
+        'ci-input: packaged provenance keeps inputKind',
+        provenance.inputKind === 'ci-prebuilt-dry-run',
+        String(provenance.inputKind),
+      );
+      check(
+        'ci-input: packaged provenance keeps addonOrigin',
+        provenance.addonOrigin === 'npm-prebuilt',
+        String(provenance.addonOrigin),
+      );
+      check(
+        'ci-input: packaged provenance addon digest',
+        provenance.addonSha256 === BASELINE_ADDON_SHA256,
+        String(provenance.addonSha256),
+      );
+      check(
+        'ci-input: staged addon bytes equal the declared addon',
+        sha256File(join(ciRuntime, 'node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node')) ===
+          BASELINE_ADDON_SHA256,
+      );
+    }
+
+    const releaseProvenance = readJson(join(tmpRoot, 'positive-runtime/wrtc-provenance.json'));
+    check(
+      'ci-input: the patched release input gains no CI markers',
+      releaseProvenance.inputKind === undefined && releaseProvenance.addonOrigin === undefined,
+      JSON.stringify(releaseProvenance),
+    );
+  }
+
+  const mismatchRoot = makeSyntheticPackages(join(tmpRoot, 'ci-pkgs-mismatch'), {
+    platformVersion: '0.9.9',
+    includeAddon: true,
+  });
+  const mismatch = runCli(ciInputCli, [
+    '--output-dir',
+    join(tmpRoot, 'ci-out-mismatch'),
+    '--packages-root',
+    mismatchRoot,
+  ]);
+  check(
+    'ci-input: package version mismatch fails closed',
+    mismatch.status !== 0 && mismatch.stderr.includes('!='),
+    `rc=${mismatch.status} ${mismatch.stderr.trim()}`,
+  );
+
+  const missingRoot = makeSyntheticPackages(join(tmpRoot, 'ci-pkgs-missing-addon'), {
+    platformVersion: PACKAGE_VERSION,
+    includeAddon: false,
+  });
+  const missing = runCli(ciInputCli, [
+    '--output-dir',
+    join(tmpRoot, 'ci-out-missing-addon'),
+    '--packages-root',
+    missingRoot,
+  ]);
+  check(
+    'ci-input: missing installed addon fails closed',
+    missing.status !== 0 && missing.stderr.includes('missing installed prebuilt addon'),
+    `rc=${missing.status} ${missing.stderr.trim()}`,
+  );
+}
+
 const tmpRoot = mkdtempSync(join(androidRoot, '.tmp-wrtc-packaging-'));
 console.log(`[verify-daemon-wrtc-packaging] fixture root: ${tmpRoot}`);
 try {
   runStageScenarios(tmpRoot);
+  runCiInputScenarios(tmpRoot);
   runVerifierScenarios(tmpRoot);
 } finally {
   rmSync(tmpRoot, { recursive: true, force: true });

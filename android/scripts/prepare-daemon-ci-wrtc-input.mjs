@@ -10,6 +10,7 @@
 // addon origin is recorded, so any artifact staged from it is self-describing
 // and can never be mistaken for the patched release addon.
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import {
   copyFileSync,
   existsSync,
@@ -32,18 +33,25 @@ function fail(message) {
 }
 
 function parseArgs(argv) {
-  const args = { outputDir: null, workspaceRoot: null };
+  const args = { outputDir: null, workspaceRoot: null, packagesRoot: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--output-dir' || arg.startsWith('--output-dir=')) {
       args.outputDir = arg === '--output-dir' ? (argv[++i] ?? null) : arg.slice(13);
     } else if (arg === '--workspace-root' || arg.startsWith('--workspace-root=')) {
       args.workspaceRoot = arg === '--workspace-root' ? (argv[++i] ?? null) : arg.slice(17);
+    } else if (arg === '--packages-root' || arg.startsWith('--packages-root=')) {
+      // Bounded override used by the packaging verifier to exercise the
+      // resolution failure paths against synthetic package trees.
+      args.packagesRoot = arg === '--packages-root' ? (argv[++i] ?? null) : arg.slice(16);
     } else {
       fail(`unknown argument: ${arg}`);
     }
   }
   if (!args.outputDir) fail('missing --output-dir');
+  if (args.packagesRoot !== null && args.packagesRoot.trim() === '') {
+    fail('--packages-root must be non-empty when provided');
+  }
   return args;
 }
 
@@ -52,10 +60,8 @@ function resolvePackageDir(packageName, searchRoots) {
   const basename = packageName.slice(packageName.indexOf('/') + 1);
   for (const base of searchRoots) {
     try {
-      const resolved = fileURLToPath(
-        import.meta.resolve(`${packageName}/package.json`, `file://${base}/`),
-      );
-      return dirname(resolved);
+      const requireFromBase = createRequire(join(base, 'probe.cjs'));
+      return dirname(requireFromBase.resolve(`${packageName}/package.json`));
     } catch {
       // fall through to the pnpm store scan
     }
@@ -90,7 +96,9 @@ function main() {
   const args = parseArgs(process.argv.slice(2));
   const scriptDir = dirname(fileURLToPath(import.meta.url));
   const androidRoot = resolve(scriptDir, '..');
-  const searchRoots = [androidRoot, args.workspaceRoot ?? resolve(androidRoot, '..')];
+  const searchRoots = args.packagesRoot
+    ? [resolve(args.packagesRoot)]
+    : [androidRoot, args.workspaceRoot ?? resolve(androidRoot, '..')];
   const triple = `${process.platform}-${process.arch}`;
 
   const mainPackageDir = resolvePackageDir('@roamhq/wrtc', searchRoots);
