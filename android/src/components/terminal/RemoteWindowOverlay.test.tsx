@@ -2230,7 +2230,7 @@ describe('RemoteWindowOverlay', () => {
       <RemoteWindowOverlay
         activeSessionId="session-embedded-pointer"
         embedded
-        embeddedFullscreen
+        embeddedFullscreen={false}
         requestTargets={requestTargets}
         startStream={startStream}
         sendInput={sendInput}
@@ -2240,7 +2240,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-pointer'));
     await screen.findByTestId('remote-window-video');
     await waitFor(() => {
-      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
     });
 
     const surface = screen.getByTestId('remote-window-video-surface');
