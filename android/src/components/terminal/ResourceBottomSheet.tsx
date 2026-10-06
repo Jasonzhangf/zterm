@@ -293,22 +293,7 @@ export function ResourceBottomSheet({
             data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.remoteWindowSurface}
             style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column' }}
           >
-            {!streamExpanded ? (
-              <div style={{ position: 'absolute', top: 8, right: 14, zIndex: 20, display: 'flex', justifyContent: 'flex-end' }}>
-                <AmbientButton
-                  type="button"
-                  data-testid="resource-stream-fullscreen"
-                  aria-label="窗口串流全屏"
-                  onClick={() => {
-                    setExpanded(true);
-                    onExpand?.();
-                  }}
-                  style={{ ...buttonStyle, minHeight: 36, padding: '0 12px', fontSize: 13 }}
-                >
-                  全屏
-                </AmbientButton>
-              </div>
-            ) : null}
+
             <div style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'hidden' }}>
               {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
             </div>

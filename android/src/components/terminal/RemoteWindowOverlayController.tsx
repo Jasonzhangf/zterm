@@ -522,12 +522,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   // remains passive (the resource drawer owns expansion), but the video surface
   // must not be passive or taps and drags cannot reach the remote target.
   const remoteWindowInteractionEnabled = !embedded
-    || (state.phase === 'targetLocked' && (state.mode === 'floating' || state.mode === 'fullscreen'));
-  // Embedded half-sheet preview is interactive for the video surface but does
-  // not own the input-context role while still in floating mode. The
-  // standalone/fullscreen roles stay unique owners per architecture rules.
-  const remoteWindowPublishesInput = !embedded
     || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
+  const remoteWindowPublishesInput = remoteWindowInteractionEnabled;
   const showEmbeddedLockedToolbar = embedded
     && state.phase === 'targetLocked'
     && state.mode === 'floating';
@@ -2400,8 +2396,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
             const filtered: typeof result.remoteEvents = [];
             if (state.mode === 'fullscreen') {
               handleDoubleTapZoom(event.clientX, event.clientY);
-            } else if (remoteWindowInteractionEnabled) {
-              handleFullscreen();
             }
             applyRemoteWindowTouchPointerResult({ ...result, remoteEvents: filtered });
             if (result.consumed) {

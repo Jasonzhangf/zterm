@@ -69,7 +69,7 @@ describe('ResourceBottomSheet', () => {
     // The stream pane no longer owns drawer gesture cancellation; its child overlay receives the touch chain.
   });
 
-  it('exposes a stream fullscreen ambient button that escalates the parent', () => {
+  it('uses the drawer grip as the stream fullscreen affordance', () => {
     const onExpand = vi.fn();
     const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="remote-stream">stream</div> : null);
     render(
@@ -82,11 +82,12 @@ describe('ResourceBottomSheet', () => {
         onExpand={onExpand}
       />,
     );
-    const button = screen.getByTestId('resource-stream-fullscreen');
-    expect(button).toBeTruthy();
-    fireEvent.click(button);
+    expect(screen.queryByTestId('resource-stream-fullscreen')).toBeNull();
+    const handle = screen.getByTestId('resource-bottom-sheet-grip');
+    fireEvent.touchStart(handle, { touches: [{ clientY: 600 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientY: 500 }] });
+    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 500 }] });
     expect(onExpand).toHaveBeenCalledTimes(1);
-    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', true, expect.any(Function));
   });
 
   it('keeps file page vertical drags inside the content scope', () => {

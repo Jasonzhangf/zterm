@@ -2214,7 +2214,7 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => expect(onInputContextChange).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-embedded-owner', targetId: 'app-embedded-owner' })));
   });
 
-  it('routes embedded half-sheet pointer gestures to the stream without promoting input context', async () => {
+  it('keeps embedded half-sheet pointer gestures passive until fullscreen', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -2260,14 +2260,11 @@ describe('RemoteWindowOverlay', () => {
     });
 
     sendInput.mockClear();
-    fireEvent.pointerDown(surface, { pointerId: 11, clientX: 40, clientY: 60, pointerType: 'touch', isPrimary: true, buttons: 1 });
-    fireEvent.pointerMove(surface, { pointerId: 11, clientX: 40, clientY: 120, pointerType: 'touch', isPrimary: true, buttons: 1 });
-    fireEvent.pointerUp(surface, { pointerId: 11, clientX: 40, clientY: 120, pointerType: 'touch', isPrimary: true, buttons: 0 });
+    fireEvent.pointerDown(surface, { pointerId: 11, clientX: 40, clientY: 90, pointerType: 'touch', isPrimary: true, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 11, clientX: 40, clientY: 40, pointerType: 'touch', isPrimary: true, buttons: 1 });
+    fireEvent.pointerUp(surface, { pointerId: 11, clientX: 40, clientY: 40, pointerType: 'touch', isPrimary: true, buttons: 0 });
     expect(remoteInputPayloads(sendInput)).toEqual([]);
 
-    sendInput.mockClear();
-    fireEvent.wheel(surface, { clientX: 40, clientY: 80, deltaX: 0, deltaY: 24 });
-    expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toEqual(['scroll']);
   });
 
   it('captures a selected remote-window screenshot without focusing the desktop app', async () => {
@@ -5060,7 +5057,7 @@ describe('RemoteWindowOverlay', () => {
     ]);
   });
 
-  it('keeps a floating pinch out of fullscreen while a single-finger double tap still enters fullscreen', async () => {
+  it('keeps a floating pinch and double tap in floating mode until drawer promotion', async () => {
     const mediaStream = { id: 'media-stream-floating-pinch' } as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-floating-pinch',
@@ -5144,7 +5141,7 @@ describe('RemoteWindowOverlay', () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
     });
   });
 
