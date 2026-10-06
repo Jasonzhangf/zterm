@@ -2195,6 +2195,25 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('keeps embedded floating input context passive and promotes it only with fullscreen', async () => {
+    const mediaStream = { id: 'media-stream-embedded-owner' } as MediaStream;
+    const onInputContextChange = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-embedded-owner',
+      targets: [makeTarget('app-embedded-owner', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({ streamId, mediaStream }));
+    const renderOverlay = (embeddedFullscreen: boolean) => (
+      <RemoteWindowOverlay activeSessionId="session-embedded-owner" embedded embeddedFullscreen={embeddedFullscreen} requestTargets={requestTargets} startStream={startStream} onInputContextChange={onInputContextChange} />
+    );
+    const view = render(renderOverlay(false));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-owner'));
+    await screen.findByTestId('remote-window-video');
+    await waitFor(() => expect(onInputContextChange).toHaveBeenLastCalledWith(null));
+    view.rerender(renderOverlay(true));
+    await waitFor(() => expect(onInputContextChange).toHaveBeenLastCalledWith(expect.objectContaining({ sessionId: 'session-embedded-owner', targetId: 'app-embedded-owner' })));
+  });
+
   it('routes embedded half-sheet pointer gestures to the stream without promoting input context', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
@@ -2211,6 +2230,7 @@ describe('RemoteWindowOverlay', () => {
       <RemoteWindowOverlay
         activeSessionId="session-embedded-pointer"
         embedded
+        embeddedFullscreen
         requestTargets={requestTargets}
         startStream={startStream}
         sendInput={sendInput}
@@ -2219,6 +2239,9 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-pointer'));
     await screen.findByTestId('remote-window-video');
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
 
     const surface = screen.getByTestId('remote-window-video-surface');
     Object.defineProperty(surface, 'getBoundingClientRect', {
@@ -2237,11 +2260,14 @@ describe('RemoteWindowOverlay', () => {
     });
 
     sendInput.mockClear();
-    fireEvent.pointerDown(surface, { pointerId: 11, clientX: 40, clientY: 60, pointerType: 'touch', isPrimary: true });
-    fireEvent.pointerMove(surface, { pointerId: 11, clientX: 40, clientY: 120, pointerType: 'touch', isPrimary: true });
-    fireEvent.pointerUp(surface, { pointerId: 11, clientX: 40, clientY: 120, pointerType: 'touch', isPrimary: true });
+    fireEvent.pointerDown(surface, { pointerId: 11, clientX: 40, clientY: 60, pointerType: 'touch', isPrimary: true, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 11, clientX: 40, clientY: 120, pointerType: 'touch', isPrimary: true, buttons: 1 });
+    fireEvent.pointerUp(surface, { pointerId: 11, clientX: 40, clientY: 120, pointerType: 'touch', isPrimary: true, buttons: 0 });
+    expect(remoteInputPayloads(sendInput)).toEqual([]);
+
+    sendInput.mockClear();
     fireEvent.wheel(surface, { clientX: 40, clientY: 80, deltaX: 0, deltaY: 24 });
-    expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toContain('scroll');
+    expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toEqual(['scroll']);
   });
 
   it('captures a selected remote-window screenshot without focusing the desktop app', async () => {
