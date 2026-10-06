@@ -517,13 +517,12 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     pointerId: number;
     startScale: number;
   } | null>(null);
-  // Embedded half-sheet preview was previously a passive view: only embedded
-  // fullscreen (and the standalone floating overlay) owned the Direct Touch /
-  // Mouse Emulation arena. The picker is now reachable through a dedicated
-  // "全屏" ambient button on the resource sheet, and embedded floating must
-  // own the same gesture/zoom/click pipeline as the floating standalone.
+  // The embedded floating preview is the same user-facing remote-window surface
+  // as standalone floating: it owns pointer/touch/scroll dispatch. Its toolbar
+  // remains passive (the resource drawer owns expansion), but the video surface
+  // must not be passive or taps and drags cannot reach the remote target.
   const remoteWindowInteractionEnabled = !embedded
-    || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
+    || (state.phase === 'targetLocked' && (state.mode === 'floating' || state.mode === 'fullscreen'));
   const showEmbeddedLockedToolbar = embedded
     && state.phase === 'targetLocked'
     && state.mode === 'floating';

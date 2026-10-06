@@ -2195,7 +2195,7 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
-  it('keeps the embedded half-sheet preview from publishing a remote-window input context', async () => {
+  it('publishes input context and routes embedded floating preview gestures', async () => {
     const mediaStream = { id: 'media-stream-embedded-context' } as MediaStream;
     const onInputContextChange = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -2217,21 +2217,22 @@ describe('RemoteWindowOverlay', () => {
       />
     );
 
-    const view = render(renderOverlay(false));
+    render(renderOverlay(false));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-context'));
     await screen.findByTestId('remote-window-video');
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
     });
-    expect(onInputContextChange.mock.calls.every(([context]) => context === null)).toBe(true);
-
-    view.rerender(renderOverlay(true));
     await waitFor(() => {
       expect(onInputContextChange).toHaveBeenLastCalledWith(expect.objectContaining({
         sessionId: 'session-embedded-context',
         targetId: 'app-embedded-context',
       }));
     });
+    const surface = screen.getByTestId('remote-window-video-surface');
+    fireEvent.pointerDown(surface, { pointerId: 7, clientX: 40, clientY: 60, pointerType: 'touch' });
+    fireEvent.pointerMove(surface, { pointerId: 7, clientX: 40, clientY: 140, pointerType: 'touch' });
+    fireEvent.pointerUp(surface, { pointerId: 7, clientX: 40, clientY: 140, pointerType: 'touch' });
   });
 
   it('does not focus on stream setup and sends later wheel or key input as single action events', async () => {

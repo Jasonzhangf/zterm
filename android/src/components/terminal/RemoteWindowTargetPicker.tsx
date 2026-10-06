@@ -65,8 +65,8 @@ export function RemoteWindowTargetPicker({
     <div data-testid="remote-window-picker" style={{
       ...styles.pickerPanel,
       ...(embedded ? {
-        position: 'relative', left: 'auto', right: 'auto', top: 'auto',
-        maxHeight: 'none', height: '100%', border: 0, borderRadius: 0,
+        position: 'absolute', left: 0, right: 0, top: 0, bottom: 0,
+        maxHeight: 'none', height: 'auto', border: 0, borderRadius: 0,
         boxShadow: 'none', backdropFilter: 'none',
       } : {}),
     }}>

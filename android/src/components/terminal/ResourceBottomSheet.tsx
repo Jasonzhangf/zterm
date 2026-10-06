@@ -235,7 +235,8 @@ export function ResourceBottomSheet({
           // 上滑永远拿不到 touchend/pointerup。把手是显式拖动面，必须声明
           // touch-action: none 才能让浏览器把手势交给本组件。
           style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px', touchAction: 'none' }}
-          onTouchStart={(event) => { event.stopPropagation(); handleTouchStart(event); }}
+          onTouchStart={(event) => { event.preventDefault(); event.stopPropagation(); handleTouchStart(event); }}
+           onTouchMove={(event) => { event.preventDefault(); event.stopPropagation(); }}
           onTouchEnd={(event) => { event.stopPropagation(); handleTouchEnd(event); }}
           onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }}
           onPointerDown={(event) => {
@@ -293,7 +294,7 @@ export function ResourceBottomSheet({
             style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column' }}
           >
             {!streamExpanded ? (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 14px 0' }}>
+              <div style={{ position: 'absolute', top: 8, right: 14, zIndex: 20, display: 'flex', justifyContent: 'flex-end' }}>
                 <AmbientButton
                   type="button"
                   data-testid="resource-stream-fullscreen"
@@ -308,7 +309,7 @@ export function ResourceBottomSheet({
                 </AmbientButton>
               </div>
             ) : null}
-            <div style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible' }}>
+            <div style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'hidden' }}>
               {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
             </div>
           </div>

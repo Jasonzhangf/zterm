@@ -532,8 +532,9 @@ describe('ResourceBottomSheet', () => {
 
     expect(screen.getByRole('navigation', { name: '资源类型' })).toBeTruthy();
     const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
-    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }] });
-    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }], changedTouches: [{ clientY: 300 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientY: 180 }], changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchEnd(handle, { touches: [], changedTouches: [{ clientY: 180 }] });
 
     expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', true, expect.any(Function));
     expect(screen.queryByRole('navigation', { name: '资源类型' })).toBeNull();
@@ -560,8 +561,9 @@ describe('ResourceBottomSheet', () => {
     );
 
     const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
-    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }] });
-    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }], changedTouches: [{ clientY: 300 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientY: 180 }], changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchEnd(handle, { touches: [], changedTouches: [{ clientY: 180 }] });
     expect(screen.queryByRole('navigation', { name: '资源类型' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '退出串流全屏' }));
