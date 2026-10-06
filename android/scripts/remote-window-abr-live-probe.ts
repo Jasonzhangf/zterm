@@ -811,25 +811,92 @@ function isHealthyRecoverySample(sample: RemoteWindowVideoStatsSample): boolean 
     && (freezes === null || freezes === 0);
 }
 
-function collectHealthySamples(collectStats: () => Promise<RemoteWindowVideoStatsSample | null>, durationMs: number): Promise<Array<{ sample: RemoteWindowVideoStatsSample; reads: number }>> {
+interface RecoveryObservation {
+  atMs: number;
+  reads: number;
+  healthy: boolean;
+  reason: string;
+  receivedBitrateBps: number | null;
+  receivedPacketLossRatio: number | null;
+  rttMs: number | null;
+  jitterBufferDelayMs: number | null;
+  framesDropped: number | null;
+  freezeCount: number | null;
+  mediaEpoch: number | null;
+  trackId: string | null;
+}
+
+// Every read is recorded with its health verdict so a failed recovery window is
+// diagnosable from evidence instead of only from a timeout message.
+function recoveryObservation(
+  sample: RemoteWindowVideoStatsSample | null,
+  reads: number,
+  atMs: number,
+): RecoveryObservation {
+  const rawLoss = sample?.receivedPacketLossRatio;
+  const loss = typeof rawLoss === 'number' && Number.isFinite(rawLoss) ? rawLoss : null;
+  const rawBitrate = sample?.receivedBitrateBps;
+  const bitrate = typeof rawBitrate === 'number' && Number.isFinite(rawBitrate) ? rawBitrate : null;
+  const reason = !sample
+    ? 'no-sample'
+    : isHealthyRecoverySample(sample)
+      ? 'healthy'
+      : loss === null
+        ? 'loss-interval-unknown'
+        : loss >= 0.05
+          ? 'loss-pressure'
+          : 'other-unhealthy';
+  return {
+    atMs,
+    reads,
+    healthy: reason === 'healthy',
+    reason,
+    receivedBitrateBps: bitrate,
+    receivedPacketLossRatio: loss,
+    rttMs: sample?.rttMs ?? null,
+    jitterBufferDelayMs: sample?.jitterBufferDelayMs ?? null,
+    framesDropped: sample?.framesDropped ?? null,
+    freezeCount: sample?.freezeCount ?? null,
+    mediaEpoch: sample?.mediaEpoch ?? null,
+    trackId: sample?.trackId ?? null,
+  };
+}
+
+interface HealthyCollection {
+  samples: Array<{ sample: RemoteWindowVideoStatsSample; reads: number }>;
+  observations: RecoveryObservation[];
+  reads: number;
+  timedOut: boolean;
+}
+
+function collectHealthySamples(
+  collectStats: () => Promise<RemoteWindowVideoStatsSample | null>,
+  durationMs: number,
+): Promise<HealthyCollection> {
   const endsAt = Date.now() + durationMs;
   return new Promise((resolvePromise, rejectPromise) => {
     const samples: Array<{ sample: RemoteWindowVideoStatsSample; reads: number }> = [];
+    const observations: RecoveryObservation[] = [];
     let reads = 0;
     let healthySinceMs: number | null = null;
     const readNext = async () => {
       reads += 1;
-      if (Date.now() > endsAt + 20_000) { rejectPromise(new Error('timed out collecting healthy recovery samples')); return; }
+      if (Date.now() > endsAt + 20_000) {
+        resolvePromise({ samples, observations, reads, timedOut: true });
+        return;
+      }
       let sample: RemoteWindowVideoStatsSample | null = null;
       try { sample = await collectStats(); } catch (error) { rejectPromise(error); return; }
-      if (!sample || !isHealthyRecoverySample(sample)) {
+      const observation = recoveryObservation(sample, reads, Date.now());
+      observations.push(observation);
+      if (!observation.healthy) {
         healthySinceMs = null;
       } else {
         healthySinceMs ??= Date.now();
-        samples.push({ sample, reads });
+        samples.push({ sample: sample as RemoteWindowVideoStatsSample, reads });
       }
       if (Date.now() >= endsAt && healthySinceMs !== null && Date.now() - healthySinceMs >= durationMs) {
-        resolvePromise(samples);
+        resolvePromise({ samples, observations, reads, timedOut: false });
         return;
       }
       setTimeout(() => { void readNext(); }, 500);
@@ -1178,7 +1245,15 @@ async function runLiveCase(args: AbrProbeArgs): Promise<{ evidence: Record<strin
       evidence.pressureAck = { wire: true, revision: pressureAck.revision, profile: pressureAck.appliedVideoProfile, frames: pressureFrames, nominatedAfterPressure, counters: relay.counters };
       relay.setPressure({ delayMs: 0, dropRatioBtoA: 0, dropRatioAtoB: 0 });
       const recoveryObservationStartedAt = Date.now();
-      const recoverySamples = await collectHealthySamples(collectStats, Math.max(13_000, recoveryMs));
+      const recovery = await collectHealthySamples(collectStats, Math.max(13_000, recoveryMs));
+      const recoverySamples = recovery.samples;
+      evidence.recoveryObservation = {
+        timedOut: recovery.timedOut,
+        reads: recovery.reads,
+        healthySamples: recoverySamples.length,
+        observations: recovery.observations,
+      };
+      if (recovery.timedOut) { throw new Error('timed out collecting healthy recovery samples'); }
       await waitFor(() => {
         const state = harness.latest?.qualityApplyState;
         return state?.phase === 'applied' && state.revision > pressureAck.revision;
