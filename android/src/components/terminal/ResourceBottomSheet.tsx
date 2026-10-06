@@ -262,7 +262,7 @@ export function ResourceBottomSheet({
           <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>预览</div>
           <AmbientButton type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</AmbientButton>
         </header> : null}
-        {!streamExpanded && tab !== 'stream' ? <nav aria-label="资源类型" {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.page]: RESOURCE_DRAWER_GESTURE_PAGE_IDS.toolbar, [RESOURCE_DRAWER_GESTURE_ATTRS.scope]: RESOURCE_DRAWER_GESTURE_SCOPE_IDS.toolbar }} style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
+        {!streamExpanded ? <nav aria-label="资源类型" {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.page]: RESOURCE_DRAWER_GESTURE_PAGE_IDS.toolbar, [RESOURCE_DRAWER_GESTURE_ATTRS.scope]: RESOURCE_DRAWER_GESTURE_SCOPE_IDS.toolbar }} style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
           {(['files', 'stream', 'web'] as const).map((item) => (
             <AmbientButton
               key={item}
