@@ -248,7 +248,8 @@ describe('remote window catalog runtime owner', () => {
     await vi.advanceTimersByTimeAsync(1_000);
     await expect(runtime.listTargets({ requestId: 'read-after-failure' })).resolves.toMatchObject({
       requestId: 'read-after-failure',
-      code: 'app_window_catalog_unavailable',
+      targets: [],
+      errors: [expect.objectContaining({ code: 'app_window_catalog_unavailable' })],
     });
 
     refreshCount = 2;
@@ -439,10 +440,12 @@ describe('remote window catalog runtime owner', () => {
     failThirdCatalog(new Error('app window catalog unavailable'));
     await vi.advanceTimersByTimeAsync(0);
     const result = await read;
-    // The refresh result keeps the structured catalog shape so the caller can
-    // see every failure reason instead of only `errors[0]`.
+    // The refresh result keeps the structured catalog shape and projects out
+    // failures from the source excluded by this read.
     expect(result).toMatchObject({ requestId: 'read-overlap-failure', targets: [] });
-    expect(Array.isArray((result as { errors?: unknown[] }).errors)).toBe(true);
+    expect((result as { errors?: Array<{ requestId: string; code: string; message: string }> }).errors).toEqual([
+      { requestId: 'read-overlap-failure', code: 'iterm2_api_unavailable', message: 'iTerm2 Python API unavailable' },
+    ]);
     runtime.dispose();
   });
 

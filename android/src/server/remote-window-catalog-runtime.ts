@@ -100,7 +100,7 @@ export function createRemoteWindowCatalogRuntime(
 ): RemoteWindowCatalogRuntime {
   // The daemon owns one canonical full catalog snapshot; source-set selection is a read-time projection.
   let snapshot: RemoteWindowTargetCatalogCacheEntry | null = null;
-  let refreshFailure: RemoteWindowStreamErrorPayload | null = null;
+  let refreshFailure: RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload | null = null;
   let hasSuccessfulSnapshot = false;
   let refresh: Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> | null = null;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -340,11 +340,7 @@ export function createRemoteWindowCatalogRuntime(
             refreshFailure = null;
           } else {
             snapshot = null;
-            refreshFailure = hasSuccessfulSnapshot
-              ? 'targets' in result
-                ? { ...result.errors![0], requestId: result.requestId }
-                : { ...result }
-              : null;
+            refreshFailure = hasSuccessfulSnapshot ? cloneRemoteWindowTargetCatalogResult(result, result.requestId) : null;
           }
         }
         return result;
@@ -391,11 +387,12 @@ export function createRemoteWindowCatalogRuntime(
     if (ready) {
       return projectSnapshot(ready.response, payload);
     }
-    if (refreshFailure && !excludedSourceErrorCodes(payload).has(refreshFailure.code)) {
-      return {
-        ...refreshFailure,
-        requestId: payload.requestId,
-      };
+    if (refreshFailure) {
+      return 'targets' in refreshFailure
+        ? projectSnapshot(refreshFailure, payload)
+        : excludedSourceErrorCodes(payload).has(refreshFailure.code)
+          ? remoteWindowError(payload, 'remote_window_catalog_not_ready', 'remote window target catalog is not ready')
+          : { ...refreshFailure, requestId: payload.requestId };
     }
     if (refresh) {
       const pending = await refresh;
@@ -410,7 +407,9 @@ export function createRemoteWindowCatalogRuntime(
           'remote window target catalog is not ready',
         );
       }
-      return cloneRemoteWindowTargetCatalogResult(pending, payload.requestId);
+      return 'targets' in pending
+        ? projectSnapshot(pending, payload)
+        : cloneRemoteWindowTargetCatalogResult(pending, payload.requestId);
     }
     return remoteWindowError(
       payload,
