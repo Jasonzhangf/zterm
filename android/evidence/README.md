@@ -92,3 +92,21 @@ evidence/
 - 本机 OTA：`~/.zterm/updates/latest.json` 指向 `0.1.3.3206`（同 sha256）。
 - 公网 Relay OTA：`https://relay.codewhisper.cc:18443/relay/updates/latest.json` 现服务 `0.1.3.3206` / `versionCode 1100032060`；normal + rollback APK `HEAD/GET` 均 `200`；公网下载 normal APK sha256 `50b189d8...` 与 manifest 一致（size 77507455）。
 - 已知遗留（P2 advisory，非阻断，未纳入本次修复）：(a) `android/docs/dagpipe/android-connection-service.graph.json` 尚未登记 command-rejection -> channel 退役节点；新增节点需在 native registry `android/native/dagpipe/src/phase8_core.rs` 注册同名 operator，属超出本次范围的 native 变更，故先 revert 保持 CI 绿；(b) 无 `channelId` 的拒绝（`mux-target-message`）在 send().catch 与 `androidConnectionError` 监听均为 no-op，未做 fail-fast 诊断，失败仍受下游 tmux control 请求超时约束。
+
+## stream-delivery joint 3208 交付索引（进行中）
+
+候选分支 `codex/stream-delivery-freshmain-1004`，base `c5f2860a` = `origin/main`。原始证据保留在本地 ignored 目录
+`~/.codex/.chatgpt-projects/g-p-6a82ba0c561881919039d12d78708a8e/artifacts/stream-execution-20261003/joint-delivery/root-joint-verification/`。
+
+### daemon wrtc packaging gate 执行回执（候选 `c1291e018deb72a651c546bf7678663dc3375418`）
+
+- 环境：Node `v22.22.2`，`darwin-arm64`，pnpm workspace `--frozen-lockfile` 安装的 `@roamhq/wrtc` `0.10.0`；候选 worktree `git status --porcelain` 为空。
+- 命令与结果（均可直接复现）：
+  - `cd android && pnpm run test:daemon-wrtc-packaging` → exit `0`；`ok` 断言 79 项、`FAIL` 0 项；末行 `[verify-daemon-wrtc-packaging] PASS`；`own fixture/tmp removed` ok（harness 自建的 `android/.tmp-wrtc-packaging-*` 已删除）。
+  - `pnpm run verify:ci` → exit `0`（13 files / 106 tests）。
+  - `cd android && pnpm run type-check` → exit `0`，含 `[source-js-pollution] clean`。
+  - `pnpm --dir android run daemon:prepare-release`（不设 `ZTERM_DAEMON_WRTC_INPUT_MANIFEST`）→ exit `1`，fail-closed 文案 `ZTERM_DAEMON_WRTC_INPUT_MANIFEST is required; refusing to build a daemon release without the strict stage manifest`。
+  - GitHub Actions run `37421603700`（PR #161，SHA `c1291e01`）→ 6/6 job `pass`，含 `Daemon package dry-run`。
+- 该候选新增/变更的覆盖点：`prepare-daemon-ci-wrtc-input.mjs`（CI dry-run 输入生产者）、`prepare-daemon-release-wrtc-input.mjs`（可选 `inputKind`/`addon.origin` 校验并写入 provenance）、`verify-daemon-wrtc-packaging.mjs` 的 `[ci-input]` 段（19 项断言：manifest 字段、已安装平台 addon 字节、严格 helper 接受、provenance 保留 `inputKind=ci-prebuilt-dry-run` 与 `addonOrigin=npm-prebuilt`、补丁版 release 输入不获得 CI 标记、包版本不匹配 fail-closed、已安装 addon 缺失 fail-closed）、`.github/workflows/ci.yml` daemon-package job 增加该门禁。
+- 本地原始日志：`review-fixes/wrtc-packaging-gate-receipt.log`（sha256 `b3211c20e2f4bd8a44f650f8f22b26ac7d13eeffec7c4088126d6cdaeb9c488b`）、`verify-ci-receipt.log`、`type-check-receipt.log`、`pr-checks-r4.log`。
+- 同一交付的既有有效证据（不重跑）：真实 ABR 压力→恢复两次 `ok=true`（`abr-recovery-r4-diag/`、`abr-recovery-r5-confirm/`，pressure rev3 → recovery rev4 / 8 Mbps / 30 FPS，41 healthy samples，`cleanup.released=true`）；安装态 emulator 真实入口（`l5-device/`，`com.zterm.android` `0.1.3.3208`，`firstInstallTime` 保留）；独立架构 review 对 `bfc5436f` 的 PASS（`review-r2/`）。
