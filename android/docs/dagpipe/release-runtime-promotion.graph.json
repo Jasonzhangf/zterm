@@ -1,6 +1,6 @@
 {
   "id": "release.runtime_promotion",
-  "version": "0.1",
+  "version": "0.2",
   "inputs": [
     {
       "id": "arc.request",
@@ -56,6 +56,9 @@
     },
     {
       "id": "verify_digest",
+      "acceptance": [
+        "daemon release uses the single strict manifest stage helper for source pin/patch/addon identity; unset or missing manifest fails before constructing release tree; tampered addon fails packaging before installer or live CLI/runner/native/PID writes"
+      ],
       "operator": "release.update_artifact.verify",
       "operator_version": "0.1",
       "inputs": [
@@ -103,6 +106,10 @@
     },
     {
       "id": "install_runtime",
+      "acceptance": [
+        "global installer is the sole writer of permanent CLI and canonical native; version-root runtime contains manifest-selected addon/provenance; .zterm/bin/zterm-daemon is present after global install alone before foreground run or service preparation, used by both permission preflight and actual capture; support install_user_shims/caller physically removed",
+        "source zterm-daemon.sh only delegates all lifecycle/run/status commands to the installed support for actual package.version; no worktree CLI shim, duplicate source stage/compiler/launchd/service owner or prebuilt fallback; missing installed support is explicit install-first error"
+      ],
       "operator": "release.runtime_home.install",
       "operator_version": "0.1",
       "inputs": [
@@ -126,6 +133,10 @@
     },
     {
       "id": "start_runtime",
+      "acceptance": [
+        "one declared restart after joint author verification and OS handback; new process/loaded server/addon match installed release and final manifest, canonical native hash matches package payload; identity/health are separate from actual media/quality/input/stop/reentry/client-device proof",
+        "failure stops downstream delivery with explicit error and retained recovery evidence; only task-owned resources can be removed, existing shared legacy daemon-runtime is retained; static graph/operator build gate never substitutes actual install/restart acceptance"
+      ],
       "operator": "daemon.runtime_entry.start",
       "operator_version": "0.1",
       "inputs": [

@@ -29,7 +29,7 @@ export interface TerminalBridgeRuntimeDeps {
   releaseAllMuxChannelSubscribers: (connection: DaemonTransportConnection) => string[];
   handleMessage: (connection: DaemonTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
   /** 传输断开（WS close/rtc 错误/超时）时回调：停掉该连接发起的 remote-window 流 */
-  handleTransportClosed?: (connection: DaemonTransportConnection) => void;
+  handleTransportClosed?: (connection: DaemonTransportConnection) => void | Promise<void>;
 }
 
 export interface TerminalBridgeRuntime {
@@ -180,7 +180,25 @@ export function createTerminalBridgeRuntime(
       deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
     }
     deps.releaseAllMuxChannelSubscribers(connection);
-    deps.handleTransportClosed?.(connection);
+    let closedResult: unknown;
+    try {
+      closedResult = deps.handleTransportClosed?.(connection);
+    } catch (error) {
+      console.error(
+        `[${deps.logTimePrefix()}] transport ${connection.id} cleanup failed after detach: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    if (closedResult && typeof (closedResult as Promise<void>).then === 'function') {
+      void (closedResult as Promise<void>).catch((error) => {
+        console.error(
+          `[${deps.logTimePrefix()}] transport ${connection.id} cleanup failed after detach: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }
   }
 
   const rtcBridgeServer = createRtcBridgeServer({

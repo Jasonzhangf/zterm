@@ -1,0 +1,96 @@
+{
+  "id": "remote.window_local_display",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.local_display_intent",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "admit_local_display",
+      "operator": "client.remote_window_overlay.admit_local_display",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.local_display_intent"
+      ],
+      "output": {
+        "id": "arc.local_display_transition",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "reproject_local_display",
+      "operator": "client.remote_window_viewport.reproject",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.local_display_transition"
+      ],
+      "output": {
+        "id": "arc.local_display_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_local_display",
+      "operator": "client.remote_window_overlay.settle_local_display",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.local_display_projection"
+      ],
+      "output": {
+        "id": "arc.local_display_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "admit_local_display",
+      "to": "reproject_local_display",
+      "arc_id": "arc.local_display_transition"
+    },
+    {
+      "from": "reproject_local_display",
+      "to": "settle_local_display",
+      "arc_id": "arc.local_display_projection"
+    }
+  ],
+  "outputs": [
+    "arc.local_display_result"
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "id": "remote.window_binding_experiment",
+  "version": "0.6",
+  "inputs": [
+    {
+      "id": "arc.binding_experiment_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "admit_experiment",
+      "operator": "author.remote_window_binding.admit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.binding_experiment_request"
+      ],
+      "output": {
+        "id": "arc.binding_experiment_admission",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "compare_binding",
+      "operator": "author.remote_window_binding.compare",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.binding_experiment_admission"
+      ],
+      "output": {
+        "id": "arc.binding_experiment_observation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "acceptance": [
+        "codec dictionary emits lossless k=v;k=v fmtp without SDP prefix or leading key spaces; fixed native full codec equality and transaction gates remain unchanged; no new feedback/ptime public fields for the proven default-valued video path",
+        "sender snapshot/projection/substitution and exclusive includes physically removed; both sender files byte-equal fixed upstream; persisted public fmtp-bearing get/set, genuine codec mutation rejection, recovery and dynamic full-frame continuity; new addon reruns immutable ABAB, both negative/caps plans and geometry",
+        "pinned SDK encoding max_framerate -> simulcast_layers -> CreateDefaultVideoStreams populated layer.max_framerate -> SetFrameRateUpperLimit -> VideoSinkWants chain documented; actual unchanged caps reject zero/no-effect propagation",
+        "separate public geometry consumer scaleResolutionDownBy2 then1 observes >=3 complete160x120 then320x240 I420 dynamic decoded frames with source320x24060FPS retained, connected identity and natural cleanup; frozen original consumer unchanged",
+        "raw RTCVideoTrackSource PushFrame consumes inherited AdaptFrame VideoSinkWants temporal and geometry decision before exactly one OnFrame; no duplicate FPS gate, SDK patch or capture-side compensation",
+        "RTP dictionary rejects non-finite maxFramerate and unsafe maxBitrate before native state mutation or integer narrowing; valid fractional bitrate preserves existing truncation and explicit native-width range",
+        "every changed input uses the frozen independently sourced per-probe oracle; A blanket setter rejection never substitutes supported normalization/ignored-field evidence; all required rejections retain fresh legal recovery and real frames",
+        "existing optional encoding ssrc and maxFramerate TO projection preserves native value/presence; caller SSRC edits/removal reach native rejection, never restored from snapshot; for each experiment sender with exactly one encoding, B fresh getter SSRC matches public outbound-rtp stats and stays stable across legal updates; multi-encoding senders are outside this experiment",
+        "source 60FPS texture-varying I420; A unrestricted vs B same-source control",
+        "warmup 2s after source start and after each setter; stable window >=5s per metric",
+        "decodedFPS <= cap + 1 (sampling boundary; decoded delta / monotonic elapsed)",
+        "outbound-rtp media payload Mbps average <= cap + max(15% cap, 100kbps); exclude retransmission/RTCP/DTLS wire",
+        "single-focus and overview-plus-focus lane cap sums each <= 3.5Mbps budget",
+        "per setter (incl. after rejection) >=3 complete 320x240 I420 frames (bytes 115200) before/after",
+        "peer no rebuild: same peer/sender/transceiver objects, mids and selected ICE pair unchanged, connection stays connected",
+        "after every rejected setter, a fresh getParameters plus a legal setParameters update must still succeed and stay frame-continuous (>=3 complete 320x240 I420 frames, bytes 115200)",
+        "if libwebrtc contract diverges, explain and keep actual cap UNVERIFIED without loosening the gate"
+      ]
+    },
+    {
+      "id": "settle_experiment",
+      "operator": "orchestrator.remote_window_binding.settle",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.binding_experiment_observation"
+      ],
+      "output": {
+        "id": "arc.binding_experiment_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "admit_experiment",
+      "to": "compare_binding",
+      "arc_id": "arc.binding_experiment_admission"
+    },
+    {
+      "from": "compare_binding",
+      "to": "settle_experiment",
+      "arc_id": "arc.binding_experiment_observation"
+    }
+  ],
+  "outputs": [
+    "arc.binding_experiment_result"
+  ],
+  "compare_acceptance_owner": "author.remote_window_binding.compare"
+}

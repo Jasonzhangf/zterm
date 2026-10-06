@@ -255,12 +255,14 @@ export function AppContent({
     setRemoteWindowBrowserUserAgent,
     updateRemoteWindowFocus,
     stopRemoteWindowStream,
+    closeRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
     sendMessageRaw,
     manageTmuxSessionsOnOpenTransport,
     onFileTransferMessage,
     onRemoteWindowMessage,
+    onRemoteWindowInputOutcome,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -1220,6 +1222,7 @@ export function AppContent({
             onSetRemoteWindowBrowserUserAgent={setRemoteWindowBrowserUserAgent}
             onUpdateRemoteWindowFocus={updateRemoteWindowFocus}
             onStopRemoteWindowStream={stopRemoteWindowStream}
+            onCloseRemoteWindowStream={closeRemoteWindowStream}
             onSendRemoteWindowInput={sendRemoteWindowInput}
             onResizeRemoteWindowTarget={resizeRemoteWindowTarget}
             quickActions={quickActions}
@@ -1259,6 +1262,7 @@ export function AppContent({
             }}
             resolveFileBrowserSessionPort={resolveFileBrowserSessionPort}
             onRemoteWindowMessage={onRemoteWindowMessage}
+            onRemoteWindowInputOutcome={onRemoteWindowInputOutcome}
             shortcutSmartSort={bridgeSettings.shortcutSmartSort}
             shortcutFrequencyMap={shortcutFrequencyMap}
             onShortcutUse={handleShortcutUse}

@@ -440,7 +440,7 @@ describe('TerminalPage remote window overlay', () => {
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '退出串流' }));
     await waitFor(() => {
       expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
@@ -537,9 +537,98 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '退出串流' }));
     await waitFor(() => {
       expect(screen.queryByTestId('resource-bottom-sheet')).toBeNull();
+      expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+    });
+  });
+
+  it('walks the page Back/Escape daisy chain from fullscreen shrink to the existing local exit path', async () => {
+    const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-page-back' } as MediaStream;
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-page-back',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2 as const, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
+      started: {
+        requestId: 'rw-start-page-back',
+        streamId,
+        targetId: 'app-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 30,
+          targetKind: 'app-window' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const onStopRemoteWindowStream = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={vi.fn()}
+        onStopRemoteWindowStream={onStopRemoteWindowStream}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    // The persistent strip exposes exactly one labelled local-exit control.
+    expect(screen.getByRole('button', { name: '退出串流' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+
+    // Escape first shrinks fullscreen back to floating, then runs the existing
+    // local exit path; it never touches host/capture identity.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() => {
       expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
     });
   });
@@ -592,6 +681,15 @@ describe('TerminalPage remote window overlay', () => {
         }
       };
     });
+    let remoteWindowInputOutcomeHandler: ((outcome: any) => void) | null = null;
+    const onRemoteWindowInputOutcome = vi.fn((handler: (outcome: any) => void) => {
+      remoteWindowInputOutcomeHandler = handler;
+      return () => {
+        if (remoteWindowInputOutcomeHandler === handler) {
+          remoteWindowInputOutcomeHandler = null;
+        }
+      };
+    });
 
     render(
       <TerminalPage
@@ -613,6 +711,7 @@ describe('TerminalPage remote window overlay', () => {
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
         onSendRemoteWindowInput={onSendRemoteWindowInput}
         onRemoteWindowMessage={onRemoteWindowMessage}
+        onRemoteWindowInputOutcome={onRemoteWindowInputOutcome}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -691,52 +790,38 @@ describe('TerminalPage remote window overlay', () => {
 
     const firstPayload = remoteWindowPayloads(onSendRemoteWindowInput)[0];
     act(() => {
-      remoteWindowMessageHandler?.({
-        type: 'remote-window-input-ack',
-        control: {
-          version: 1,
-          sequence: 'rw-input-accepted-1',
-          accepted: true,
-          retryable: false,
-          duplicate: false,
-          receivedAtMs: 1,
-        },
-        payload: {
-          streamId: firstPayload.streamId,
-          targetId: firstPayload.targetId,
-        },
+      remoteWindowInputOutcomeHandler?.({
+        sequence: 'rw-input-accepted-1',
+        streamId: firstPayload.streamId,
+        targetId: firstPayload.targetId,
+        status: 'delivered',
+        source: 'daemon-ack',
+        execution: 'confirmed',
       });
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('ACK rw-input-accepted-1');
+      expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('ACK rw-input-accepted-1 daemon-ack/confirmed');
       expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('A 1 · E 0');
     });
 
     act(() => {
-      remoteWindowMessageHandler?.({
-        type: 'remote-window-input-ack',
-        control: {
-          version: 1,
-          sequence: 'rw-input-error-1',
-          accepted: false,
-          retryable: false,
-          duplicate: false,
-          receivedAtMs: 2,
-          error: {
-            code: 'remote_window_input_failed',
-            message: 'remote window input stale',
-          },
-        },
-        payload: {
-          streamId: firstPayload.streamId,
-          targetId: firstPayload.targetId,
+      remoteWindowInputOutcomeHandler?.({
+        sequence: 'rw-input-error-1',
+        streamId: firstPayload.streamId,
+        targetId: firstPayload.targetId,
+        status: 'failed',
+        source: 'client-timeout',
+        execution: 'unconfirmed',
+        error: {
+          code: 'remote_window_input_ack_timeout',
+          message: 'Remote window input ACK timed out',
         },
       });
     });
 
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('NAK rw-input-error-1 remote_window_input_failed');
+      expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('NAK rw-input-error-1 client-timeout/unconfirmed');
       expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('A 1 · E 1');
     });
 
@@ -1224,5 +1309,156 @@ describe('TerminalPage remote window overlay', () => {
     fireEvent.click(screen.getByText('quickbar-arrow-up'));
     expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
     expect(onQuickActionInput).toHaveBeenCalledWith('\x1b[A', 's1');
+  });
+});
+
+describe('TerminalPage remote window input outcome projection', () => {
+  beforeEach(() => {
+    Object.defineProperties(HTMLVideoElement.prototype, {
+      requestVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn(() => 1),
+      },
+      cancelVideoFrameCallback: {
+        configurable: true,
+        value: vi.fn(),
+      },
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+    Reflect.deleteProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback');
+    Reflect.deleteProperty(HTMLVideoElement.prototype, 'cancelVideoFrameCallback');
+  });
+
+  it('projects failed and cancelled input delivery outcomes for the current stream', async () => {
+    const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-outcome' } as MediaStream;
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-outcome-1',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      bindings: [{ streamId, mediaPlanVersion: 2, lane: 'focus' as const, mediaEpoch: 0, mediaStream, trackId: 'mock-track' }],
+      commitDecodedFrame: vi.fn(() => true),
+      replaceLaneBinding: vi.fn(async () => false),
+      started: {
+        requestId: 'rw-start-outcome',
+        streamId,
+        targetId: 'app-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 1 as const,
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 12,
+          targetKind: 'app-window' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const onSendRemoteWindowInput = vi.fn();
+    const onRemoteWindowMessage = vi.fn(() => () => undefined);
+    let remoteWindowInputOutcomeHandler: ((outcome: any) => void) | null = null;
+    const onRemoteWindowInputOutcome = vi.fn((handler: (outcome: any) => void) => {
+      remoteWindowInputOutcomeHandler = handler;
+      return () => {
+        if (remoteWindowInputOutcomeHandler === handler) {
+          remoteWindowInputOutcomeHandler = null;
+        }
+      };
+    });
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={onSendRemoteWindowInput}
+        onRemoteWindowMessage={onRemoteWindowMessage}
+        onRemoteWindowInputOutcome={onRemoteWindowInputOutcome}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-target-app-1')).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-video')).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByText('quickbar-arrow-up'));
+    await waitFor(() => {
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith('s1', expect.objectContaining({
+        streamId: expect.stringMatching(/^rw-stream-/),
+        targetId: 'app-1',
+      }));
+    });
+
+    const payload = remoteWindowPayloads(onSendRemoteWindowInput)[0];
+    act(() => {
+      remoteWindowInputOutcomeHandler?.({
+        sequence: 'rw-outcome-failed',
+        streamId: payload.streamId,
+        targetId: payload.targetId,
+        status: 'failed',
+        source: 'client-timeout',
+        execution: 'unconfirmed',
+        error: { code: 'remote_window_input_ack_timeout', message: 'timed out' },
+      });
+    });
+
+    await waitFor(() => {
+      const notice = screen.getByTestId('remote-window-input-notice');
+      expect(notice.getAttribute('data-tone')).toBe('error');
+      expect(notice.textContent).toContain('输入未送达');
+    });
+
+    act(() => {
+      remoteWindowInputOutcomeHandler?.({
+        sequence: 'rw-outcome-cancel',
+        streamId: payload.streamId,
+        targetId: payload.targetId,
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'not-dispatched',
+      });
+    });
+
+    await waitFor(() => {
+      const notice = screen.getByTestId('remote-window-input-notice');
+      expect(notice.getAttribute('data-tone')).toBe('warning');
+      expect(notice.textContent).toContain('输入已取消');
+    });
   });
 });

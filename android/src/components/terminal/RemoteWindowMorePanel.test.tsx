@@ -2,145 +2,130 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemoteWindowMorePanel } from './RemoteWindowMorePanel';
+import type { RemoteWindowVideoQualitySettings } from '../../lib/remote-window-video-quality';
 
 afterEach(cleanup);
 
-describe('RemoteWindowMorePanel view owner', () => {
-  it('keeps low-frequency fullscreen and video preference intents in More', () => {
-    const onToggleFullscreenDisplayMode = vi.fn();
-    const onVideoPreferenceChange = vi.fn();
-    render(<RemoteWindowMorePanel
-      fullscreen
-      videoPreference="smooth"
-      streamStatusText="串流：已连接 · 流畅优先"
-      networkStatusText="网络：4g · RTT 20ms"
-      developerDiagnostics={<div data-testid="diagnostics-slot" />}
-      onToggleFullscreenDisplayMode={onToggleFullscreenDisplayMode}
-      onVideoPreferenceChange={onVideoPreferenceChange}
-    />);
+const committed: RemoteWindowVideoQualitySettings = {
+  preference: 'smooth',
+  maxBitrateCapMbps: null,
+  maxFrameRateFps: 30,
+};
 
-    fireEvent.click(screen.getByTestId('remote-window-fullscreen-display-toggle'));
-    fireEvent.change(screen.getByLabelText('远程窗口串流偏好'), { target: { value: 'quality' } });
-    expect(onToggleFullscreenDisplayMode).toHaveBeenCalledTimes(1);
-    expect(onVideoPreferenceChange).toHaveBeenCalledWith('quality');
-    expect(screen.getByTestId('remote-window-user-stream-status').textContent).toContain('已连接');
-    expect(screen.getByTestId('diagnostics-slot')).toBeTruthy();
-  });
+function renderPanel(overrides: Partial<Parameters<typeof RemoteWindowMorePanel>[0]> = {}) {
+  const onQualityApply = vi.fn();
+  const onDismiss = vi.fn();
+  render(<RemoteWindowMorePanel
+    fullscreen
+    streamStatusText="串流：已连接"
+    networkStatusText="网络：4g · RTT 20ms"
+    developerDiagnostics={<div data-testid="diagnostics-slot" />}
+    onToggleFullscreenDisplayMode={vi.fn()}
+    onDismiss={onDismiss}
+    qualitySettings={committed}
+    onQualityApply={onQualityApply}
+    {...overrides}
+  />);
+  return { onQualityApply, onDismiss };
+}
 
-  it('emits orientation and quality control intents', () => {
-    const onDisplayOrientationChange = vi.fn();
-    const onBitrateMultiplierChange = vi.fn();
-    const onMaxFrameRateChange = vi.fn();
-    render(<RemoteWindowMorePanel
-      fullscreen
-      videoPreference="smooth"
-      streamStatusText="串流：已连接"
-      networkStatusText="网络：4g"
-      developerDiagnostics={null}
-      onToggleFullscreenDisplayMode={vi.fn()}
-      onVideoPreferenceChange={vi.fn()}
-      displayOrientation="follow-device"
-      onDisplayOrientationChange={onDisplayOrientationChange}
-      bitrateMultiplierSelection="auto"
-      onBitrateMultiplierChange={onBitrateMultiplierChange}
-      maxFrameRateFps={30}
-      onMaxFrameRateChange={onMaxFrameRateChange}
-    />);
-
-    fireEvent.change(screen.getByTestId('remote-window-display-orientation-select'), { target: { value: 'landscape' } });
-    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
-    fireEvent.change(screen.getByTestId('remote-window-max-frame-rate-select'), { target: { value: '60' } });
-
-    expect(onDisplayOrientationChange).toHaveBeenCalledWith('landscape');
-    expect(onBitrateMultiplierChange).toHaveBeenCalledWith(4);
-    expect(onMaxFrameRateChange).toHaveBeenCalledWith(60);
-  });
-
-  it('dismisses the settings sheet after a select change and via the close button', () => {
-    const onDismiss = vi.fn();
-    const onVideoPreferenceChange = vi.fn();
-    const onBitrateMultiplierChange = vi.fn();
-    const onMaxFrameRateChange = vi.fn();
-    const onBrowserUserAgentChange = vi.fn();
-    render(<RemoteWindowMorePanel
-      fullscreen
-      videoPreference="smooth"
-      streamStatusText="串流：已连接"
-      networkStatusText="网络：4g"
-      developerDiagnostics={null}
-      onDismiss={onDismiss}
-      onToggleFullscreenDisplayMode={vi.fn()}
-      onVideoPreferenceChange={onVideoPreferenceChange}
-      bitrateMultiplierSelection="auto"
-      onBitrateMultiplierChange={onBitrateMultiplierChange}
-      maxFrameRateFps={30}
-      onMaxFrameRateChange={onMaxFrameRateChange}
-      browserMode
-      browserUserAgent="mobile"
-      onBrowserUserAgentChange={onBrowserUserAgentChange}
-    />);
+describe('RemoteWindowMorePanel draft transaction', () => {
+  it('applies the three draft values as one intent and dismisses once', () => {
+    const { onQualityApply, onDismiss } = renderPanel();
 
     fireEvent.change(screen.getByTestId('remote-window-video-preference-select'), { target: { value: 'quality' } });
-    expect(onVideoPreferenceChange).toHaveBeenCalledWith('quality');
-    expect(onDismiss).toHaveBeenCalledTimes(1);
-
-    fireEvent.change(screen.getByTestId('remote-window-bitrate-multiplier-select'), { target: { value: '4' } });
-    expect(onBitrateMultiplierChange).toHaveBeenCalledWith(4);
-    expect(onDismiss).toHaveBeenCalledTimes(2);
-
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-cap-input'), { target: { value: '12.5' } });
     fireEvent.change(screen.getByTestId('remote-window-max-frame-rate-select'), { target: { value: '60' } });
-    expect(onMaxFrameRateChange).toHaveBeenCalledWith(60);
-    expect(onDismiss).toHaveBeenCalledTimes(3);
+    // Editing a draft must not emit an intent or persist anything.
+    expect(onQualityApply).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByTestId('remote-window-browser-user-agent-select'), { target: { value: 'desktop' } });
-    expect(onBrowserUserAgentChange).toHaveBeenCalledWith('desktop');
-    expect(onDismiss).toHaveBeenCalledTimes(4);
-
-    fireEvent.click(screen.getByTestId('remote-window-more-close'));
-    expect(onDismiss).toHaveBeenCalledTimes(5);
+    fireEvent.click(screen.getByTestId('remote-window-quality-apply'));
+    expect(onQualityApply).toHaveBeenCalledTimes(1);
+    expect(onQualityApply).toHaveBeenCalledWith({
+      preference: 'quality',
+      maxBitrateCapMbps: 12.5,
+      maxFrameRateFps: 60,
+    });
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the orientation select out of floating mode and offers the auto bitrate baseline', () => {
-    render(<RemoteWindowMorePanel
-      fullscreen={false}
-      videoPreference="smooth"
+  it('reverts every draft on Cancel with zero apply intent', () => {
+    const { onQualityApply, onDismiss } = renderPanel();
+    fireEvent.change(screen.getByTestId('remote-window-video-preference-select'), { target: { value: 'quality' } });
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-cap-input'), { target: { value: '12.5' } });
+    fireEvent.change(screen.getByTestId('remote-window-max-frame-rate-select'), { target: { value: '60' } });
+
+    fireEvent.click(screen.getByTestId('remote-window-quality-cancel'));
+    expect(onQualityApply).not.toHaveBeenCalled();
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect((screen.getByTestId('remote-window-video-preference-select') as HTMLSelectElement).value).toBe('smooth');
+    expect((screen.getByTestId('remote-window-bitrate-cap-input') as HTMLInputElement).value).toBe('');
+    expect((screen.getByTestId('remote-window-max-frame-rate-select') as HTMLSelectElement).value).toBe('30');
+  });
+
+  it('disables Apply and surfaces a range hint for an out-of-range Mbps cap', () => {
+    const { onQualityApply } = renderPanel();
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-cap-input'), { target: { value: '26' } });
+    expect((screen.getByTestId('remote-window-quality-apply') as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('请输入 0.5-25 Mbps')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('remote-window-quality-apply'));
+    expect(onQualityApply).not.toHaveBeenCalled();
+  });
+
+  it('keeps Apply disabled until a draft actually differs from committed settings', () => {
+    renderPanel();
+    expect((screen.getByTestId('remote-window-quality-apply') as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('resyncs drafts when the committed settings change from outside', () => {
+    const { rerender } = render(<RemoteWindowMorePanel
+      fullscreen
       streamStatusText="串流：已连接"
       networkStatusText="网络：4g"
       developerDiagnostics={null}
       onToggleFullscreenDisplayMode={vi.fn()}
-      onVideoPreferenceChange={vi.fn()}
-      onDisplayOrientationChange={vi.fn()}
-      bitrateMultiplierSelection="auto"
-      onBitrateMultiplierChange={vi.fn()}
+      qualitySettings={committed}
+      onQualityApply={vi.fn()}
     />);
-
-    expect(screen.queryByTestId('remote-window-display-orientation-select')).toBeNull();
-    expect((screen.getByTestId('remote-window-bitrate-multiplier-select') as HTMLSelectElement).value).toBe('auto');
-  });
-
-  it('does not show the fullscreen display action in floating mode', () => {
-    render(<RemoteWindowMorePanel
-      fullscreen={false}
-      videoPreference="smooth"
-      streamStatusText="串流：starting"
-      networkStatusText="网络：未知"
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-cap-input'), { target: { value: '8' } });
+    rerender(<RemoteWindowMorePanel
+      fullscreen
+      streamStatusText="串流：已连接"
+      networkStatusText="网络：4g"
       developerDiagnostics={null}
       onToggleFullscreenDisplayMode={vi.fn()}
-      onVideoPreferenceChange={vi.fn()}
+      qualitySettings={{ preference: 'quality', maxBitrateCapMbps: 5, maxFrameRateFps: 15 }}
+      onQualityApply={vi.fn()}
     />);
+    expect((screen.getByTestId('remote-window-bitrate-cap-input') as HTMLInputElement).value).toBe('5');
+    expect((screen.getByTestId('remote-window-video-preference-select') as HTMLSelectElement).value).toBe('quality');
+  });
+
+  it('keeps the orientation select out of floating mode and the fullscreen action hidden', () => {
+    renderPanel({ fullscreen: false });
+    expect(screen.queryByTestId('remote-window-display-orientation-select')).toBeNull();
     expect(screen.queryByTestId('remote-window-fullscreen-display-toggle')).toBeNull();
+  });
+
+  it('shows the dangerous remote-close entry only when the handler is wired', () => {
+    const onRemoteClose = vi.fn();
+    renderPanel({ onRemoteClose });
+    expect(screen.getByText('此操作会关闭所选远端窗口')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('remote-window-remote-close'));
+    expect(onRemoteClose).toHaveBeenCalledTimes(1);
   });
 
   it('shows browser UA control only for a browser target', () => {
     const onBrowserUserAgentChange = vi.fn();
     const view = render(<RemoteWindowMorePanel
       fullscreen
-      videoPreference="smooth"
       streamStatusText="串流：已连接"
       networkStatusText="网络：4g"
       developerDiagnostics={null}
       onToggleFullscreenDisplayMode={vi.fn()}
-      onVideoPreferenceChange={vi.fn()}
+      qualitySettings={committed}
+      onQualityApply={vi.fn()}
       browserMode
       browserUserAgent="desktop"
       browserUserAgentStatus="idle"
@@ -150,12 +135,12 @@ describe('RemoteWindowMorePanel view owner', () => {
     expect(onBrowserUserAgentChange).toHaveBeenCalledWith('mobile');
     view.rerender(<RemoteWindowMorePanel
       fullscreen
-      videoPreference="smooth"
       streamStatusText="串流：已连接"
       networkStatusText="网络：4g"
       developerDiagnostics={null}
       onToggleFullscreenDisplayMode={vi.fn()}
-      onVideoPreferenceChange={vi.fn()}
+      qualitySettings={committed}
+      onQualityApply={vi.fn()}
     />);
     expect(screen.queryByTestId('remote-window-browser-user-agent-select')).toBeNull();
   });

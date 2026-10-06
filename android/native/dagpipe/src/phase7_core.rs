@@ -11,11 +11,6 @@ const UPDATE_GRAPH_JSON: &str =
     include_str!("../../../docs/dagpipe/release-update-lifecycle.graph.json");
 const DEBUG_GRAPH_JSON: &str = include_str!("../../../docs/dagpipe/observability-debug.graph.json");
 
-pub const RELEASE_GRAPH_ID: &str = "release.runtime_promotion";
-pub const UPDATE_GRAPH_ID: &str = "release.update_lifecycle";
-pub const DEBUG_GRAPH_ID: &str = "observability.debug";
-pub const PHASE7_GRAPH_VERSION: &str = "0.1";
-
 fn obj(value: Value) -> Map<String, Value> {
     match value {
         Value::Object(map) => map,
@@ -62,12 +57,7 @@ fn make_registry() -> Registry {
     registry
 }
 
-fn run_graph(
-    request: Value,
-    graph_json: &str,
-    graph_id: &str,
-    graph_version: &str,
-) -> serde_json::Result<Value> {
+fn run_graph(request: Value, graph_json: &str) -> serde_json::Result<Value> {
     let request_obj = match request {
         Value::Object(map) => map,
         other => obj(other),
@@ -96,8 +86,8 @@ fn run_graph(
     };
     let identity = Identity {
         project_id: "zterm".into(),
-        graph_id: graph_id.into(),
-        graph_version: graph_version.into(),
+        graph_id: compiled.id().into(),
+        graph_version: compiled.version().into(),
         execution_id: if execution_id.is_empty() {
             "execution".into()
         } else {
@@ -128,53 +118,24 @@ fn run_graph(
 pub fn compile_phase7_graphs() -> Result<Vec<String>, CompileError> {
     let registry = make_registry();
     let capabilities = BTreeSet::new();
-    compile(
-        parse_graph_json(RELEASE_GRAPH_JSON)?,
-        &registry,
-        &capabilities,
-    )?;
-    compile(
-        parse_graph_json(UPDATE_GRAPH_JSON)?,
-        &registry,
-        &capabilities,
-    )?;
-    compile(
-        parse_graph_json(DEBUG_GRAPH_JSON)?,
-        &registry,
-        &capabilities,
-    )?;
-    Ok(vec![
-        format!("{RELEASE_GRAPH_ID}@{PHASE7_GRAPH_VERSION}"),
-        format!("{UPDATE_GRAPH_ID}@{PHASE7_GRAPH_VERSION}"),
-        format!("{DEBUG_GRAPH_ID}@{PHASE7_GRAPH_VERSION}"),
-    ])
+    let mut graphs = Vec::new();
+    for graph_json in [RELEASE_GRAPH_JSON, UPDATE_GRAPH_JSON, DEBUG_GRAPH_JSON] {
+        let compiled = compile(parse_graph_json(graph_json)?, &registry, &capabilities)?;
+        graphs.push(format!("{}@{}", compiled.id(), compiled.version()));
+    }
+    Ok(graphs)
 }
 
 pub fn run_phase7_release_json(input_json: String) -> serde_json::Result<Value> {
-    run_graph(
-        serde_json::from_str(&input_json)?,
-        RELEASE_GRAPH_JSON,
-        RELEASE_GRAPH_ID,
-        PHASE7_GRAPH_VERSION,
-    )
+    run_graph(serde_json::from_str(&input_json)?, RELEASE_GRAPH_JSON)
 }
 
 pub fn run_phase7_update_json(input_json: String) -> serde_json::Result<Value> {
-    run_graph(
-        serde_json::from_str(&input_json)?,
-        UPDATE_GRAPH_JSON,
-        UPDATE_GRAPH_ID,
-        PHASE7_GRAPH_VERSION,
-    )
+    run_graph(serde_json::from_str(&input_json)?, UPDATE_GRAPH_JSON)
 }
 
 pub fn run_phase7_debug_json(input_json: String) -> serde_json::Result<Value> {
-    run_graph(
-        serde_json::from_str(&input_json)?,
-        DEBUG_GRAPH_JSON,
-        DEBUG_GRAPH_ID,
-        PHASE7_GRAPH_VERSION,
-    )
+    run_graph(serde_json::from_str(&input_json)?, DEBUG_GRAPH_JSON)
 }
 
 struct ReleaseVerifyDigest;

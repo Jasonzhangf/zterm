@@ -13,6 +13,7 @@ import {
   resizeRemoteWindowTargetRuntime,
   sendRemoteWindowInputRuntime,
   stopRemoteWindowStreamRuntime,
+  closeRemoteWindowStreamRuntime,
   updateRemoteWindowFocusRuntime,
   updateRemoteWindowStreamQualityRuntime,
 } from './session-context-remote-window-runtime';
@@ -35,6 +36,7 @@ import type {
   RemoteWindowBrowserUserAgent,
   RemoteWindowBrowserUserAgentResultPayload,
   RemoteWindowVideoProfile,
+  RemoteWindowCloseResultPayload,
   Session,
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
@@ -74,6 +76,7 @@ interface RemoteWindowMessageRuntimeLike {
   sendBrowserUserAgent: (...args: any[]) => Promise<RemoteWindowBrowserUserAgentResultPayload>;
   sendStreamIceCandidate: (...args: any[]) => void;
   stopStream: (...args: any[]) => Promise<RemoteWindowStreamStatusPayload>;
+  requestStreamClose: (...args: any[]) => Promise<RemoteWindowCloseResultPayload>;
   sendInputEvent: (...args: any[]) => string;
 }
 
@@ -323,6 +326,18 @@ export function createSessionInteractionRuntime(options: {
     });
   };
 
+  const closeRemoteWindowStream = (sessionId: string, streamId: string, targetId: string) => {
+    return closeRemoteWindowStreamRuntime({
+      sessionId,
+      streamId,
+      targetId,
+      sessions: options.refs.stateRef.current.sessions,
+      daemonConnection,
+      remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
+      sendSocketPayload: options.sendSocketPayload,
+    });
+  };
+
   const sendRemoteWindowInput = (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
@@ -363,6 +378,7 @@ export function createSessionInteractionRuntime(options: {
     setRemoteWindowBrowserUserAgent,
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
+    closeRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
   };

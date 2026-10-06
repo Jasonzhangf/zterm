@@ -23,7 +23,10 @@ import {
   FILE_TRANSFER_WIRE_FRAME_MAX_CHARS,
   getRemoteWindowMediaPlanContract,
   getRemoteWindowMediaPlanV2Contract,
+  isRemoteWindowCloseRequestPayload,
+  isRemoteWindowCloseResultPayload,
   isRemoteWindowStreamStartRequestV2,
+  REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE,
 } from './protocol';
 
 describe('remote-window media plan contract', () => {
@@ -106,6 +109,81 @@ describe('remote-window media plan contract', () => {
         { role: 'overview', requiredForStart: true },
       ],
     });
+  });
+});
+
+describe('remote-window lifecycle wire contract', () => {
+  it('binds the typed stop cleanup result to the shared protocol owner', () => {
+    const statuses: import('./protocol').RemoteWindowStreamCleanupStatus[] = [
+      'released',
+      'cleanup_failed',
+      'failed',
+      'unverified',
+      'absent',
+    ];
+    expect(statuses).toEqual(['released', 'cleanup_failed', 'failed', 'unverified', 'absent']);
+    const cleanup: import('./protocol').RemoteWindowStreamCleanupResult = {
+      status: 'cleanup_failed',
+      remainingResources: ['input:stream-1'],
+      errors: [{ resource: 'input:stream-1', code: 'release_failed', message: 'native up unobserved' }],
+    };
+    const status: import('./protocol').RemoteWindowStreamStatusPayload = {
+      requestId: 'request-1',
+      streamId: 'stream-1',
+      phase: 'stopped',
+      cleanup,
+    };
+    expect(status.cleanup).toEqual(cleanup);
+    expect(cleanup.errors[0]?.resource).toBe('input:stream-1');
+  });
+
+  it('exposes the typed pending-answer cancellation code', () => {
+    expect(REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE).toBe('remote_window_stream_answer_cancelled');
+  });
+
+  it('validates the typed close request identity', () => {
+    const request = { requestId: 'r1', sessionId: 's1', streamId: 'w1', targetId: 'app-window:1:2' };
+    expect(isRemoteWindowCloseRequestPayload(request)).toBe(true);
+    expect(isRemoteWindowCloseRequestPayload({ ...request, targetId: '' })).toBe(false);
+    expect(isRemoteWindowCloseRequestPayload({ ...request, streamId: undefined })).toBe(false);
+    expect(isRemoteWindowCloseRequestPayload(null)).toBe(false);
+    expect(isRemoteWindowCloseRequestPayload({ requestId: 'r1' })).toBe(false);
+  });
+
+  it('validates the typed close result statuses and rejects unknown statuses', () => {
+    const result = {
+      requestId: 'r1',
+      sessionId: 's1',
+      streamId: 'w1',
+      targetId: 'app-window:1:2',
+      status: 'closed' as const,
+    };
+    expect(isRemoteWindowCloseResultPayload(result)).toBe(true);
+    for (const status of ['closed', 'not_closed', 'unverified', 'failed', 'unsupported'] as const) {
+      expect(isRemoteWindowCloseResultPayload({ ...result, status })).toBe(true);
+    }
+    expect(isRemoteWindowCloseResultPayload({ ...result, status: 'blocked' })).toBe(false);
+    expect(isRemoteWindowCloseResultPayload({ ...result, status: undefined })).toBe(false);
+  });
+
+  it('keeps the close request and result on the shared bridge message unions', () => {
+    const request: import('./protocol').BridgeClientMessage = {
+      type: 'remote-window-close-request',
+      payload: { requestId: 'r1', sessionId: 's1', streamId: 'w1', targetId: 'app-window:1:2' },
+    };
+    const result: import('./protocol').BridgeServerMessage = {
+      type: 'remote-window-close-result',
+      payload: {
+        requestId: 'r1',
+        sessionId: 's1',
+        streamId: 'w1',
+        targetId: 'app-window:1:2',
+        status: 'unsupported',
+        error: 'os-event route required',
+      },
+    };
+    expect(request.type).toBe('remote-window-close-request');
+    expect(result.type).toBe('remote-window-close-result');
   });
 });
 

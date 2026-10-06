@@ -397,6 +397,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
   }) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  onSessionTransportTeardown?: (sessionId: string, reason?: string) => void;
 }): QueueSessionTransportOpenIntentOptions {
   return {
     sessionId: options.sessionId,
@@ -431,6 +432,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
       });
     },
     onClosed: (reason, code) => {
+      options.onSessionTransportTeardown?.(options.sessionId, reason);
       options.reconnectStore.deleteRuntime(options.sessionId);
       if (code === 'no_body_demand') {
         options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(reason || ''));
@@ -460,6 +462,7 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
   }) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  onSessionTransportTeardown?: (sessionId: string, reason?: string) => void;
 }): QueueSessionTransportOpenIntentOptions {
   return {
     sessionId: options.sessionId,
@@ -486,6 +489,7 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
       });
     },
     onClosed: (reason, code) => {
+      options.onSessionTransportTeardown?.(options.sessionId, reason);
       if (code === 'no_body_demand') {
         options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(reason || ''));
         return;

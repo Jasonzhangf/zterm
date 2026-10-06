@@ -111,6 +111,7 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
     sessionName: string;
     state: 'opening' | 'open' | 'closing' | 'closed';
   } | null;
+  onTransportTeardown?: (sessionId: string, reason: string) => void;
   scheduleReconnect: (sessionId: string, message: string, retryable?: boolean) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
@@ -128,8 +129,14 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
     return channel;
   };
 
+  // Only a current channel close settles this session's reliable input; a stale/superseded close must not cancel newer input.
+  const currentClosedChannel = readCurrentClosedChannel();
+  if (currentClosedChannel) {
+    options.onTransportTeardown?.(options.sessionId, options.reason);
+  }
+
   if (options.code === 'no_body_demand') {
-    if (!readCurrentClosedChannel()) {
+    if (!currentClosedChannel) {
       return;
     }
     options.updateSessionSync(
@@ -493,6 +500,8 @@ export function createSessionTransportOrchestrationRuntime(options: {
   sessionTerminalReadyTimeoutMs?: number;
   /** Relay-assigned device id of this client (from bridge settings). */
   clientDeviceId?: string;
+  /** Client-local reliable-input settle for a torn-down per-session transport; owned by the message runtime. */
+  onSessionTransportTeardown?: (sessionId: string, reason?: string) => void;
   refs: {
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
     reconnectStore: SessionReconnectStore;
@@ -806,6 +815,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
             channelId: channel?.channelId || '',
             reason,
             code,
+            onTransportTeardown: options.onSessionTransportTeardown,
             shouldReconnectNow: (
               options.stateRef.current.activeSessionId === sessionId
               || Boolean(options.stateRef.current.liveSessionIds?.includes(sessionId))
@@ -1181,6 +1191,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       reconnectStore: options.refs.reconnectStore,
       applyTransportOpenConnectedEffects,
       emitSessionStatus,
+      onSessionTransportTeardown: options.onSessionTransportTeardown,
       updateSessionSync: (_id, updates) => {
         options.updateSessionSync(_id, updates);
       },
@@ -1198,6 +1209,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       scheduleReconnect,
       applyTransportOpenConnectedEffects,
       emitSessionStatus,
+      onSessionTransportTeardown: options.onSessionTransportTeardown,
       updateSessionSync: (_id, updates) => {
         options.updateSessionSync(_id, updates);
       },

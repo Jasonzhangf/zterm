@@ -4,7 +4,11 @@ import { existsSync, readFileSync, statSync } from 'fs';
 import { resolve } from 'path';
 
 const projectRoot = resolve(import.meta.dirname, '..');
-const releaseDist = resolve(projectRoot, 'release-dist');
+const releaseDistArgIndex = process.argv.indexOf('--release-dist');
+const releaseDist =
+  releaseDistArgIndex >= 0 && process.argv[releaseDistArgIndex + 1]
+    ? resolve(process.argv[releaseDistArgIndex + 1])
+    : resolve(projectRoot, 'release-dist');
 const manifestPath = resolve(releaseDist, 'latest.json');
 const packageJsonPath = resolve(projectRoot, 'package.json');
 
@@ -40,6 +44,16 @@ function readTarballText(path, entry) {
   return execFileSync('tar', ['-xOf', path, entry], { encoding: 'utf8' });
 }
 
+function readTarballBytes(path, entry) {
+  return execFileSync('tar', ['-xOf', path, entry], { maxBuffer: 1024 * 1024 * 1024 });
+}
+
+function sha256Bytes(buffer) {
+  const hash = createHash('sha256');
+  hash.update(buffer);
+  return hash.digest('hex');
+}
+
 function hasTarballEntry(entries, expected) {
   return entries.includes(expected) || entries.some((entry) => entry.startsWith(`${expected}/`));
 }
@@ -61,6 +75,21 @@ const daemonNpmSha = requireFile(`${daemonNpmTgz}.sha256`);
 const daemonNpmEntries = listTarballEntries(daemonNpmTgz);
 const daemonNpmSupportScript = readTarballText(daemonNpmTgz, 'package/support/zterm-daemon.sh');
 
+const wrtcAddonEntry = 'package/runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node';
+const wrtcProvenanceEntry = 'package/runtime/wrtc-provenance.json';
+
+let daemonNpmWrtcProvenance = null;
+if (hasTarballEntry(daemonNpmEntries, wrtcProvenanceEntry)) {
+  try {
+    daemonNpmWrtcProvenance = JSON.parse(readTarballText(daemonNpmTgz, wrtcProvenanceEntry));
+  } catch {
+    daemonNpmWrtcProvenance = null;
+  }
+}
+const daemonNpmWrtcAddonSha = hasTarballEntry(daemonNpmEntries, wrtcAddonEntry)
+  ? sha256Bytes(readTarballBytes(daemonNpmTgz, wrtcAddonEntry))
+  : null;
+
 const checks = {
   apkShaMatches: sha256(apkPath) === manifest.sha256,
   apkSizeMatches: statSync(apkPath).size === manifest.size,
@@ -71,6 +100,13 @@ const checks = {
   daemonNpmHasWrtcRuntime: hasTarballEntry(daemonNpmEntries, 'package/runtime/node_modules/@roamhq/wrtc'),
   daemonNpmHasWrtcNative: hasTarballEntry(daemonNpmEntries, 'package/runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node'),
   daemonNpmHasSupportScript: hasTarballEntry(daemonNpmEntries, 'package/support/zterm-daemon.sh'),
+  daemonNpmWrtcProvenancePresent: hasTarballEntry(daemonNpmEntries, wrtcProvenanceEntry),
+  daemonNpmWrtcProvenanceSchema: daemonNpmWrtcProvenance?.schema === 'zterm.daemon.wrtc-provenance/v1',
+  daemonNpmWrtcProvenanceAddonSha:
+    typeof daemonNpmWrtcProvenance?.addonSha256 === 'string' &&
+    /^[0-9a-f]{64}$/.test(daemonNpmWrtcProvenance.addonSha256),
+  daemonNpmWrtcAddonShaMatchesProvenance:
+    daemonNpmWrtcAddonSha !== null && daemonNpmWrtcAddonSha === daemonNpmWrtcProvenance?.addonSha256,
 };
 
 const ok = Object.values(checks).every(Boolean);
@@ -85,6 +121,8 @@ const result = {
   daemonArchiveSha256: readShaFile(daemonArchiveSha),
   daemonNpmTgz,
   daemonNpmSha256: readShaFile(daemonNpmSha),
+  daemonNpmWrtcAddonSha256: daemonNpmWrtcAddonSha,
+  daemonNpmWrtcProvenance,
   checks,
 };
 console.log(JSON.stringify(result, null, 2));

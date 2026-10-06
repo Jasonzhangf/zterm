@@ -1,0 +1,11 @@
+{
+  "id": "remote.window_input_delivery", "version": "0.1",
+  "inputs": [{"id":"arc.input_request","schema":"Object"}],
+  "nodes": [
+    {"id":"dispatch_input","operator":"client.remote_window_input_delivery.dispatch","operator_version":"0.1","inputs":["arc.input_request"],"output":{"id":"arc.input_delivery","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"},
+    {"id":"deliver_input","operator":"daemon.remote_window_stream.deliver_input","operator_version":"0.1","inputs":["arc.input_delivery"],"output":{"id":"arc.input_delivery_result","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"},
+    {"id":"settle_input","operator":"client.remote_window_input_delivery.settle","operator_version":"0.1","inputs":["arc.input_delivery_result"],"output":{"id":"arc.input_result","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"}
+  ],
+  "edges": [{"from":"dispatch_input","to":"deliver_input","arc_id":"arc.input_delivery"},{"from":"deliver_input","to":"settle_input","arc_id":"arc.input_delivery_result"}],
+  "outputs": ["arc.input_result"]
+}

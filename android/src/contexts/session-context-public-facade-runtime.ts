@@ -9,6 +9,8 @@ import type {
   RemoteWindowBrowserUserAgentResultPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
+  RemoteWindowCloseResultPayload,
+  RemoteWindowStopOutcome,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
@@ -32,7 +34,10 @@ import type { SessionHeadStore } from '../lib/session-head-store';
 import type { SessionAttachmentStore } from '../lib/session-attachment-store';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
-import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
+import type {
+  RemoteWindowControlMessage,
+  RemoteWindowInputDeliveryOutcomeV1,
+} from '../lib/remote-window-message-runtime';
 import {
   manageTmuxSessionsOnOpenTransportRuntime,
   queryTerminalSessionCatalogOnOpenTransportRuntime,
@@ -412,7 +417,8 @@ export function buildSessionContextValueRuntime(options: {
     target: RemoteWindowStreamTargetManifest,
     revision?: number,
   ) => void;
-  stopRemoteWindowStream: (sessionId: string, streamId: string) => Promise<boolean>;
+  stopRemoteWindowStream: (sessionId: string, streamId: string) => Promise<RemoteWindowStopOutcome>;
+  closeRemoteWindowStream: (sessionId: string, streamId: string, targetId: string) => Promise<RemoteWindowCloseResultPayload>;
   sendRemoteWindowInput: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
@@ -444,6 +450,7 @@ export function buildSessionContextValueRuntime(options: {
   getSessionHeadStore: () => SessionHeadStore;
   onFileTransferMessage: (handler: (msg: any) => void) => () => void;
   onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
+  onRemoteWindowInputOutcome: (handler: (outcome: RemoteWindowInputDeliveryOutcomeV1) => void) => () => void;
   sendMessageRaw: (sessionId: string, msg: unknown) => void;
   sendTargetHeartbeat: () => number;
   getPendingAttachmentCount: () => number;
@@ -481,6 +488,7 @@ export function buildSessionContextValueRuntime(options: {
     setRemoteWindowBrowserUserAgent: options.setRemoteWindowBrowserUserAgent,
     updateRemoteWindowFocus: options.updateRemoteWindowFocus,
     stopRemoteWindowStream: options.stopRemoteWindowStream,
+    closeRemoteWindowStream: options.closeRemoteWindowStream,
     sendRemoteWindowInput: options.sendRemoteWindowInput,
     resizeRemoteWindowTarget: options.resizeRemoteWindowTarget,
     updateSessionViewport: options.updateSessionViewport,
@@ -500,6 +508,7 @@ export function buildSessionContextValueRuntime(options: {
     getSessionHeadStore: options.getSessionHeadStore,
     onFileTransferMessage: options.onFileTransferMessage,
     onRemoteWindowMessage: options.onRemoteWindowMessage,
+    onRemoteWindowInputOutcome: options.onRemoteWindowInputOutcome,
     sendMessageRaw: options.sendMessageRaw,
     sendTargetHeartbeat: options.sendTargetHeartbeat,
     getPendingAttachmentCount: options.getPendingAttachmentCount,

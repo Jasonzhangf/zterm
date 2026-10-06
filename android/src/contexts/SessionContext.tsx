@@ -6,7 +6,10 @@ import React, { createContext, useContext, useMemo, useReducer, useRef } from 'r
 import type {
   SessionScheduleState,
 } from '../lib/types';
-import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
+import type {
+  RemoteWindowControlMessage,
+  RemoteWindowInputDeliveryOutcomeV1,
+} from '../lib/remote-window-message-runtime';
 import type {
   SessionTargetNetworkProbeFailure,
   SessionTargetNetworkSignal,
@@ -126,6 +129,7 @@ export function SessionProvider({
     setRemoteWindowBrowserUserAgent,
     updateRemoteWindowFocus,
     stopRemoteWindowStream,
+    closeRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
     updateSessionViewport,
@@ -222,6 +226,7 @@ export function SessionProvider({
     setRemoteWindowBrowserUserAgent,
     updateRemoteWindowFocus,
     stopRemoteWindowStream,
+    closeRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
     updateSessionViewport,
@@ -241,6 +246,9 @@ export function SessionProvider({
     getSessionHeadStore,
     onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => (
       remoteWindowMessageRuntimeRef.current.subscribe(handler)
+    ),
+    onRemoteWindowInputOutcome: (handler: (outcome: RemoteWindowInputDeliveryOutcomeV1) => void) => (
+      remoteWindowMessageRuntimeRef.current.subscribeInputOutcome(handler)
     ),
     sendMessageRaw,
     sendTargetHeartbeat,
@@ -281,6 +289,7 @@ export function SessionProvider({
     setRemoteWindowBrowserUserAgent,
     updateRemoteWindowFocus,
     stopRemoteWindowStream,
+    closeRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
     updateSessionViewport,
@@ -300,6 +309,9 @@ export function SessionProvider({
     getSessionHeadStore,
     onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => (
       remoteWindowMessageRuntimeRef.current.subscribe(handler)
+    ),
+    onRemoteWindowInputOutcome: (handler: (outcome: RemoteWindowInputDeliveryOutcomeV1) => void) => (
+      remoteWindowMessageRuntimeRef.current.subscribeInputOutcome(handler)
     ),
     sendMessageRaw,
     sendTargetHeartbeat,
@@ -376,6 +388,9 @@ export function SessionProvider({
     stopRemoteWindowStream: (sessionId: string, streamId: string) => (
       contextRuntimeRef.current.stopRemoteWindowStream(sessionId, streamId)
     ),
+    closeRemoteWindowStream: (sessionId: string, streamId: string, targetId: string) => (
+      contextRuntimeRef.current.closeRemoteWindowStream(sessionId, streamId, targetId)
+    ),
     sendRemoteWindowInput: (...args: Parameters<typeof sendRemoteWindowInput>): string => (
       contextRuntimeRef.current.sendRemoteWindowInput(...args)
     ),
@@ -423,6 +438,9 @@ export function SessionProvider({
     },
     onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => {
       return remoteWindowMessageRuntimeRef.current.subscribe(handler);
+    },
+    onRemoteWindowInputOutcome: (handler: (outcome: RemoteWindowInputDeliveryOutcomeV1) => void) => {
+      return remoteWindowMessageRuntimeRef.current.subscribeInputOutcome(handler);
     },
     sendMessageRaw: (sessionId: string, msg: unknown) => contextRuntimeRef.current.sendMessageRaw(sessionId, msg),
     sendTargetHeartbeat: () => contextRuntimeRef.current.sendTargetHeartbeat(),

@@ -412,123 +412,134 @@ describe('remote-window-touch-action-runtime', () => {
     ]);
   });
 
-  it('suppresses zoomed fullscreen single-finger motion without local or remote effects', () => {
+  it('maps a zoomed single-finger tap to an implicit local pan with no remote click', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
-      pointer: pointer({ pointerId: 9, clientX: 90, clientY: 50 }),
-      geometry,
-      zoomedProjection: true,
-      touchMode: true,
-      suppressSingleFinger: true,
-    });
-    expect(down.nextState.mode).toBe('actionPending');
-    expect(down.nextState).toEqual(expect.objectContaining({
-      pointerId: 9,
-      startClientX: 90,
-      startClientY: 50,
-      suppressTap: true,
-    }));
-    expect(down.localEffect).toEqual({ kind: 'none' });
-    expect(down.remoteEvents).toEqual([]);
-
-    const move = resolveRemoteWindowTouchPointerMoveRuntime({
-      state: down.nextState,
-      pointer: pointer({ pointerId: 9, clientX: 120, clientY: 80 }),
-      geometry,
-      touchMode: true,
-    });
-    expect(move.nextState.mode).toBe('actionPending');
-    expect(move.localEffect).toEqual({ kind: 'none' });
-    expect(move.remoteEvents).toEqual([]);
-
-    const upAfterMove = resolveRemoteWindowTouchPointerUpRuntime({
-      state: move.nextState,
-      pointer: pointer({ pointerId: 9, clientX: 120, clientY: 80, buttons: 0 }),
-      geometry,
-      touchMode: true,
-    });
-    expect(upAfterMove.nextState.mode).toBe('idle');
-    expect(upAfterMove.localEffect).toEqual({ kind: 'none' });
-    expect(upAfterMove.remoteEvents).toEqual([]);
-
-    const tapDown = resolveRemoteWindowTouchPointerDownRuntime({
-      state: createRemoteWindowTouchPointerState(),
-      pointer: pointer({ pointerId: 10, clientX: 110, clientY: 70 }),
-      geometry,
-      zoomedProjection: true,
-      touchMode: true,
-      suppressSingleFinger: true,
-    });
-    const tapUp = resolveRemoteWindowTouchPointerUpRuntime({
-      state: tapDown.nextState,
-      pointer: pointer({ pointerId: 10, clientX: 110, clientY: 70, buttons: 0 }),
-      geometry,
-      touchMode: true,
-    });
-    expect(tapUp.remoteEvents).toEqual([]);
-    expect(tapUp.localEffect).toEqual({ kind: 'none' });
-  });
-
-  it('keeps zoomed floating single-finger local pan when suppression is omitted', () => {
-    const down = resolveRemoteWindowTouchPointerDownRuntime({
-      state: createRemoteWindowTouchPointerState(),
-      pointer: pointer({ pointerId: 14, clientX: 90, clientY: 50 }),
+      pointer: pointer({ pointerId: 9, clientX: 110, clientY: 70 }),
       geometry,
       zoomedProjection: true,
       touchMode: true,
     });
     expect(down.nextState.mode).toBe('localPan');
-    expect(down.localEffect).toEqual({
-      kind: 'local-pan-start',
-      pointerId: 14,
-      clientX: 90,
-      clientY: 50,
-    });
+    expect(down.localEffect).toEqual({ kind: 'local-pan-start', pointerId: 9, clientX: 110, clientY: 70 });
     expect(down.remoteEvents).toEqual([]);
+
+    const up = resolveRemoteWindowTouchPointerUpRuntime({
+      state: down.nextState,
+      pointer: pointer({ pointerId: 9, clientX: 110, clientY: 70, buttons: 0, timeMs: 1_120 }),
+      geometry,
+      touchMode: true,
+    });
+    expect(up.nextState.mode).toBe('idle');
+    expect(up.localEffect).toEqual({ kind: 'local-pan-end', pointerId: 9, moved: false });
+    expect(up.remoteEvents).toEqual([]);
+  });
+
+  it('routes zoomed single-finger movement to an implicit local pan with zero remote scroll', () => {
+    const down = resolveRemoteWindowTouchPointerDownRuntime({
+      state: createRemoteWindowTouchPointerState(),
+      pointer: pointer({ pointerId: 14, clientX: 130, clientY: 90, timeMs: 1_000 }),
+      geometry,
+      zoomedProjection: true,
+      touchMode: true,
+    });
+    expect(down.nextState.mode).toBe('localPan');
 
     const move = resolveRemoteWindowTouchPointerMoveRuntime({
       state: down.nextState,
-      pointer: pointer({ pointerId: 14, clientX: 120, clientY: 80 }),
+      pointer: pointer({ pointerId: 14, clientX: 130, clientY: 72, timeMs: 1_020 }),
       geometry,
       touchMode: true,
     });
     expect(move.nextState.mode).toBe('localPan');
-    expect(move.localEffect).toEqual({
-      kind: 'local-pan-move',
-      pointerId: 14,
-      deltaX: 30,
-      deltaY: 30,
-      moved: true,
-    });
+    expect(move.nextState).toEqual(expect.objectContaining({ moved: true }));
+    expect(move.localEffect).toEqual({ kind: 'local-pan-move', pointerId: 14, deltaX: 0, deltaY: -18, moved: true });
     expect(move.remoteEvents).toEqual([]);
+
+    const up = resolveRemoteWindowTouchPointerUpRuntime({
+      state: move.nextState,
+      pointer: pointer({ pointerId: 14, clientX: 130, clientY: 72, buttons: 0, timeMs: 1_040 }),
+      geometry,
+      touchMode: true,
+    });
+    expect(up.nextState.mode).toBe('idle');
+    expect(up.remoteEvents).toEqual([]);
   });
 
-  it('suppresses zoomed single-finger hold without remote events or local pan', () => {
+  it('keeps a zoomed single finger in local pan past the 250 ms hold with no remote drag', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
-      pointer: pointer({ pointerId: 13, timeMs: 2_000 }),
+      pointer: pointer({ pointerId: 13, clientX: 130, clientY: 90, timeMs: 2_000 }),
       geometry,
       zoomedProjection: true,
       touchMode: true,
-      suppressSingleFinger: true,
     });
+    expect(down.nextState.mode).toBe('localPan');
     const hold = resolveRemoteWindowTouchPointerMoveRuntime({
       state: down.nextState,
-      pointer: pointer({ pointerId: 13, clientX: 120, clientY: 70, timeMs: 2_260 }),
+      pointer: pointer({ pointerId: 13, clientX: 130, clientY: 72, timeMs: 2_300 }),
       geometry,
       touchMode: true,
     });
-    expect(hold.nextState.mode).toBe('actionPending');
-    expect(hold.localEffect).toEqual({ kind: 'none' });
+    expect(hold.nextState.mode).toBe('localPan');
+    expect(hold.localEffect).toEqual({ kind: 'local-pan-move', pointerId: 13, deltaX: 0, deltaY: -18, moved: true });
     expect(hold.remoteEvents).toEqual([]);
+
     const release = resolveRemoteWindowTouchPointerUpRuntime({
       state: hold.nextState,
-      pointer: pointer({ pointerId: 13, clientX: 120, clientY: 70, buttons: 0, timeMs: 7_260 }),
+      pointer: pointer({ pointerId: 13, clientX: 130, clientY: 72, buttons: 0, timeMs: 7_300 }),
       geometry,
       touchMode: true,
     });
+    expect(release.nextState.mode).toBe('idle');
+    expect(release.localEffect).toEqual({ kind: 'local-pan-end', pointerId: 13, moved: true });
     expect(release.remoteEvents).toEqual([]);
-    expect(release.localEffect).toEqual({ kind: 'none' });
+  });
+
+  it('enters local pan for a zoomed single finger without stealing a 1x remote action', () => {
+    const down = resolveRemoteWindowTouchPointerDownRuntime({
+      state: createRemoteWindowTouchPointerState(),
+      pointer: pointer({ pointerId: 15, clientX: 90, clientY: 50 }),
+      geometry,
+      zoomedProjection: true,
+      touchMode: true,
+    });
+    expect(down.nextState.mode).toBe('localPan');
+
+    const smallMove = resolveRemoteWindowTouchPointerMoveRuntime({
+      state: down.nextState,
+      pointer: pointer({ pointerId: 15, clientX: 92, clientY: 52 }),
+      geometry,
+      touchMode: true,
+    });
+    expect(smallMove.localEffect).toEqual({ kind: 'local-pan-move', pointerId: 15, deltaX: 2, deltaY: 2, moved: false });
+    expect(smallMove.remoteEvents).toEqual([]);
+  });
+
+
+  it('terminates a zoomed single-finger local pan on cancel without replaying a tap', () => {
+    const down = resolveRemoteWindowTouchPointerDownRuntime({
+      state: createRemoteWindowTouchPointerState(),
+      pointer: pointer({ pointerId: 16, clientX: 130, clientY: 90, timeMs: 1_000 }),
+      geometry,
+      zoomedProjection: true,
+      touchMode: true,
+    });
+    const move = resolveRemoteWindowTouchPointerMoveRuntime({
+      state: down.nextState,
+      pointer: pointer({ pointerId: 16, clientX: 130, clientY: 72, timeMs: 1_300 }),
+      geometry,
+      touchMode: true,
+    });
+    expect(move.nextState.mode).toBe('localPan');
+    const cancel = resolveRemoteWindowTouchPointerCancelRuntime({
+      state: move.nextState,
+      pointer: pointer({ pointerId: 16, clientX: 130, clientY: 72, buttons: 0 }),
+      geometry,
+    });
+    expect(cancel.nextState.mode).toBe('idle');
+    expect(cancel.remoteEvents).toEqual([]);
+    expect(cancel.remoteEvents.some((event) => event.kind === 'click')).toBe(false);
   });
 
   it('releases a remote drag on cancel', () => {
@@ -1338,6 +1349,42 @@ describe('remote-window-touch-action-runtime', () => {
       });
       expect(result.nextState.mode).toBe('actionPending');
       expect(result.nextState).toEqual(expect.objectContaining({ suppressTap: true }));
+      expect(result.remoteEvents).toEqual([]);
+    });
+
+    it('resumes the remaining zoomed pointer as a local pan from its current coordinates', () => {
+      const state = {
+        mode: 'twoFingerScroll' as const,
+        firstPointerId: 1,
+        secondPointerId: 2,
+        firstStart: { clientX: 100, clientY: 60 },
+        secondStart: { clientX: 120, clientY: 60 },
+        startDistance: 20,
+        startMidX: 110,
+        startMidY: 60,
+        lastMidX: 110,
+        lastMidY: 90,
+        startedAtMs: 1_000,
+        committed: true as const,
+      };
+      const result = resolveRemoteWindowTouchPairPointerUpRuntime({
+        state,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 90, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 90, timeMs: 1_200 },
+        },
+        geometry,
+        remainingPointer: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 90, timeMs: 1_200 },
+        timeMs: 1_200,
+        remainingPointerMode: 'local-pan',
+      });
+      expect(result.nextState).toEqual(expect.objectContaining({
+        mode: 'localPan',
+        pointerId: 2,
+        startClientX: 120,
+        startClientY: 90,
+        moved: true,
+      }));
       expect(result.remoteEvents).toEqual([]);
     });
   });

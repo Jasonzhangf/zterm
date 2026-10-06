@@ -60,6 +60,25 @@ export interface RemoteWindowReceiverStartupTelemetry {
 
 export const REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS = 25_000;
 
+type RemoteWindowVideoLane = 'focus' | 'overview';
+
+interface RemoteWindowVideoStatsBaseline {
+  bytesReceived: number | null;
+  packetsReceived: number | null;
+  packetsLost: number | null;
+  sampledAtMs: number;
+  framesDropped: number | null;
+  freezeCount: number | null;
+  jitterBufferDelay: number | null;
+  jitterBufferEmittedCount: number | null;
+  identity: {
+    mediaEpoch: number;
+    trackId: string;
+    ssrc: number | null;
+    mid: string | null;
+  };
+}
+
 interface ActiveRemoteWindowReceiverStream {
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
@@ -91,14 +110,7 @@ interface ActiveRemoteWindowReceiverStream {
   trackWaitStartedAt: number | null;
   resolveTrack: ((result: { mediaStream: MediaStream; overviewMediaStream: MediaStream | null }) => void) | null;
   rejectTrack: ((error: Error) => void) | null;
-  statsBaseline: {
-    bytesReceived?: number;
-    sampledAtMs: number;
-    framesDropped: number;
-    freezeCount: number;
-    jitterBufferDelay: number;
-    jitterBufferEmittedCount: number;
-  } | null;
+  statsBaselines: Map<RemoteWindowVideoLane, RemoteWindowVideoStatsBaseline>;
 }
 
 function normalizeLocalCandidate(candidate: RTCIceCandidate): RemoteWindowStreamIceCandidatePayload['candidate'] {
@@ -164,6 +176,74 @@ export function createRemoteWindowReceiverRuntime(input?: {
   const nowMs = input?.nowMs ?? Date.now;
   const createPeerConnection = () => resolvePeerConnectionFactory(input?.peerConnectionFactory);
   const createMediaStream = () => resolveMediaStreamFactory(input?.mediaStreamFactory);
+
+  const resolveLaneTransceiverMid = (
+    entry: ActiveRemoteWindowReceiverStream,
+    lane: RemoteWindowVideoLane,
+  ): string | null => {
+    for (const [transceiver, registeredLane] of entry.laneTransceivers) {
+      if (registeredLane === lane && typeof transceiver.mid === 'string') {
+        return transceiver.mid;
+      }
+    }
+    return null;
+  };
+
+  const isInboundRtpForLane = (
+    entry: ActiveRemoteWindowReceiverStream,
+    lane: RemoteWindowVideoLane,
+    item: RTCStats & Record<string, unknown>,
+  ): boolean => {
+    const binding = entry.playbackBindings.get(lane);
+    if (!binding) {
+      return false;
+    }
+    for (const otherLane of ['focus', 'overview'] as const) {
+      if (otherLane === lane) {
+        continue;
+      }
+      const otherBinding = entry.playbackBindings.get(otherLane);
+      if (otherBinding && typeof item.trackIdentifier === 'string' && item.trackIdentifier === otherBinding.trackId) {
+        return false;
+      }
+      const otherMid = resolveLaneTransceiverMid(entry, otherLane);
+      if (otherMid !== null && typeof item.mid === 'string' && item.mid === otherMid) {
+        return false;
+      }
+    }
+    if (typeof item.trackIdentifier === 'string' && item.trackIdentifier === binding.trackId) {
+      return true;
+    }
+    const laneMid = resolveLaneTransceiverMid(entry, lane);
+    return laneMid !== null && typeof item.mid === 'string' && item.mid === laneMid;
+  };
+
+  const resolveInboundIdentity = (
+    entry: ActiveRemoteWindowReceiverStream,
+    lane: RemoteWindowVideoLane,
+    item: RTCStats & Record<string, unknown>,
+  ) => {
+    const binding = entry.playbackBindings.get(lane);
+    if (!binding) {
+      return null;
+    }
+    return {
+      mediaEpoch: binding.mediaEpoch,
+      trackId: binding.trackId,
+      ssrc: typeof item.ssrc === 'number' && Number.isFinite(item.ssrc) ? item.ssrc : null,
+      mid: typeof item.mid === 'string' ? item.mid : resolveLaneTransceiverMid(entry, lane),
+    };
+  };
+
+  const sameStatsIdentity = (
+    previous: RemoteWindowVideoStatsBaseline,
+    current: RemoteWindowVideoStatsBaseline['identity'],
+  ) => (
+    previous.identity.mediaEpoch === current.mediaEpoch
+    && previous.identity.trackId === current.trackId
+    && (previous.identity.ssrc === null || current.ssrc === null || previous.identity.ssrc === current.ssrc)
+    && (previous.identity.mid === null || current.mid === null || previous.identity.mid === current.mid)
+  );
 
   const isCurrent = (entry: ActiveRemoteWindowReceiverStream) => (
     activeStreams.get(entry.streamId) === entry && !entry.cleanupDone
@@ -450,7 +530,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
         trackWaitStartedAt: null,
         resolveTrack: null,
         rejectTrack: null,
-        statsBaseline: null,
+        statsBaselines: new Map(),
       };
       activeStreams.set(streamId, entry);
 
@@ -624,6 +704,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
             entry.mediaTracks.delete(replacement.role);
           }
           entry.playbackBindings.delete(replacement.role);
+          entry.statsBaselines.delete(replacement.role);
           entry.committedFrameIds.delete(replacement.role);
           if (replacement.role === 'focus') {
             entry.trackAttached = false;
@@ -701,54 +782,156 @@ export function createRemoteWindowReceiverRuntime(input?: {
       return cleanupEntry(entry, 'Remote window stream stopped');
     },
 
-    async getStatsSample(streamId: string): Promise<RemoteWindowVideoStatsSample | null> {
+    async getStatsSample(
+      streamId: string,
+      lane: RemoteWindowVideoLane = 'focus',
+    ): Promise<RemoteWindowVideoStatsSample | null> {
       const entry = activeStreams.get(streamId.trim());
-      if (!entry || entry.cleanupDone || typeof entry.peerConnection.getStats !== 'function') {
+      if (
+        !entry
+        || entry.cleanupDone
+        || (lane !== 'focus' && lane !== 'overview')
+        || typeof entry.peerConnection.getStats !== 'function'
+      ) {
+        return null;
+      }
+      const binding = entry.playbackBindings.get(lane);
+      if (!binding) {
         return null;
       }
       const report = await entry.peerConnection.getStats();
-      const sample: RemoteWindowVideoStatsSample = { sampledAtMs: Date.now() };
-      report.forEach((item: RTCStats & Record<string, unknown>) => {
-        if (item.type === 'inbound-rtp' && item.kind === 'video') {
-          if (typeof item.framesPerSecond === 'number') sample.framesPerSecond = item.framesPerSecond;
-          const framesDropped = typeof item.framesDropped === 'number' ? item.framesDropped : 0;
-          const freezeCount = typeof item.freezeCount === 'number' ? item.freezeCount : 0;
-          const jitterBufferDelay = typeof item.jitterBufferDelay === 'number' ? item.jitterBufferDelay : 0;
-          const jitterBufferEmittedCount = typeof item.jitterBufferEmittedCount === 'number'
-            ? item.jitterBufferEmittedCount
-            : 0;
-          const previous = entry.statsBaseline;
-          if (typeof item.bytesReceived === 'number' && previous?.bytesReceived != null && previous.sampledAtMs < sample.sampledAtMs) {
-            sample.receivedBitrateBps = Math.max(0, (item.bytesReceived - previous.bytesReceived) * 8 * 1000 / (sample.sampledAtMs - previous.sampledAtMs));
+      const items: Array<RTCStats & Record<string, unknown>> = [];
+      report.forEach((item: RTCStats & Record<string, unknown>) => items.push(item));
+      const sample: RemoteWindowVideoStatsSample = {
+        sampledAtMs: nowMs(),
+        lane,
+        mediaEpoch: binding.mediaEpoch,
+        trackId: binding.trackId,
+      };
+      const inbound = items.find((item) => (
+        item.type === 'inbound-rtp'
+        && item.kind === 'video'
+        && isInboundRtpForLane(entry, lane, item)
+      ));
+      if (!inbound) {
+        return sample;
+      }
+      const identity = resolveInboundIdentity(entry, lane, inbound);
+      if (!identity) {
+        return sample;
+      }
+      sample.ssrc = identity.ssrc;
+      sample.mid = identity.mid;
+      sample.transportId = typeof inbound.transportId === 'string' ? inbound.transportId : null;
+      if (typeof inbound.framesPerSecond === 'number' && Number.isFinite(inbound.framesPerSecond)) {
+        sample.framesPerSecond = inbound.framesPerSecond;
+      }
+      const transport = typeof inbound.transportId === 'string'
+        ? items.find((item) => item.type === 'transport' && item.id === inbound.transportId)
+        : undefined;
+      const selectedCandidatePairId = typeof transport?.selectedCandidatePairId === 'string'
+        ? transport.selectedCandidatePairId
+        : null;
+      sample.selectedCandidatePairId = selectedCandidatePairId;
+      const selectedPair = selectedCandidatePairId === null
+        ? undefined
+        : items.find((item) => item.type === 'candidate-pair' && item.id === selectedCandidatePairId);
+      if (typeof selectedPair?.currentRoundTripTime === 'number' && Number.isFinite(selectedPair.currentRoundTripTime)) {
+        sample.rttMs = selectedPair.currentRoundTripTime * 1000;
+      } else {
+        sample.rttMs = null;
+      }
+      if (typeof selectedPair?.availableIncomingBitrate === 'number' && Number.isFinite(selectedPair.availableIncomingBitrate)) {
+        sample.availableIncomingBitrateBps = selectedPair.availableIncomingBitrate;
+      } else {
+        sample.availableIncomingBitrateBps = null;
+      }
+      const rawBytesReceived = typeof inbound.bytesReceived === 'number' && Number.isFinite(inbound.bytesReceived)
+        ? inbound.bytesReceived
+        : null;
+      const rawFramesDropped = typeof inbound.framesDropped === 'number' && Number.isFinite(inbound.framesDropped)
+        ? inbound.framesDropped
+        : null;
+      const rawFreezeCount = typeof inbound.freezeCount === 'number' && Number.isFinite(inbound.freezeCount)
+        ? inbound.freezeCount
+        : null;
+      const rawJitterBufferDelay = typeof inbound.jitterBufferDelay === 'number' && Number.isFinite(inbound.jitterBufferDelay)
+        ? inbound.jitterBufferDelay
+        : null;
+      const rawJitterBufferEmittedCount = typeof inbound.jitterBufferEmittedCount === 'number'
+        && Number.isFinite(inbound.jitterBufferEmittedCount)
+        ? inbound.jitterBufferEmittedCount
+        : null;
+      const rawPacketsReceived = typeof inbound.packetsReceived === 'number'
+        && Number.isFinite(inbound.packetsReceived)
+        ? inbound.packetsReceived
+        : null;
+      const rawPacketsLost = typeof inbound.packetsLost === 'number'
+        && Number.isFinite(inbound.packetsLost)
+        ? inbound.packetsLost
+        : null;
+      const previous = entry.statsBaselines.get(lane);
+      const sameIdentity = previous !== undefined && sameStatsIdentity(previous, identity);
+      sample.receivedBitrateBps = null;
+      sample.receivedPacketLossRatio = null;
+      sample.framesDropped = null;
+      sample.freezeCount = null;
+      sample.jitterBufferDelayMs = null;
+      if (sameIdentity && previous) {
+        const elapsedMs = sample.sampledAtMs - previous.sampledAtMs;
+        if (rawBytesReceived !== null && previous.bytesReceived !== null && elapsedMs > 0) {
+          sample.receivedBitrateBps = Math.max(
+            0,
+            (rawBytesReceived - previous.bytesReceived) * 8 * 1000 / elapsedMs,
+          );
+        }
+        if (rawFramesDropped !== null && previous.framesDropped !== null) {
+          sample.framesDropped = Math.max(0, rawFramesDropped - previous.framesDropped);
+        }
+        if (
+          rawPacketsReceived !== null
+          && previous.packetsReceived !== null
+          && rawPacketsLost !== null
+          && previous.packetsLost !== null
+        ) {
+          const receivedDelta = rawPacketsReceived - previous.packetsReceived;
+          const lostDelta = rawPacketsLost - previous.packetsLost;
+          const totalDelta = receivedDelta + lostDelta;
+          if (
+            elapsedMs > 0
+            && receivedDelta >= 0
+            && lostDelta >= 0
+            && totalDelta > 0
+          ) {
+            sample.receivedPacketLossRatio = lostDelta / totalDelta;
           }
-          sample.framesDropped = Math.max(0, framesDropped - (previous?.framesDropped ?? 0));
-          sample.freezeCount = Math.max(0, freezeCount - (previous?.freezeCount ?? 0));
-          const jitterDelayDelta = Math.max(0, jitterBufferDelay - (previous?.jitterBufferDelay ?? 0));
-          const jitterEmittedDelta = Math.max(0, jitterBufferEmittedCount - (previous?.jitterBufferEmittedCount ?? 0));
+        }
+        if (rawFreezeCount !== null && previous.freezeCount !== null) {
+          sample.freezeCount = Math.max(0, rawFreezeCount - previous.freezeCount);
+        }
+        if (
+          rawJitterBufferDelay !== null
+          && previous.jitterBufferDelay !== null
+          && rawJitterBufferEmittedCount !== null
+          && previous.jitterBufferEmittedCount !== null
+        ) {
+          const jitterDelayDelta = Math.max(0, rawJitterBufferDelay - previous.jitterBufferDelay);
+          const jitterEmittedDelta = Math.max(0, rawJitterBufferEmittedCount - previous.jitterBufferEmittedCount);
           if (jitterEmittedDelta > 0) {
             sample.jitterBufferDelayMs = (jitterDelayDelta / jitterEmittedDelta) * 1000;
           }
-          if (typeof item.qualityLimitationReason === 'string') {
-            sample.qualityLimitationReason = item.qualityLimitationReason;
-          }
-          entry.statsBaseline = {
-            bytesReceived: typeof item.bytesReceived === 'number' ? item.bytesReceived : previous?.bytesReceived,
-            sampledAtMs: sample.sampledAtMs,
-            framesDropped,
-            freezeCount,
-            jitterBufferDelay,
-            jitterBufferEmittedCount,
-          };
         }
-        if (item.type === 'candidate-pair' && (item.state === 'succeeded' || item.nominated === true)) {
-          if (typeof item.currentRoundTripTime === 'number') sample.rttMs = item.currentRoundTripTime * 1000;
-        }
-        if (item.type === 'remote-inbound-rtp' && item.kind === 'video') {
-          if (typeof item.roundTripTime === 'number') sample.rttMs = item.roundTripTime * 1000;
-        }
-        if (item.type === 'remote-outbound-rtp' && item.kind === 'video' && typeof item.qualityLimitationReason === 'string') {
-          sample.qualityLimitationReason = item.qualityLimitationReason;
-        }
+      }
+      entry.statsBaselines.set(lane, {
+        bytesReceived: rawBytesReceived,
+        packetsReceived: rawPacketsReceived,
+        packetsLost: rawPacketsLost,
+        sampledAtMs: sample.sampledAtMs,
+        framesDropped: rawFramesDropped,
+        freezeCount: rawFreezeCount,
+        jitterBufferDelay: rawJitterBufferDelay,
+        jitterBufferEmittedCount: rawJitterBufferEmittedCount,
+        identity,
       });
       return sample;
     },

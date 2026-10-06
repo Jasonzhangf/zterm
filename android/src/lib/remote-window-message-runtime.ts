@@ -9,6 +9,7 @@ import type {
   RemoteWindowStreamAnswerV2Payload,
   RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
+  RemoteWindowStreamCleanupResult,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamRequestPayload,
@@ -19,6 +20,8 @@ import type {
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowVideoProfile,
+  RemoteWindowCloseRequestPayload,
+  RemoteWindowCloseResultPayload,
   ServerMessage,
 } from './types';
 import type { BridgeTransportSocket } from './traversal/types';
@@ -35,6 +38,7 @@ export type RemoteWindowControlMessage = Extract<
   | { type: 'remote-window-input-ack' }
   | { type: 'remote-window-error' }
   | { type: 'remote-window-browser-user-agent-result' }
+  | { type: 'remote-window-close-result' }
 >;
 
 type RemoteWindowInputClientMessage = Extract<ClientMessage, { type: 'remote-window-input' }>;
@@ -45,6 +49,8 @@ interface PendingRemoteWindowReliableInput {
   payload: RemoteWindowInputEventPayload;
   control: RemoteWindowInputDeliveryControl;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  /** True once this record has been handed to the physical socket at least once (even if send threw). */
+  dispatchedToSocket?: boolean;
 }
 
 interface PendingRemoteWindowContinuousInput extends PendingRemoteWindowReliableInput {
@@ -75,6 +81,16 @@ interface PendingRemoteWindowStreamStopRequest {
   reject: (error: Error) => void;
 }
 
+interface PendingRemoteWindowStreamCloseRequest {
+  kind: 'stream-close';
+  sessionId: string;
+  streamId: string;
+  targetId: string;
+  timeoutId: number | null;
+  resolve: (payload: RemoteWindowCloseResultPayload) => void;
+  reject: (error: Error) => void;
+}
+
 interface PendingRemoteWindowStreamQualityRequest {
   kind: 'stream-quality';
   streamId: string;
@@ -95,13 +111,77 @@ type PendingRemoteWindowRequest =
   | PendingRemoteWindowTargetsRequest
   | PendingRemoteWindowStreamStartRequest
   | PendingRemoteWindowStreamStopRequest
+  | PendingRemoteWindowStreamCloseRequest
   | PendingRemoteWindowStreamQualityRequest;
 type RemoteWindowMessageSubscriber = (msg: RemoteWindowControlMessage) => void | Promise<unknown>;
+
+export type RemoteWindowInputDeliveryOutcomeStatusV1 = 'delivered' | 'failed' | 'cancelled';
+export type RemoteWindowInputDeliveryOutcomeSourceV1 =
+  | 'daemon-ack'
+  | 'client-send'
+  | 'client-timeout'
+  | 'client-teardown';
+export type RemoteWindowInputDeliveryOutcomeExecutionV1 = 'confirmed' | 'not-dispatched' | 'unconfirmed';
+
+/**
+ * Client-local result of one reliable remote-window input delivery. This is the only settle result for a
+ * reliable delivery record and is intentionally NOT part of `RemoteWindowControlMessage`, `ServerMessage`
+ * or any shared wire union; it never travels on the wire.
+ */
+export interface RemoteWindowInputDeliveryOutcomeV1 {
+  sequence: string;
+  streamId: string;
+  targetId: string;
+  status: RemoteWindowInputDeliveryOutcomeStatusV1;
+  source: RemoteWindowInputDeliveryOutcomeSourceV1;
+  execution: RemoteWindowInputDeliveryOutcomeExecutionV1;
+  error?: { code: string; message: string };
+}
+
+type RemoteWindowInputOutcomeSubscriber = (outcome: RemoteWindowInputDeliveryOutcomeV1) => void | Promise<unknown>;
+type RemoteWindowListenerPhase = 'ice-candidate' | 'status' | 'input-outcome' | 'input-send';
+
+// Daemon rejects these before any injection attempt, so a NACK carrying one of these codes proves zero submission.
+const REMOTE_WINDOW_INPUT_NOT_DISPATCHED_NACK_CODES = new Set([
+  'remote_window_input_delivery_invalid',
+  'remote_window_input_stream_missing',
+]);
 
 export const REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS = 15000;
 export const REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS = 40_000;
 export const REMOTE_WINDOW_STREAM_STOP_REQUEST_TIMEOUT_MS = 15_000;
+export const REMOTE_WINDOW_STREAM_CLOSE_REQUEST_TIMEOUT_MS = 20_000;
 export const REMOTE_WINDOW_STREAM_QUALITY_REQUEST_TIMEOUT_MS = 10_000;
+
+/**
+ * Project the daemon-typed cleanup report from a stop status. Only an explicit `released` from the daemon is a
+ * terminal success; an older server that reports no `cleanup` is an explicit `unverified`, never a manufactured
+ * `released`. A `cleanup_failed`/`failed`/`unverified` report is preserved verbatim (remaining resources + errors).
+ */
+export function projectRemoteWindowCleanupResult(
+  status: Pick<RemoteWindowStreamStatusPayload, 'phase' | 'cleanup'>,
+): RemoteWindowStreamCleanupResult {
+  const cleanup = status.cleanup;
+  if (!cleanup) {
+    return {
+      status: 'unverified',
+      remainingResources: [],
+      errors: [{
+        code: 'remote_window_cleanup_unreported',
+        message: 'Daemon did not report remote resource cleanup for this stream',
+      }],
+    };
+  }
+  return {
+    status: cleanup.status,
+    remainingResources: [...cleanup.remainingResources],
+    errors: cleanup.errors.map((error) => ({ ...error })),
+  };
+}
+
+export function isRemoteWindowStreamCleanupReleased(cleanup: RemoteWindowStreamCleanupResult) {
+  return cleanup.status === 'released';
+}
 export const REMOTE_WINDOW_INPUT_RELIABLE_MAX_ATTEMPTS = 2;
 export const REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS = 4_000;
 // Action validity must outlive one ACK timeout, otherwise the single retry is always already expired.
@@ -117,9 +197,10 @@ export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteW
     || msg.type === 'remote-window-stream-status'
     || msg.type === 'remote-window-stream-focus-result'
     || msg.type === 'remote-window-stream-quality-result'
-    || msg.type === 'remote-window-input-ack'
+  || msg.type === 'remote-window-input-ack'
   || msg.type === 'remote-window-error'
-  || msg.type === 'remote-window-browser-user-agent-result';
+  || msg.type === 'remote-window-browser-user-agent-result'
+  || msg.type === 'remote-window-close-result';
 }
 
 function buildRemoteWindowError(payload: RemoteWindowStreamErrorPayload) {
@@ -141,11 +222,12 @@ export function createRemoteWindowMessageRuntime(input?: {
   now?: () => number;
   onStreamIceCandidate?: (payload: RemoteWindowStreamIceCandidatePayload) => void | Promise<unknown>;
   onStreamStatus?: (payload: RemoteWindowStreamStatusPayload) => void | Promise<unknown>;
-  onListenerError?: (phase: 'ice-candidate' | 'status', error: unknown) => void;
+  onListenerError?: (phase: RemoteWindowListenerPhase, error: unknown) => void;
 }) {
   const pendingRequests = new Map<string, PendingRemoteWindowTargetsRequest>();
   const pendingStreamStarts = new Map<string, PendingRemoteWindowStreamStartRequest>();
   const pendingStreamStops = new Map<string, PendingRemoteWindowStreamStopRequest>();
+  const pendingStreamCloses = new Map<string, PendingRemoteWindowStreamCloseRequest>();
   const pendingStreamQuality = new Map<string, PendingRemoteWindowStreamQualityRequest>();
   const pendingBrowserUserAgent = new Map<string, PendingRemoteWindowBrowserUserAgentRequest>();
   const pendingContinuousInput = new Map<string, PendingRemoteWindowContinuousInput>();
@@ -155,15 +237,17 @@ export function createRemoteWindowMessageRuntime(input?: {
   let continuousFlushTimer: number | null = null;
   let nextInputSequence = 1;
   const subscribers = new Set<RemoteWindowMessageSubscriber>();
+  const inputOutcomeSubscribers = new Set<RemoteWindowInputOutcomeSubscriber>();
   const targetsTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS;
   const streamStartTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS;
   const streamStopTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_STREAM_STOP_REQUEST_TIMEOUT_MS;
+  const streamCloseTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_STREAM_CLOSE_REQUEST_TIMEOUT_MS;
   const streamQualityTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_STREAM_QUALITY_REQUEST_TIMEOUT_MS;
   const setTimeoutFn = input?.setTimeoutFn ?? globalThis.setTimeout.bind(globalThis);
   const clearTimeoutFn = input?.clearTimeoutFn ?? globalThis.clearTimeout.bind(globalThis);
   const now = input?.now ?? (() => Date.now());
   const dispatchListener = <TPayload,>(
-    phase: 'ice-candidate' | 'status',
+    phase: RemoteWindowListenerPhase,
     handler: ((payload: TPayload) => void | Promise<unknown>) | undefined,
     payload: TPayload,
   ) => {
@@ -178,6 +262,11 @@ export function createRemoteWindowMessageRuntime(input?: {
       input?.onListenerError?.(phase, error);
     }
     return true;
+  };
+  const notifyInputOutcomeSubscribers = (outcome: RemoteWindowInputDeliveryOutcomeV1) => {
+    inputOutcomeSubscribers.forEach((handler) => {
+      dispatchListener('input-outcome', handler, outcome);
+    });
   };
   const notifySubscribers = (msg: RemoteWindowControlMessage) => {
     if (subscribers.size === 0) {
@@ -268,6 +357,24 @@ export function createRemoteWindowMessageRuntime(input?: {
     return true;
   };
 
+  const armPendingStreamCloseTimeout = (requestId: string) => {
+    const pending = pendingStreamCloses.get(requestId);
+    if (!pending) {
+      return false;
+    }
+    clearPendingTimeout(pending);
+    pending.timeoutId = setTimeoutFn(() => {
+      const activePending = pendingStreamCloses.get(requestId);
+      if (!activePending) {
+        return;
+      }
+      pendingStreamCloses.delete(requestId);
+      activePending.timeoutId = null;
+      activePending.reject(new Error('Remote window close result timed out'));
+    }, streamCloseTimeoutMs) as unknown as number;
+    return true;
+  };
+
   const sendClientMessage = (
     sessionId: string,
     ws: BridgeTransportSocket,
@@ -278,6 +385,7 @@ export function createRemoteWindowMessageRuntime(input?: {
   };
 
   const sendRemoteWindowInputMessage = (pending: PendingRemoteWindowReliableInput) => {
+    pending.dispatchedToSocket = true;
     pending.control = {
       ...pending.control,
       sentAtMs: now(),
@@ -297,63 +405,44 @@ export function createRemoteWindowMessageRuntime(input?: {
     }
   };
 
-  const isReliableInputExpired = (pending: PendingRemoteWindowReliableInput) => (
-    Number.isFinite(pending.payload.deadlineMs) && now() > Number(pending.payload.deadlineMs)
-  );
-
-  const publishExpiredReliableInput = (pending: PendingRemoteWindowReliableInput) => {
-    notifySubscribers({
-      type: 'remote-window-input-ack',
-      control: {
-        version: 1,
-        sequence: pending.control.sequence,
-        accepted: false,
-        retryable: false,
-        duplicate: false,
-        receivedAtMs: now(),
-        error: {
-          code: 'remote_window_input_action_expired',
-          message: 'Remote window input action expired before send',
-        },
-      },
-      payload: {
-        streamId: pending.payload.streamId,
-        targetId: pending.payload.targetId,
-      },
+  /**
+   * The single settle exit for one reliable delivery record: remove it from pending state before emitting the
+   * client-local outcome, so a repeated/late ACK can never settle the same `streamId + sequence` twice.
+   */
+  const settleReliableInput = (
+    pending: PendingRemoteWindowReliableInput,
+    result: {
+      status: RemoteWindowInputDeliveryOutcomeStatusV1;
+      source: RemoteWindowInputDeliveryOutcomeSourceV1;
+      execution: RemoteWindowInputDeliveryOutcomeExecutionV1;
+      error?: { code: string; message: string };
+    },
+  ) => {
+    const queuedIndex = reliableInputQueue.indexOf(pending);
+    const wasInFlight = reliableInputInFlight === pending;
+    if (queuedIndex === -1 && !wasInFlight) {
+      return false;
+    }
+    if (queuedIndex !== -1) {
+      reliableInputQueue.splice(queuedIndex, 1);
+    }
+    if (wasInFlight) {
+      clearReliableInputAckTimer();
+      reliableInputInFlight = null;
+    }
+    notifyInputOutcomeSubscribers({
+      sequence: pending.control.sequence,
+      streamId: pending.payload.streamId,
+      targetId: pending.payload.targetId,
+      status: result.status,
+      source: result.source,
+      execution: result.execution,
+      ...(result.error ? { error: result.error } : {}),
     });
-  };
-
-  const publishInputSendFailure = (pending: PendingRemoteWindowReliableInput, error: unknown) => {
-    notifySubscribers({
-      type: 'remote-window-input-ack',
-      control: {
-        version: 1,
-        sequence: pending.control.sequence,
-        accepted: false,
-        retryable: false,
-        duplicate: false,
-        receivedAtMs: now(),
-        error: {
-          code: 'remote_window_input_send_failed',
-          message: error instanceof Error ? error.message : String(error),
-        },
-      },
-      payload: {
-        streamId: pending.payload.streamId,
-        targetId: pending.payload.targetId,
-      },
-    });
+    return true;
   };
 
   const retryReliableInput = (pending: PendingRemoteWindowReliableInput) => {
-    if (isReliableInputExpired(pending)) {
-      publishExpiredReliableInput(pending);
-      if (reliableInputInFlight === pending) {
-        reliableInputInFlight = null;
-        pumpReliableInput();
-      }
-      return;
-    }
     pending.control = {
       ...pending.control,
       attempt: pending.control.attempt + 1,
@@ -366,14 +455,18 @@ export function createRemoteWindowMessageRuntime(input?: {
     try {
       sendRemoteWindowInputMessage(pending);
     } catch (error) {
-      if (reliableInputInFlight === pending) {
-        reliableInputInFlight = null;
-        clearReliableInputAckTimer();
-      }
+      settleReliableInput(pending, {
+        status: 'failed',
+        source: 'client-send',
+        execution: 'unconfirmed',
+        error: {
+          code: 'remote_window_input_send_failed',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
       if (pending.control.sequence === immediateSequence) {
         throw error;
       }
-      publishInputSendFailure(pending, error);
       pumpReliableInput();
       return;
     }
@@ -393,26 +486,15 @@ export function createRemoteWindowMessageRuntime(input?: {
         retryReliableInput(pending);
         return;
       }
-      notifySubscribers({
-        type: 'remote-window-input-ack',
-        control: {
-          version: 1,
-          sequence: pending.control.sequence,
-          accepted: false,
-          retryable: false,
-          duplicate: false,
-          receivedAtMs: now(),
-          error: {
-            code: 'remote_window_input_ack_timeout',
-            message: 'Remote window input ACK timed out',
-          },
-        },
-        payload: {
-          streamId: pending.payload.streamId,
-          targetId: pending.payload.targetId,
+      settleReliableInput(pending, {
+        status: 'failed',
+        source: 'client-timeout',
+        execution: 'unconfirmed',
+        error: {
+          code: 'remote_window_input_ack_timeout',
+          message: 'Remote window input ACK timed out',
         },
       });
-      reliableInputInFlight = null;
       pumpReliableInput();
     }, REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS) as unknown as number;
   };
@@ -434,7 +516,9 @@ export function createRemoteWindowMessageRuntime(input?: {
       try {
         sendRemoteWindowInputMessage(sample);
       } catch (error) {
-        publishInputSendFailure(sample, error);
+        // Continuous samples are best-effort and never produce a reliable outcome; surface the send failure
+        // through the typed listener-error channel instead of fabricating a daemon ACK.
+        input?.onListenerError?.('input-send', error);
       }
     });
     return pendingKeys.length > 0;
@@ -444,11 +528,7 @@ export function createRemoteWindowMessageRuntime(input?: {
     if (reliableInputInFlight) {
       return;
     }
-    let next = reliableInputQueue.shift();
-    while (next && isReliableInputExpired(next)) {
-      publishExpiredReliableInput(next);
-      next = reliableInputQueue.shift();
-    }
+    const next = reliableInputQueue.shift();
     if (!next) {
       flushContinuousInput();
       return;
@@ -547,17 +627,38 @@ export function createRemoteWindowMessageRuntime(input?: {
       retryReliableInput(inFlight);
       return true;
     }
-    reliableInputInFlight = null;
+    const nackCode = control.accepted ? undefined : control.error?.code;
+    settleReliableInput(inFlight, {
+      status: control.accepted ? 'delivered' : 'failed',
+      source: 'daemon-ack',
+      execution: control.accepted
+        ? 'confirmed'
+        : (nackCode && REMOTE_WINDOW_INPUT_NOT_DISPATCHED_NACK_CODES.has(nackCode)
+          ? 'not-dispatched'
+          : 'unconfirmed'),
+      ...(control.accepted || !control.error
+        ? {}
+        : { error: { code: control.error.code, message: control.error.message } }),
+    });
     notifySubscribers(message);
     pumpReliableInput();
     return true;
   };
 
-  const discardStreamInput = (streamId: string) => {
-    for (let index = reliableInputQueue.length - 1; index >= 0; index -= 1) {
-      if (reliableInputQueue[index]?.payload.streamId === streamId) {
-        reliableInputQueue.splice(index, 1);
-      }
+  const settleReliableInputAsCancelled = (pending: PendingRemoteWindowReliableInput) => {
+    settleReliableInput(pending, {
+      status: 'cancelled',
+      source: 'client-teardown',
+      execution: pending.dispatchedToSocket ? 'unconfirmed' : 'not-dispatched',
+    });
+  };
+
+  const cancelStreamInput = (streamId: string) => {
+    [...reliableInputQueue]
+      .filter((pending) => pending.payload.streamId === streamId)
+      .forEach((pending) => settleReliableInputAsCancelled(pending));
+    if (reliableInputInFlight?.payload.streamId === streamId) {
+      settleReliableInputAsCancelled(reliableInputInFlight);
     }
     for (const [key, pending] of pendingContinuousInput) {
       if (pending.payload.streamId === streamId) {
@@ -567,9 +668,23 @@ export function createRemoteWindowMessageRuntime(input?: {
     if (pendingContinuousInput.size === 0) {
       clearContinuousFlushTimer();
     }
-    if (reliableInputInFlight?.payload.streamId === streamId) {
-      clearReliableInputAckTimer();
-      reliableInputInFlight = null;
+    pumpReliableInput();
+  };
+
+  const cancelSessionInput = (sessionId: string) => {
+    [...reliableInputQueue]
+      .filter((pending) => pending.sessionId === sessionId)
+      .forEach((pending) => settleReliableInputAsCancelled(pending));
+    if (reliableInputInFlight?.sessionId === sessionId) {
+      settleReliableInputAsCancelled(reliableInputInFlight);
+    }
+    for (const [key, pending] of pendingContinuousInput) {
+      if (pending.sessionId === sessionId) {
+        pendingContinuousInput.delete(key);
+      }
+    }
+    if (pendingContinuousInput.size === 0) {
+      clearContinuousFlushTimer();
     }
     pumpReliableInput();
   };
@@ -813,7 +928,8 @@ export function createRemoteWindowMessageRuntime(input?: {
         throw new Error('Remote window stream stop requires sessionId and streamId');
       }
       const requestId = `rw-stop-${now()}-${Math.random().toString(36).slice(2, 8)}`;
-      discardStreamInput(streamId);
+      // Close this stream's client input admission and settle every queued/in-flight record before the stop request.
+      cancelStreamInput(streamId);
       return new Promise<RemoteWindowStreamStatusPayload>((resolve, reject) => {
         const pending: PendingRemoteWindowStreamStopRequest = {
           kind: 'stream-stop',
@@ -836,6 +952,51 @@ export function createRemoteWindowMessageRuntime(input?: {
           });
         } catch (error) {
           pendingStreamStops.delete(requestId);
+          clearPendingTimeout(pending);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    },
+
+    requestStreamClose(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      streamId: string;
+      targetId: string;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      const streamId = options.streamId.trim();
+      const targetId = options.targetId.trim();
+      if (!targetSessionId || !streamId || !targetId) {
+        throw new Error('Remote window close requires sessionId, streamId, and targetId');
+      }
+      const requestId = `rw-close-${now()}-${Math.random().toString(36).slice(2, 8)}`;
+      return new Promise<RemoteWindowCloseResultPayload>((resolve, reject) => {
+        const pending: PendingRemoteWindowStreamCloseRequest = {
+          kind: 'stream-close',
+          sessionId: targetSessionId,
+          streamId,
+          targetId,
+          timeoutId: null,
+          resolve,
+          reject,
+        };
+        pendingStreamCloses.set(requestId, pending);
+        armPendingStreamCloseTimeout(requestId);
+
+        try {
+          const payload: RemoteWindowCloseRequestPayload = {
+            requestId,
+            sessionId: targetSessionId,
+            streamId,
+            targetId,
+          };
+          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+            type: 'remote-window-close-request',
+            payload,
+          });
+        } catch (error) {
+          pendingStreamCloses.delete(requestId);
           clearPendingTimeout(pending);
           reject(error instanceof Error ? error : new Error(String(error)));
         }
@@ -946,6 +1107,13 @@ export function createRemoteWindowMessageRuntime(input?: {
         stopPending.reject(buildRemoteWindowError(payload));
         return true;
       }
+      const closePending = pendingStreamCloses.get(payload.requestId);
+      if (closePending && (!payload.streamId || payload.streamId === closePending.streamId)) {
+        pendingStreamCloses.delete(payload.requestId);
+        clearPendingTimeout(closePending);
+        closePending.reject(buildRemoteWindowError(payload));
+        return true;
+      }
       const qualityPending = pendingStreamQuality.get(payload.requestId);
       if (qualityPending && (!payload.streamId || payload.streamId === qualityPending.streamId)) {
         pendingStreamQuality.delete(payload.requestId);
@@ -981,6 +1149,23 @@ export function createRemoteWindowMessageRuntime(input?: {
           }
         }
         const handled = dispatchListener('status', input?.onStreamStatus, msg.payload);
+        const observed = notifySubscribers(msg);
+        return handled || observed;
+      }
+      if (msg.type === 'remote-window-close-result') {
+        const pending = pendingStreamCloses.get(msg.payload.requestId);
+        let handled = false;
+        if (
+          pending
+          && pending.sessionId === msg.payload.sessionId
+          && pending.streamId === msg.payload.streamId
+          && pending.targetId === msg.payload.targetId
+        ) {
+          handled = true;
+          pendingStreamCloses.delete(msg.payload.requestId);
+          clearPendingTimeout(pending);
+          pending.resolve(msg.payload);
+        }
         const observed = notifySubscribers(msg);
         return handled || observed;
       }
@@ -1039,6 +1224,25 @@ export function createRemoteWindowMessageRuntime(input?: {
       };
     },
 
+    subscribeInputOutcome(handler: RemoteWindowInputOutcomeSubscriber) {
+      inputOutcomeSubscribers.add(handler);
+      return () => {
+        inputOutcomeSubscribers.delete(handler);
+      };
+    },
+
+    /**
+     * Settle reliable input that can no longer be delivered because its physical transport is gone.
+     * The real per-session transport close owner is outside this runtime; callers pass the owning sessionId.
+     */
+    teardownTransport(sessionId: string, _reason = 'Remote window transport torn down') {
+      const targetSessionId = sessionId.trim();
+      if (!targetSessionId) {
+        return;
+      }
+      cancelSessionInput(targetSessionId);
+    },
+
     dispose(reason = 'Session provider disposed before remote window request completed') {
       for (const pending of pendingRequests.values()) {
         clearPendingTimeout(pending);
@@ -1055,6 +1259,11 @@ export function createRemoteWindowMessageRuntime(input?: {
         pending.reject(new Error(reason));
       }
       pendingStreamStops.clear();
+      for (const pending of pendingStreamCloses.values()) {
+        clearPendingTimeout(pending);
+        pending.reject(new Error(reason));
+      }
+      pendingStreamCloses.clear();
       for (const pending of pendingStreamQuality.values()) {
         clearPendingTimeout(pending);
         pending.reject(new Error(reason));
@@ -1065,20 +1274,27 @@ export function createRemoteWindowMessageRuntime(input?: {
         pending.reject(new Error(reason));
       }
       pendingBrowserUserAgent.clear();
+      // Settle queued/in-flight reliable input (notifying still-registered consumers) before clearing
+      // timers and subscriptions.
+      [...reliableInputQueue].forEach((pending) => settleReliableInputAsCancelled(pending));
+      if (reliableInputInFlight) {
+        settleReliableInputAsCancelled(reliableInputInFlight);
+      }
       clearContinuousFlushTimer();
       pendingContinuousInput.clear();
       clearReliableInputAckTimer();
       reliableInputQueue.splice(0);
       reliableInputInFlight = null;
       subscribers.clear();
+      inputOutcomeSubscribers.clear();
     },
 
     getPendingCount() {
-      return pendingRequests.size + pendingStreamStarts.size + pendingStreamStops.size + pendingStreamQuality.size + pendingBrowserUserAgent.size;
+      return pendingRequests.size + pendingStreamStarts.size + pendingStreamStops.size + pendingStreamCloses.size + pendingStreamQuality.size + pendingBrowserUserAgent.size;
     },
 
     getPendingRequestIds() {
-      return [...pendingRequests.keys(), ...pendingStreamStarts.keys(), ...pendingStreamStops.keys(), ...pendingStreamQuality.keys(), ...pendingBrowserUserAgent.keys()];
+      return [...pendingRequests.keys(), ...pendingStreamStarts.keys(), ...pendingStreamStops.keys(), ...pendingStreamCloses.keys(), ...pendingStreamQuality.keys(), ...pendingBrowserUserAgent.keys()];
     },
   };
 

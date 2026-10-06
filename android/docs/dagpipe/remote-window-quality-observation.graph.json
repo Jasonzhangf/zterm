@@ -1,0 +1,136 @@
+{
+  "id": "remote.window_quality_observation",
+  "version": "0.1",
+  "notes": "收端丢包观察对象流（SESE，单入口/单出口）。质量意图只委托既有 client.remote_window_quality_control.admit（现有 quality 请求图，只读依赖，非本图 root）；不新增第二 pending/ACK owner。拓扑由 dagpipe CLI 校验；operator 绑定为设计绑定，未注册/未编译。状态机与终态见 decisions/2026-10-05-remote-window-receive-loss-observation.md。admit_observation 的 in-flight 准入护栏为本设计要求的最小既有 owner 变更（现状 window.setInterval 无 overlap guard，未实现）。",
+  "inputs": [
+    {
+      "id": "arc.observation_tick",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "admit_observation",
+      "operator": "client.remote_window_quality_observation.admit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.observation_tick"
+      ],
+      "output": {
+        "id": "arc.observation_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "label": "准入观察节拍与流身份护栏",
+      "owner": "useRemoteWindowQuality.ts 观察 effect（streamReady/qualityStreamActive + stopped/generation guard）；设计要求：本 effect 内加最小 in-flight 准入护栏（至多一个未结算 collectStats/effect 代次，finally 释放），现状 window.setInterval(()=>void tick(),2000) 无 overlap guard、未实现"
+    },
+    {
+      "id": "sample_lane_stats",
+      "operator": "client.remote_window_receiver.get_stats_sample",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.observation_request"
+      ],
+      "output": {
+        "id": "arc.lane_stats_sample",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "label": "按 lane 采样收端公开统计与身份区间",
+      "owner": "remote-window-receiver-runtime.ts getStatsSample(streamId, lane='focus')：复用既有每 lane statsBaselines / sameStatsIdentity，产出 nullable receivedPacketLossRatio"
+    },
+    {
+      "id": "decide_loss_policy",
+      "operator": "client.remote_window_quality_control.classify_observation",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.lane_stats_sample"
+      ],
+      "output": {
+        "id": "arc.observation_decision",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "label": "类型化丢包策略判定",
+      "owner": "remote-window-video-quality.ts classifyRemoteWindowVideoPressure + resolveRemoteWindowVideoAdaptiveDecision（由 useRemoteWindowQuality.runAdaptiveQualityTick 调用）"
+    },
+    {
+      "id": "settle_observation",
+      "operator": "client.remote_window_quality_control.settle_observation",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.observation_decision"
+      ],
+      "output": {
+        "id": "arc.observation_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "label": "唯一结算观察结果（unknown / 不变 / 质量意图 / 错误 / 取消）",
+      "owner": "useRemoteWindowQuality.ts runAdaptiveQualityTick / observeUnknownAdaptiveSample；质量意图只委托既有 client.remote_window_quality_control.admit；本地决策不得改写 ACK 真相",
+      "depends_on": [
+        "client.remote_window_quality_control.admit"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "admit_observation",
+      "to": "sample_lane_stats",
+      "arc_id": "arc.observation_request"
+    },
+    {
+      "from": "sample_lane_stats",
+      "to": "decide_loss_policy",
+      "arc_id": "arc.lane_stats_sample"
+    },
+    {
+      "from": "decide_loss_policy",
+      "to": "settle_observation",
+      "arc_id": "arc.observation_decision"
+    }
+  ],
+  "outputs": [
+    "arc.observation_result"
+  ]
+}

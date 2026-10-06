@@ -14,12 +14,15 @@ import type {
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowBrowserUserAgent,
   RemoteWindowBrowserUserAgentResultPayload,
+  RemoteWindowCloseResultPayload,
+  RemoteWindowStopOutcome,
 } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { buildTraversalPlan } from '../lib/traversal/config';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import { projectRemoteWindowCleanupResult } from '../lib/remote-window-message-runtime';
 
 interface RemoteWindowCatalogMessageRuntimeLike {
   requestTargets: (
@@ -80,6 +83,15 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => Promise<RemoteWindowStreamStatusPayload>;
+  requestStreamClose: (
+    sessionId: string,
+    options: {
+      ws: BridgeTransportSocket;
+      streamId: string;
+      targetId: string;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    },
+  ) => Promise<RemoteWindowCloseResultPayload>;
   sendInputEvent: (
     sessionId: string,
     options: {
@@ -275,7 +287,7 @@ export function resolveRemoteWindowStreamIceServers(options: {
     bridgePort: options.session.bridgePort || 0,
     authToken: options.session.authToken,
     daemonHostId: options.session.daemonHostId,
-    transportMode: 'auto',
+    transportMode: 'webrtc',
   }, options.bridgeSettings);
   const candidate = plan.candidates.find((item) => (
     item.kind === 'rtc'
@@ -495,13 +507,44 @@ export async function stopRemoteWindowStreamRuntime(options: {
     sessions: options.sessions,
     daemonConnection: options.daemonConnection,
   });
-  await options.remoteWindowMessageRuntime.stopStream(targetSessionId, {
+  const status = await options.remoteWindowMessageRuntime.stopStream(targetSessionId, {
     ws,
     streamId,
     purpose: options.purpose,
     sendSocketPayload: options.sendSocketPayload,
   });
-  return localStopped;
+  return {
+    localStopped,
+    cleanup: projectRemoteWindowCleanupResult(status),
+  } satisfies RemoteWindowStopOutcome;
+}
+
+export function closeRemoteWindowStreamRuntime(options: {
+  sessionId: string;
+  streamId: string;
+  targetId: string;
+  sessions: Session[];
+  daemonConnection: ClientDaemonConnection;
+  remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+}): Promise<RemoteWindowCloseResultPayload> {
+  const targetSessionId = options.sessionId.trim();
+  const streamId = options.streamId.trim();
+  const targetId = options.targetId.trim();
+  if (!targetSessionId || !streamId || !targetId) {
+    return Promise.reject(new Error('Remote window close requires sessionId, streamId, and targetId'));
+  }
+  const ws = resolveRemoteWindowStreamTransport({
+    sessionId: targetSessionId,
+    sessions: options.sessions,
+    daemonConnection: options.daemonConnection,
+  });
+  return options.remoteWindowMessageRuntime.requestStreamClose(targetSessionId, {
+    ws,
+    streamId,
+    targetId,
+    sendSocketPayload: options.sendSocketPayload,
+  });
 }
 
 export function sendRemoteWindowInputRuntime(options: {

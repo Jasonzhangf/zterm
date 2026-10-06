@@ -600,7 +600,6 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
   geometry: RemoteWindowTouchSurfaceGeometry;
   zoomedProjection: boolean;
   touchMode?: boolean;
-  suppressSingleFinger?: boolean;
 }): RemoteWindowTouchPointerRuntimeResult {
   const { pointer } = options;
   if (pointer.pointerType === 'mouse' && pointer.button > 2) {
@@ -610,47 +609,29 @@ export function resolveRemoteWindowTouchPointerDownRuntime(options: {
   if (button === 'none') {
     return emptyResult(options.state, false);
   }
-  // Zoomed fullscreen in Direct Touch suppresses one finger completely:
-  // down/move/up must not create remote input or move the local projection.
-  if (
-    options.zoomedProjection
-    && options.touchMode
-    && pointer.pointerType === 'touch'
-    && options.suppressSingleFinger
-  ) {
-    return emptyResult({
-      mode: 'actionPending',
-      pointerId: pointer.pointerId,
-      button,
-      startClientX: pointer.clientX,
-      startClientY: pointer.clientY,
-      lastClientX: pointer.clientX,
-      lastClientY: pointer.clientY,
-      startAtMs: pointer.timeMs,
-      suppressTap: true,
-    }, true);
-  }
-  // Zoomed floating remains the existing local-pan projection.
-  if (
-    options.zoomedProjection
-    && options.touchMode
-    && pointer.pointerType === 'touch'
-  ) {
-    return withLocalEffect({
-      mode: 'localPan',
-      pointerId: pointer.pointerId,
-      startClientX: pointer.clientX,
-      startClientY: pointer.clientY,
-      lastClientX: pointer.clientX,
-      lastClientY: pointer.clientY,
-      startAtMs: pointer.timeMs,
-      moved: false,
-    }, {
-      kind: 'local-pan-start',
-      pointerId: pointer.pointerId,
-      clientX: pointer.clientX,
-      clientY: pointer.clientY,
-    });
+  // A zoomed single pointer (scale>1.01) always enters local pan from the touch
+  // point, independent of the touch/mouse input mode. Local pan is the only
+  // effect: it never emits remote scroll/down/click. 1x keeps the remote
+  // tap / hold-drag / realtime-scroll classification.
+  if (options.zoomedProjection) {
+    return withLocalEffect(
+      {
+        mode: 'localPan',
+        pointerId: pointer.pointerId,
+        startClientX: pointer.clientX,
+        startClientY: pointer.clientY,
+        startAtMs: pointer.timeMs,
+        lastClientX: pointer.clientX,
+        lastClientY: pointer.clientY,
+        moved: false,
+      },
+      {
+        kind: 'local-pan-start',
+        pointerId: pointer.pointerId,
+        clientX: pointer.clientX,
+        clientY: pointer.clientY,
+      },
+    );
   }
   return emptyResult({
     mode: 'actionPending',

@@ -21,7 +21,7 @@ fn compiles_phase7_graphs() {
     assert_eq!(
         graphs,
         vec![
-            "release.runtime_promotion@0.1",
+            "release.runtime_promotion@0.2",
             "release.update_lifecycle@0.1",
             "observability.debug@0.1",
         ]
@@ -85,6 +85,7 @@ fn release_rejects_digest_mismatch() {
         },
     }));
     assert_eq!(result["ok"], false);
+    assert_eq!(result["error"], "release artifact digest mismatch");
 }
 
 #[test]
@@ -98,6 +99,7 @@ fn release_rejects_missing_expected_digest() {
         },
     }));
     assert_eq!(result["ok"], false);
+    assert_eq!(result["error"], "release policy requires expectedSha256");
 }
 
 #[test]
@@ -111,6 +113,7 @@ fn release_rejects_missing_artifact_digest() {
         },
     }));
     assert_eq!(result["ok"], false);
+    assert_eq!(result["error"], "release artifact digest missing");
 }
 
 #[test]
@@ -124,6 +127,7 @@ fn update_rejects_when_update_disallowed() {
         },
     }));
     assert_eq!(result["ok"], false);
+    assert_eq!(result["error"], "update is not available");
 }
 
 #[test]
@@ -137,6 +141,7 @@ fn update_rejects_missing_version() {
         },
     }));
     assert_eq!(result["ok"], false);
+    assert_eq!(result["error"], "update check requires version");
 }
 
 #[test]
@@ -150,4 +155,5 @@ fn debug_rejects_unauthorized_sample() {
         },
     }));
     assert_eq!(result["ok"], false);
+    assert_eq!(result["error"], "debug channel denied");
 }
