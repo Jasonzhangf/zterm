@@ -523,6 +523,11 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   // must not be passive or taps and drags cannot reach the remote target.
   const remoteWindowInteractionEnabled = !embedded
     || (state.phase === 'targetLocked' && (state.mode === 'floating' || state.mode === 'fullscreen'));
+  // Embedded half-sheet preview is interactive for the video surface but does
+  // not own the input-context role while still in floating mode. The
+  // standalone/fullscreen roles stay unique owners per architecture rules.
+  const remoteWindowPublishesInput = !embedded
+    || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
   const showEmbeddedLockedToolbar = embedded
     && state.phase === 'targetLocked'
     && state.mode === 'floating';
@@ -604,7 +609,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const bodySubscriptionSuppressed = state.phase === 'targetEnumerating' || state.phase === 'pickerOpen' || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
   // The embedded half-sheet preview is passive: it must never advertise a
   // remote-window paste/input target while it is still floating.
-  const inputContext = remoteWindowInteractionEnabled
+  const inputContext = remoteWindowPublishesInput
     && state.phase === 'targetLocked'
     && state.streamId
     && state.streamStatus !== 'error'
@@ -1057,6 +1062,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleFullscreen = useCallback(() => { settleGestureSequence(); publishRemoteWindowInputContext(); resetFullscreenViewport(); setStreamStatusOpen(false); setState((current) => enterRemoteWindowFullscreen(current)); }, [publishRemoteWindowInputContext, resetFullscreenViewport, settleGestureSequence]);
   const handleShrink = useCallback(() => {
     settleGestureSequence();
+    publishRemoteWindowInputContext();
     resetFullscreenViewport();
     // The More sheet is portalled to the body and re-measured against the
     // toolbar anchor; leaving it open across a mode transition would let the
@@ -1168,13 +1174,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   ]);
 
   const handleToggleInputMode = useCallback(() => {
+    if (!remoteWindowInteractionEnabled) return;
     setInputMode((current) => {
       const next: RemoteWindowInputMode = current === 'touch' ? 'mouse' : 'touch';
       inputModeRef.current = next;
       writeRemoteWindowInputMode(next);
       return next;
     });
-  }, []);
+  }, [remoteWindowInteractionEnabled]);
 
   const updateFloatingResizeFromPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
     const resize = floatingResizeRef.current;

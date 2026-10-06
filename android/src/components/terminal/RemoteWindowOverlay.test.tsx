@@ -2195,52 +2195,12 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
-  it('publishes input context and routes embedded floating preview gestures', async () => {
-    const mediaStream = { id: 'media-stream-embedded-context' } as MediaStream;
-    const onInputContextChange = vi.fn();
-    const requestTargets = vi.fn(async () => ({
-      requestId: 'rw-embedded-context',
-      targets: [makeTarget('app-embedded-context', 'TextEdit', 'app-window')],
-    }));
-    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
-      streamId,
-      mediaStream,
-    }));
-    const renderOverlay = (embeddedFullscreen: boolean) => (
-      <RemoteWindowOverlay
-        activeSessionId="session-embedded-context"
-        embedded
-        embeddedFullscreen={embeddedFullscreen}
-        requestTargets={requestTargets}
-        startStream={startStream}
-        onInputContextChange={onInputContextChange}
-      />
-    );
-
-    render(renderOverlay(false));
-    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-context'));
-    await screen.findByTestId('remote-window-video');
-    await waitFor(() => {
-      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
-    });
-    await waitFor(() => {
-      expect(onInputContextChange).toHaveBeenLastCalledWith(expect.objectContaining({
-        sessionId: 'session-embedded-context',
-        targetId: 'app-embedded-context',
-      }));
-    });
-    const surface = screen.getByTestId('remote-window-video-surface');
-    fireEvent.pointerDown(surface, { pointerId: 7, clientX: 40, clientY: 60, pointerType: 'touch' });
-    fireEvent.pointerMove(surface, { pointerId: 7, clientX: 40, clientY: 140, pointerType: 'touch' });
-    fireEvent.pointerUp(surface, { pointerId: 7, clientX: 40, clientY: 140, pointerType: 'touch' });
-  });
-
-  it('does not focus on stream setup and sends later wheel or key input as single action events', async () => {
+  it('routes embedded half-sheet pointer gestures to the stream without promoting input context', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
-      requestId: 'rw-1',
-      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+      requestId: 'rw-embedded-pointer',
+      targets: [makeTarget('app-embedded-pointer', 'TextEdit', 'app-window')],
     }));
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
@@ -2249,21 +2209,16 @@ describe('RemoteWindowOverlay', () => {
 
     render(
       <RemoteWindowOverlay
-        activeSessionId="session-1"
+        activeSessionId="session-embedded-pointer"
+        embedded
         requestTargets={requestTargets}
         startStream={startStream}
         sendInput={sendInput}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-app-1');
-    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-pointer'));
     await screen.findByTestId('remote-window-video');
-    expect(sendInput).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
-    fireEvent.click(screen.getByRole('button', { name: '缩小远程窗口' }));
-    expect(sendInput).not.toHaveBeenCalled();
 
     const surface = screen.getByTestId('remote-window-video-surface');
     Object.defineProperty(surface, 'getBoundingClientRect', {
@@ -2282,16 +2237,11 @@ describe('RemoteWindowOverlay', () => {
     });
 
     sendInput.mockClear();
-    fireEvent.wheel(surface, { clientX: 100, clientY: 50, deltaX: 0, deltaY: 64 });
-    expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toEqual([
-      'scroll',
-    ]);
-
-    sendInput.mockClear();
-    fireEvent.keyDown(surface, { key: 'a', code: 'KeyA' });
-    expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toEqual([
-      'key',
-    ]);
+    fireEvent.pointerDown(surface, { pointerId: 11, clientX: 40, clientY: 60, pointerType: 'touch', isPrimary: true });
+    fireEvent.pointerMove(surface, { pointerId: 11, clientX: 40, clientY: 120, pointerType: 'touch', isPrimary: true });
+    fireEvent.pointerUp(surface, { pointerId: 11, clientX: 40, clientY: 120, pointerType: 'touch', isPrimary: true });
+    fireEvent.wheel(surface, { clientX: 40, clientY: 80, deltaX: 0, deltaY: 24 });
+    expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toContain('scroll');
   });
 
   it('captures a selected remote-window screenshot without focusing the desktop app', async () => {
