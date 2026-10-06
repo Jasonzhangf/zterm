@@ -506,6 +506,48 @@ describe('useRemoteWindowQuality adaptive wiring', () => {
     expect(updateStreamQuality).toHaveBeenCalledTimes(3);
   });
 
+  it('rebuilds adaptive observation after a lane identity change instead of latching the old identity', async () => {
+    vi.useFakeTimers();
+    const updateStreamQuality = vi.fn<Parameters<RemoteWindowQualityUpdater>, ReturnType<RemoteWindowQualityUpdater>>(
+      async (_sessionId, payload) => appliedResult(payload),
+    );
+    const h = renderAdaptive({ preference: 'quality', updateStreamQuality });
+    await flush();
+    expect(updateStreamQuality).toHaveBeenCalledTimes(1);
+
+    await reachAdaptiveDispatch(h);
+    expect(updateStreamQuality).toHaveBeenCalledTimes(2);
+    expect(updateStreamQuality.mock.calls[1][1].videoProfile.maxBitrateBps).toBe(6_000_000);
+    await flush();
+
+    // The receiver admits a lane/track identity change on the same stream.
+    const next = (sampledAtMs: number, overrides: Partial<RemoteWindowVideoStatsSample> = {}) =>
+      credible(sampledAtMs, { mediaEpoch: 1, ...overrides });
+
+    // The first new-identity tick holds as unknown and never dispatches.
+    h.enqueue(next(h.at()));
+    await tick();
+    expect(updateStreamQuality).toHaveBeenCalledTimes(2);
+
+    // The observed identity advanced, so the two fresh slots armed by the
+    // applied downgrade are consumed on the new identity.
+    h.enqueue(next(h.at()), next(h.at()));
+    await tick();
+    await tick();
+    expect(updateStreamQuality).toHaveBeenCalledTimes(2);
+
+    // A stable window on the new identity can still restore. Latching the old
+    // identity would leave the hook returning early forever and this would stay
+    // at two calls.
+    const stableAt = h.at();
+    h.enqueue(next(stableAt));
+    await tick();
+    h.enqueue(next(stableAt + 12_000));
+    await tick();
+    expect(updateStreamQuality).toHaveBeenCalledTimes(3);
+    expect(updateStreamQuality.mock.calls[2][1].videoProfile.maxBitrateBps).toBeGreaterThan(6_000_000);
+  });
+
   it('does not restore across a rejected stats read', async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

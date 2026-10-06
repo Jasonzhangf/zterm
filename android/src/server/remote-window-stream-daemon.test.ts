@@ -618,8 +618,22 @@ describe('remote window stream daemon v2 contract', () => {
     const first = runtime.stopStream({ requestId: 'stop-a', streamId: payload.streamId });
     const second = runtime.stopStream({ requestId: 'stop-b', streamId: payload.streamId });
     const [firstResult, secondResult] = await Promise.all([first, second]);
-    expect(firstResult).toBe(secondResult);
+    // Cleanup is shared, but each protocol caller must settle on its own
+    // requestId: the client matches a stop result only by the id it sent.
     expect(releaseStream).toHaveBeenCalledTimes(1);
+    expect(firstResult).not.toBe(secondResult);
+    expect(firstResult.requestId).toBe('stop-a');
+    expect(secondResult.requestId).toBe('stop-b');
+    expect(firstResult.streamId).toBe(payload.streamId);
+    expect(secondResult.streamId).toBe(payload.streamId);
+    if ('code' in firstResult || 'code' in secondResult) {
+      throw new Error(
+        `concurrent stop must settle with a status, got ${JSON.stringify({ firstResult, secondResult })}`,
+      );
+    }
+    expect(firstResult.phase).toBe('stopped');
+    expect(secondResult.phase).toBe('stopped');
+    expect(firstResult.cleanup).toEqual(secondResult.cleanup);
     await runtime.dispose();
   });
 

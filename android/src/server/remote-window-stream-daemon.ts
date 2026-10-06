@@ -847,7 +847,17 @@ export function createRemoteWindowStreamDaemonRuntime(
   ): Promise<RemoteWindowStreamStatusPayload | RemoteWindowStreamErrorPayload> {
     const existing = pendingStops.get(streamId);
     if (existing) {
-      return existing.promise;
+      // Cleanup is shared, but every protocol caller keeps its own dispatch
+      // identity: the client settles a stop only by the requestId it sent.
+      // Project this caller's requestId/purpose onto the shared outcome so a
+      // concurrent stop never receives the first caller's correlation.
+      const callerRequestId = requestId || activeStreams.get(streamId)?.requestId || `rw-stop-${streamId}`;
+      const callerPurpose = purpose ?? activeStreams.get(streamId)?.purpose;
+      return existing.promise.then((result) =>
+        'code' in result
+          ? { ...result, requestId: callerRequestId }
+          : { ...result, requestId: callerRequestId, purpose: callerPurpose ?? result.purpose },
+      );
     }
     const entry = activeStreams.get(streamId);
     const requestIdForStatus = requestId || entry?.requestId || `rw-stop-${streamId}`;

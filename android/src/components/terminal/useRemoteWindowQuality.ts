@@ -487,12 +487,19 @@ export function useRemoteWindowQuality({
         }
         setLastStatsSample(sample);
         const identity = resolveRemoteWindowStatsIdentity(sample);
-        if (
-          identity === null
-          || (adaptiveIdentityRef.current !== null && adaptiveIdentityRef.current !== identity)
-        ) {
-          // An unconfirmable or changed media identity clears the observation
-          // window through the policy unknown branch and never dispatches.
+        if (identity === null) {
+          // An unconfirmable identity clears the observation window through the
+          // policy unknown branch and never dispatches.
+          observeUnknownAdaptiveSample(generation);
+          return;
+        }
+        if (adaptiveIdentityRef.current !== null && adaptiveIdentityRef.current !== identity) {
+          // A lane/track identity change admitted by the receiver. Hold this
+          // tick as unknown so no sample crosses identities, then advance the
+          // observed identity so the next tick can rebuild a baseline. The old
+          // identity is never left latched, otherwise adaptive downgrade and
+          // restore would stop for the rest of the stream.
+          adaptiveIdentityRef.current = identity;
           observeUnknownAdaptiveSample(generation);
           return;
         }

@@ -794,8 +794,17 @@ function isHealthyRecoverySample(sample: RemoteWindowVideoStatsSample): boolean 
   const dropped = sample.framesDropped ?? null;
   const freezes = sample.freezeCount ?? null;
   const bitrate = sample.receivedBitrateBps ?? null;
+  const rawLoss = sample.receivedPacketLossRatio;
+  const loss = typeof rawLoss === 'number' && Number.isFinite(rawLoss) ? rawLoss : null;
+  // The product's restore window only accumulates on an established interval: a
+  // null/non-finite receive-loss ratio (first interval, identity change, or
+  // zero-traffic tick) can never prove health, and >=5% loss is pressure. A
+  // health predicate without this gate would expect a restore the product
+  // deliberately holds.
   return bitrate !== null
     && bitrate > 0
+    && loss !== null
+    && loss < 0.05
     && (rttMs === null || rttMs < 350)
     && (jitterMs === null || jitterMs < 250)
     && (dropped === null || dropped < 3)
