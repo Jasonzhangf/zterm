@@ -4709,7 +4709,7 @@ describe('RemoteWindowOverlay', () => {
     expect(content.style.height).toBe('100%');
   });
 
-  it('mounts the embedded-floating locked toolbar and accepts double-click to escalate to fullscreen', async () => {
+  it('mounts the embedded-floating locked toolbar and keeps double-click passive', async () => {
     const mediaStream = { id: 'media-stream-embedded-half' } as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-embedded-half',
@@ -4740,7 +4740,7 @@ describe('RemoteWindowOverlay', () => {
     expect(overlay.querySelector('[data-testid="remote-window-locked-toolbar"]')).toBeTruthy();
     fireEvent.doubleClick(screen.getByTestId('remote-window-video-surface'), { clientX: 30, clientY: 30 });
     await waitFor(() => {
-      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
     });
   });
 
