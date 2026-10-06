@@ -290,16 +290,27 @@ export function ResourceBottomSheet({
             data-testid="resource-stream-pane"
             data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.stream}
             data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.remoteWindowSurface}
-            style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible' }}
-            onTouchStart={(event) => event.stopPropagation()}
-            onTouchMove={(event) => event.stopPropagation()}
-            onTouchEnd={(event) => event.stopPropagation()}
-            onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }}
-            onPointerDown={(event) => event.stopPropagation()}
-            onPointerUp={(event) => event.stopPropagation()}
-            onPointerCancel={(event) => { event.stopPropagation(); gestureRuntime.current.cancel(`pointer:${event.pointerId}`); }}
+            style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column' }}
           >
-            {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
+            {!streamExpanded && onExpand ? (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 14px 0' }}>
+                <AmbientButton
+                  type="button"
+                  data-testid="resource-stream-fullscreen"
+                  aria-label="窗口串流全屏"
+                  onClick={() => {
+                    setExpanded(true);
+                    onExpand();
+                  }}
+                  style={{ ...buttonStyle, minHeight: 36, padding: '0 12px', fontSize: 13 }}
+                >
+                  全屏
+                </AmbientButton>
+              </div>
+            ) : null}
+            <div style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible' }}>
+              {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
+            </div>
           </div>
         ) : null}
         {tab === 'web' ? (

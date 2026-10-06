@@ -517,10 +517,16 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     pointerId: number;
     startScale: number;
   } | null>(null);
-  // Embedded half-sheet preview is passive: only embedded fullscreen (and the
-  // standalone floating overlay) owns the Direct Touch / Mouse Emulation arena.
+  // Embedded half-sheet preview was previously a passive view: only embedded
+  // fullscreen (and the standalone floating overlay) owned the Direct Touch /
+  // Mouse Emulation arena. The picker is now reachable through a dedicated
+  // "全屏" ambient button on the resource sheet, and embedded floating must
+  // own the same gesture/zoom/click pipeline as the floating standalone.
   const remoteWindowInteractionEnabled = !embedded
     || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
+  const showEmbeddedLockedToolbar = embedded
+    && state.phase === 'targetLocked'
+    && state.mode === 'floating';
   const lastReportedQuickBarSuppressionRef = useRef<boolean | null>(null);
   const lastReportedBodySuppressionRef = useRef<boolean | null>(null);
   const lastReportedInputContextKeyRef = useRef<string | null>(null);
@@ -2829,7 +2835,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       data-testid="remote-window-video-surface"
       ref={videoSurfaceRef}
       tabIndex={0}
-      onDoubleClick={state.mode === 'floating' && !embedded ? handleFullscreen : undefined}
+      onDoubleClick={state.mode === 'floating' && (!embedded || showEmbeddedLockedToolbar) ? handleFullscreen : undefined}
       onPointerDown={handleVideoSurfacePointerDown}
       onPointerMove={handleVideoSurfacePointerMove}
       onPointerUp={handleVideoSurfacePointerUp}
@@ -3033,7 +3039,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         ? fullscreenOverlayStyle
         : embedded ? embeddedOverlayStyle : floatingOverlayStyle}
     >
-      {(!embedded || state.mode === 'fullscreen') ? <RemoteWindowLockedToolbar
+      {(!embedded || state.mode === 'fullscreen' || showEmbeddedLockedToolbar) ? <RemoteWindowLockedToolbar
           ref={lockedToolbarRef}
           activeTitle={state.target.videoTarget.title || state.target.videoTarget.appBundleId}
           appSwitchContent={lockedAppSwitchContent}

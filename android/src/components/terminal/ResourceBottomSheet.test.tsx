@@ -58,7 +58,7 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps stream gestures inside the stream pane', () => {
+  it('forwards pointer gestures from the stream pane to the embedded overlay', () => {
     const onClose = vi.fn();
     render(<ResourceBottomSheet open initialTab="stream" renderFileBrowser={() => null} renderRemoteWindow={() => <div data-testid="stream-surface" />} onClose={onClose} />);
     const pane = screen.getByTestId('resource-stream-pane');
@@ -66,6 +66,29 @@ describe('ResourceBottomSheet', () => {
     fireEvent.touchMove(pane, { touches: [{ clientY: 80 }] });
     fireEvent.touchEnd(pane, { changedTouches: [{ clientY: 80 }] });
     expect(onClose).not.toHaveBeenCalled();
+    // The stream pane must not steal the gesture: the overlay is reachable for the embedded overlay's own pointer/touch chain.
+    // No React-attached pointer event handler is set on the stream pane container (only its inner child is owned by the overlay).
+    expect(Object.keys((pane as unknown as Record<string, unknown>)).filter((key) => key.startsWith('on')).filter((key) => key.toLowerCase().includes('pointer'))).toEqual([]);
+  });
+
+  it('exposes a stream fullscreen ambient button that escalates the parent', () => {
+    const onExpand = vi.fn();
+    const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="remote-stream">stream</div> : null);
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={renderRemoteWindow}
+        onClose={vi.fn()}
+        onExpand={onExpand}
+      />,
+    );
+    const button = screen.getByTestId('resource-stream-fullscreen');
+    expect(button).toBeTruthy();
+    fireEvent.click(button);
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', true, expect.any(Function));
   });
 
   it('keeps file page vertical drags inside the content scope', () => {

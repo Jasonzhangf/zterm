@@ -4709,6 +4709,41 @@ describe('RemoteWindowOverlay', () => {
     expect(content.style.height).toBe('100%');
   });
 
+  it('mounts the embedded-floating locked toolbar and accepts double-click to escalate to fullscreen', async () => {
+    const mediaStream = { id: 'media-stream-embedded-half' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-embedded-half',
+      targets: [makeTarget('app-embedded-half', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        embedded
+        embeddedFullscreen={false}
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-embedded-half'));
+    await screen.findByTestId('remote-window-video-surface');
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+    });
+    // The embedded floating lock toolbar must mount so the user has a fullscreen entry.
+    const overlay = screen.getByTestId('remote-window-locked-overlay');
+    expect(overlay.querySelector('[data-testid="remote-window-locked-toolbar"]')).toBeTruthy();
+    fireEvent.doubleClick(screen.getByTestId('remote-window-video-surface'), { clientX: 30, clientY: 30 });
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    });
+  });
+
   it('keeps a resize ACK target in the cached picker catalog after the stream closes', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const target = makeTarget('app-1', 'TextEdit', 'app-window');
