@@ -292,7 +292,7 @@ export function ResourceBottomSheet({
             data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.remoteWindowSurface}
             style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column' }}
           >
-            {!streamExpanded && onExpand ? (
+            {!streamExpanded ? (
               <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '8px 14px 0' }}>
                 <AmbientButton
                   type="button"
@@ -300,7 +300,7 @@ export function ResourceBottomSheet({
                   aria-label="窗口串流全屏"
                   onClick={() => {
                     setExpanded(true);
-                    onExpand();
+                    onExpand?.();
                   }}
                   style={{ ...buttonStyle, minHeight: 36, padding: '0 12px', fontSize: 13 }}
                 >

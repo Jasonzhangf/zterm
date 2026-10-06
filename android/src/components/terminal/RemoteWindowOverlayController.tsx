@@ -3070,6 +3070,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           screenshotButtonStyle={screenshotButtonStyle}
           streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${qualityStatus}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
           targetKindLabel={formatTargetKind(state.target)}
+           passivePreview={embedded && state.mode === 'floating'}
           onClose={handleExplicitClose}
           onFullscreen={handleFullscreen}
           onRequestKeyboard={handleRequestKeyboard}
