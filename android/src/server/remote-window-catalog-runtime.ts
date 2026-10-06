@@ -161,6 +161,7 @@ export function createRemoteWindowCatalogRuntime(
             'tmux_client_catalog_unavailable',
             'iterm2_capture_window_unavailable',
             'remote_window_pane_geometry_invalid',
+            'remote_window_manifest_invalid',
           ]),
     ]);
   };

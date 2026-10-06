@@ -349,6 +349,49 @@ describe('remote window catalog runtime owner', () => {
     runtime.dispose();
   });
 
+  it('does not surface a manifest failure from excluded iTerm2 source', async () => {
+    const runtime = createRuntime('darwin', {
+      runIterm2Python: vi.fn(async () => JSON.stringify({
+        windows: [{
+          windowId: 'iterm-invalid',
+          title: 'iTerm2',
+          pid: 7,
+          frame: { x: 0, y: 0, width: 400, height: 300 },
+          tabs: [{
+            tabId: 'tab-invalid',
+            root: {
+              type: 'session',
+              sessionId: 'session-invalid',
+              title: 'invalid-pane',
+              tty: '/dev/ttys001',
+              frame: { x: -1, y: 0, width: 400, height: 300 },
+            },
+          }],
+        }],
+      })),
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify({
+        windows: [{
+          windowId: 'window-1',
+          ownerName: 'Example',
+          appBundleId: 'com.example.app',
+          pid: 42,
+          title: 'Example',
+          frame: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      })),
+    });
+
+    runtime.warm();
+    await expect(runtime.listTargets({ requestId: 'read-app-only', includeIterm2: false })).resolves.toMatchObject({
+      requestId: 'read-app-only',
+      targets: [expect.objectContaining({ streamTargetId: 'app-window:42:window-1' })],
+    });
+    const read = await runtime.listTargets({ requestId: 'read-app-only-again', includeIterm2: false });
+    expect(read).toMatchObject({ requestId: 'read-app-only-again' });
+    expect((read as { errors?: Array<{ code: string }> }).errors).toBeUndefined();
+    runtime.dispose();
+  });
+
   it('does not surface a failure from a source the request excluded', async () => {
     vi.useFakeTimers();
     // The app-window source is enumerated first, so it owns the phase counter.
