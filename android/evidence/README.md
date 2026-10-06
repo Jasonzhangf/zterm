@@ -109,4 +109,10 @@ evidence/
   - GitHub Actions run `37421603700`（PR #161，SHA `c1291e01`）→ 6/6 job `pass`，含 `Daemon package dry-run`。
 - 该候选新增/变更的覆盖点：`prepare-daemon-ci-wrtc-input.mjs`（CI dry-run 输入生产者）、`prepare-daemon-release-wrtc-input.mjs`（可选 `inputKind`/`addon.origin` 校验并写入 provenance）、`verify-daemon-wrtc-packaging.mjs` 的 `[ci-input]` 段（19 项断言：manifest 字段、已安装平台 addon 字节、严格 helper 接受、provenance 保留 `inputKind=ci-prebuilt-dry-run` 与 `addonOrigin=npm-prebuilt`、补丁版 release 输入不获得 CI 标记、包版本不匹配 fail-closed、已安装 addon 缺失 fail-closed）、`.github/workflows/ci.yml` daemon-package job 增加该门禁。
 - 本地原始日志：`review-fixes/wrtc-packaging-gate-receipt.log`（sha256 `b3211c20e2f4bd8a44f650f8f22b26ac7d13eeffec7c4088126d6cdaeb9c488b`）、`verify-ci-receipt.log`、`type-check-receipt.log`、`pr-checks-r4.log`。
+- 回执与提交的绑定方式（避免"回执属于另一个 SHA"的歧义）：上述命令在 `c1291e018deb72a651c546bf7678663dc3375418` 执行；本索引提交相对该 SHA 的唯一差异是 `android/evidence/README.md` 自身（`git diff --name-only c1291e01 HEAD` 只输出该文件），因此被验证的源码在本提交中逐字节相同。可直接核对的被验证源码摘要：
+  - `android/scripts/prepare-daemon-ci-wrtc-input.mjs` sha256 `549f110289fd7f14828e91ff76a03eec18fe1c8696eb918b926fab6f99d66ab7`
+  - `android/scripts/prepare-daemon-release-wrtc-input.mjs` sha256 `f627e40328930e2aa537458805476515d8dc19d7195d73541a242314e10267e3`
+  - `android/scripts/verify-daemon-wrtc-packaging.mjs` sha256 `5696aaf73e3237f436448bfc974f746afb8fe381af85145e12fbcdc93a3578b3`
+  - `android/package.json` sha256 `574977d15a6087057c9787e209ce76c79a48222127647b268b7194385fac26e9`
+  - `.github/workflows/ci.yml` sha256 `5d7e5a5dc8131a9e60167fb4eef5b47381a188140c2b5162036f8413af15c4d9`
 - 同一交付的既有有效证据（不重跑）：真实 ABR 压力→恢复两次 `ok=true`（`abr-recovery-r4-diag/`、`abr-recovery-r5-confirm/`，pressure rev3 → recovery rev4 / 8 Mbps / 30 FPS，41 healthy samples，`cleanup.released=true`）；安装态 emulator 真实入口（`l5-device/`，`com.zterm.android` `0.1.3.3208`，`firstInstallTime` 保留）；独立架构 review 对 `bfc5436f` 的 PASS（`review-r2/`）。
