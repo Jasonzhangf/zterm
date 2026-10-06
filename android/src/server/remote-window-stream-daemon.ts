@@ -34,10 +34,22 @@ import type {
   RemoteWindowVideoProfile,
   RemoteWindowBrowserUserAgentRequestPayload,
   RemoteWindowBrowserUserAgentResultPayload,
+  RemoteWindowCloseRequestPayload,
+  RemoteWindowCloseResultPayload,
+  RemoteWindowStreamCleanupResult,
+  RemoteWindowStreamCleanupResourceError,
+  RemoteWindowStreamInputReleaseProjection,
 } from '@zterm/shared/protocol';
-import { getRemoteWindowMediaPlanV2Contract } from '@zterm/shared/protocol';
+import {
+  getRemoteWindowMediaPlanV2Contract,
+  REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE,
+} from '@zterm/shared/protocol';
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
-import { applyRemoteWindowStreamGroupQuality } from './remote-window-quality';
+import {
+  applyRemoteWindowStreamGroupQuality,
+  RemoteWindowQualityUnsupportedError,
+  REMOTE_WINDOW_STREAM_QUALITY_UNSUPPORTED_CODE,
+} from './remote-window-quality';
 import { runPhase4RemoteWindow, type DagpipeResult } from './dagpipe-bridge';
 import {
   releaseRemoteWindowStreamSessionResources,
@@ -59,6 +71,7 @@ import {
   createDefaultRemoteWindowInputHelper,
   type RemoteWindowInputEventRunner,
   type RemoteWindowInputHelper,
+  type RemoteWindowNativeResizeOperation,
 } from './remote-window-input-helper';
 import { validateRemoteWindowInputPayload } from './remote-window-input-policy';
 import {
@@ -200,6 +213,9 @@ export interface RemoteWindowStreamDaemonRuntime {
   stopStream: (
     payload: RemoteWindowStreamStopRequestPayload,
   ) => Promise<RemoteWindowStreamStatusPayload | RemoteWindowStreamErrorPayload>;
+  requestRemoteWindowClose: (
+    payload: RemoteWindowCloseRequestPayload,
+  ) => Promise<RemoteWindowCloseResultPayload>;
   updateStreamQuality: (
     payload: RemoteWindowStreamQualityRequestPayload,
   ) => Promise<RemoteWindowStreamQualityResultPayload | RemoteWindowStreamErrorPayload>;
@@ -209,11 +225,11 @@ export interface RemoteWindowStreamDaemonRuntime {
   injectInput: (
     payload: RemoteWindowInputEventPayload,
     control: RemoteWindowInputDeliveryControl,
-  ) => Promise<RemoteWindowInputAckMessage | null>;
+  ) => Promise<RemoteWindowInputAck | null>;
   setBrowserUserAgent: (
     payload: RemoteWindowBrowserUserAgentRequestPayload,
   ) => Promise<RemoteWindowBrowserUserAgentResultPayload>;
-  dispose: (reason?: string) => void;
+  dispose: (reason?: string) => Promise<void>;
 }
 
 export interface RemoteWindowStreamDaemonHandlers {
@@ -264,15 +280,27 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   focusCaptureStartedReported: boolean;
   overviewCaptureStartedReported: boolean;
   cleanupDone: boolean;
+  admissionClosed: boolean;
   reliableInputTail: Promise<void>;
-  reliableInputInFlightBySequence: Map<string, Promise<RemoteWindowInputAckMessage>>;
-  reliableInputCompletedBySequence: Map<string, RemoteWindowInputAckMessage>;
+  reliableInputInFlightBySequence: Map<string, Promise<RemoteWindowInputAck>>;
+  reliableInputCompletedBySequence: Map<string, RemoteWindowInputAck>;
   continuousGestureState: Map<string, { lastSampledAtMs: number; ended: boolean }>;
 }
 
-interface RemoteWindowInputAckMessage {
+interface RemoteWindowInputAck {
   control: RemoteWindowInputAckControl;
   payload: RemoteWindowInputResultPayload;
+}
+
+/**
+ * The stream release capability the input helper exposes for r5 lifecycle.
+ * It is declared optional here because the concrete helper owner may land
+ * after this backend author; a missing capability is surfaced as an explicit
+ * failed input release, never a silent success.
+ */
+interface RemoteWindowStreamInputHelperRelease {
+  releaseStream?: (streamId: string) => Promise<RemoteWindowStreamInputReleaseProjection>;
+  hasLease?: (streamId: string) => boolean;
 }
 
 interface RemoteWindowPendingMediaFrame {
@@ -286,6 +314,15 @@ interface PendingRemoteWindowAnswer {
   resolve: (answer: RTCSessionDescriptionInit) => void;
   reject: (error: Error) => void;
   timeoutId: ReturnType<typeof setTimeout>;
+}
+
+/**
+ * The single serialized async stop owner for one remote-window stream. Concurrent
+ * callers observe the same pending operation/result.
+ */
+interface RemoteWindowStopOperation {
+  promise: Promise<RemoteWindowStreamStatusPayload | RemoteWindowStreamErrorPayload>;
+  result?: RemoteWindowStreamStatusPayload | RemoteWindowStreamErrorPayload;
 }
 
 
@@ -321,27 +358,26 @@ interface RemoteWindowResizeApplyResult {
 
 function buildObservedRemoteWindowTarget(
   target: RemoteWindowStreamTargetManifest,
-  observed: RemoteWindowStreamTargetManifest,
+  observation: RemoteWindowNativeResizeOperation,
   createdAt: string,
 ): RemoteWindowStreamTargetManifest {
   if (
     target.videoTarget.kind !== 'app-window'
-    || observed.streamTargetId !== target.streamTargetId
-    || observed.videoTarget.kind !== target.videoTarget.kind
-    || observed.videoTarget.pid !== target.videoTarget.pid
-    || observed.videoTarget.windowId !== target.videoTarget.windowId
   ) {
     throw new Error('remote window resize readback identity mismatch');
   }
-  validateStreamTargetForCapture(observed);
+  const bounds = {
+    x: Math.round(observation.position.x),
+    y: Math.round(observation.position.y),
+    width: Math.round(observation.size.width),
+    height: Math.round(observation.size.height),
+  };
   const nextTarget: RemoteWindowStreamTargetManifest = {
     ...target,
     videoTarget: {
       ...target.videoTarget,
-      windowBoundsTopLeftPx: { ...observed.videoTarget.windowBoundsTopLeftPx },
-      cropRectTopLeftPx: observed.videoTarget.cropRectTopLeftPx
-        ? { ...observed.videoTarget.cropRectTopLeftPx }
-        : undefined,
+      windowBoundsTopLeftPx: bounds,
+      cropRectTopLeftPx: bounds,
     },
     capture: {
       ...target.capture,
@@ -390,7 +426,7 @@ function takeRemoteWindowLatestFrame(
 
 async function applyRemoteWindowTargetResize(
   entry: ActiveRemoteWindowStream,
-  observed: RemoteWindowStreamTargetManifest,
+  observation: RemoteWindowNativeResizeOperation,
   createdAt: string,
   assertCurrentTarget: () => void,
 ): Promise<RemoteWindowResizeApplyResult> {
@@ -398,7 +434,7 @@ async function applyRemoteWindowTargetResize(
   if (!captureSource?.updateTarget) {
     throw new Error('remote window active capture source cannot update target resize');
   }
-  const nextTarget = buildObservedRemoteWindowTarget(entry.target, observed, createdAt);
+  const nextTarget = buildObservedRemoteWindowTarget(entry.target, observation, createdAt);
   await captureSource.updateTarget(nextTarget);
   assertCurrentTarget();
   entry.target = nextTarget;
@@ -429,7 +465,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   const captureStartupTimeoutMs = deps.captureStartupTimeoutMs || DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS;
   const runIterm2Python = deps.runIterm2Python || runDefaultIterm2Python;
   const runMacosAppWindowCatalog = deps.runMacosAppWindowCatalog || runDefaultMacosAppWindowCatalog;
-  let remoteWindowInputHelper: RemoteWindowInputHelper | null = null;
+  let remoteWindowInputHelper: (RemoteWindowInputHelper & RemoteWindowStreamInputHelperRelease) | null = null;
   const getRemoteWindowInputHelper = () => {
     if (!remoteWindowInputHelper) {
       remoteWindowInputHelper = deps.remoteWindowInputHelperFactory
@@ -452,9 +488,14 @@ export function createRemoteWindowStreamDaemonRuntime(
   const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target, options) => {
     // 每个业务输入都在同一持久 helper 队列内完成前台/窗口校验后再注入。
     // 禁止时间防抖跳过校验：用户可在任意时刻把另一窗口置前。
-    return getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target, {
-      daemonReceivedAtMs: options.daemonReceivedAtMs,
-    }), options.delivery);
+    return getRemoteWindowInputHelper().send({
+      ...buildRemoteWindowInputConfig(payload, target, {
+        daemonReceivedAtMs: options.daemonReceivedAtMs,
+      }),
+      // The helper owns the per-stream lease table; the daemon passes the
+      // stream identity so releaseStream can withdraw exactly this stream.
+      streamId: payload.streamId,
+    } as unknown as Parameters<RemoteWindowInputHelper['send']>[0], options.delivery);
   });
   const now = deps.now || (() => new Date().toISOString());
   const captureSourceFactory = deps.captureSourceFactory || startScreenCaptureKitFrameSource;
@@ -467,7 +508,9 @@ export function createRemoteWindowStreamDaemonRuntime(
   const pendingAnswers = new Map<string, PendingRemoteWindowAnswer>();
   const pendingIceCandidatesByStream = new Map<string, RTCIceCandidateInit[]>();
   const iceCandidateFingerprintsByStream = new Map<string, Set<string>>();
-  const closedStreamIds = new Set<string>();
+  const pendingStops = new Map<string, RemoteWindowStopOperation>();
+  const completedStops = new Map<string, RemoteWindowStreamStatusPayload>();
+  let disposePromise: Promise<void> | null = null;
   const targetCatalogRefreshIntervalMs = Math.max(
     1_000,
     Math.floor(deps.targetCatalogRefreshIntervalMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS),
@@ -501,6 +544,31 @@ export function createRemoteWindowStreamDaemonRuntime(
       }, 25_000);
       pendingAnswers.set(key, { streamId, requestId, resolve, reject, timeoutId });
     });
+  }
+
+  /**
+   * Cancels the original pending-answer owner at the admission boundary: clears
+   * its existing timer, deletes the pending entry, and rejects its original
+   * promise with the typed cancellation code. Returns true when a pending
+   * answer was cancelled.
+   */
+  function cancelPendingRemoteWindowAnswer(streamId: string, requestId?: string) {
+    let cancelled = false;
+    for (const [key, pending] of Array.from(pendingAnswers.entries())) {
+      if (pending.streamId !== streamId) {
+        continue;
+      }
+      if (requestId !== undefined && pending.requestId !== requestId) {
+        continue;
+      }
+      clearTimeout(pending.timeoutId);
+      pendingAnswers.delete(key);
+      const error = new Error(`remote window stream answer cancelled: ${streamId}/${pending.requestId}`);
+      error.name = REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE;
+      pending.reject(error);
+      cancelled = true;
+    }
+    return cancelled;
   }
 
   function buildStreamError(
@@ -544,14 +612,12 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
   }
 
-  function markStreamClosed(streamId: string) {
-    closedStreamIds.add(streamId);
-    if (closedStreamIds.size > 128) {
-      const oldestStreamId = closedStreamIds.values().next().value;
-      if (typeof oldestStreamId === 'string') {
-        closedStreamIds.delete(oldestStreamId);
-      }
-    }
+  /**
+   * Drops the buffered ICE/fingerprint state for one stream id at real
+   * retirement. r5 keeps no closed-stream tombstone: cancellation truth is the
+   * active entry's admissionClosed flag plus the existing completedStops cache.
+   */
+  function clearRemoteWindowStreamIceState(streamId: string) {
     for (const key of pendingIceCandidatesByStream.keys()) {
       if (key === streamId || key.startsWith(`${streamId}\u0000`)) pendingIceCandidatesByStream.delete(key);
     }
@@ -560,9 +626,49 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
   }
 
-  function cleanupStream(entry: ActiveRemoteWindowStream, reason: string) {
+  /**
+   * Releases this stream's input-helper leases. A missing helper release
+   * capability is surfaced as an explicit failed projection with the input
+   * lease retained for retry, never manufactured as released.
+   */
+  function releaseRemoteWindowStreamInput(entry: ActiveRemoteWindowStream): Promise<RemoteWindowStreamInputReleaseProjection> {
+    const helper = getRemoteWindowInputHelper();
+    if (typeof helper.releaseStream !== 'function') {
+      return Promise.resolve({
+        status: 'failed',
+        released: [],
+        sharedReleased: [],
+        remaining: [`input:${entry.streamId}`],
+        errors: ['remote window input helper release capability is unavailable'],
+      });
+    }
+    return helper.releaseStream(entry.streamId).then(
+      (release) => ({
+        status: release.status,
+        released: release.released,
+        sharedReleased: release.sharedReleased,
+        remaining: release.remaining,
+        errors: release.errors,
+      }),
+      (error) => ({
+        status: 'failed',
+        released: [],
+        sharedReleased: [],
+        remaining: [`input:${entry.streamId}`],
+        errors: [error instanceof Error ? error.message : String(error)],
+      }),
+    );
+  }
+
+  /**
+   * Retires an entry after a fully successful release: removes it from the
+   * active registry and caches the stream id in the existing bounded
+   * completed-stream cache. Incomplete cleanup keeps the entry so a repeat
+   * stop retries the preserved resources.
+   */
+  function retireRemoteWindowStream(entry: ActiveRemoteWindowStream) {
     if (entry.cleanupDone) {
-      return false;
+      return;
     }
     entry.cleanupDone = true;
     if (entry.compositePollTimer) {
@@ -570,38 +676,245 @@ export function createRemoteWindowStreamDaemonRuntime(
       entry.compositePollTimer = null;
     }
     activeStreams.delete(entry.streamId);
-    markStreamClosed(entry.streamId);
+    clearRemoteWindowStreamIceState(entry.streamId);
     entry.pendingFocusFrame = null;
     entry.pendingOverviewFrame = null;
     entry.reliableInputInFlightBySequence.clear();
     entry.reliableInputCompletedBySequence.clear();
     entry.continuousGestureState.clear();
-    releaseRemoteWindowStreamSessionResources({
-      ...entry,
-      sendStatus: entry.handlers.sendStatus,
-    }, reason);
-    entry.captureSource = null;
-    entry.overviewCaptureSource = null;
-    return true;
+  }
+
+  function buildRemoteWindowStreamCleanupResult(
+    sessionResult: ReturnType<typeof releaseRemoteWindowStreamSessionResources>,
+    inputRelease?: RemoteWindowStreamInputReleaseProjection,
+  ): RemoteWindowStreamCleanupResult {
+    const remainingResources = [
+      ...sessionResult.remainingResources,
+      ...(inputRelease?.remaining ?? []),
+    ];
+    const errors: RemoteWindowStreamCleanupResourceError[] = [
+      ...sessionResult.errors.map((error) => ({ resource: error.resource, message: error.message })),
+      ...(inputRelease?.errors.map((message) => ({ message })) ?? []),
+    ];
+    let status: RemoteWindowStreamCleanupResult['status'];
+    if (remainingResources.length === 0) {
+      status = 'released';
+    } else if (inputRelease?.status === 'failed') {
+      status = 'failed';
+    } else if (inputRelease?.status === 'unverified') {
+      status = 'unverified';
+    } else {
+      status = 'cleanup_failed';
+    }
+    return { status, remainingResources, errors };
+  }
+
+  /**
+   * Settles reliable input that was already admitted before the lease release.
+   * The reliable tail never rejects; this simply waits for in-flight work to
+   * drain so a native down cannot land after release.
+   */
+  async function settleReliableInputTail(entry: ActiveRemoteWindowStream) {
+    await entry.reliableInputTail;
+  }
+
+  const cacheCompletedStop = (streamId: string, payload: RemoteWindowStreamStatusPayload) => {
+    completedStops.set(streamId, payload);
+    if (completedStops.size > 128) {
+      const oldest = completedStops.keys().next().value;
+      if (typeof oldest === 'string') {
+        completedStops.delete(oldest);
+      }
+    }
+  };
+
+  /**
+   * A stop whose release failed keeps the stream and its resources for retry.
+   * Event-driven callers must surface that typed failure; they never discard
+   * the promise silently.
+   */
+  const reportStopFailure = (entry: ActiveRemoteWindowStream, error: unknown) => {
+    entry.handlers.sendStatus?.({
+      requestId: entry.requestId,
+      streamId: entry.streamId,
+      purpose: entry.purpose,
+      phase: 'streaming',
+      framesSent: entry.framesSent,
+      framesDropped: entry.framesDropped,
+      message: `remote window stream stop failed: ${error instanceof Error ? error.message : String(error)}`,
+    });
+  };
+
+  /**
+   * Fire-and-forget stop for event-driven triggers. The stop owner never
+   * rejects; an incomplete cleanup is surfaced with its typed remaining
+   * resources and preserved for retry.
+   */
+  const stopAndSurface = (entry: ActiveRemoteWindowStream, reason: string) => {
+    void requestRemoteWindowStreamStop(entry.streamId, reason).then(
+      (result) => {
+        if ('cleanup' in result && result.cleanup && result.cleanup.status !== 'released' && result.cleanup.status !== 'absent') {
+          reportStopFailure(entry, result.cleanup.errors.map((error) => error.message).join('; ') || result.cleanup.status);
+        }
+      },
+      (error: unknown) => {
+        reportStopFailure(entry, error);
+      },
+    );
+  };
+
+  /**
+   * The one serialized async stop owner. Admission closes immediately, pending
+   * answers are cancelled before any negotiation continuation, already admitted
+   * input settles, then input-helper leases and session resources are released.
+   * Any failure leaves the real session entry and resource references in place
+   * for a retry with the same owner.
+   */
+  async function performRemoteWindowStreamStop(
+    streamId: string,
+    reason: string,
+    requestId: string,
+    purpose?: RemoteWindowStreamPurpose,
+  ): Promise<RemoteWindowStreamStatusPayload | RemoteWindowStreamErrorPayload> {
+    const entry = activeStreams.get(streamId);
+    if (!entry) {
+      const cachedReleased = completedStops.get(streamId);
+      if (cachedReleased) {
+        return {
+          ...cachedReleased,
+          requestId,
+          ...(purpose ? { purpose } : {}),
+        };
+      }
+      return {
+        requestId,
+        streamId,
+        ...(purpose ? { purpose } : {}),
+        phase: 'stopped',
+        framesSent: 0,
+        cleanup: { status: 'absent', remainingResources: [], errors: [] },
+        message: 'remote window stream was not active',
+      };
+    }
+
+    entry.admissionClosed = true;
+    cancelPendingRemoteWindowAnswer(streamId);
+
+    // Settle already admitted input before lease release.
+    await settleReliableInputTail(entry);
+
+    const inputReleasePromise = releaseRemoteWindowStreamInput(entry);
+    const sessionResult = releaseRemoteWindowStreamSessionResources(entry);
+    const inputRelease = await inputReleasePromise;
+    const cleanup = buildRemoteWindowStreamCleanupResult(sessionResult, inputRelease);
+    const message = cleanup.remainingResources.length === 0
+      ? `remote window stream stopped: ${reason}`
+      : `remote window stream cleanup incomplete: ${reason}`;
+
+    if (cleanup.status === 'released') {
+      retireRemoteWindowStream(entry);
+      cacheCompletedStop(streamId, {
+        requestId,
+        streamId,
+        purpose: entry.purpose,
+        phase: 'stopped',
+        framesSent: entry.framesSent,
+        framesDropped: entry.framesDropped,
+        cleanup,
+        inputRelease,
+        message,
+      });
+    }
+
+    return {
+      requestId,
+      streamId,
+      purpose: entry.purpose,
+      phase: 'stopped',
+      framesSent: entry.framesSent,
+      framesDropped: entry.framesDropped,
+      cleanup,
+      inputRelease,
+      message,
+    };
+  }
+
+  function requestRemoteWindowStreamStop(
+    streamId: string,
+    reason: string,
+    requestId?: string,
+    purpose?: RemoteWindowStreamPurpose,
+  ): Promise<RemoteWindowStreamStatusPayload | RemoteWindowStreamErrorPayload> {
+    const existing = pendingStops.get(streamId);
+    if (existing) {
+      // Cleanup is shared, but every protocol caller keeps its own dispatch
+      // identity: the client settles a stop only by the requestId it sent.
+      // Project this caller's requestId/purpose onto the shared outcome so a
+      // concurrent stop never receives the first caller's correlation.
+      const callerRequestId = requestId || activeStreams.get(streamId)?.requestId || `rw-stop-${streamId}`;
+      const callerPurpose = purpose ?? activeStreams.get(streamId)?.purpose;
+      return existing.promise.then((result) =>
+        'code' in result
+          ? { ...result, requestId: callerRequestId }
+          : { ...result, requestId: callerRequestId, purpose: callerPurpose ?? result.purpose },
+      );
+    }
+    const entry = activeStreams.get(streamId);
+    const requestIdForStatus = requestId || entry?.requestId || `rw-stop-${streamId}`;
+    const operation: RemoteWindowStopOperation = {
+      promise: performRemoteWindowStreamStop(streamId, reason, requestIdForStatus, purpose ?? entry?.purpose),
+    };
+    pendingStops.set(streamId, operation);
+    void operation.promise.then(
+      (result) => {
+        if (pendingStops.get(streamId) === operation) {
+          operation.result = result;
+          pendingStops.delete(streamId);
+        }
+      },
+      () => {
+        if (pendingStops.get(streamId) === operation) {
+          pendingStops.delete(streamId);
+        }
+      },
+    );
+    return operation.promise;
   }
 
   function isCurrentStream(entry: ActiveRemoteWindowStream) {
-    return activeStreams.get(entry.streamId) === entry && !entry.cleanupDone;
+    return activeStreams.get(entry.streamId) === entry && !entry.cleanupDone && !entry.admissionClosed;
   }
 
-  function isRemoteWindowPeerMediaReady(entry: ActiveRemoteWindowStream) {
+  function isRemoteWindowPeerMediaReady(
+    entry: ActiveRemoteWindowStream,
+    lane: 'focus' | 'overview' = 'focus',
+  ) {
     // A local description only means that the offer was created. Feeding the
     // RTCVideoSource before ICE is connected lets the encoder emit delta
     // frames while the receiver is still negotiating; Android then has no
     // decodable reference frame and builds an avoidable decoder backlog.
     // `answer-accepted` is a control-plane milestone, not streaming truth.
+    // The lane's own capture source must be assigned before this lane may
+    // dispatch its retained pending frame. Overview readiness never reuses the
+    // focus source assignment.
+    if (entry.admissionClosed) {
+      return false;
+    }
+    const captureSource = lane === 'overview' ? entry.overviewCaptureSource : entry.captureSource;
+    if (!captureSource) {
+      return false;
+    }
+    const peerConnection = entry.peerConnection;
+    if (!peerConnection) {
+      return false;
+    }
     return Boolean(
-      entry.peerConnection.localDescription
+      peerConnection.localDescription
       && entry.remoteDescriptionApplied
       && (
-        entry.peerConnection.connectionState === 'connected'
-        || entry.peerConnection.iceConnectionState === 'connected'
-        || entry.peerConnection.iceConnectionState === 'completed'
+        peerConnection.connectionState === 'connected'
+        || peerConnection.iceConnectionState === 'connected'
+        || peerConnection.iceConnectionState === 'completed'
       ),
     );
   }
@@ -654,7 +967,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     entry[scheduledKey] = true;
     setImmediate(() => {
       entry[scheduledKey] = false;
-      if (!isCurrentStream(entry) || !isRemoteWindowPeerMediaReady(entry)) {
+      if (!isCurrentStream(entry) || !isRemoteWindowPeerMediaReady(entry, lane)) {
         return;
       }
       const pending = takeRemoteWindowLatestFrame(entry, lane);
@@ -664,11 +977,14 @@ export function createRemoteWindowStreamDaemonRuntime(
       if (nowMs() - pending.capturedAtMs > entry.maxFrameAgeMs) {
         const frameAgeMs = Math.max(0, nowMs() - pending.capturedAtMs);
         entry.framesDropped += 1;
+        // An expired frame that never became visible must not surface as
+        // streaming truth; the drop telemetry only claims streaming once the
+        // stream has actually dispatched a first visible frame.
         entry.handlers.sendStatus?.({
           requestId: entry.requestId,
           streamId: entry.streamId,
           purpose: entry.purpose,
-          phase: 'streaming',
+          phase: entry.framesSent > 0 ? 'streaming' : 'starting',
           lane,
           framesSent: entry.framesSent,
           framesDropped: entry.framesDropped,
@@ -683,7 +999,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       try {
         sendRemoteWindowVideoFrame(entry, pending.frame, lane);
       } catch (error) {
-        cleanupStream(
+        stopAndSurface(
           entry,
           `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`,
         );
@@ -708,7 +1024,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       return;
     }
     enqueueRemoteWindowLatestFrame(entry, lane, captureFrame);
-    if (isRemoteWindowPeerMediaReady(entry)) {
+    if (isRemoteWindowPeerMediaReady(entry, lane)) {
       scheduleRemoteWindowFrameDrain(entry, lane);
     }
   }
@@ -727,7 +1043,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       policy: { allowStream: true, allowQuality: true, fps: 30 },
     });
     if (!gate.ok || !isRemoteWindowDagpipeProjectionReady(gate)) {
-      markStreamClosed(payload.streamId);
+      clearRemoteWindowStreamIceState(payload.streamId);
       return buildStreamError(
         payload,
         'remote_window_dagpipe_rejected',
@@ -736,15 +1052,15 @@ export function createRemoteWindowStreamDaemonRuntime(
       );
     }
     if (platform !== 'darwin') {
-      markStreamClosed(payload.streamId);
+      clearRemoteWindowStreamIceState(payload.streamId);
       return buildStreamError(payload, 'remote_window_platform_unsupported', 'remote window stream is only available on macOS daemon hosts', 'platform-capability');
     }
     if (arch !== 'arm64' && arch !== 'x64') {
-      markStreamClosed(payload.streamId);
+      clearRemoteWindowStreamIceState(payload.streamId);
       return buildStreamError(payload, 'remote_window_webrtc_abi_unsupported', `remote window WebRTC ABI is unsupported: ${platform}-${arch}`, 'platform-capability');
     }
     if (!captureBinary) {
-      markStreamClosed(payload.streamId);
+      clearRemoteWindowStreamIceState(payload.streamId);
       return buildStreamError(
         payload,
         'remote_window_capture_binary_missing',
@@ -759,11 +1075,8 @@ export function createRemoteWindowStreamDaemonRuntime(
       || typeof nonstandard?.RTCVideoSource !== 'function'
       || typeof nonstandard?.rgbaToI420 !== 'function'
     ) {
-      markStreamClosed(payload.streamId);
+      clearRemoteWindowStreamIceState(payload.streamId);
       return buildStreamError(payload, 'remote_window_wrtc_capability_missing', 'remote window requires the native @roamhq/wrtc peer, video source, and RGBA converter capabilities', 'platform-capability');
-    }
-    if (closedStreamIds.has(payload.streamId)) {
-      return buildStreamError(payload, 'remote_window_stream_closed', `remote window stream id was already closed: ${payload.streamId}`, 'stream-lifecycle');
     }
     if (activeStreams.has(payload.streamId)) {
       return buildStreamError(payload, 'remote_window_stream_exists', `remote window stream already exists: ${payload.streamId}`, 'stream-lifecycle');
@@ -779,7 +1092,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       const mediaPlanContract = getRemoteWindowMediaPlanV2Contract(expectedMediaPlan);
       const hasOverviewLane = mediaPlanContract.lanes.some((lane) => lane.role === 'overview');
       if (payload.mediaPlan !== expectedMediaPlan) {
-        markStreamClosed(payload.streamId);
+        clearRemoteWindowStreamIceState(payload.streamId);
         return buildStreamError(
           payload,
           'remote_window_stream_media_plan_mismatch',
@@ -788,7 +1101,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         );
       }
       if (payload.mediaPlanVersion !== mediaPlanContract.version) {
-        markStreamClosed(payload.streamId);
+        clearRemoteWindowStreamIceState(payload.streamId);
         return buildStreamError(
           payload,
           'remote_window_stream_media_plan_version_mismatch',
@@ -890,6 +1203,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         focusCaptureStartedReported: false,
         overviewCaptureStartedReported: false,
         cleanupDone: false,
+        admissionClosed: false,
         reliableInputTail: Promise.resolve(),
         reliableInputInFlightBySequence: new Map(),
         reliableInputCompletedBySequence: new Map(),
@@ -941,7 +1255,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           }
         }
         if (state === 'failed' || state === 'closed') {
-          cleanupStream(streamEntry, `remote window WebRTC connection ${state}`);
+          stopAndSurface(streamEntry, `remote window WebRTC connection ${state}`);
         }
       };
 
@@ -1000,27 +1314,19 @@ export function createRemoteWindowStreamDaemonRuntime(
         swiftBinary,
         captureBinary,
         onFrame: (frame) => {
-          if (!isCurrentStream(streamEntry)) {
-            return;
+          // A capture implementation may emit its first frame before this
+          // factory promise resolves. Keep that frame in the single pending
+          // media slot; the status owner publishes ready only after
+          // streamEntry.captureSource is assigned and the frame is dispatched.
+          if (isCurrentStream(streamEntry)) {
+            handleRemoteWindowCaptureFrame(streamEntry, frame, 'focus');
           }
-          if (!streamEntry.focusCaptureStartedReported) {
-            streamEntry.focusCaptureStartedReported = true;
-            streamEntry.handlers.sendStatus?.({
-              requestId: streamEntry.requestId,
-              streamId: streamEntry.streamId,
-              purpose: streamEntry.purpose,
-              phase: 'starting',
-              stage: 'capture-started',
-              lane: 'focus',
-            });
-          }
-          handleRemoteWindowCaptureFrame(streamEntry, frame, 'focus');
         },
         onError: (error) => {
           if (!isCurrentStream(streamEntry)) {
             return;
           }
-          cleanupStream(streamEntry, error.message || 'remote window capture failed');
+          stopAndSurface(streamEntry, error.message || 'remote window capture failed');
         },
       });
       if (!isCurrentStream(streamEntry)) {
@@ -1028,6 +1334,10 @@ export function createRemoteWindowStreamDaemonRuntime(
         throw new Error('remote window stream was closed before capture started');
       }
       streamEntry.captureSource = captureSource;
+      // Source assignment is the readiness cause: dispatch the retained first
+      // frame through the existing pending-frame drain, without a second
+      // capture callback or a second ready state.
+      flushPendingRemoteWindowVideoFrame(streamEntry);
       if (!streamEntry.focusCaptureStartedReported) {
         streamEntry.focusCaptureStartedReported = true;
         handlers.sendStatus?.({
@@ -1076,7 +1386,7 @@ export function createRemoteWindowStreamDaemonRuntime(
             if (!isCurrentStream(streamEntry)) {
               return;
             }
-            cleanupStream(streamEntry, error.message || 'remote window overview capture failed');
+            stopAndSurface(streamEntry, error.message || 'remote window overview capture failed');
           },
         });
         if (!isCurrentStream(streamEntry)) {
@@ -1084,6 +1394,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           throw new Error('remote window stream was closed before overview capture started');
         }
         streamEntry.overviewCaptureSource = overviewCaptureSource;
+        scheduleRemoteWindowFrameDrain(streamEntry, 'overview');
         if (!streamEntry.overviewCaptureStartedReported) {
           streamEntry.overviewCaptureStartedReported = true;
           handlers.sendStatus?.({
@@ -1219,8 +1530,19 @@ export function createRemoteWindowStreamDaemonRuntime(
     } catch (error) {
       const targetUnavailable = error instanceof RemoteWindowCaptureTargetUnavailableError;
       const targetOutOfDisplay = error instanceof RemoteWindowCaptureTargetOutOfDisplayError;
+      const startErrorMessage = error instanceof Error ? error.message : 'remote window stream start failed';
+      let cleanupMessage = '';
       if (entry) {
-        cleanupStream(entry, error instanceof Error ? error.message : String(error));
+        // Rejected-start cleanup uses the same serialized stop owner; it can
+        // never overwrite a successful stop or revive the stream.
+        const stopResult = await requestRemoteWindowStreamStop(entry.streamId, startErrorMessage);
+        if ('cleanup' in stopResult && stopResult.cleanup
+          && stopResult.cleanup.status !== 'released' && stopResult.cleanup.status !== 'absent') {
+          const detail = stopResult.cleanup.errors.map((item) => item.message).join('; ')
+            || stopResult.cleanup.remainingResources.join(', ')
+            || stopResult.cleanup.status;
+          cleanupMessage = `; cleanup ${stopResult.cleanup.status}: ${detail}`;
+        }
       }
       return buildStreamError(
         payload,
@@ -1229,7 +1551,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           : targetOutOfDisplay
             ? 'remote_window_target_out_of_display'
             : 'remote_window_stream_start_failed',
-        error instanceof Error ? error.message : 'remote window stream start failed',
+        `${startErrorMessage}${cleanupMessage}`,
         targetUnavailable || targetOutOfDisplay ? 'target-validation' : failureStage,
       );
     }
@@ -1248,9 +1570,6 @@ export function createRemoteWindowStreamDaemonRuntime(
       error.name = code;
       return error;
     };
-    if (closedStreamIds.has(payload.streamId)) {
-      throw candidateError('remote_window_stream_candidate_closed', `remote window ICE candidate targets a closed stream: ${payload.streamId}`);
-    }
     const generationKey = iceGenerationKey(payload.streamId, payload.requestId);
     const fingerprints = iceCandidateFingerprintsByStream.get(generationKey) ?? new Set<string>();
     const streamFingerprints = iceCandidateFingerprintsByStream.get(payload.streamId);
@@ -1283,7 +1602,11 @@ export function createRemoteWindowStreamDaemonRuntime(
       if (generationKey !== payload.streamId) iceCandidateFingerprintsByStream.set(payload.streamId, new Set(fingerprints));
       return true;
     }
-    await entry.peerConnection.addIceCandidate(createRtcIceCandidate(candidate));
+    const peerConnection = entry.peerConnection;
+    if (!peerConnection) {
+      throw candidateError('remote_window_stream_candidate_unavailable', `remote window ICE candidate found no active peer connection: ${payload.streamId}`);
+    }
+    await peerConnection.addIceCandidate(createRtcIceCandidate(candidate));
     fingerprints.add(candidateFingerprint);
     iceCandidateFingerprintsByStream.set(generationKey, fingerprints);
     if (generationKey !== payload.streamId) iceCandidateFingerprintsByStream.set(payload.streamId, new Set(fingerprints));
@@ -1298,10 +1621,23 @@ export function createRemoteWindowStreamDaemonRuntime(
     const key = answerKey(payload.streamId, payload.requestId);
     const pending = pendingAnswers.get(key);
     if (!pending) {
+      const entry = activeStreams.get(payload.streamId);
+      if ((entry && (entry.admissionClosed || entry.cleanupDone)) || completedStops.has(payload.streamId)) {
+        const cancelled = new Error(`remote window stream answer cancelled: ${payload.streamId}/${payload.requestId}`);
+        cancelled.name = REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE;
+        throw cancelled;
+      }
       throw new Error(`remote window v2 answer has no pending offer: ${payload.streamId}/${payload.requestId}`);
     }
     pendingAnswers.delete(key);
     clearTimeout(pending.timeoutId);
+    const entry = activeStreams.get(payload.streamId);
+    if (entry && (entry.admissionClosed || entry.cleanupDone)) {
+      const cancelled = new Error(`remote window stream answer cancelled: ${payload.streamId}/${payload.requestId}`);
+      cancelled.name = REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE;
+      pending.reject(cancelled);
+      return false;
+    }
     pending.resolve({ type: 'answer', sdp: payload.answer.sdp });
     return true;
   }
@@ -1312,29 +1648,12 @@ export function createRemoteWindowStreamDaemonRuntime(
     if (!payload.requestId || !payload.streamId) {
       return buildStreamError(payload, 'remote_window_stream_stop_invalid', 'remote window stream stop requires requestId and streamId');
     }
-    const entry = activeStreams.get(payload.streamId);
-    if (!entry) {
-      markStreamClosed(payload.streamId);
-      return {
-        requestId: payload.requestId,
-        streamId: payload.streamId,
-        ...(payload.purpose ? { purpose: payload.purpose } : {}),
-        phase: 'stopped',
-        framesSent: 0,
-        message: 'remote window stream already stopped',
-      };
-    }
-    const framesSent = entry.framesSent;
-    cleanupStream(entry, 'remote window stream stopped');
-    return {
-      requestId: payload.requestId,
-      streamId: payload.streamId,
-      purpose: entry.purpose,
-      phase: 'stopped',
-      framesSent,
-      framesDropped: entry.framesDropped,
-      message: 'remote window stream stopped',
-    };
+    return requestRemoteWindowStreamStop(
+      payload.streamId,
+      'remote window stream stopped',
+      payload.requestId,
+      payload.purpose,
+    );
   }
 
   async function updateStreamQuality(
@@ -1489,7 +1808,9 @@ export function createRemoteWindowStreamDaemonRuntime(
         status: 'rejected',
         requestedVideoProfile: payload.videoProfile,
         error: {
-          code: 'remote_window_stream_quality_failed',
+          code: error instanceof RemoteWindowQualityUnsupportedError
+            ? REMOTE_WINDOW_STREAM_QUALITY_UNSUPPORTED_CODE
+            : 'remote_window_stream_quality_failed',
           message: formatRemoteWindowVideoProfileError(error),
         },
       };
@@ -1563,7 +1884,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       error?: { code: string; message: string; retryable?: boolean };
       result?: Omit<RemoteWindowInputResultPayload, 'streamId' | 'targetId'>;
     },
-  ): RemoteWindowInputAckMessage => ({
+  ): RemoteWindowInputAck => ({
     control: {
       version: 1,
       sequence: control.sequence,
@@ -1645,10 +1966,16 @@ export function createRemoteWindowStreamDaemonRuntime(
         `dagpipe remote window input gate rejected: ${inputGate.ok ? 'output contract missing' : inputGate.error}`,
       );
     }
-    const resizeTarget = payload.event.kind === 'window-resize'
-      ? buildResizedRemoteWindowTarget(entry.target, payload.event, now())
-      : null;
-    await runRemoteWindowInputEvent(mappedPayload, entry.target, {
+    if (payload.event.kind === 'window-resize') {
+      // Preflight uses only the existing display-bound guard. The ACK/capture
+      // target is still built from the native readback, never this prediction.
+      validateStreamTargetForCapture(buildResizedRemoteWindowTarget(
+        entry.target,
+        payload.event,
+        now(),
+      ));
+    }
+    const operationResult = await runRemoteWindowInputEvent(mappedPayload, entry.target, {
       swiftBinary,
       runTmux: deps.runTmux,
       daemonReceivedAtMs,
@@ -1658,10 +1985,12 @@ export function createRemoteWindowStreamDaemonRuntime(
       },
     });
     if (payload.event.kind === 'window-resize') {
-      const observedTarget = resizeTarget!;
+      if (operationResult?.kind !== 'window-resize') {
+        throw new Error('remote window resize native readback missing');
+      }
       const resized = await applyRemoteWindowTargetResize(
         entry,
-        observedTarget,
+        operationResult,
         now(),
         () => {
           if (!isCurrentStream(entry)) {
@@ -1685,7 +2014,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   const rememberCompletedReliableInput = (
     entry: ActiveRemoteWindowStream,
     sequence: string,
-    message: RemoteWindowInputAckMessage,
+    message: RemoteWindowInputAck,
   ) => {
     entry.reliableInputCompletedBySequence.set(sequence, message);
     if (entry.reliableInputCompletedBySequence.size > 256) {
@@ -1699,7 +2028,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   async function injectInput(
     payload: RemoteWindowInputEventPayload,
     control: RemoteWindowInputDeliveryControl,
-  ): Promise<RemoteWindowInputAckMessage | null> {
+  ): Promise<RemoteWindowInputAck | null> {
     try {
       validateInputDeliveryControl(payload, control);
     } catch (error) {
@@ -1712,12 +2041,24 @@ export function createRemoteWindowStreamDaemonRuntime(
       });
     }
     const entry = activeStreams.get(payload.streamId);
-    if (!entry || entry.cleanupDone) {
+    if (!entry || entry.cleanupDone || entry.admissionClosed) {
       return buildInputAck(control, payload, {
         accepted: false,
         error: {
           code: 'remote_window_input_stream_missing',
           message: `remote window stream is not active: ${payload.streamId || 'missing'}`,
+        },
+      });
+    }
+    if (payload.event.kind === 'close-window') {
+      // The single remote-window close owner is requestRemoteWindowClose
+      // (forwarded through remote-window-close-request). Rejecting the legacy
+      // close-window input lane avoids a second, unobserved close injection.
+      return buildInputAck(control, payload, {
+        accepted: false,
+        error: {
+          code: 'remote_window_close_unsupported',
+          message: 'remote window close must use the remote-window-close-request control path',
         },
       });
     }
@@ -1815,16 +2156,93 @@ export function createRemoteWindowStreamDaemonRuntime(
     return result;
   }
 
-  function dispose(reason = 'remote window daemon runtime disposed') {
-    for (const entry of Array.from(activeStreams.values())) {
-      cleanupStream(entry, reason);
+  async function requestRemoteWindowClose(
+    payload: RemoteWindowCloseRequestPayload,
+  ): Promise<RemoteWindowCloseResultPayload> {
+    const base = {
+      requestId: payload.requestId,
+      sessionId: payload.sessionId,
+      streamId: payload.streamId,
+      targetId: payload.targetId,
+    };
+    if (!payload.requestId || !payload.sessionId || !payload.streamId || !payload.targetId) {
+      return { ...base, status: 'failed', error: 'remote window close request requires requestId, sessionId, streamId, and targetId' };
     }
-    pendingIceCandidatesByStream.clear();
-    iceCandidateFingerprintsByStream.clear();
-    closedStreamIds.clear();
-    catalogRuntime.dispose();
-    remoteWindowInputHelper?.dispose();
-    remoteWindowInputHelper = null;
+    const entry = activeStreams.get(payload.streamId);
+    if (!entry || entry.cleanupDone) {
+      return { ...base, status: 'failed', error: `remote window stream is not active: ${payload.streamId}` };
+    }
+    if (payload.targetId !== entry.targetId) {
+      return { ...base, status: 'failed', error: `remote window close target mismatch: ${payload.targetId}` };
+    }
+    const supportedTarget = entry.target.videoTarget.kind === 'app-window'
+      && entry.target.inputRoute === 'os-event'
+      && entry.target.streamMode === 'interactive';
+    if (!supportedTarget) {
+      return { ...base, status: 'unsupported', error: 'remote window close is only supported for interactive app-window OS-event targets' };
+    }
+    try {
+      const closePayload: RemoteWindowInputEventPayload = {
+        streamId: entry.streamId,
+        targetId: entry.targetId,
+        event: { kind: 'close-window' },
+      };
+      await runRemoteWindowInputEvent(closePayload, entry.target, {
+        swiftBinary,
+        runTmux: deps.runTmux,
+        daemonReceivedAtMs: nowMs(),
+        delivery: { lane: 'reliable' },
+      });
+    } catch (error) {
+      return { ...base, status: 'failed', error: `remote window close injection failed: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    const injectedAtMs = nowMs();
+    const observation = await catalogRuntime.awaitAppWindowCloseObservation({
+      windowId: entry.target.videoTarget.windowId,
+      ...(typeof entry.target.videoTarget.pid === 'number' ? { pid: entry.target.videoTarget.pid } : {}),
+      injectedAtMs,
+    });
+    if (observation.status === 'closed' || observation.status === 'not_closed') {
+      return { ...base, status: observation.status };
+    }
+    return { ...base, status: observation.status, error: observation.error };
+  }
+
+  /**
+   * Async runtime disposal. Every active stream is released through the same
+   * serialized stop owner, then the catalog and input helper are disposed. The
+   * returned promise is the single disposal outcome; callers must await it
+   * before process exit, and a failed release rejects instead of being
+   * swallowed. Concurrent callers share the same promise.
+   */
+  function dispose(reason = 'remote window daemon runtime disposed'): Promise<void> {
+    if (!disposePromise) {
+      disposePromise = (async () => {
+        const stopResults = await Promise.all(
+          Array.from(activeStreams.values()).map((entry) => requestRemoteWindowStreamStop(entry.streamId, reason)),
+        );
+        pendingIceCandidatesByStream.clear();
+        iceCandidateFingerprintsByStream.clear();
+        catalogRuntime.dispose();
+        const helper = remoteWindowInputHelper as (RemoteWindowInputHelper & RemoteWindowStreamInputHelperRelease) | null;
+        remoteWindowInputHelper = null;
+        if (helper) {
+          await helper.dispose();
+        }
+        const unreleased = stopResults.filter((result) => (
+          'cleanup' in result && result.cleanup
+          && result.cleanup.status !== 'released' && result.cleanup.status !== 'absent'
+        ));
+        if (unreleased.length > 0) {
+          throw new Error(
+            `remote window daemon disposal left ${unreleased.length} stream(s) unreleased: ${unreleased
+              .map((result) => ('cleanup' in result && result.cleanup ? `${result.streamId}:${result.cleanup.status}` : result.streamId))
+              .join(', ')}`,
+          );
+        }
+      })();
+    }
+    return disposePromise;
   }
 
   if (deps.warmTargetCatalogOnStart) {
@@ -1859,6 +2277,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     acceptAnswer,
     addIceCandidate,
     stopStream,
+    requestRemoteWindowClose,
     updateStreamQuality,
     updateFocus,
     injectInput,

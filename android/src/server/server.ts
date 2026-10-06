@@ -698,7 +698,7 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
   disposeSessionCatalogRuntime: () => daemonSessionCatalogRuntime.dispose(),
   startRelayHostClient: () => relayHostClient?.start(),
   disposeRelayHostClient: () => relayHostClient?.dispose(),
-  disposeRemoteWindowStreamRuntime: () => remoteWindowStreamRuntime?.dispose(),
+  disposeRemoteWindowStreamRuntime: () => (remoteWindowStreamRuntime ? remoteWindowStreamRuntime.dispose() : Promise.resolve()),
   disposeRtcBridgeServer: () => rtcBridgeServer.dispose(),
   sendTransportMessage,
 });

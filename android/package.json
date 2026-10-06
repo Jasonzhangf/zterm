@@ -74,6 +74,7 @@
     "daemon:install-service": "bash ./scripts/zterm-daemon.sh install-service",
     "daemon:service-status": "bash ./scripts/zterm-daemon.sh service-status",
     "daemon:prepare-release": "bash ./scripts/prepare-global-daemon-release.sh",
+    "test:daemon-wrtc-packaging": "node ./scripts/verify-daemon-wrtc-packaging.mjs",
     "sync:android": "npx cap sync android",
     "run:android": "npx cap run android",
     "build:android": "./scripts/build-android-debug.sh",

@@ -316,4 +316,173 @@ describe('remote window catalog runtime owner', () => {
     });
     runtime.dispose();
   });
+
+  it('settles an app window close waiter as closed on a qualifying empty app window refresh', async () => {
+    let resolveCatalog: (value: string) => void = () => undefined;
+    const runMacosAppWindowCatalog = vi.fn(() => new Promise<string>((resolve) => {
+      resolveCatalog = resolve;
+    }));
+    const runtime = createRuntime('darwin', {
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runMacosAppWindowCatalog,
+    });
+
+    runtime.warm();
+    const observed = runtime.awaitAppWindowCloseObservation({
+      windowId: 'window-gone',
+      pid: 42,
+      injectedAtMs: 0,
+    });
+    resolveCatalog(JSON.stringify({ windows: [] }));
+    await expect(observed).resolves.toMatchObject({ status: 'closed' });
+    runtime.dispose();
+  });
+
+  it('settles an app window close waiter as not_closed when the qualifying refresh still lists the window', async () => {
+    let resolveCatalog: (value: string) => void = () => undefined;
+    const runMacosAppWindowCatalog = vi.fn(() => new Promise<string>((resolve) => {
+      resolveCatalog = resolve;
+    }));
+    const runtime = createRuntime('darwin', {
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runMacosAppWindowCatalog,
+    });
+
+    runtime.warm();
+    const observed = runtime.awaitAppWindowCloseObservation({
+      windowId: 'window-1',
+      pid: 42,
+      injectedAtMs: 0,
+    });
+    resolveCatalog(JSON.stringify({
+      windows: [{
+        windowId: 'window-1',
+        ownerName: 'Example',
+        appBundleId: 'com.example.app',
+        pid: 42,
+        title: 'Example',
+        frame: { x: 0, y: 0, width: 800, height: 600 },
+      }],
+    }));
+    await expect(observed).resolves.toMatchObject({ status: 'not_closed' });
+    runtime.dispose();
+  });
+
+  it('matches the canonical pid:windowId identity and ignores a same windowId owned by another pid', async () => {
+    let resolveCatalog: (value: string) => void = () => undefined;
+    const runMacosAppWindowCatalog = vi.fn(() => new Promise<string>((resolve) => {
+      resolveCatalog = resolve;
+    }));
+    const runtime = createRuntime('darwin', {
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runMacosAppWindowCatalog,
+    });
+
+    runtime.warm();
+    const observed = runtime.awaitAppWindowCloseObservation({
+      windowId: 'window-1',
+      pid: 42,
+      injectedAtMs: 0,
+    });
+    // Same windowId, different owning pid: a different canonical window target,
+    // so the original target is treated as gone (closed), not not_closed.
+    resolveCatalog(JSON.stringify({
+      windows: [{
+        windowId: 'window-1',
+        ownerName: 'Example',
+        appBundleId: 'com.example.app',
+        pid: 7,
+        title: 'Example',
+        frame: { x: 0, y: 0, width: 800, height: 600 },
+      }],
+    }));
+    await expect(observed).resolves.toMatchObject({ status: 'closed' });
+    runtime.dispose();
+  });
+
+  it('does not settle a close waiter from a refresh that started before the injection marker', async () => {
+    vi.useFakeTimers();
+    let refreshCount = 0;
+    const runMacosAppWindowCatalog = vi.fn(async () => {
+      refreshCount += 1;
+      return JSON.stringify({ windows: [] });
+    });
+    const runtime = createRuntime('darwin', {
+      targetCatalogRefreshIntervalMs: 1_000,
+      appWindowCatalogTimeoutMs: 1_000,
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runMacosAppWindowCatalog,
+    });
+
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    // The warm refresh already started before the injection marker.
+    const observed = runtime.awaitAppWindowCloseObservation({
+      windowId: 'window-late',
+      pid: 42,
+      injectedAtMs: Date.now() + 100_000,
+    });
+    await vi.advanceTimersByTimeAsync(1_000);
+    // A post-marker refresh still never happens before the deadline.
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(observed).resolves.toMatchObject({ status: 'unverified' });
+    runtime.dispose();
+  });
+
+  it('does not let an unrelated iTerm2 refresh error erase the app window outcome', async () => {
+    let resolveCatalog: (value: string) => void = () => undefined;
+    const runMacosAppWindowCatalog = vi.fn(() => new Promise<string>((resolve) => {
+      resolveCatalog = resolve;
+    }));
+    const runtime = createRuntime('darwin', {
+      runIterm2Python: vi.fn(async () => {
+        throw new Error('iTerm2 Python API unavailable');
+      }),
+      runMacosAppWindowCatalog,
+    });
+
+    runtime.warm();
+    const observed = runtime.awaitAppWindowCloseObservation({
+      windowId: 'window-1',
+      pid: 42,
+      injectedAtMs: 0,
+    });
+    resolveCatalog(JSON.stringify({
+      windows: [{
+        windowId: 'window-1',
+        ownerName: 'Example',
+        appBundleId: 'com.example.app',
+        pid: 42,
+        title: 'Example',
+        frame: { x: 0, y: 0, width: 800, height: 600 },
+      }],
+    }));
+    await expect(observed).resolves.toMatchObject({ status: 'not_closed' });
+    runtime.dispose();
+  });
+
+  it('fails pending close waiters on dispose', async () => {
+    const runMacosAppWindowCatalog = vi.fn((): Promise<string> => new Promise(() => undefined));
+    const runtime = createRuntime('darwin', {
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runMacosAppWindowCatalog,
+    });
+
+    runtime.warm();
+    const observed = runtime.awaitAppWindowCloseObservation({
+      windowId: 'window-x',
+      pid: 42,
+      injectedAtMs: 0,
+    });
+    runtime.dispose();
+    await expect(observed).resolves.toMatchObject({ status: 'failed' });
+  });
+
+  it('fails a close waiter immediately on non-darwin hosts', async () => {
+    const runtime = createRuntime('linux');
+    await expect(runtime.awaitAppWindowCloseObservation({
+      windowId: 'window-1',
+      injectedAtMs: 0,
+    })).resolves.toMatchObject({ status: 'failed' });
+  });
 });

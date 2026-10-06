@@ -1,4 +1,5 @@
 import type {
+  RemoteWindowCloseStatus,
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamRequestPayload,
   RemoteWindowStreamTargetManifest,
@@ -48,7 +49,50 @@ export interface RemoteWindowCatalogRuntime {
   ) => Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload>;
   warm: () => void;
   listAppWindowTargets: () => Promise<RemoteWindowStreamTargetManifest[]>;
+  /**
+   * Internal destructive-close observation. It consumes the existing
+   * self-refresh loop; it never starts a second scan or snapshot.
+   */
+  awaitAppWindowCloseObservation: (
+    request: RemoteWindowAppWindowCloseObservationRequest,
+  ) => Promise<RemoteWindowAppWindowCloseObservationResult>;
   dispose: () => void;
+}
+
+export interface RemoteWindowAppWindowCloseObservationRequest {
+  windowId: string;
+  pid?: number;
+  /**
+   * Marker of the close-injection completion. Only an app-window enumeration
+   * that actually STARTED after this marker may settle the waiter.
+   */
+  injectedAtMs: number;
+}
+
+export interface RemoteWindowAppWindowCloseObservationResult {
+  status: Extract<RemoteWindowCloseStatus, 'closed' | 'not_closed' | 'unverified' | 'failed'>;
+  error?: string;
+}
+
+interface RemoteWindowAppWindowRefreshObservation {
+  startedAtMs: number;
+  ok: boolean;
+  /**
+   * Canonical app-window identities observed by the app-window enumeration,
+   * keyed by `pid:windowId` to match the stream's canonical app-window target.
+   */
+  windowKeys: Set<string>;
+  errorMessage?: string;
+}
+
+const appWindowIdentityKey = (pid: number | undefined, windowId: string): string => (
+  `${typeof pid === 'number' ? pid : ''}:${windowId}`
+);
+
+interface RemoteWindowAppWindowCloseWaiter {
+  request: RemoteWindowAppWindowCloseObservationRequest;
+  deadlineTimer: ReturnType<typeof setTimeout>;
+  settle: (result: RemoteWindowAppWindowCloseObservationResult) => void;
 }
 
 export function createRemoteWindowCatalogRuntime(
@@ -62,10 +106,40 @@ export function createRemoteWindowCatalogRuntime(
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   let disposed = false;
   let generation = 0;
+  const closeWaiters = new Set<RemoteWindowAppWindowCloseWaiter>();
   const refreshIntervalMs = Math.max(
     1_000,
     Math.floor(deps.targetCatalogRefreshIntervalMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS),
   );
+  const closeObservationDeadlineMs = refreshIntervalMs + deps.appWindowCatalogTimeoutMs;
+
+  const settleAppWindowCloseWaiters = (observation: RemoteWindowAppWindowRefreshObservation) => {
+    for (const waiter of Array.from(closeWaiters)) {
+      if (observation.startedAtMs <= waiter.request.injectedAtMs) {
+        continue;
+      }
+      clearTimeout(waiter.deadlineTimer);
+      closeWaiters.delete(waiter);
+      if (!observation.ok) {
+        waiter.settle({
+          status: 'failed',
+          error: observation.errorMessage ?? 'app window catalog refresh failed after close injection',
+        });
+        continue;
+      }
+      waiter.settle(observation.windowKeys.has(appWindowIdentityKey(waiter.request.pid, waiter.request.windowId))
+        ? { status: 'not_closed' }
+        : { status: 'closed' });
+    }
+  };
+
+  const rejectAppWindowCloseWaiters = (error: string) => {
+    for (const waiter of Array.from(closeWaiters)) {
+      clearTimeout(waiter.deadlineTimer);
+      closeWaiters.delete(waiter);
+      waiter.settle({ status: 'failed', error });
+    }
+  };
 
   const buildFullCatalogPayload = (requestId: string): RemoteWindowStreamRequestPayload => ({
     requestId,
@@ -111,6 +185,12 @@ export function createRemoteWindowCatalogRuntime(
 
   const listTargetsLive = async (
     payload: RemoteWindowStreamRequestPayload,
+    onAppWindowSource?: (outcome: {
+      startedAtMs: number;
+      ok: boolean;
+      windowKeys: Set<string>;
+      errorMessage?: string;
+    }) => void,
   ): Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> => {
     const createdAt = deps.now();
     const includeAppWindows = payload.includeAppWindows !== false;
@@ -120,13 +200,22 @@ export function createRemoteWindowCatalogRuntime(
 
     let macosAppWindowCatalogOk = false;
     let macosAppWindowCatalog: MacosAppWindowCatalog | null = null;
+    let appWindowStartedAtMs = 0;
+    let appWindowWindowKeys = new Set<string>();
+    let appWindowErrorMessage: string | undefined;
     if (includeAppWindows) {
       try {
+        appWindowStartedAtMs = deps.nowMs();
         macosAppWindowCatalog = await queryMacosAppWindowCatalog();
-        targets.push(...buildMacosAppWindowTargets(macosAppWindowCatalog, createdAt));
+        const appWindowTargets = buildMacosAppWindowTargets(macosAppWindowCatalog, createdAt);
+        targets.push(...appWindowTargets);
+        appWindowWindowKeys = new Set(appWindowTargets.map((item) => (
+          appWindowIdentityKey(item.videoTarget.pid, item.videoTarget.windowId)
+        )));
         macosAppWindowCatalogOk = true;
       } catch (error) {
         const message = summarizeRemoteWindowCatalogError(error, 'macOS app window catalog unavailable');
+        appWindowErrorMessage = message || 'macOS app window catalog unavailable';
         errors.push(remoteWindowError(payload, 'app_window_catalog_unavailable', message || 'macOS app window catalog unavailable'));
       }
     }
@@ -145,10 +234,17 @@ export function createRemoteWindowCatalogRuntime(
     if (catalog) {
       if (!macosAppWindowCatalogOk) {
         try {
+          appWindowStartedAtMs = deps.nowMs();
           macosAppWindowCatalog = await queryMacosAppWindowCatalog();
+          const appWindowTargets = buildMacosAppWindowTargets(macosAppWindowCatalog, createdAt);
+          appWindowWindowKeys = new Set(appWindowTargets.map((item) => (
+            appWindowIdentityKey(item.videoTarget.pid, item.videoTarget.windowId)
+          )));
           macosAppWindowCatalogOk = true;
+          appWindowErrorMessage = undefined;
         } catch (error) {
           const message = summarizeRemoteWindowCatalogError(error, 'macOS app window catalog unavailable');
+          appWindowErrorMessage = message || 'macOS app window catalog unavailable';
           errors.push(remoteWindowError(payload, 'app_window_catalog_unavailable', message || 'macOS app window catalog unavailable'));
         }
       }
@@ -177,6 +273,13 @@ export function createRemoteWindowCatalogRuntime(
       }
     }
 
+    onAppWindowSource?.({
+      startedAtMs: appWindowStartedAtMs || deps.nowMs(),
+      ok: macosAppWindowCatalogOk,
+      windowKeys: appWindowWindowKeys,
+      ...(macosAppWindowCatalogOk ? {} : { errorMessage: appWindowErrorMessage }),
+    });
+
     if (targets.length > 0) {
       return {
         requestId: payload.requestId,
@@ -193,7 +296,9 @@ export function createRemoteWindowCatalogRuntime(
     }
     const refreshPayload = buildFullCatalogPayload(requestId || `rw-catalog-refresh-${deps.nowMs()}`);
     const startedGeneration = generation;
-    const started = listTargetsLive(refreshPayload)
+    const started = listTargetsLive(refreshPayload, (outcome) => {
+      settleAppWindowCloseWaiters(outcome);
+    })
       .catch((error: unknown) => remoteWindowError(
         refreshPayload,
         'remote_window_catalog_failed',
@@ -306,6 +411,36 @@ export function createRemoteWindowCatalogRuntime(
     deps.now(),
   );
 
+  const awaitAppWindowCloseObservation = (
+    request: RemoteWindowAppWindowCloseObservationRequest,
+  ): Promise<RemoteWindowAppWindowCloseObservationResult> => {
+    if (deps.platform !== 'darwin') {
+      return Promise.resolve({ status: 'failed', error: 'remote window close observation is only available on macOS daemon hosts' });
+    }
+    if (disposed) {
+      return Promise.resolve({ status: 'failed', error: 'remote window catalog runtime is disposed' });
+    }
+    return new Promise((resolve) => {
+      let waiter: RemoteWindowAppWindowCloseWaiter;
+      const settle = (result: RemoteWindowAppWindowCloseObservationResult) => {
+        clearTimeout(waiter.deadlineTimer);
+        resolve(result);
+      };
+      waiter = {
+        request,
+        settle,
+        deadlineTimer: setTimeout(() => {
+          closeWaiters.delete(waiter);
+          resolve({ status: 'unverified', error: 'no qualifying app window refresh completed before the observation deadline' });
+        }, closeObservationDeadlineMs),
+      };
+      // The existing self-refresh loop reports every app-window enumeration
+      // start; a refresh that completed before the injection marker must not
+      // settle the waiter, so it stays registered until a later one lands.
+      closeWaiters.add(waiter);
+    });
+  };
+
   const dispose = () => {
     disposed = true;
     generation += 1;
@@ -313,11 +448,12 @@ export function createRemoteWindowCatalogRuntime(
       clearInterval(refreshTimer);
       refreshTimer = null;
     }
+    rejectAppWindowCloseWaiters('remote window catalog runtime is disposed');
     snapshot = null;
     refreshFailure = null;
     hasSuccessfulSnapshot = false;
     refresh = null;
   };
 
-  return { listTargets, warm, listAppWindowTargets, dispose };
+  return { listTargets, warm, listAppWindowTargets, awaitAppWindowCloseObservation, dispose };
 }

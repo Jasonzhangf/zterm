@@ -6,7 +6,7 @@ function makeCaptureSource(stop: () => void = vi.fn()) {
 }
 
 function makeSession(overrides: Record<string, unknown> = {}) {
-  return {
+  const session = {
     requestId: 'request-1',
     streamId: 'stream-1',
     purpose: 'focus' as const,
@@ -20,45 +20,76 @@ function makeSession(overrides: Record<string, unknown> = {}) {
       onconnectionstatechange: vi.fn(),
       close: vi.fn(),
     } as unknown as RTCPeerConnection,
-    sendStatus: vi.fn(),
     ...overrides,
   };
+  return session;
 }
 
 describe('remote window stream session resource owner', () => {
-  it('releases every focus/overview resource and publishes one stopped status', () => {
+  it('releases every focus/overview resource and clears each field only on success', () => {
     const session = makeSession();
-    const result = releaseRemoteWindowStreamSessionResources(session, 'closed');
+    const captureStop = session.captureSource.stop;
+    const overviewCaptureStop = session.overviewCaptureSource.stop;
+    const videoTrackStop = session.videoTrack.stop;
+    const overviewTrackStop = session.overviewVideoTrack!.stop;
+    const peerClose = session.peerConnection.close;
 
-    expect(session.captureSource.stop).toHaveBeenCalledTimes(1);
-    expect(session.overviewCaptureSource.stop).toHaveBeenCalledTimes(1);
-    expect(session.videoTrack.stop).toHaveBeenCalledTimes(1);
-    expect(session.overviewVideoTrack.stop).toHaveBeenCalledTimes(1);
-    expect(session.peerConnection.close).toHaveBeenCalledTimes(1);
-    expect(session.sendStatus).toHaveBeenCalledWith(expect.objectContaining({
-      phase: 'stopped',
-      framesSent: 7,
-      message: 'closed',
-    }));
-    expect(result.cleanupErrors).toEqual([]);
+    const result = releaseRemoteWindowStreamSessionResources(session);
+
+    expect(captureStop).toHaveBeenCalledTimes(1);
+    expect(overviewCaptureStop).toHaveBeenCalledTimes(1);
+    expect(videoTrackStop).toHaveBeenCalledTimes(1);
+    expect(overviewTrackStop).toHaveBeenCalledTimes(1);
+    expect(peerClose).toHaveBeenCalledTimes(1);
+    expect(session.captureSource).toBeNull();
+    expect(session.overviewCaptureSource).toBeNull();
+    expect(session.videoTrack).toBeNull();
+    expect(session.overviewVideoTrack).toBeNull();
+    expect(session.peerConnection).toBeNull();
+    expect(result.remainingResources).toEqual([]);
+    expect(result.errors).toEqual([]);
+    expect(result.hadResources).toBe(true);
   });
 
-  it('continues exact cleanup and exposes every release failure in stopped status', () => {
-    const session = makeSession({
-      captureSource: makeCaptureSource(vi.fn(() => { throw new Error('capture busy'); })),
-      videoTrack: { stop: vi.fn(() => { throw new Error('track busy'); }) } as unknown as MediaStreamTrack,
-    });
-    const result = releaseRemoteWindowStreamSessionResources(session, 'closed');
+  it('preserves failed resource references for retry and only retries those', () => {
+    const captureStop = vi.fn(() => { throw new Error('capture busy'); });
+    const trackStop = vi.fn(() => { throw new Error('track busy'); });
+    const captureSource = makeCaptureSource(captureStop);
+    const videoTrack = { stop: trackStop } as unknown as MediaStreamTrack;
+    const session = makeSession({ captureSource, videoTrack });
+    const overviewCaptureStop = session.overviewCaptureSource.stop;
+    const peerClose = session.peerConnection.close;
 
-    expect(session.overviewCaptureSource.stop).toHaveBeenCalledTimes(1);
-    expect(session.overviewVideoTrack.stop).toHaveBeenCalledTimes(1);
-    expect(session.peerConnection.close).toHaveBeenCalledTimes(1);
-    expect(result.cleanupErrors).toEqual([
-      'focus capture stop: capture busy',
-      'focus track stop: track busy',
+    const result = releaseRemoteWindowStreamSessionResources(session);
+
+    expect(result.remainingResources).toEqual(['focus-capture', 'focus-track']);
+    expect(result.errors).toEqual([
+      { resource: 'focus-capture', message: 'capture busy' },
+      { resource: 'focus-track', message: 'track busy' },
     ]);
-    expect(session.sendStatus).toHaveBeenCalledWith(expect.objectContaining({
-      message: 'closed; cleanup failed: focus capture stop: capture busy; focus track stop: track busy',
-    }));
+    expect(session.captureSource).toBe(captureSource);
+    expect(session.videoTrack).toBe(videoTrack);
+    expect(overviewCaptureStop).toHaveBeenCalledTimes(1);
+    expect(peerClose).toHaveBeenCalledTimes(1);
+    expect(session.overviewCaptureSource).toBeNull();
+    expect(session.peerConnection).toBeNull();
+
+    // A retry must not release resources that already succeeded.
+    const retry = releaseRemoteWindowStreamSessionResources(session);
+    expect(overviewCaptureStop).toHaveBeenCalledTimes(1);
+    expect(peerClose).toHaveBeenCalledTimes(1);
+    expect(retry.remainingResources).toEqual(['focus-capture', 'focus-track']);
+  });
+
+  it('reports no owned resources when every field is already released', () => {
+    const session = makeSession({
+      captureSource: null,
+      overviewCaptureSource: null,
+      videoTrack: null,
+      overviewVideoTrack: null,
+      peerConnection: null,
+    });
+    const result = releaseRemoteWindowStreamSessionResources(session);
+    expect(result).toEqual({ remainingResources: [], errors: [], hadResources: false });
   });
 });

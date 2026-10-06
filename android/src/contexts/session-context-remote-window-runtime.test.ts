@@ -5,6 +5,7 @@ import {
   resolveRemoteWindowCatalogTransport,
   resolveRemoteWindowStreamIceServers,
   sendRemoteWindowInputRuntime,
+  closeRemoteWindowStreamRuntime,
   stopRemoteWindowStreamRuntime,
   updateRemoteWindowStreamQualityRuntime,
 } from './session-context-remote-window-runtime';
@@ -588,6 +589,7 @@ describe('session context remote window runtime', () => {
         requestTargets: vi.fn(),
         requestStreamStart,
         sendStreamAnswerV2: vi.fn(),
+        requestStreamClose: vi.fn(),
         sendStreamQuality: vi.fn(),
     sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate,
@@ -678,6 +680,7 @@ describe('session context remote window runtime', () => {
     const remoteWindowMessageRuntime = {
       requestTargets: vi.fn(),
       requestStreamStart,
+      requestStreamClose: vi.fn(),
       sendStreamQuality: vi.fn(),
       sendStreamUpdateFocus: vi.fn(),
       sendStreamIceCandidate: vi.fn(),
@@ -824,6 +827,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart,
+        requestStreamClose: vi.fn(),
         sendStreamQuality: vi.fn(),
         sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
@@ -863,6 +867,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        requestStreamClose: vi.fn(),
         sendStreamQuality: vi.fn(),
         sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
@@ -889,7 +894,7 @@ describe('session context remote window runtime', () => {
     }));
     const sendSocketPayload = vi.fn();
 
-    await expect(stopRemoteWindowStreamRuntime({
+    const outcome = await stopRemoteWindowStreamRuntime({
       sessionId: 'session-1',
       streamId: 'stream-1',
       sessions: [baseSession],
@@ -897,6 +902,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        requestStreamClose: vi.fn(),
         sendStreamQuality: vi.fn(),
         sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
@@ -908,7 +914,18 @@ describe('session context remote window runtime', () => {
         stopStream: stopReceiver,
       },
       sendSocketPayload,
-    })).resolves.toBe(true);
+    });
+
+    expect(outcome.localStopped).toBe(true);
+    // A legacy daemon that reports no cleanup is an explicit `unverified`, never a manufactured `released`.
+    expect(outcome.cleanup).toEqual({
+      status: 'unverified',
+      remainingResources: [],
+      errors: [{
+        code: 'remote_window_cleanup_unreported',
+        message: 'Daemon did not report remote resource cleanup for this stream',
+      }],
+    });
 
     expect(stopReceiver).toHaveBeenCalledWith('stream-1');
     expect(stopMessage).toHaveBeenCalledWith('session-1', {
@@ -933,6 +950,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        requestStreamClose: vi.fn(),
         sendStreamQuality: vi.fn(),
         sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
@@ -946,6 +964,7 @@ describe('session context remote window runtime', () => {
       sendSocketPayload: vi.fn(),
     })).rejects.toThrow('daemon stop failed');
 
+    // Local receiver teardown always runs, even when the daemon stop acknowledgement fails.
     expect(stopReceiver).toHaveBeenCalledWith('stream-1');
   });
 
@@ -981,6 +1000,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        requestStreamClose: vi.fn(),
         sendStreamQuality,
         sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
@@ -1032,6 +1052,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        requestStreamClose: vi.fn(),
         sendStreamQuality: vi.fn(),
         sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
@@ -1074,6 +1095,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        requestStreamClose: vi.fn(),
         sendStreamQuality: vi.fn(),
         sendStreamUpdateFocus: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
@@ -1082,5 +1104,150 @@ describe('session context remote window runtime', () => {
       },
       sendSocketPayload: vi.fn(),
     })).toThrow('Remote window stream requires an open daemon connection (socket=closed');
+  });
+
+  it('keeps the local teardown and preserves the exact remaining resources when the daemon reports cleanup failure', async () => {
+    const ws = makeSocket();
+    const stopReceiver = vi.fn(() => true);
+    const stopMessage = vi.fn(async () => ({
+      requestId: 'rw-stop-cleanup-failed',
+      streamId: 'stream-1',
+      phase: 'stopped' as const,
+      cleanup: {
+        status: 'cleanup_failed' as const,
+        remainingResources: ['mirror:stream-1'],
+        errors: [{ code: 'tmux_attach_alive', message: 'subscriber still attached' }],
+      },
+    }));
+
+    const outcome = await stopRemoteWindowStreamRuntime({
+      sessionId: 'session-1',
+      streamId: 'stream-1',
+      sessions: [baseSession],
+      daemonConnection: makeDaemonConnection(ws),
+      remoteWindowMessageRuntime: {
+        requestTargets: vi.fn(),
+        requestStreamStart: vi.fn(),
+        requestStreamClose: vi.fn(),
+        sendStreamQuality: vi.fn(),
+        sendStreamUpdateFocus: vi.fn(),
+        sendStreamIceCandidate: vi.fn(),
+        stopStream: stopMessage,
+        sendInputEvent: vi.fn(),
+      },
+      remoteWindowReceiverRuntime: {
+        startStream: vi.fn(),
+        stopStream: stopReceiver,
+      },
+      sendSocketPayload: vi.fn(),
+    });
+
+    expect(outcome.localStopped).toBe(true);
+    expect(outcome.cleanup).toEqual({
+      status: 'cleanup_failed',
+      remainingResources: ['mirror:stream-1'],
+      errors: [{ code: 'tmux_attach_alive', message: 'subscriber still attached' }],
+    });
+  });
+
+  it('reports released only when the daemon confirms full remote cleanup', async () => {
+    const ws = makeSocket();
+    const stopMessage = vi.fn(async () => ({
+      requestId: 'rw-stop-released',
+      streamId: 'stream-1',
+      phase: 'stopped' as const,
+      cleanup: {
+        status: 'released' as const,
+        remainingResources: [],
+        errors: [],
+      },
+    }));
+
+    const outcome = await stopRemoteWindowStreamRuntime({
+      sessionId: 'session-1',
+      streamId: 'stream-1',
+      sessions: [baseSession],
+      daemonConnection: makeDaemonConnection(ws),
+      remoteWindowMessageRuntime: {
+        requestTargets: vi.fn(),
+        requestStreamStart: vi.fn(),
+        requestStreamClose: vi.fn(),
+        sendStreamQuality: vi.fn(),
+        sendStreamUpdateFocus: vi.fn(),
+        sendStreamIceCandidate: vi.fn(),
+        stopStream: stopMessage,
+        sendInputEvent: vi.fn(),
+      },
+      remoteWindowReceiverRuntime: {
+        startStream: vi.fn(),
+        stopStream: vi.fn(() => true),
+      },
+      sendSocketPayload: vi.fn(),
+    });
+
+    expect(outcome.localStopped).toBe(true);
+    expect(outcome.cleanup).toEqual({ status: 'released', remainingResources: [], errors: [] });
+  });
+
+  it('sends a correlated remote-window close request over the effective stream transport', async () => {
+    const ws = makeSocket();
+    const requestStreamClose = vi.fn(async () => ({
+      requestId: 'rw-close-1',
+      sessionId: 'session-1',
+      streamId: 'stream-1',
+      targetId: 'target-1',
+      status: 'closed' as const,
+    }));
+    const sendSocketPayload = vi.fn();
+
+    const result = await closeRemoteWindowStreamRuntime({
+      sessionId: ' session-1 ',
+      streamId: ' stream-1 ',
+      targetId: ' target-1 ',
+      sessions: [baseSession],
+      daemonConnection: makeDaemonConnection(ws),
+      remoteWindowMessageRuntime: {
+        requestTargets: vi.fn(),
+        requestStreamStart: vi.fn(),
+        requestStreamClose,
+        sendStreamQuality: vi.fn(),
+        sendStreamUpdateFocus: vi.fn(),
+        sendStreamIceCandidate: vi.fn(),
+        stopStream: vi.fn(),
+        sendInputEvent: vi.fn(),
+      },
+      sendSocketPayload,
+    });
+
+    expect(requestStreamClose).toHaveBeenCalledWith('session-1', {
+      ws,
+      streamId: 'stream-1',
+      targetId: 'target-1',
+      sendSocketPayload,
+    });
+    expect(result.status).toBe('closed');
+  });
+
+  it('rejects a remote close without sessionId, streamId, or targetId before touching the transport', async () => {
+    const requestStreamClose = vi.fn();
+    await expect(closeRemoteWindowStreamRuntime({
+      sessionId: 'session-1',
+      streamId: 'stream-1',
+      targetId: '   ',
+      sessions: [baseSession],
+      daemonConnection: makeDaemonConnection(makeSocket()),
+      remoteWindowMessageRuntime: {
+        requestTargets: vi.fn(),
+        requestStreamStart: vi.fn(),
+        requestStreamClose,
+        sendStreamQuality: vi.fn(),
+        sendStreamUpdateFocus: vi.fn(),
+        sendStreamIceCandidate: vi.fn(),
+        stopStream: vi.fn(),
+        sendInputEvent: vi.fn(),
+      },
+      sendSocketPayload: vi.fn(),
+    })).rejects.toThrow('Remote window close requires sessionId, streamId, and targetId');
+    expect(requestStreamClose).not.toHaveBeenCalled();
   });
 });

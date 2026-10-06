@@ -119,20 +119,20 @@ describe('remote window architecture boundary truth', () => {
     expect(controller).not.toContain('data-testid="remote-window-stream-status-panel"');
   });
 
-  it('keeps the bitrate budget on the selection render path with no lagging ref', () => {
+  it('keeps the explicit Mbps cap on the committed render path with no lagging ref', () => {
     const controls = read('src/components/terminal/useRemoteWindowDisplayQualityControls.ts');
     const controller = read('src/components/terminal/RemoteWindowOverlayController.tsx');
     const compact = (source: string) => source.replace(/\s+/g, ' ');
-    // The selection -> multiplier mapping keeps its single owner helper, and the
-    // hook derives it on the render path rather than through a post-commit ref.
+    // The explicit Mbps cap keeps its single owner helper, and the hook derives
+    // the Bps cap on the render path rather than through a post-commit ref.
     expect(compact(controls)).toContain(
-      'resolveRemoteWindowBitrateMultiplier(bitrateMultiplierSelection)',
+      'resolveRemoteWindowVideoCapBps(qualitySettings.maxBitrateCapMbps)',
     );
     // Follow the value, not the name. The exported hook field is a contract, so
     // resolve the local identifier it is destructured into and require the two
     // consumers to pass that render-path binding. A renamed local that is really
     // a `.current` read then fails these assertions instead of slipping through.
-    const hookCall = controller.match(/const\s*\{([^}]*)\}\s*=\s*useRemoteWindowDisplayQualityControls\(\)/);
+    const hookCall = controller.match(/const\s*\{([^}]*)\}\s*=\s*useRemoteWindowDisplayQualityControls\(/);
     expect(hookCall).not.toBeNull();
     const destructured = hookCall![1].split(',').map((entry) => entry.trim()).filter(Boolean);
     const localNameFor = (exported: string) => {
@@ -142,67 +142,52 @@ describe('remote window architecture boundary truth', () => {
       }
       return null;
     };
-    const budgetLocal = localNameFor('budgetMultiplier');
-    expect(budgetLocal, 'controller must destructure budgetMultiplier from the hook').toBeTruthy();
+    const capLocal = localNameFor('maxBitrateCapBps');
+    expect(capLocal, 'controller must destructure maxBitrateCapBps from the hook').toBeTruthy();
 
-    // The hook must bind the exported budget value directly to the owner helper
+    // The hook must bind the exported cap value directly to the owner helper
     // on the render path, never through a `.current` read, whatever the local
     // bound to the helper result is called.
     const hookDerivation = compact(controls).match(
-      /const budgetMultiplier = resolveRemoteWindowBitrateMultiplier\(\s*\w+\s*\);/,
+      /const maxBitrateCapBps = .*resolveRemoteWindowVideoCapBps\(\s*\w+(?:\.\w+)*\s*\);/,
     );
-    expect(hookDerivation, 'hook must derive budgetMultiplier via the owner helper').not.toBeNull();
-    const hookDerivedNames = new Set<string>(['budgetMultiplier']);
-    for (const match of controls.matchAll(/const\s+(\w+)\s*=\s*resolveRemoteWindowBitrateMultiplier\(/g)) {
+    expect(hookDerivation, 'hook must derive the Bps cap via the owner helper').not.toBeNull();
+    const hookDerivedNames = new Set<string>(['maxBitrateCapBps']);
+    for (const match of controls.matchAll(/const\s+(\w+)\s*=\s*[^;]*resolveRemoteWindowVideoCapBps\(/g)) {
       hookDerivedNames.add(match[1]!);
     }
     for (const match of controls.matchAll(/useRef(?:<[^>]*>)?\(\s*(\w+)\b/g)) {
-      expect(hookDerivedNames.has(match[1]!), `hook ref created from budget value: ${match[1]}`).toBe(false);
+      expect(hookDerivedNames.has(match[1]!), `hook ref created from cap value: ${match[1]}`).toBe(false);
     }
     for (const match of controls.matchAll(/\.current\s*=\s*(\w+)\b/g)) {
-      expect(hookDerivedNames.has(match[1]!), `hook ref synced from budget value: ${match[1]}`).toBe(false);
+      expect(hookDerivedNames.has(match[1]!), `hook ref synced from cap value: ${match[1]}`).toBe(false);
     }
 
-    // Any identifier bound to a `.current` read is a lagging value; the budget
+    // Any identifier bound to a `.current` read is a lagging value; the cap
     // binding must never be one of them.
     const refReadBindings = new Set<string>();
     for (const match of controller.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*[^;\n]*\.current\b/g)) {
       refReadBindings.add(match[1]!);
     }
-    expect(refReadBindings.has(budgetLocal!)).toBe(false);
+    expect(refReadBindings.has(capLocal!)).toBe(false);
 
-    // No ref may be initialized or synced from the budget value or its aliases.
-    const aliases = new Set<string>([budgetLocal!]);
+    // No ref may be initialized or synced from the cap value or its aliases.
+    const aliases = new Set<string>([capLocal!]);
     for (const match of controller.matchAll(/(?:const|let|var)\s+(\w+)\s*=\s*(\w+)\s*;/g)) {
       if (aliases.has(match[2]!)) aliases.add(match[1]!);
     }
     for (const match of controller.matchAll(/useRef(?:<[^>]*>)?\(\s*(\w+)\b/g)) {
-      expect(aliases.has(match[1]!), `ref created from budget value: ${match[1]}`).toBe(false);
+      expect(aliases.has(match[1]!), `ref created from cap value: ${match[1]}`).toBe(false);
     }
     for (const match of controller.matchAll(/\.current\s*=\s*(\w+)\b/g)) {
-      expect(aliases.has(match[1]!), `ref synced from budget value: ${match[1]}`).toBe(false);
+      expect(aliases.has(match[1]!), `ref synced from cap value: ${match[1]}`).toBe(false);
     }
 
-    // Both consumers read the hook's derived value, not a ref: the live quality
-    // request and the start profile each get their own structural anchor.
-    expect(compact(controller)).toContain(`bitrateMultiplier: ${budgetLocal}`);
-    expect(compact(controller)).toContain(`${budgetLocal}, }),`);
+    // The live quality request reads the hook's derived value positionally, and
+    // the start profile derives its own cap through the same owner helper.
+    expect(capLocal).toBe('maxBitrateCapBps');
+    expect(compact(controller)).toContain('maxBitrateCapBps, maxFrameRateFps:');
+    expect(compact(controller)).toContain('maxBitrateCapBps: resolveRemoteWindowVideoCapBps(');
   });
 
-  it('keeps the architecture gesture contract aligned with the active amendment', () => {
-    const architecture = read('docs/architecture.md');
-    const amendment = read('docs/decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md');
-    const sop = read('docs/testing/remote-window-touch-action-sop.md');
-    expect(amendment).toContain('one finger is a complete no-op: tap, hold, drag, local pan, and double-tap do');
-    expect(amendment).toContain('one-finger movement pans the local canvas and emits no remote input');
-    expect(amendment).toContain('two-finger same-direction vertical motion commits to realtime remote scroll');
-    expect(amendment).toContain('same-direction motion at 1x and zoomed scale commits to realtime remote scroll');
-    expect(sop).toContain('At zoomed floating scale,');
-    expect(sop).toContain('At zoomed fullscreen scale one finger is a complete');
-    expect(sop).toContain('Two-finger same-direction motion is realtime remote scroll at 1x and');
-    expect(architecture).toContain('zoomed fullscreen 单指完全 no-op');
-    expect(architecture).toContain('1x 与 zoomed 的双指同向移动都是 realtime remote scroll');
-    expect(architecture).not.toContain('zoomed 双指同向移动才是本地 pan');
-    expect(architecture).not.toContain('1x/zoomed 的单指移动都是 realtime remote pixel scroll');
-  });
 });

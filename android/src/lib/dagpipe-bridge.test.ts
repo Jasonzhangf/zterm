@@ -120,7 +120,7 @@ describe('dagpipe native bridge', () => {
     expect(compilePhase7()).toEqual({
       ok: true,
       graphs: [
-        'release.runtime_promotion@0.1',
+        'release.runtime_promotion@0.2',
         'release.update_lifecycle@0.1',
         'observability.debug@0.1',
       ],

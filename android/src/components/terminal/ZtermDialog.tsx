@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { AmbientButton } from '../ambient';
 
 export type ZtermDialogTone = 'info' | 'success' | 'warning' | 'error';
@@ -205,7 +206,7 @@ export function ZtermDialog({
     onCancel?.();
   };
 
-  return (
+  const dialog = (
     <div
         data-testid="zterm-dialog"
         data-tone={tone}
@@ -391,4 +392,8 @@ export function ZtermDialog({
       </div>
     </div>
   );
+
+  // Escape the resource sheet's stacking context so the existing modal layer
+  // stays above the body-portalled stream controls and remains hit-testable.
+  return createPortal(dialog, document.body);
 }

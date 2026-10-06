@@ -11,7 +11,6 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { App as CapacitorApp } from '@capacitor/app';
 import { useIndependentFloatingEntryPosition, useSharedDraggableDrag, SHARED_DRAG_SUPPRESS_CLICK_MS } from './draggable-bubble-shared';
 import type {
   RemoteWindowCanvasLayoutV1,
@@ -21,14 +20,15 @@ import type {
   RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamStartedOfferV2Payload,
+  RemoteWindowCloseResultPayload,
   RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowBrowserUserAgent,
-  RemoteWindowVideoPreference,
   RemoteWindowVideoProfile,
 } from '../../lib/types';
 import type { RemoteWindowControlMessage } from '../../lib/remote-window-message-runtime';
+import { ZtermDialog } from './ZtermDialog';
 import type {
   DecodedFrameCommit,
   RemoteWindowPlaybackBinding,
@@ -49,7 +49,6 @@ import {
   attachRemoteWindowStreamReceiver,
   beginRemoteWindowStreamHandoff,
   beginRemoteWindowStreamSetup,
-  canResizeRemoteWindowTarget,
   closeRemoteWindowOverlay,
   commitRemoteWindowStreamHandoff,
   enterRemoteWindowFullscreen,
@@ -66,10 +65,8 @@ import {
 import {
   applyRemoteWindowMaxFrameRate,
   getRemoteWindowSourceRect,
-  readRemoteWindowVideoPreference,
   resolveInitialRemoteWindowVideoProfile,
-  writeRemoteWindowVideoPreference,
-  type RemoteWindowQualityMaxFrameRate,
+  resolveRemoteWindowVideoCapBps,
   type RemoteWindowVideoStatsSample,
 } from '../../lib/remote-window-video-quality';
 import {
@@ -115,13 +112,13 @@ import {
   readRemoteWindowInputMode,
   readRemoteWindowTouchScrollFraction,
   readRemoteWindowTouchScrollInverted,
+  readRemoteWindowVideoQualitySettings,
   readStoredBrowserEntryPosition,
   readStoredEntryPosition,
   writeRemoteWindowInputMode,
   writeStoredBrowserEntryPosition,
   writeStoredEntryPosition,
   type FloatingEntryPosition,
-  type RemoteWindowBitrateMultiplierSelection,
   type RemoteWindowTouchScrollFraction,
 } from './remote-window-overlay-storage';
 import {
@@ -140,8 +137,6 @@ import {
   resolveFloatingOverlaySizing,
   resolveStartedCaptureFrameSize,
   resolveRemoteWindowDisplaySourceSize,
-  resolveRemoteWindowFullscreenFillReferenceSize,
-  resolveRemoteWindowTargetResizeSize,
   formatTargetKind,
   isRemoteWindowInputSupported,
   pointerSampleFromReactEvent,
@@ -152,7 +147,10 @@ import {
   isRemoteWindowChromeTarget,
   releasePointerCaptureSafely,
   setPointerCaptureSafely,
+  resolveRemoteWindowCloseResult,
+  resolveRemoteWindowCloseDialogProjection,
   type RemoteWindowOrientationPolicy,
+  type RemoteWindowClosePhase,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
 import { AmbientButton } from '../ambient';
@@ -176,6 +174,7 @@ import { useRemoteWindowLockedPortal } from './useRemoteWindowLockedPortal';
 import { useRemoteWindowViewport } from './useRemoteWindowViewport';
 import { useRemoteWindowFocusSwitch } from './useRemoteWindowFocusSwitch';
 import { useRemoteWindowSelectionAdmission } from './useRemoteWindowSelectionAdmission';
+import { useRemoteWindowBackNavigation } from './useRemoteWindowBackNavigation';
 export type { RemoteWindowViewportDebugSnapshot } from './useRemoteWindowViewport';
 export type {
   RemoteWindowLiveDiagnostics,
@@ -183,6 +182,16 @@ export type {
 } from './useRemoteWindowPlayback';
 import { useRemoteWindowScreenshot } from './useRemoteWindowScreenshot';
 import type { RemoteWindowScreenshotSaveResult } from './useRemoteWindowScreenshot';
+
+function formatRemoteWindowQualityProfile(profile: {
+  maxBitrateBps: number;
+  maxFrameRateFps: number;
+} | null) {
+  return profile
+    ? `${profile.maxBitrateBps / 1_000_000} Mbps / ${profile.maxFrameRateFps} FPS`
+    : '尚未确认';
+}
+
 export interface RemoteWindowOverlayProps {
   browserOnly?: boolean; browserEntryEnabled?: boolean;
   activeSessionId?: string | null;
@@ -217,6 +226,7 @@ export interface RemoteWindowOverlayProps {
     revision?: number,
   ) => void;
   stopStream?: (sessionId: string, streamId: string) => unknown;
+  closeRemoteWindowStream?: (sessionId: string, streamId: string, targetId: string) => Promise<RemoteWindowCloseResultPayload> | unknown;
   requestScreenshot?: (
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
@@ -250,11 +260,6 @@ interface RemoteWindowStreamStartResult {
   startupTelemetry?: RemoteWindowReceiverStartupTelemetry;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
-type RemoteWindowScreenshotStatus =
-  | { phase: 'idle' }
-  | { phase: 'capturing' }
-  | { phase: 'saved'; fileName: string; savedPath: string }
-  | { phase: 'failed'; message: string };
 export interface RemoteWindowInputContext {
   sessionId: string;
   streamId: string;
@@ -274,9 +279,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   setBrowserUserAgentRequest,
   updateFocus,
   stopStream,
+  closeRemoteWindowStream,
   requestScreenshot,
   sendInput,
-  resizeTargetWindow,
   onInputDebug,
   bottomInsetPx = 0, bottomChromeInsetPx = 0, embedded = false, embeddedFullscreen = false, onExitEmbeddedFullscreen, onCloseEmbedded,
   onOpenResourceDrawer,
@@ -291,17 +296,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [state, setState] = useState<RemoteWindowOverlayState>(initialRemoteWindowOverlayState);
   const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
   const [floatingOverlayWidthPx, setFloatingOverlayWidthPxState] = useState<number | null>(null);
-  const [videoPreference, setVideoPreference] = useState<RemoteWindowVideoPreference>('smooth');
   const {
     displayOrientation,
-    displayOrientationRef,
-    bitrateMultiplierSelection,
-    maxFrameRateFps,
-    budgetMultiplier,
+    qualitySettings,
+    maxBitrateCapBps,
     setDisplayOrientation,
-    setBitrateMultiplierSelection,
-    setMaxFrameRateFps,
-  } = useRemoteWindowDisplayQualityControls();
+    commitQualitySettings,
+  } = useRemoteWindowDisplayQualityControls({ target: state.phase === 'targetLocked' ? state.target : null });
   const [touchScrollFraction] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
   const [touchScrollInverted] = useState(() => readRemoteWindowTouchScrollInverted());
   const [inputMode, setInputMode] = useState<RemoteWindowInputMode>(() => readRemoteWindowInputMode());
@@ -363,8 +364,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     clientX: number;
     clientY: number;
   } | null>(null);
-  const appliedRemoteFillResizeRef = useRef<{ streamId: string; targetId: string; width: number; height: number } | null>(null);
-  const pendingRemoteFillResizeRef = useRef<{ sequence: string; streamId: string; targetId: string; width: number; height: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current !== null) {
@@ -386,11 +385,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const [browserUserAgentError, setBrowserUserAgentError] = useState<string | null>(null);
   const [appSwitchOpen, setAppSwitchOpen] = useState(false);
   const [streamStatusOpen, setStreamStatusOpen] = useState(false);
+  const [remoteCloseState, setRemoteCloseState] = useState<RemoteWindowClosePhase>({ phase: 'idle' });
+  const remoteCloseBusyRef = useRef(false);
   const screenshotController = useRemoteWindowScreenshot({
     activeSessionId,
     requestScreenshot,
   });
-  const screenshotStatus: RemoteWindowScreenshotStatus = screenshotController.status;
+  const screenshotFeedback = screenshotController.feedback;
+  const screenshotBusy = screenshotController.busy;
   const [entryOffset, setEntryOffsetState] = useState<FloatingEntryPosition>(() => readStoredEntryPosition());
   const floatingOffsetRef = useRef(floatingOffset);
   const floatingOverlayWidthPxRef = useRef(floatingOverlayWidthPx);
@@ -530,10 +532,17 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     surfacePinchStartRef.current = null;
   }, [clearLongPressTimer]);
   const resetSurfaceGestures = clearSurfacePointerState;
+  // Mode/Back/shrink/blur/lostpointercapture all settle through the one gesture
+  // owner first, then clear pointer obligations. settleGestureSequenceRef holds
+  // the runtime-backed implementation defined later in this component.
+  const settleGestureSequenceRef = useRef<() => void>(() => {});
+  const settleGestureSequence = useCallback(() => {
+    settleGestureSequenceRef.current();
+  }, []);
 
   useEffect(() => {
-    if (!remoteWindowInteractionEnabled) clearSurfacePointerState();
-  }, [clearSurfacePointerState, remoteWindowInteractionEnabled]);
+    if (!remoteWindowInteractionEnabled) settleGestureSequence();
+  }, [remoteWindowInteractionEnabled, settleGestureSequence]);
   const {
     commitFullscreenViewport,
     fullscreenDisplayMode,
@@ -557,7 +566,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     onResetGestures: resetSurfaceGestures,
   });
   const {
-    activeProfile, adaptiveCause,
+    lastAck, qualityStatus, failureMessage, adaptiveCause,
     networkQuality,
     lastStatsSample, resetQualityState: resetQualityApplyState,
   } = useRemoteWindowQuality({
@@ -570,9 +579,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     // The old strict focus-ref equality dropped quality updates for the first
     // stream whenever focus projection lagged the committed active stream.
     qualityStreamActive: state.phase === 'targetLocked' && Boolean(qualityStreamId && state.streamStarted),
-    videoPreference,
-    bitrateMultiplier: budgetMultiplier,
-    maxFrameRateFps,
+    videoPreference: qualitySettings.preference,
+    maxBitrateCapBps,
+    maxFrameRateFps: qualitySettings.maxFrameRateFps,
     target: state.phase === 'targetLocked' ? state.target : null,
     updateStreamQuality,
     collectStatsRef: collectStreamStatsRef,
@@ -919,8 +928,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setItermPaneTargetsExpanded(false);
     setAppSwitchOpen(false);
     setStreamStatusOpen(false);
+    setRemoteCloseState({ phase: 'idle' });
     floatingResizeRef.current = null;
-    clearSurfacePointerState();
+    settleGestureSequence();
     screenshotController.reset();
     activeHandoffRef.current = null;
     handoffVideoVisibilityRef.current = null;
@@ -976,7 +986,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     if (closeEmbedded && embedded) onCloseEmbedded?.();
   }, [
     activeSessionId,
-    clearSurfacePointerState,
+    settleGestureSequence,
     resetCatalog,
     resetFullscreenViewport,
     setFloatingOffset,
@@ -1039,8 +1049,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     lastReportedInputContextKeyRef.current = inputContextKey;
     onInputContextChange?.(inputContext);
   }, [inputContext, inputContextKey, onInputContextChange]);
-  const handleFullscreen = useCallback(() => { publishRemoteWindowInputContext(); resetFullscreenViewport(); setStreamStatusOpen(false); setState((current) => enterRemoteWindowFullscreen(current)); }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
+  const handleFullscreen = useCallback(() => { settleGestureSequence(); publishRemoteWindowInputContext(); resetFullscreenViewport(); setStreamStatusOpen(false); setState((current) => enterRemoteWindowFullscreen(current)); }, [publishRemoteWindowInputContext, resetFullscreenViewport, settleGestureSequence]);
   const handleShrink = useCallback(() => {
+    settleGestureSequence();
     resetFullscreenViewport();
     // The More sheet is portalled to the body and re-measured against the
     // toolbar anchor; leaving it open across a mode transition would let the
@@ -1054,137 +1065,101 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     setDualStreamSwitch((current) => resetRemoteWindowDualStreamSwitch(current));
     setState((current) => shrinkRemoteWindowOverlay(current));
     if (embedded) onExitEmbeddedFullscreen?.();
-  }, [embedded, onExitEmbeddedFullscreen, resetFullscreenViewport, setDualStreamSwitch]);
+  }, [embedded, onExitEmbeddedFullscreen, resetFullscreenViewport, setDualStreamSwitch, settleGestureSequence]);
   const handleExplicitClose = useCallback(() => handleClose(true), [handleClose]);
-  const handleRemoteClose = useCallback(() => {
+  // Remote destructive close is a typed control round-trip. The overlay never injects a close-window input and never
+  // tears the overlay down on click; only a correlated `closed` result triggers the final local exit.
+  const openRemoteCloseConfirm = useCallback(() => {
     if (state.phase !== 'targetLocked' || !currentLockedTarget) {
       return;
     }
-    sendRemoteWindowInputEventsForTarget({
-      sessionId: activeSessionId || null,
-      streamId: currentLockedStreamId,
-      target: currentLockedTarget,
-      events: [{ kind: 'close-window' }],
-    });
+    setRemoteCloseState({ phase: 'confirming' });
+  }, [currentLockedTarget, state.phase]);
+  const cancelRemoteClose = useCallback(() => {
+    setRemoteCloseState((current) => (current.phase === 'closing' ? current : { phase: 'idle' }));
+  }, []);
+  // A non-`closed` remote outcome keeps the overlay usable: the user can retry the remote close, or take the explicit
+  // local exit. Local exit stays the only path that tears the local overlay/stream down.
+  const exitFromRemoteCloseOutcome = useCallback(() => {
+    setRemoteCloseState({ phase: 'idle' });
     handleExplicitClose();
+  }, [handleExplicitClose]);
+  const confirmRemoteClose = useCallback(() => {
+    if (remoteCloseBusyRef.current) {
+      return;
+    }
+    if (state.phase !== 'targetLocked' || !currentLockedTarget || !currentLockedStreamId || !activeSessionId) {
+      return;
+    }
+    if (!closeRemoteWindowStream) {
+      setRemoteCloseState({
+        phase: 'unsupported',
+        message: '当前客户端未接通远端关闭通道，请使用本地退出。',
+      });
+      return;
+    }
+    remoteCloseBusyRef.current = true;
+    setRemoteCloseState({ phase: 'closing' });
+    const targetId = currentLockedTarget.streamTargetId;
+    void Promise.resolve(closeRemoteWindowStream(activeSessionId, currentLockedStreamId, targetId))
+      .then((result) => {
+        const resolution = resolveRemoteWindowCloseResult(result);
+        if (resolution.kind === 'closed') {
+          setRemoteCloseState({ phase: 'idle' });
+          handleExplicitClose();
+          return;
+        }
+        setRemoteCloseState({ phase: resolution.phase, message: resolution.message });
+      })
+      .catch((error) => {
+        setRemoteCloseState({
+          phase: 'failed',
+          message: error instanceof Error ? error.message : '远端关闭请求失败。',
+        });
+      })
+      .finally(() => {
+        remoteCloseBusyRef.current = false;
+      });
   }, [
     activeSessionId,
+    closeRemoteWindowStream,
     currentLockedStreamId,
     currentLockedTarget,
     handleExplicitClose,
-    sendRemoteWindowInputEventsForTarget,
     state.phase,
   ]);
-  const requestRemoteTargetFillResize = useCallback((
-    force = false,
-  ) => {
-    if (
-      state.phase !== 'targetLocked' || !state.streamStarted
-      || (!embedded && state.mode !== 'fullscreen')
-      || !activeSessionId
-      || !currentLockedStreamId || activeStreamIdRef.current !== currentLockedStreamId
-      || !currentLockedTarget || !canResizeRemoteWindowTarget(currentLockedTarget)
-      || !resizeTargetWindow
-    ) {
-      return false;
-    }
-    const fillReference = resolveRemoteWindowFullscreenFillReferenceSize({
-      overlay: embedded ? null : floatingOverlayRef.current,
-      toolbar: embedded ? null : lockedToolbarRef.current,
-      surface: videoSurfaceRef.current,
-      fallbackSurfaceSize: surfaceSize,
-    });
-    if (!fillReference) {
-      return false;
-    }
-    const reference = resolveRemoteWindowTargetResizeSize({
-      viewport: fillReference,
-      devicePixelRatio: window.devicePixelRatio,
-      target: currentLockedTarget,
-      orientation: displayOrientationRef.current,
-    });
-    if (!reference) return false;
-    const width = reference.width;
-    const height = reference.height;
-    const delivery = { streamId: currentLockedStreamId, targetId: currentLockedTarget.streamTargetId, width, height };
-    if (!force && [appliedRemoteFillResizeRef.current, pendingRemoteFillResizeRef.current].some((current) => current?.streamId === delivery.streamId && current.targetId === delivery.targetId && current.width === width && current.height === height)) return false;
-    try {
-      const sequence = resizeTargetWindow(activeSessionId, {
-        streamId: currentLockedStreamId,
-        targetId: currentLockedTarget.streamTargetId,
-        event: {
-          kind: 'window-resize',
-          width,
-          height,
-        },
-      });
-      pendingRemoteFillResizeRef.current = { sequence, ...delivery };
-      return true;
-    } catch (error) {
-      console.error('[RemoteWindowOverlay] remote fill resize dispatch failed:', error);
-      return false;
-    }
-  }, [activeSessionId, currentLockedStreamId, currentLockedTarget, embedded, resizeTargetWindow, state, surfaceSize]);
+  useRemoteWindowBackNavigation({
+    active: state.phase === 'targetLocked' || state.phase === 'pickerOpen' || state.phase === 'targetEnumerating',
+    lockedToolbarRef,
+    streamStatusOpen,
+    appSwitchOpen,
+    fullscreen: state.phase === 'targetLocked' && state.mode === 'fullscreen',
+    closeStreamStatus: () => setStreamStatusOpen(false),
+    closeAppSwitch: () => setAppSwitchOpen(false),
+    shrinkFullscreen: handleShrink,
+    exitLocalStream: handleExplicitClose,
+  });
   const handleDisplayOrientationChange = useCallback((orientation: RemoteWindowOrientationPolicy) => {
     setDisplayOrientation(orientation);
-    requestRemoteTargetFillResize(true);
-  }, [requestRemoteTargetFillResize, setDisplayOrientation]);
-  const handleBitrateMultiplierChange = useCallback((selection: RemoteWindowBitrateMultiplierSelection) => {
-    setBitrateMultiplierSelection(selection);
-    resetQualityApplyState();
-  }, [resetQualityApplyState, setBitrateMultiplierSelection]);
-  const handleMaxFrameRateChange = useCallback((frameRate: RemoteWindowQualityMaxFrameRate) => {
-    setMaxFrameRateFps(frameRate);
-    resetQualityApplyState();
-  }, [resetQualityApplyState, setMaxFrameRateFps]);
+  }, [setDisplayOrientation]);
   useEffect(() => {
     if (!embeddedFullscreen) { embeddedFullscreenRef.current = false; embeddedFullscreenPromotionPendingRef.current = false; suppressEmbeddedFullscreenPromotionRef.current = false; return; }
     if (!embeddedFullscreenRef.current) { embeddedFullscreenRef.current = true; embeddedFullscreenPromotionPendingRef.current = true; suppressEmbeddedFullscreenPromotionRef.current = false; }
     if (embeddedFullscreenPromotionPendingRef.current && !suppressEmbeddedFullscreenPromotionRef.current && state.phase === 'targetLocked' && state.mode === 'floating') { embeddedFullscreenPromotionPendingRef.current = false; handleFullscreen(); }
   }, [embeddedFullscreen, handleFullscreen, state]);
-  useEffect(() => {
-    if (state.phase !== 'targetLocked' || (!embedded && state.mode !== 'fullscreen')) {
-      return;
-    }
-    const frame = window.requestAnimationFrame(() => {
-      requestRemoteTargetFillResize();
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [embedded, requestRemoteTargetFillResize, state]);
-
   const handleRequestKeyboard = useCallback(() => {
     publishRemoteWindowInputContext();
     onRequestKeyboard?.();
   }, [onRequestKeyboard, publishRemoteWindowInputContext]);
 
   const handleToggleFullscreenDisplayMode = useCallback(() => {
+    settleGestureSequence();
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
-    requestRemoteTargetFillResize(true);
   }, [
-    requestRemoteTargetFillResize,
     resetFullscreenViewport,
     setFullscreenDisplayMode,
-  ]);
-
-  useEffect(() => {
-    if (
-      state.phase !== 'targetLocked'
-      || state.mode !== 'fullscreen'
-      || !state.streamId
-      || !activeSessionId
-      || !surfaceSize
-      || fullscreenDisplayMode !== initialFullscreenDisplayMode
-    ) {
-      return;
-    }
-    requestRemoteTargetFillResize();
-  }, [
-    activeSessionId,
-    fullscreenDisplayMode,
-    requestRemoteTargetFillResize,
-    state,
-    surfaceSize,
+    settleGestureSequence,
   ]);
 
   const handleToggleInputMode = useCallback(() => {
@@ -1491,14 +1466,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         }
         return;
       }
-      if (msg.type === 'remote-window-input-ack') {
-        const pending = pendingRemoteFillResizeRef.current;
-        const matchesPending = pending?.sequence === msg.control.sequence && pending.streamId === msg.payload.streamId && pending.targetId === msg.payload.targetId;
-        if (matchesPending) {
-          pendingRemoteFillResizeRef.current = null;
-          if (msg.control.accepted) appliedRemoteFillResizeRef.current = pending;
-        }
-      }
       if (msg.type !== 'remote-window-input-ack' || msg.control.accepted !== true) {
         return;
       }
@@ -1591,16 +1558,20 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
     // Keep the browser video placeholder hidden until this receiver has a real frame.
     updateReceiverVideoVisibility(false);
-    const selectedVideoPreference = readRemoteWindowVideoPreference(target);
-    if (!previousHadStream) {
-      setVideoPreference(selectedVideoPreference);
-    }
+    const selectedSettings = readRemoteWindowVideoQualitySettings(target);
     const videoProfile = applyRemoteWindowMaxFrameRate(
-      resolveInitialRemoteWindowVideoProfile(selectedVideoPreference, networkQuality, false, {
-        target: effectiveTarget,
-        budgetMultiplier,
-      }),
-      maxFrameRateFps,
+      resolveInitialRemoteWindowVideoProfile(
+        selectedSettings.preference,
+        networkQuality,
+        false,
+        {
+          target: effectiveTarget,
+          ...(selectedSettings.maxBitrateCapMbps === null
+            ? {}
+            : { maxBitrateCapBps: resolveRemoteWindowVideoCapBps(selectedSettings.maxBitrateCapMbps) ?? undefined }),
+        },
+      ),
+      selectedSettings.maxFrameRateFps,
     );
 
     const selectEffectiveTarget = (current: RemoteWindowOverlayState) => selectRemoteWindowTargetFromCatalog(
@@ -1724,7 +1695,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           screenshotController.reset();
           resetFullscreenViewport();
           setFullscreenDisplayMode(initialFullscreenDisplayMode);
-          setVideoPreference(selectedVideoPreference);
           setState((current) => commitRemoteWindowStreamHandoff(current, handoff, committedStreamId));
         } else {
           if (
@@ -1815,11 +1785,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       });
   }, [
     activeSessionId,
-    bitrateMultiplierSelection,
     browserPickerOpen,
     invalidatePlayback,
-    maxFrameRateFps,
     networkQuality,
+    qualitySettings,
     resetCatalog,
     resetQualityApplyState,
     resetFullscreenViewport,
@@ -2137,11 +2106,10 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         && localPanBaseline.pointerId === currentGesture.pointerId,
       );
       if (upgradesAppliedLocalPan) {
-        // 第二指落下即撤销单指阶段已应用的本地 pan，并立刻把控制权交给
-        // pair runtime。Android 会把真实双指交错派发为「第一指继续 move」，
-        // 若在这里等待第二指自己移动过阈值，第一指后续 move 会被整段吞掉，
-        // 表现为双指只拖动窗口、不发远端 scroll。
-        setFullscreenViewport((current) => ({ scale: current.scale, panX: localPanBaseline!.startPanX, panY: localPanBaseline!.startPanY }));
+        // 第二指落下保留单指阶段已应用的本地 pan，并把控制权交给 pair runtime。
+        // Android 会把真实双指交错派发为「第一指继续 move」；保留已应用 pan
+        // 让双指从当前投影接管，避免本地 pan 被回滚，同时第一指后续 move 仍
+        // 由 pair runtime 送远端 scroll。
         surfaceLocalPanStartRef.current = null;
       }
       const [firstEntry, secondEntry] = pointers.slice(-2) as [
@@ -2195,8 +2163,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       zoomedProjection: event.pointerType === 'touch'
         && fullscreenViewportRef.current.scale > 1.01,
       touchMode: inputModeRef.current === 'touch',
-      suppressSingleFinger: state.mode === 'fullscreen'
-        && fullscreenViewportRef.current.scale > 1.01,
     });
     applyRemoteWindowTouchPointerResult(result);
     // 触控模式：按下启动长按定时器（手指不动 ≥500ms → 右键）
@@ -2504,7 +2470,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         timeMs: event.timeStamp,
         scrollFraction: touchScrollFractionRef.current,
         invertGestureDirection: touchScrollInvertedRef.current,
-        remainingPointerMode: 'remote-action',
+        remainingPointerMode: fullscreenViewportRef.current.scale > 1.01
+          ? 'local-pan'
+          : 'remote-action',
       });
       if (pairResult.nextState.mode === 'localPan') {
         surfaceLocalPanStartRef.current = {
@@ -2577,6 +2545,60 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     }
   }, [applyRemoteWindowTouchPointerResult, clearLongPressTimer, resolveSurfaceInputGeometry]);
 
+  // The single gesture-owner settle path: classify-then-settle through the
+  // existing touch-action runtime, then clear pointer obligations. Repeated
+  // cancel/up/lostcapture/blur calls are idempotent because an idle gesture
+  // produces no remote event and clearing an already-clear map is a no-op.
+  settleGestureSequenceRef.current = () => {
+    const gesture = surfaceGestureRef.current;
+    if (gesture) {
+      const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
+      if (runtimeGesture.mode !== 'idle') {
+        const geometry = resolveSurfaceInputGeometry();
+        if (geometry) {
+          const pointerId = 'pointerId' in runtimeGesture ? runtimeGesture.pointerId : 0;
+          const clientX = 'lastClientX' in runtimeGesture ? runtimeGesture.lastClientX : 0;
+          const clientY = 'lastClientY' in runtimeGesture ? runtimeGesture.lastClientY : 0;
+          const result = resolveRemoteWindowTouchPointerCancelRuntime({
+            state: runtimeGesture,
+            pointer: {
+              pointerId,
+              pointerType: 'touch',
+              clientX,
+              clientY,
+              button: 0,
+              buttons: 0,
+              timeMs: Date.now(),
+            },
+            geometry,
+          });
+          applyRemoteWindowTouchPointerResult(result);
+        }
+      }
+    }
+    clearSurfacePointerState();
+  };
+
+  useEffect(() => {
+    const handleWindowBlur = () => settleGestureSequence();
+    window.addEventListener('blur', handleWindowBlur);
+    return () => window.removeEventListener('blur', handleWindowBlur);
+  }, [settleGestureSequence]);
+
+  const handleVideoSurfaceLostPointerCapture = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const gesture = surfaceGestureRef.current;
+    if (!gesture) {
+      return;
+    }
+    // A pair gesture has no single pointerId: any capture loss ends the pair.
+    // A single-pointer gesture only settles for its own pointer so that lifting
+    // one finger of a two->one transition does not cancel the remaining pan.
+    if ('pointerId' in gesture && gesture.pointerId !== event.pointerId) {
+      return;
+    }
+    settleGestureSequence();
+  }, [settleGestureSequence]);
+
   const handleVideoSurfaceWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
     if (!remoteWindowInteractionEnabled) {
       return;
@@ -2619,31 +2641,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     event.preventDefault();
     event.stopPropagation();
   }, [emitRemoteWindowActionInput, publishRemoteWindowInputContext, remoteWindowInteractionEnabled, state]);
-
-  useEffect(() => {
-    if (state.phase !== 'targetLocked' || state.mode !== 'fullscreen') {
-      return;
-    }
-    let disposed = false;
-    let listenerHandle: { remove: () => Promise<void> | void } | null = null;
-    void Promise.resolve(CapacitorApp.addListener('backButton', handleShrink))
-      .then((handle) => {
-        if (disposed) {
-          void handle.remove();
-          return;
-        }
-        listenerHandle = handle;
-      })
-      .catch((error) => {
-        console.error('[RemoteWindowOverlay] backButton listener failed:', error);
-      });
-    return () => {
-      disposed = true;
-      if (listenerHandle) {
-        void listenerHandle.remove();
-      }
-    };
-  }, [handleShrink, state]);
 
   const pickerContent = state.phase === 'targetEnumerating' || state.phase === 'pickerOpen' ? (
     <RemoteWindowTargetPicker
@@ -2792,35 +2789,6 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
 	    : embeddedFloatingProjection
 	      ? { ...styles.videoPlaceholder, width: '100%', height: '100%', minHeight: 0, flex: '1 1 auto' }
       : styles.videoPlaceholder;
-  const screenshotFeedback = (() => {
-    switch (screenshotStatus.phase) {
-      case 'capturing':
-        return {
-          phase: screenshotStatus.phase,
-          title: '远程原始截屏中',
-          detail: '正在从目标窗口获取 PNG',
-          tone: 'progress' as const,
-        };
-      case 'saved':
-        return {
-          phase: screenshotStatus.phase,
-          title: '原始截图已保存',
-          detail: screenshotStatus.fileName,
-          tone: 'success' as const,
-        };
-      case 'failed':
-        return {
-          phase: screenshotStatus.phase,
-          title: '截屏失败',
-          detail: screenshotStatus.message,
-          tone: 'error' as const,
-        };
-      case 'idle':
-      default:
-        return null;
-    }
-  })();
-  const screenshotBusy = screenshotStatus.phase === 'capturing';
   const screenshotButtonStyle = screenshotBusy
     ? { ...styles.headerIconButton, ...styles.headerIconButtonBusy }
     : styles.headerIconButton;
@@ -2866,6 +2834,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onPointerMove={handleVideoSurfacePointerMove}
       onPointerUp={handleVideoSurfacePointerUp}
       onPointerCancel={handleVideoSurfacePointerCancel}
+      onLostPointerCapture={handleVideoSurfaceLostPointerCapture}
       onWheel={handleVideoSurfaceWheel}
       onKeyDown={(event) => handleVideoSurfaceKey(event, 'down')}
       onKeyUp={(event) => handleVideoSurfaceKey(event, 'up')}
@@ -3020,27 +2989,22 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const lockedMoreContent = state.phase === 'targetLocked' ? (
     <RemoteWindowMorePanel
       fullscreen={state.mode === 'fullscreen'}
-      videoPreference={videoPreference}
       displayOrientation={displayOrientation}
       onDisplayOrientationChange={handleDisplayOrientationChange}
-      bitrateMultiplierSelection={bitrateMultiplierSelection}
-      onBitrateMultiplierChange={handleBitrateMultiplierChange}
-      maxFrameRateFps={maxFrameRateFps}
-      onMaxFrameRateChange={handleMaxFrameRateChange}
-      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS`}
+      qualitySettings={qualitySettings}
+      onQualityApply={(settings) => {
+        commitQualitySettings(settings);
+      }}
+      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${qualityStatus}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       onDismiss={() => setStreamStatusOpen(false)}
+      onRemoteClose={openRemoteCloseConfirm}
       browserMode={state.phase === 'targetLocked' && isRemoteWindowChromeTarget(state.target)}
       browserUserAgent={browserUserAgent}
       browserUserAgentStatus={browserUserAgentStatus}
       browserUserAgentError={browserUserAgentError}
       onBrowserUserAgentChange={handleBrowserUserAgentChange}
       onToggleFullscreenDisplayMode={handleToggleFullscreenDisplayMode}
-      onVideoPreferenceChange={(preference) => {
-        setVideoPreference(preference);
-        writeRemoteWindowVideoPreference(state.target, preference);
-        resetQualityApplyState();
-      }}
       developerDiagnostics={<RemoteWindowDeveloperDiagnostics
         activeSessionId={activeSessionId}
         appForegroundActive={appForegroundActive !== false}
@@ -3098,10 +3062,9 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           moreOpen={streamStatusOpen}
           screenshotBusy={screenshotBusy}
           screenshotButtonStyle={screenshotButtonStyle}
-          streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${activeProfile.maxBitrateBps / 1_000_000} Mbps / ${activeProfile.maxFrameRateFps} FPS`}
+          streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${qualityStatus}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
           targetKindLabel={formatTargetKind(state.target)}
           onClose={handleExplicitClose}
-          onRemoteClose={handleRemoteClose}
           onFullscreen={handleFullscreen}
           onRequestKeyboard={handleRequestKeyboard}
           onScreenshot={handleRemoteWindowScreenshot}
@@ -3109,7 +3072,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           onToggleAppSwitch={() => setAppSwitchOpen((current) => !current)}
           onToggleInputMode={handleToggleInputMode}
           onToggleMore={() => setStreamStatusOpen((current) => !current)}
-          streamDebugInfo={state.mode === 'fullscreen' ? { frameSize: receiverFrameSize, videoSize: liveDiag && liveDiag.videoWidth > 0 && liveDiag.videoHeight > 0 ? { width: liveDiag.videoWidth, height: liveDiag.videoHeight } : null, fps: lastStatsSample?.framesPerSecond ?? null, uplinkBps: null, downlinkBps: lastStatsSample?.receivedBitrateBps ?? null, targetBps: activeProfile.maxBitrateBps, sample: lastStatsSample } : null}
+          streamDebugInfo={state.mode === 'fullscreen' ? { frameSize: receiverFrameSize, videoSize: liveDiag && liveDiag.videoWidth > 0 && liveDiag.videoHeight > 0 ? { width: liveDiag.videoWidth, height: liveDiag.videoHeight } : null, fps: lastStatsSample?.framesPerSecond ?? null, uplinkBps: null, downlinkBps: lastStatsSample?.receivedBitrateBps ?? null, targetBps: lastAck?.profile.maxBitrateBps ?? null, sample: lastStatsSample } : null}
         /> : null}
       {lockedVideoGroupContent}
       {state.mode === 'floating' ? (
@@ -3139,6 +3102,13 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const lockedContentProjection = embedded && embeddedLockedPortalHost
     ? createPortal(lockedContent, embeddedLockedPortalHost)
     : lockedContent;
+  // The remote close round-trip is a typed control flow: confirm first, then show the exact typed outcome. Cancel and
+  // any non-`closed` outcome keep the overlay and local stream alive.
+  const remoteCloseDialog = resolveRemoteWindowCloseDialogProjection(remoteCloseState, {
+    onCancelConfirm: cancelRemoteClose,
+    onConfirm: confirmRemoteClose,
+    onExitLocal: exitFromRemoteCloseOutcome,
+  });
 
   return (
     <>
@@ -3211,6 +3181,18 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         />
       ) : null}
       {lockedContentProjection}
+      <ZtermDialog
+        open={remoteCloseDialog.open}
+        tone={remoteCloseDialog.tone}
+        title={remoteCloseDialog.title}
+        message={remoteCloseDialog.message}
+        confirmLabel={remoteCloseDialog.confirmLabel}
+        cancelLabel={remoteCloseDialog.cancelLabel}
+        busy={remoteCloseDialog.busy}
+        showCancel={remoteCloseDialog.showCancel}
+        onCancel={remoteCloseDialog.onCancel}
+        onConfirm={remoteCloseDialog.onConfirm}
+      />
       <style>{`
         [data-testid="remote-window-control-strip"]::-webkit-scrollbar {
           display: none;

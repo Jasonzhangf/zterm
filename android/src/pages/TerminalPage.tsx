@@ -182,7 +182,10 @@ import {
   type TraversalRelayDeviceSnapshot,
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
-import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
+import type {
+  RemoteWindowControlMessage,
+  RemoteWindowInputDeliveryOutcomeV1,
+} from '../lib/remote-window-message-runtime';
 
 type DrawerRemoteSessionTarget = {
   name: string;
@@ -514,6 +517,7 @@ interface TerminalPageProps {
     target: RemoteWindowStreamTargetManifest,
   ) => void;
   onStopRemoteWindowStream?: (sessionId: string, streamId: string) => unknown;
+  onCloseRemoteWindowStream?: (sessionId: string, streamId: string, targetId: string) => unknown;
   onSendRemoteWindowInput?: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
@@ -523,6 +527,9 @@ interface TerminalPageProps {
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
   ) => string;
   onRemoteWindowMessage?: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
+  onRemoteWindowInputOutcome?: (
+    handler: (outcome: RemoteWindowInputDeliveryOutcomeV1) => void,
+  ) => () => void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string, sessionId?: string) => void;
@@ -611,9 +618,11 @@ function TerminalPageComponent({
   onSetRemoteWindowBrowserUserAgent,
   onUpdateRemoteWindowFocus,
   onStopRemoteWindowStream,
+  onCloseRemoteWindowStream,
   onSendRemoteWindowInput,
   onResizeRemoteWindowTarget,
   onRemoteWindowMessage,
+  onRemoteWindowInputOutcome,
   quickActions,
   shortcutActions,
   onQuickActionInput,
@@ -685,6 +694,12 @@ function TerminalPageComponent({
   const [remoteWindowInputContext, setRemoteWindowInputContext] = useState<RemoteWindowInputContext | null>(null);
   const [remoteWindowStreamInvalidation, setRemoteWindowStreamInvalidation] = useState<{
     streamId: string;
+    message: string;
+    nonce: number;
+  } | null>(null);
+  const [remoteWindowInputNotice, setRemoteWindowInputNotice] = useState<{
+    tone: 'warning' | 'error';
+    title: string;
     message: string;
     nonce: number;
   } | null>(null);
@@ -861,8 +876,6 @@ function TerminalPageComponent({
   }, []);
 
   const recordRemoteWindowInputResultDebug = useCallback((msg: RemoteWindowControlMessage) => {
-    const context = remoteWindowInputContextRef.current;
-    const currentCounts = remoteWindowInputDebugRef.current.counts;
     if (msg.type === 'remote-window-input-ack') {
       const error = msg.control.error;
       if (error?.code === 'remote_window_input_stream_missing' && msg.payload.streamId) {
@@ -872,21 +885,56 @@ function TerminalPageComponent({
           nonce: Date.now(),
         });
       }
-      remoteWindowInputDebugRef.current = {
-        ...remoteWindowInputDebugRef.current,
-        ...projectRemoteWindowInputDebugContext(context),
-        streamId: abbreviateRemoteWindowDebugId(msg.payload.streamId || context?.streamId || null),
-        targetId: abbreviateRemoteWindowDebugId(msg.payload.targetId || context?.targetId || null),
-        lastResult: `${msg.control.accepted ? 'ACK' : 'NAK'} ${abbreviateRemoteWindowDebugId(msg.control.sequence)}${error ? ` ${error.code} ${truncateRemoteWindowInputResult(error.message)}` : ''}`,
-        lastResultAt: Date.now(),
-        counts: {
-          ...currentCounts,
-          accepted: currentCounts.accepted + (msg.control.accepted ? 1 : 0),
-          error: currentCounts.error + (msg.control.accepted ? 0 : 1),
-        },
-      };
+    }
+  }, []);
+
+  // Reliable delivery diagnostics consume the single client-local outcome so a retry/duplicate daemon ACK
+  // cannot be double-counted, and so failures/cancels can be surfaced to the user.
+  const recordRemoteWindowInputOutcome = useCallback((outcome: RemoteWindowInputDeliveryOutcomeV1) => {
+    const context = remoteWindowInputContextRef.current;
+    const currentCounts = remoteWindowInputDebugRef.current.counts;
+    const delivered = outcome.status === 'delivered';
+    const label = outcome.status === 'delivered' ? 'ACK' : outcome.status === 'cancelled' ? 'CANCEL' : 'NAK';
+    remoteWindowInputDebugRef.current = {
+      ...remoteWindowInputDebugRef.current,
+      ...projectRemoteWindowInputDebugContext(context),
+      streamId: abbreviateRemoteWindowDebugId(outcome.streamId || context?.streamId || null),
+      targetId: abbreviateRemoteWindowDebugId(outcome.targetId || context?.targetId || null),
+      lastResult: `${label} ${abbreviateRemoteWindowDebugId(outcome.sequence)} ${outcome.source}/${outcome.execution}${outcome.error ? ` ${outcome.error.code} ${truncateRemoteWindowInputResult(outcome.error.message)}` : ''}`,
+      lastResultAt: Date.now(),
+      counts: {
+        ...currentCounts,
+        accepted: currentCounts.accepted + (delivered ? 1 : 0),
+        error: currentCounts.error + (delivered ? 0 : 1),
+      },
+    };
+    if (outcome.status === 'delivered') {
       return;
     }
+    if (context && (context.streamId !== outcome.streamId || context.targetId !== outcome.targetId)) {
+      return;
+    }
+    if (outcome.status === 'cancelled') {
+      setRemoteWindowInputNotice({
+        tone: 'warning',
+        title: '输入已取消',
+        message: outcome.execution === 'not-dispatched'
+          ? '未发送的输入已取消。'
+          : '已发送的输入被取消，远端是否已执行尚未确认。',
+        nonce: Date.now(),
+      });
+      return;
+    }
+    setRemoteWindowInputNotice({
+      tone: 'error',
+      title: '输入未送达',
+      message: outcome.execution === 'not-dispatched'
+        ? '远端未执行该输入。'
+        : outcome.error?.message
+          ? `远端是否已执行该输入尚未确认：${truncateRemoteWindowInputResult(outcome.error.message)}`
+          : '远端是否已执行该输入尚未确认。',
+      nonce: Date.now(),
+    });
   }, []);
 
   const recordRemoteWindowVideoDebug = useCallback((snapshot: RemoteWindowVideoDebugSnapshot) => {
@@ -906,6 +954,25 @@ function TerminalPageComponent({
       recordRemoteWindowInputResultDebug(msg);
     });
   }, [onRemoteWindowMessage, recordRemoteWindowInputResultDebug]);
+
+  useEffect(() => {
+    if (!onRemoteWindowInputOutcome) {
+      return undefined;
+    }
+    return onRemoteWindowInputOutcome((outcome) => {
+      recordRemoteWindowInputOutcome(outcome);
+    });
+  }, [onRemoteWindowInputOutcome, recordRemoteWindowInputOutcome]);
+
+  useEffect(() => {
+    if (!remoteWindowInputNotice) {
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setRemoteWindowInputNotice(null);
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [remoteWindowInputNotice]);
 
   const rawShellHeight = resolveLayoutViewportHeight();
   const keyboardViewportAlreadyResized = isAndroid
@@ -3655,6 +3722,53 @@ function TerminalPageComponent({
       className="zterm-terminal-shell"
       data-terminal-shell-skin={effectiveTerminalShellSkin}
     >
+      {remoteWindowInputNotice ? (
+        <div
+          data-testid="remote-window-input-notice"
+          data-tone={remoteWindowInputNotice.tone}
+          role="status"
+          style={{
+            position: 'fixed',
+            top: `calc(env(safe-area-inset-top, 0px) + ${headerTopInsetPx + 8}px)`,
+            left: 12,
+            right: 12,
+            zIndex: 141,
+            pointerEvents: 'none',
+            padding: '9px 12px',
+            borderRadius: '12px',
+            border: `1px solid ${remoteWindowInputNotice.tone === 'error'
+              ? 'var(--zterm-settings-danger-border)'
+              : 'var(--zterm-settings-border)'}`,
+            background: remoteWindowInputNotice.tone === 'error'
+              ? 'var(--zterm-settings-danger-soft)'
+              : 'var(--zterm-settings-surface)',
+            color: 'var(--zterm-settings-text)',
+            boxShadow: 'var(--zterm-settings-shadow)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: '13px',
+              fontWeight: 800,
+              color: remoteWindowInputNotice.tone === 'error'
+                ? 'var(--zterm-settings-danger)'
+                : 'var(--zterm-settings-warning, var(--zterm-settings-text))',
+            }}
+          >
+            {remoteWindowInputNotice.title}
+          </div>
+          <div
+            style={{
+              marginTop: '3px',
+              fontSize: '12px',
+              lineHeight: 1.35,
+              color: 'var(--zterm-settings-muted)',
+            }}
+          >
+            {remoteWindowInputNotice.message}
+          </div>
+        </div>
+      ) : null}
       {!portraitSessionDrawerEnabled ? (
         <div>
           <TerminalHeader
@@ -3883,6 +3997,7 @@ function TerminalPageComponent({
               setBrowserUserAgentRequest: onSetRemoteWindowBrowserUserAgent,
               updateFocus: onUpdateRemoteWindowFocus,
               stopStream: onStopRemoteWindowStream,
+              closeRemoteWindowStream: onCloseRemoteWindowStream,
               requestScreenshot: handleRequestRemoteWindowScreenshot,
               sendInput: onSendRemoteWindowInput,
               resizeTargetWindow: onResizeRemoteWindowTarget,
@@ -3973,6 +4088,7 @@ function TerminalPageComponent({
             setBrowserUserAgentRequest: onSetRemoteWindowBrowserUserAgent,
             updateFocus: onUpdateRemoteWindowFocus,
             stopStream: onStopRemoteWindowStream,
+            closeRemoteWindowStream: onCloseRemoteWindowStream,
             requestScreenshot: handleRequestRemoteWindowScreenshot,
             sendInput: onSendRemoteWindowInput,
             resizeTargetWindow: onResizeRemoteWindowTarget,
@@ -4095,9 +4211,11 @@ function terminalPagePropsEqual(
     && prev.onSetRemoteWindowBrowserUserAgent === next.onSetRemoteWindowBrowserUserAgent
     && prev.onUpdateRemoteWindowFocus === next.onUpdateRemoteWindowFocus
     && prev.onStopRemoteWindowStream === next.onStopRemoteWindowStream
+    && prev.onCloseRemoteWindowStream === next.onCloseRemoteWindowStream
     && prev.onSendRemoteWindowInput === next.onSendRemoteWindowInput
     && prev.onResizeRemoteWindowTarget === next.onResizeRemoteWindowTarget
     && prev.onRemoteWindowMessage === next.onRemoteWindowMessage
+    && prev.onRemoteWindowInputOutcome === next.onRemoteWindowInputOutcome
     && prev.quickActions === next.quickActions
     && prev.shortcutActions === next.shortcutActions
     && prev.onQuickActionInput === next.onQuickActionInput

@@ -1,6 +1,8 @@
 import { EventEmitter } from 'events';
 import type { IncomingMessage } from 'http';
-import { WebSocketServer, type RawData } from 'ws';
+import { createServer as createHttpServer } from 'http';
+import type { AddressInfo } from 'net';
+import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
 import type { TerminalTransportSubscriber } from './terminal-runtime';
@@ -83,6 +85,10 @@ function createRuntime(handleMessage: (connection: DaemonTransportConnection, ra
     sessions,
     wss,
   };
+}
+
+function waitMs(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 afterEach(() => {
@@ -419,5 +425,170 @@ describe('terminal bridge runtime message scheduling', () => {
     expect(connection.closed).toBe(true);
     expect(events).toEqual(['head']);
     wss.close();
+  });
+});
+
+describe('terminal bridge runtime transport close cleanup', () => {
+  async function createOwnedLoopbackRuntime(options: {
+    handleTransportClosed?: (connection: DaemonTransportConnection) => void | Promise<void>;
+  }) {
+    const httpServer = createHttpServer();
+    const wss = new WebSocketServer({ noServer: true });
+    httpServer.on('upgrade', (request, socket, head) => {
+      wss.handleUpgrade(request, socket, head, (clientSocket) => {
+        wss.emit('connection', clientSocket, request);
+      });
+    });
+    await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve));
+    const address = httpServer.address() as AddressInfo;
+    const connectionUrl = `ws://127.0.0.1:${address.port}/ws?token=test-token`;
+
+    const sessions = new Map<string, TerminalTransportSubscriber>();
+    const connections = new Map<string, DaemonTransportConnection>();
+    const createdConnections: DaemonTransportConnection[] = [];
+    const serverSocketClosed = new Promise<number>((resolve) => {
+      wss.once('connection', (ws) => {
+        ws.once('close', (code) => resolve(code));
+      });
+    });
+    const runtime = createTerminalBridgeRuntime({
+      requiredAuthToken: 'test-token',
+      sessions,
+      connections,
+      wss,
+      logTimePrefix: () => '2026-06-15 12:00:00',
+      extractAuthToken: (rawUrl) =>
+        new URL(rawUrl || '/ws', 'http://127.0.0.1').searchParams.get('token') || '',
+      resolveRequestOrigin: () => `http://127.0.0.1:${address.port}`,
+      createWebSocketSessionTransport: (ws) =>
+        ({
+          kind: 'ws',
+          readyState: 1,
+          requestOrigin: undefined,
+          connectedSent: false,
+          sendText: vi.fn(),
+          close: vi.fn(),
+          ws,
+        }) as never,
+      createRtcSessionTransport: () => undefined as never,
+      createTransportConnection: (transport, requestOrigin) => {
+        const connection = {
+          id: `loopback-connection-${createdConnections.length + 1}`,
+          transportId: `loopback-transport-${createdConnections.length + 1}`,
+          requestOrigin,
+          role: 'session',
+          boundSubscriberId: null,
+          wsAlive: true,
+          lastInboundAt: Date.now(),
+          closeTransport: vi.fn(),
+          transport,
+        } as unknown as DaemonTransportConnection;
+        createdConnections.push(connection);
+        connections.set(connection.id, connection);
+        return connection;
+      },
+      detachSubscriberTransportOnly: vi.fn(),
+      refreshAdaptiveWidthLeaseHeartbeat: vi.fn(),
+      listMuxChannelSubscriberIds: () => [],
+      releaseAllMuxChannelSubscribers: () => [],
+      handleMessage: async () => {},
+      handleTransportClosed: options.handleTransportClosed,
+    });
+    wss.on('connection', (ws) => runtime.handleWebSocketConnection(ws, createRequest()));
+
+    const client = new WebSocket(connectionUrl);
+    await new Promise<void>((resolve, reject) => {
+      client.once('open', () => resolve());
+      client.once('error', reject);
+    });
+
+    async function closeOwnedClient() {
+      const closed = new Promise<void>((resolve) => client.once('close', () => resolve()));
+      client.close(1000, 'owned close');
+      await Promise.race([closed, waitMs(500)]);
+      await serverSocketClosed;
+    }
+
+    async function teardown() {
+      for (const clientSocket of [...wss.clients]) {
+        clientSocket.terminate();
+      }
+      await new Promise<void>((resolve) => wss.close(() => resolve()));
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    }
+
+    return {
+      closeOwnedClient,
+      connection: createdConnections[0],
+      connections,
+      sessions,
+      teardown,
+    };
+  }
+
+  it('observes one genuine rejecting cleanup promise and keeps the owned transport closed', async () => {
+    const cleanupFailures: unknown[] = [];
+    const consoleError = vi.spyOn(console, 'error').mockImplementation((message: unknown) => {
+      cleanupFailures.push(message);
+    });
+    let observed = 0;
+    const { closeOwnedClient, teardown } = await createOwnedLoopbackRuntime({
+      handleTransportClosed: () => {
+        observed += 1;
+        return Promise.reject(new Error('close-cleanup-failed'));
+      },
+    });
+
+    await closeOwnedClient();
+    await waitMs(50);
+
+    expect(observed).toBe(1);
+    expect(cleanupFailures).toEqual([
+      '[2026-06-15 12:00:00] transport loopback-connection-1 cleanup failed after detach: close-cleanup-failed',
+    ]);
+    await teardown();
+    consoleError.mockRestore();
+  });
+
+  it('reports a delayed cleanup rejection once with the original error', async () => {
+    const cleanupFailures: unknown[] = [];
+    const consoleError = vi.spyOn(console, 'error').mockImplementation((message: unknown) => {
+      cleanupFailures.push(message);
+    });
+    const { closeOwnedClient, teardown } = await createOwnedLoopbackRuntime({
+      handleTransportClosed: () =>
+        new Promise<void>((_resolve, reject) => {
+          setTimeout(() => reject(new Error('delayed-close-cleanup-failed')), 60);
+        }),
+    });
+
+    await closeOwnedClient();
+    await waitMs(150);
+
+    expect(cleanupFailures).toEqual([
+      '[2026-06-15 12:00:00] transport loopback-connection-1 cleanup failed after detach: delayed-close-cleanup-failed',
+    ]);
+    await teardown();
+    consoleError.mockRestore();
+  });
+
+  it('reports a synchronous cleanup throw once with the original error', async () => {
+    const cleanupFailures: unknown[] = [];
+    const consoleError = vi.spyOn(console, 'error').mockImplementation((message: unknown) => {
+      cleanupFailures.push(message);
+    });
+    const { closeOwnedClient, teardown } = await createOwnedLoopbackRuntime({
+      handleTransportClosed: () => {
+        throw new Error('sync-close-cleanup-threw');
+      },
+    });
+
+    await closeOwnedClient();
+
+    expect(cleanupFailures).toEqual([
+      '[2026-06-15 12:00:00] transport loopback-connection-1 cleanup failed after detach: sync-close-cleanup-threw',
+    ]);
+    await teardown();
+    consoleError.mockRestore();
   });
 });

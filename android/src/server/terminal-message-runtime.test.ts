@@ -214,6 +214,13 @@ function createRuntime(options?: {
       streamId: 'stream-default',
       phase: 'stopped',
     })),
+    requestRemoteWindowClose: vi.fn(async () => ({
+      requestId: 'remote-window-close-default',
+      sessionId: 'session-default',
+      streamId: 'stream-default',
+      targetId: 'target-default',
+      status: 'closed' as const,
+    })),
     updateStreamQuality: vi.fn(async (): Promise<RemoteWindowQualityResult> => ({
       requestId: 'remote-window-quality-default',
       streamId: 'stream-default',
@@ -245,6 +252,7 @@ function createRuntime(options?: {
       payload: { streamId: 'stream-default', targetId: 'target-default' },
     })),
     setBrowserUserAgent: vi.fn(),
+    acceptAnswer: vi.fn(async () => true),
     dispose: vi.fn(),
   };
 
@@ -340,6 +348,7 @@ function createRuntime(options?: {
   return {
     runtime,
     sessions,
+    closeConnection: runtime.closeConnection,
     sendTransportMessage,
     sendMessage,
     sendBufferHeadToSession,
@@ -1910,6 +1919,189 @@ describe('terminal message runtime explicit error truth', () => {
       },
     });
   });
+  it('dispatches a valid remote window close request and echoes the typed result with full correlation', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const result = {
+      requestId: 'rw-close-1',
+      sessionId: 'session-1',
+      streamId: 'stream-1',
+      targetId: 'app-window:42:window-1',
+      status: 'closed' as const,
+    };
+    remoteWindowStreamRuntime.requestRemoteWindowClose.mockResolvedValueOnce(result);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-close-request',
+      payload: {
+        requestId: 'rw-close-1',
+        sessionId: 'session-1',
+        streamId: 'stream-1',
+        targetId: 'app-window:42:window-1',
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(remoteWindowStreamRuntime.requestRemoteWindowClose).toHaveBeenCalledWith({
+      requestId: 'rw-close-1',
+      sessionId: 'session-1',
+      streamId: 'stream-1',
+      targetId: 'app-window:42:window-1',
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-close-result',
+      payload: result,
+    });
+  });
+
+  it('rejects a malformed remote window close request without calling the close owner', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-close-request',
+      payload: {
+        requestId: 'rw-close-bad',
+        sessionId: 'session-1',
+        streamId: '',
+        targetId: 'app-window:42:window-1',
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(remoteWindowStreamRuntime.requestRemoteWindowClose).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-close-result',
+      payload: expect.objectContaining({
+        requestId: 'rw-close-bad',
+        sessionId: 'session-1',
+        streamId: '',
+        targetId: 'app-window:42:window-1',
+        status: 'failed',
+      }),
+    });
+  });
+
+  it('surfaces a missing close owner as an explicit failed result instead of throwing', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    (remoteWindowStreamRuntime as { requestRemoteWindowClose?: unknown }).requestRemoteWindowClose = undefined;
+
+    await expect(runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-close-request',
+      payload: {
+        requestId: 'rw-close-owner',
+        sessionId: 'session-1',
+        streamId: 'stream-1',
+        targetId: 'app-window:42:window-1',
+      },
+    })))).resolves.toBeUndefined();
+    await flushAsyncHandlers();
+
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-close-result',
+      payload: expect.objectContaining({
+        requestId: 'rw-close-owner',
+        sessionId: 'session-1',
+        streamId: 'stream-1',
+        targetId: 'app-window:42:window-1',
+        status: 'failed',
+      }),
+    });
+  });
+
+  it('converts a rejected close owner call into an explicit failed result carrying the error', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    remoteWindowStreamRuntime.requestRemoteWindowClose.mockRejectedValueOnce(new Error('close injection unavailable'));
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-close-request',
+      payload: {
+        requestId: 'rw-close-reject',
+        sessionId: 'session-1',
+        streamId: 'stream-1',
+        targetId: 'app-window:42:window-1',
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-close-result',
+      payload: expect.objectContaining({
+        requestId: 'rw-close-reject',
+        sessionId: 'session-1',
+        streamId: 'stream-1',
+        targetId: 'app-window:42:window-1',
+        status: 'failed',
+        error: 'close injection unavailable',
+      }),
+    });
+  });
+
+  it('converts a synchronously throwing close owner into an explicit failed result', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    remoteWindowStreamRuntime.requestRemoteWindowClose.mockImplementationOnce(() => {
+      throw new Error('synchronous close owner failure');
+    });
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-close-request',
+      payload: {
+        requestId: 'rw-close-sync',
+        sessionId: 'session-1',
+        streamId: 'stream-1',
+        targetId: 'app-window:42:window-1',
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-close-result',
+      payload: expect.objectContaining({
+        requestId: 'rw-close-sync',
+        status: 'failed',
+        error: 'synchronous close owner failure',
+      }),
+    });
+  });
+
+  it('surfaces a disconnect cleanup failure instead of swallowing it, awaiting the same stop owner', async () => {
+    const { runtime, closeConnection, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    remoteWindowStreamRuntime.stopStream.mockResolvedValueOnce({
+      requestId: 'rw-close-stream-1',
+      streamId: 'stream-1',
+      phase: 'stopped' as const,
+      cleanup: {
+        status: 'cleanup_failed' as const,
+        remainingResources: ['input:stream-1'],
+        errors: [{ resource: 'input:stream-1', message: 'native up unobserved' }],
+      },
+    });
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-start-v2-request',
+      payload: {
+        requestId: 'rw-start-disconnect',
+        streamId: 'stream-1',
+        mediaPlan: 'single-focus' as const,
+        mediaPlanVersion: 2 as const,
+        target: makeRemoteWindowTargetManifest(),
+        videoProfile: smoothVideoProfile,
+      },
+    })));
+    await flushAsyncHandlers();
+
+    await expect(closeConnection(connection)).rejects.toThrow(/disconnect surfaced cleanup failure/);
+    expect(remoteWindowStreamRuntime.stopStream).toHaveBeenCalledTimes(1);
+    expect(remoteWindowStreamRuntime.stopStream).toHaveBeenCalledWith({
+      requestId: 'rw-close-stream-1',
+      streamId: 'stream-1',
+    });
+  });
+
   describe('remote-window mux channel envelope', () => {
     it('rejects an unwrapped remote-window request on the physical mux transport', async () => {
       const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
@@ -2089,5 +2281,91 @@ describe('terminal message runtime explicit error truth', () => {
       && frame.payload.channelId === 'rw-channel'
       && frame.payload.message.type === 'remote-window-targets-response'
     ))).toBe(false);
+  });
+});
+
+describe('remote window v2 answer typed error projection', () => {
+  it('projects a typed late-answer cancellation as remote_window_stream_answer_cancelled with request/stream identity', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    remoteWindowStreamRuntime.acceptAnswer.mockRejectedValueOnce(
+      Object.assign(new Error('remote window stream answer cancelled: stream-1/rw-answer-1'), {
+        name: 'remote_window_stream_answer_cancelled',
+      }),
+    );
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-answer-v2',
+      payload: {
+        requestId: 'rw-answer-1',
+        streamId: 'stream-1',
+        mediaPlanVersion: 2,
+        answer: { type: 'answer', sdp: 'late-answer-sdp' },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(remoteWindowStreamRuntime.acceptAnswer).toHaveBeenCalledWith({
+      requestId: 'rw-answer-1',
+      streamId: 'stream-1',
+      mediaPlanVersion: 2,
+      answer: { type: 'answer', sdp: 'late-answer-sdp' },
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-error',
+      payload: {
+        requestId: 'rw-answer-1',
+        streamId: 'stream-1',
+        code: 'remote_window_stream_answer_cancelled',
+        message: 'remote window stream answer cancelled: stream-1/rw-answer-1',
+      },
+    });
+  });
+
+  it('projects an ordinary answer failure as remote_window_stream_answer_failed', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    remoteWindowStreamRuntime.acceptAnswer.mockRejectedValueOnce(new Error('remote window v2 answer is invalid'));
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-answer-v2',
+      payload: {
+        requestId: 'rw-answer-2',
+        streamId: 'stream-2',
+        mediaPlanVersion: 2,
+        answer: { type: 'answer', sdp: 'invalid-sdp' },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-error',
+      payload: {
+        requestId: 'rw-answer-2',
+        streamId: 'stream-2',
+        code: 'remote_window_stream_answer_failed',
+        message: 'remote window v2 answer is invalid',
+      },
+    });
+  });
+
+  it('fails explicitly when the v2 answer owner is unavailable', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    (remoteWindowStreamRuntime as { acceptAnswer?: unknown }).acceptAnswer = undefined;
+
+    await expect(runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-answer-v2',
+      payload: {
+        requestId: 'rw-answer-3',
+        streamId: 'stream-3',
+        mediaPlanVersion: 2,
+        answer: { type: 'answer', sdp: 'sdp' },
+      },
+    })))).rejects.toThrow('remote window v2 answer owner is unavailable');
+    await flushAsyncHandlers();
+    expect(sendTransportMessage).not.toHaveBeenCalledWith(connection.transport, expect.objectContaining({
+      type: 'remote-window-error',
+    }));
   });
 });

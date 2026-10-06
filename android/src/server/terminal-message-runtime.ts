@@ -4,6 +4,8 @@ import {
   buildTerminalMuxServerChannelMessage,
   buildTerminalMuxUnwrappedSessionMessageError,
   classifyTerminalMuxClientMessage,
+  isRemoteWindowCloseRequestPayload,
+  REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE,
 } from '@zterm/shared/protocol';
 import type {
   BridgeClientMessage as ClientMessage,
@@ -108,7 +110,7 @@ export interface TerminalMessageRuntime {
   ) => TerminalTransportSubscriber | null;
   handleMessage: (connection: TerminalTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
   /** WS/传输断开时调用：停掉该连接发起的全部 remote-window 流，避免残留占用 capture */
-  closeConnection: (connection: TerminalTransportConnection) => void;
+  closeConnection: (connection: TerminalTransportConnection) => Promise<void>;
 }
 
 export function createTerminalMessageRuntime(
@@ -121,21 +123,37 @@ export function createTerminalMessageRuntime(
   // 连接 → 该连接发起的 remote-window 流（transportId → streamId 集合）
   const connectionRwStreams = new Map<string, Set<string>>();
 
-  function closeConnection(connection: TerminalTransportConnection) {
+  async function closeConnection(connection: TerminalTransportConnection) {
     const streamIds = connectionRwStreams.get(connection.transportId);
     if (!streamIds || streamIds.size === 0) {
       connectionRwStreams.delete(connection.transportId);
       return;
     }
-    for (const streamId of [...streamIds]) {
-      void deps.remoteWindowStreamRuntime.stopStream({
-        requestId: `rw-close-${streamId}`,
-        streamId,
-      }).catch(() => {
-        // 断连清理不因单个流失败而中断
-      });
-    }
+    const failures: string[] = [];
+    const notReleased: string[] = [];
+    await Promise.all([...streamIds].map(async (streamId) => {
+      try {
+        const payload = await deps.remoteWindowStreamRuntime.stopStream({
+          requestId: `rw-close-${streamId}`,
+          streamId,
+        });
+        if ('cleanup' in payload && payload.cleanup && payload.cleanup.status !== 'released' && payload.cleanup.status !== 'absent') {
+          notReleased.push(
+            `stream ${streamId} stop not released after disconnect: status=${payload.cleanup.status} remaining=${payload.cleanup.remainingResources.join(',') || '-'}`,
+          );
+        }
+      } catch (error) {
+        failures.push(
+          `stream ${streamId} stop failed after disconnect: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }));
     connectionRwStreams.delete(connection.transportId);
+    if (notReleased.length > 0 || failures.length > 0) {
+      const message = [...failures, ...notReleased].join('; ');
+      console.error(`[rw-close] disconnect surfaced cleanup failure: ${message}`);
+      throw new Error(`[rw-close] disconnect surfaced cleanup failure: ${message}`);
+    }
   }
 
   const muxRuntime = createTerminalMuxChannelRuntime({
@@ -661,7 +679,9 @@ export function createTerminalMessageRuntime(
             payload: {
               requestId: message.payload.requestId,
               streamId: message.payload.streamId,
-              code: 'remote_window_stream_answer_failed',
+              code: error instanceof Error && error.name === REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE
+                ? error.name
+                : 'remote_window_stream_answer_failed',
               message: error instanceof Error ? error.message : 'remote window stream answer failed',
             },
           });
@@ -738,6 +758,53 @@ export function createTerminalMessageRuntime(
             },
           });
         });
+        }
+        break;
+      case 'remote-window-close-request':
+        {
+          const request = message.payload;
+          if (!isRemoteWindowCloseRequestPayload(request)) {
+            sendRemoteWindowMessage(connection, {
+              type: 'remote-window-close-result',
+              payload: {
+                requestId: (request as { requestId?: string } | undefined)?.requestId || '',
+                sessionId: (request as { sessionId?: string } | undefined)?.sessionId || '',
+                streamId: (request as { streamId?: string } | undefined)?.streamId || '',
+                targetId: (request as { targetId?: string } | undefined)?.targetId || '',
+                status: 'failed',
+                error: 'remote window close request requires requestId, sessionId, streamId, and targetId',
+              },
+            });
+            break;
+          }
+          if (!deps.remoteWindowStreamRuntime.requestRemoteWindowClose) {
+            sendRemoteWindowMessage(connection, {
+              type: 'remote-window-close-result',
+              payload: {
+                ...request,
+                status: 'failed',
+                error: 'remote window close owner is unavailable',
+              },
+            });
+            break;
+          }
+          // A synchronous throw from the close owner must surface as an
+          // explicit failed result, never an unhandled rejection.
+          void Promise.resolve()
+            .then(() => deps.remoteWindowStreamRuntime.requestRemoteWindowClose(request))
+            .then((payload) => {
+              sendRemoteWindowMessage(connection, { type: 'remote-window-close-result', payload });
+            })
+            .catch((error: unknown) => {
+              sendRemoteWindowMessage(connection, {
+                type: 'remote-window-close-result',
+                payload: {
+                  ...request,
+                  status: 'failed',
+                  error: error instanceof Error ? error.message : 'remote window close failed',
+                },
+              });
+            });
         }
         break;
       case 'remote-window-stream-quality-request':

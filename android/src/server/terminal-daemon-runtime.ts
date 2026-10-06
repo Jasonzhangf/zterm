@@ -53,7 +53,7 @@ export interface TerminalDaemonRuntimeDeps {
   disposeSessionCatalogRuntime: () => void;
   startRelayHostClient: () => void;
   disposeRelayHostClient: () => void;
-  disposeRemoteWindowStreamRuntime: () => void;
+  disposeRemoteWindowStreamRuntime: () => Promise<void>;
   disposeRtcBridgeServer: () => void;
 }
 
@@ -90,6 +90,23 @@ export function createTerminalDaemonRuntime(
   let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   let memoryGuardTimer: ReturnType<typeof setInterval> | null = null;
   let shutdownInFlight = false;
+  let remoteWindowStreamDisposalInFlight: Promise<void> | null = null;
+
+  /**
+   * Single disposal outcome shared by the daemon shutdown path and the HTTP
+   * server `close` callback. The promise is created before the websocket/http
+   * close calls, so neither `process.exit` nor the 1500ms finalize timer can
+   * truncate the release attempt; a rejection is preserved and handled by each
+   * caller instead of being swallowed.
+   */
+  function remoteWindowStreamRuntimeDisposal(): Promise<void> {
+    if (!remoteWindowStreamDisposalInFlight) {
+      remoteWindowStreamDisposalInFlight = Promise.resolve().then(
+        () => deps.disposeRemoteWindowStreamRuntime(),
+      );
+    }
+    return remoteWindowStreamDisposalInFlight;
+  }
 
   function clearHeartbeatLoop() {
     if (!heartbeatTimer) {
@@ -261,47 +278,60 @@ export function createTerminalDaemonRuntime(
     deps.disposeScheduleRuntime();
     deps.disposeSessionCatalogRuntime();
     deps.disposeRelayHostClient();
-    deps.disposeRemoteWindowStreamRuntime();
-
-    for (const connection of deps.connections.values()) {
+    const remoteWindowStreamDisposal = remoteWindowStreamRuntimeDisposal();
+    void (async () => {
+      let failedDisposal = false;
       try {
-        connection.closeTransport(reason);
+        await remoteWindowStreamDisposal;
       } catch (error) {
-        console.warn(
-          `[${deps.logTimePrefix()}] failed to close transport ${connection.id} during daemon shutdown: ${
+        failedDisposal = true;
+        console.error(
+          `[${deps.logTimePrefix()}] remote window runtime disposal failed during daemon shutdown: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
       }
-    }
-    deps.connections.clear();
-    deps.shutdownTerminalSessions(deps.sessions, reason);
 
-    for (const mirror of [...deps.mirrors.values()]) {
-      deps.destroyMirror(mirror, reason, {
-        closeTransportSubscribers: true,
-        notifyClientClose: true,
-      });
-    }
-
-    const finalize = () => {
-      process.exit(exitCode);
-    };
-
-    try {
-      deps.wss.close();
-    } catch (error) {
-      console.warn(`[${deps.logTimePrefix()}] websocket server close failed:`, error);
-    }
-
-    deps.server.close((error) => {
-      if (error) {
-        console.warn(`[${deps.logTimePrefix()}] http server close failed: ${error.message}`);
+      for (const connection of deps.connections.values()) {
+        try {
+          connection.closeTransport(reason);
+        } catch (error) {
+          console.warn(
+            `[${deps.logTimePrefix()}] failed to close transport ${connection.id} during daemon shutdown: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
       }
-      finalize();
-    });
+      deps.connections.clear();
+      deps.shutdownTerminalSessions(deps.sessions, reason);
 
-    setTimeout(finalize, 1500).unref?.();
+      for (const mirror of [...deps.mirrors.values()]) {
+        deps.destroyMirror(mirror, reason, {
+          closeTransportSubscribers: true,
+          notifyClientClose: true,
+        });
+      }
+
+      const finalize = () => {
+        process.exit(failedDisposal ? 1 : exitCode);
+      };
+
+      try {
+        deps.wss.close();
+      } catch (error) {
+        console.warn(`[${deps.logTimePrefix()}] websocket server close failed:`, error);
+      }
+
+      deps.server.close((error) => {
+        if (error) {
+          console.warn(`[${deps.logTimePrefix()}] http server close failed: ${error.message}`);
+        }
+        finalize();
+      });
+
+      setTimeout(finalize, 1500).unref?.();
+    })();
   }
 
   function handleDaemonServerClosed() {
@@ -310,7 +340,13 @@ export function createTerminalDaemonRuntime(
     deps.disposeScheduleRuntime();
     deps.disposeSessionCatalogRuntime();
     deps.disposeRelayHostClient();
-    deps.disposeRemoteWindowStreamRuntime();
+    void remoteWindowStreamRuntimeDisposal().catch((error: unknown) => {
+      console.error(
+        `[${deps.logTimePrefix()}] remote window runtime disposal failed on http close: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    });
     deps.disposeRtcBridgeServer();
   }
 

@@ -1,0 +1,11 @@
+{
+  "id": "remote.window_close", "version": "0.3",
+  "inputs": [{"id":"arc.close_intent","schema":"Object"}],
+  "nodes": [
+    {"id":"confirm_close","operator":"client.remote_window_overlay.confirm_close","operator_version":"0.3","inputs":["arc.close_intent"],"output":{"id":"arc.close_command","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"},
+    {"id":"request_remote_close","operator":"daemon.remote_window_stream.request_remote_close","operator_version":"0.3","inputs":["arc.close_command"],"output":{"id":"arc.remote_close_result","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"},
+    {"id":"settle_close","operator":"client.remote_window_overlay.settle_close","operator_version":"0.3","inputs":["arc.remote_close_result"],"output":{"id":"arc.close_result","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"}
+  ],
+  "edges": [{"from":"confirm_close","to":"request_remote_close","arc_id":"arc.close_command"},{"from":"request_remote_close","to":"settle_close","arc_id":"arc.remote_close_result"}],
+  "outputs": ["arc.close_result"]
+}

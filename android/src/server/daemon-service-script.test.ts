@@ -1,41 +1,326 @@
 import { execFileSync } from 'child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
+
+const ANDROID_ROOT = process.cwd();
+const cleanupDirs: string[] = [];
 
 function readDaemonScript() {
-  return readFileSync(join(process.cwd(), 'scripts', 'zterm-daemon.sh'), 'utf8');
+  return readFileSync(join(ANDROID_ROOT, 'scripts', 'zterm-daemon.sh'), 'utf8');
 }
 
 function readReleaseScript() {
-  return readFileSync(join(process.cwd(), 'scripts', 'prepare-global-daemon-release.sh'), 'utf8');
+  return readFileSync(join(ANDROID_ROOT, 'scripts', 'prepare-global-daemon-release.sh'), 'utf8');
 }
 
 function readDaemonNpmPackageScript() {
-  return readFileSync(join(process.cwd(), 'scripts', 'prepare-daemon-npm-package.mjs'), 'utf8');
+  return readFileSync(join(ANDROID_ROOT, 'scripts', 'prepare-daemon-npm-package.mjs'), 'utf8');
 }
 
 function readWindowsDaemonScript() {
-  return readFileSync(join(process.cwd(), 'scripts', 'windows', 'zterm-daemon.ps1'), 'utf8');
+  return readFileSync(join(ANDROID_ROOT, 'scripts', 'windows', 'zterm-daemon.ps1'), 'utf8');
 }
 
 function readReleaseVerifyScript() {
-  return readFileSync(join(process.cwd(), 'scripts', 'verify-release-assets.mjs'), 'utf8');
+  return readFileSync(join(ANDROID_ROOT, 'scripts', 'verify-release-assets.mjs'), 'utf8');
 }
 
-function extractBlock(script: string, anchor: string, length = 1200) {
+function readInstallGlobalDaemonCliScript() {
+  return readFileSync(join(ANDROID_ROOT, 'scripts', 'install-global-daemon-cli.sh'), 'utf8');
+}
+
+function packageVersion(): string {
+  return JSON.parse(readFileSync(join(ANDROID_ROOT, 'package.json'), 'utf8')).version as string;
+}
+
+function block(script: string, anchor: string, length: number, ownerName: string) {
   const start = script.indexOf(anchor);
-  expect(start, `${anchor} should exist in zterm-daemon.sh`).toBeGreaterThanOrEqual(0);
+  expect(start, `${anchor} should exist in ${ownerName}`).toBeGreaterThanOrEqual(0);
   return script.slice(start, start + length);
 }
 
+function extractSupportHeredocBody(): string {
+  const packagerLines = readReleaseScript().split('\n');
+  const startMarker = "cat > \"${SUPPORT_DIR}/zterm-daemon.sh\" <<'EOF'";
+  const start = packagerLines.findIndex((line) => line.trim() === startMarker);
+  expect(start, `${startMarker} should exist in release packager`).toBeGreaterThanOrEqual(0);
+  const end = packagerLines.findIndex((line, index) => index > start && line.trim() === 'EOF');
+  expect(end, `EOF terminator after ${startMarker} should exist in release packager`).toBeGreaterThan(start);
+  return packagerLines.slice(start + 1, end).join('\n') + '\n';
+}
+
+function makeTempHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'zterm-daemon-script-test-'));
+  cleanupDirs.push(home);
+  return home;
+}
+
+function installRealSupportAtVersion(home: string): string {
+  const version = packageVersion();
+  const supportDir = join(home, '.zterm', 'releases', 'zterm-daemon', version, 'support');
+  mkdirSync(supportDir, { recursive: true });
+  const supportPath = join(supportDir, 'zterm-daemon.sh');
+  writeFileSync(supportPath, extractSupportHeredocBody());
+  chmodSync(supportPath, 0o755);
+  return supportPath;
+}
+
+function installRecordingSupportAtVersion(home: string, argvPath: string, pathPath: string): string {
+  const version = packageVersion();
+  const supportDir = join(home, '.zterm', 'releases', 'zterm-daemon', version, 'support');
+  mkdirSync(supportDir, { recursive: true });
+  const supportPath = join(supportDir, 'zterm-daemon.sh');
+  const body = [
+    '#!/usr/bin/env bash',
+    'set -u',
+    `printf '%s\\n' "$0" > "${pathPath}"`,
+    `printf '%s\\n' "$@" > "${argvPath}"`,
+    'for arg in "$@"; do printf " <%s>" "$arg"; done',
+    'printf "\\n"',
+    'exit "${FIXTURE_EXIT:-3}"',
+    '',
+  ].join('\n');
+  writeFileSync(supportPath, body);
+  chmodSync(supportPath, 0o755);
+  return supportPath;
+}
+
+type CliResult = {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+};
+
+function runSourceCli(home: string, args: string[]): CliResult {
+  try {
+    const stdout = execFileSync('bash', [join(ANDROID_ROOT, 'scripts', 'zterm-daemon.sh'), ...args], {
+      cwd: ANDROID_ROOT,
+      env: { ...process.env, HOME: home },
+      encoding: 'utf8',
+    });
+    return { status: 0, stdout, stderr: '' };
+  } catch (error) {
+    const failed = error as { status?: number | null; stdout?: unknown; stderr?: unknown };
+    return {
+      status: failed.status ?? 1,
+      stdout: typeof failed.stdout === 'string' ? failed.stdout : '',
+      stderr: typeof failed.stderr === 'string' ? failed.stderr : '',
+    };
+  }
+}
+
+afterEach(() => {
+  while (cleanupDirs.length > 0) {
+    const dir = cleanupDirs.pop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 describe('zterm daemon service script truth gates', () => {
-  it('exposes relay account configuration as a global daemon command without leaking secrets', () => {
+  it('delegates every argument to the installed package-version support and owns no lifecycle code', () => {
     const script = readDaemonScript();
-    const usageBlock = extractBlock(script, 'Usage:', 1200);
-    const caseBlock = extractBlock(script, 'case "$cmd" in', 1200);
-    const configureBody = extractBlock(script, 'configure_relay() {', 5200);
+
+    expect(script).toContain('PACKAGE_VERSION="$("$NODE_BIN" -p "require(\'${ROOT_DIR}/package.json\').version")"');
+    expect(script).toContain('INSTALLED_SUPPORT="${HOME}/.zterm/releases/zterm-daemon/${PACKAGE_VERSION}/support/zterm-daemon.sh"');
+    expect(script).toContain('echo "zterm-daemon: installed support script not found at ${INSTALLED_SUPPORT}" >&2');
+    expect(script).toContain('echo "run daemon:install-global first" >&2');
+    expect(script).toContain('exec bash "${INSTALLED_SUPPORT}" "$@"');
+
+    const removedOwners = [
+      'Usage:',
+      'Behavior:',
+      'case "$cmd" in',
+      'configure_relay() {',
+      'read_config() {',
+      'run_foreground() {',
+      'start_service() {',
+      'restart_service() {',
+      'stop_service() {',
+      'status_service() {',
+      'write_launch_agent() {',
+      'install_service() {',
+      'uninstall_service() {',
+      'install_user_shims() {',
+      'stage_daemon_runtime() {',
+      'stage_native_daemon_binary() {',
+      'resolve_node_package_dir() {',
+      'wait_for_service_ready() {',
+      'prime_daemon_install_permissions() {',
+      'prepare_iterm2_python_env() {',
+      'start_direct() {',
+      'stop_direct() {',
+      'status_direct() {',
+      'DAEMON_PID_FILE=',
+      'start_tmux',
+      'tmux new-session',
+      'tmux kill-session',
+      'swiftc',
+      'release-dist',
+      '.local/bin',
+    ];
+    for (const removed of removedOwners) {
+      expect(script, `${removed} must stay removed from source`).not.toContain(removed);
+    }
+    expect(script).not.toMatch(/swiftc|compile|node_modules|stage_|bootstrap_service/i);
+    expect(script.match(/\bexec\b/g)?.length ?? 0).toBe(1);
+  });
+
+  it('preserves exact arguments, exit status, and version-scoped support path through real child bash', () => {
+    const home = makeTempHome();
+    const argvPath = join(home, '.zterm', 'fixture-argv.txt');
+    const pathPath = join(home, '.zterm', 'fixture-support-path.txt');
+    installRecordingSupportAtVersion(home, argvPath, pathPath);
+
+    const args = [
+      'configure-relay',
+      '--relay-url',
+      'https://relay.example.com/',
+      '--username',
+      'zterm-relay-smoke',
+      '--password',
+      'secret-password',
+      '--host-id',
+      'mac-studio',
+      '--device-name',
+      'Mac Studio',
+      '--no-restart',
+    ];
+    const result = runSourceCli(home, args);
+
+    expect(result.status).toBe(3);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toBe(` ${args.map((arg) => `<${arg}>`).join(' ')}\n`);
+    expect(readFileSync(argvPath, 'utf8').split('\n')).toEqual([...args, '']);
+    expect(readFileSync(pathPath, 'utf8').trim()).toBe(
+      join(home, '.zterm', 'releases', 'zterm-daemon', packageVersion(), 'support', 'zterm-daemon.sh'),
+    );
+  });
+
+  it('fails install-first without installed support and creates no canonical native, global shim, or user shim', () => {
+    const home = makeTempHome();
+    const result = runSourceCli(home, [
+      'configure-relay',
+      '--relay-url',
+      'https://relay.example.com/',
+      '--username',
+      'zterm-relay-smoke',
+      '--password',
+      'secret-password',
+      '--host-id',
+      'mac-studio',
+      '--device-name',
+      'Mac Studio',
+      '--no-restart',
+    ]);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toBe('');
+    expect(result.stderr).toContain('zterm-daemon: installed support script not found at');
+    expect(result.stderr).toContain(join(home, '.zterm', 'releases', 'zterm-daemon', packageVersion(), 'support', 'zterm-daemon.sh'));
+    expect(result.stderr).toContain('run daemon:install-global first');
+
+    expect(existsSync(join(home, '.zterm', 'bin', 'zterm-daemon'))).toBe(false);
+    expect(existsSync(join(home, '.zterm', 'bin', 'wterm'))).toBe(false);
+    expect(existsSync(join(home, '.local', 'bin', 'zterm-daemon'))).toBe(false);
+    expect(existsSync(join(home, '.local', 'bin', 'wterm'))).toBe(false);
+    expect(existsSync(join(home, '.zterm', 'releases'))).toBe(false);
+    expect(existsSync(join(home, '.zterm', 'config.json'))).toBe(false);
+    expect(existsSync(join(home, '.zterm', 'run'))).toBe(false);
+    expect(existsSync(join(home, '.zterm', 'logs'))).toBe(false);
+    expect(existsSync(join(home, 'Library', 'LaunchAgents'))).toBe(false);
+  });
+
+  it('configures relay through the real installed support while preserving daemon config and hiding the password', () => {
+    const home = makeTempHome();
+    installRealSupportAtVersion(home);
+    mkdirSync(join(home, '.zterm'), { recursive: true });
+    writeFileSync(
+      join(home, '.zterm', 'config.json'),
+      JSON.stringify(
+        {
+          mobile: {
+            daemon: {
+              host: '127.0.0.1',
+              port: 17680,
+              authToken: 'keep-daemon-token',
+            },
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const result = runSourceCli(home, [
+      'configure-relay',
+      '--relay-url',
+      'https://relay.example.com/relay/',
+      '--username',
+      'zterm-relay-smoke',
+      '--password',
+      'secret-password',
+      '--host-id',
+      'mac-studio',
+      '--device-name',
+      'Mac Studio',
+      '--no-restart',
+    ]);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain('passwordSet=true');
+    expect(result.stdout).not.toContain('secret-password');
+    expect(result.stdout).toContain("run 'zterm-daemon restart' after configuration to reconnect relay");
+
+    const config = JSON.parse(readFileSync(join(home, '.zterm', 'config.json'), 'utf8'));
+    expect(config.mobile.daemon).toEqual({
+      host: '127.0.0.1',
+      port: 17680,
+      authToken: 'keep-daemon-token',
+    });
+    expect(config.mobile.relay).toMatchObject({
+      relayUrl: 'https://relay.example.com/relay/',
+      username: 'zterm-relay-smoke',
+      password: 'secret-password',
+      hostId: 'mac-studio',
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: process.platform,
+    });
+    expect(existsSync(join(home, '.zterm', 'run'))).toBe(false);
+    expect(existsSync(join(home, '.zterm', 'logs'))).toBe(false);
+    expect(existsSync(join(home, 'Library', 'LaunchAgents'))).toBe(false);
+  });
+
+  it('extracts the bounded write_support_script heredoc as an executable support script', () => {
+    const support = extractSupportHeredocBody();
+    expect(support).toContain('#!/usr/bin/env bash');
+    expect(support).toContain('PACKAGE_ROOT="$(cd "$(dirname "$0")/.." && pwd)"');
+    expect(support).toContain('WTERM_HOME="${HOME}/.zterm"');
+    expect(support).toContain('NATIVE_DAEMON_BIN="${WTERM_BIN_DIR}/zterm-daemon"');
+    expect(support).toContain('DAGPIPE_NATIVE_BIN="${RUNTIME_DIR}/dagpipe.node"');
+
+    const home = makeTempHome();
+    const supportPath = installRealSupportAtVersion(home);
+    expect(readFileSync(supportPath, 'utf8')).toBe(support);
+    expect(execFileSync('bash', ['-n', supportPath], { encoding: 'utf8' })).toBe('');
+  });
+
+  it('keeps relay account configuration explicit and secret-free in generated support', () => {
+    const support = extractSupportHeredocBody();
+    const usageBlock = block(support, 'Usage:', 1200, 'generated support');
+    const caseBlock = block(support, 'case "$cmd" in', 1200, 'generated support');
+    const configureBody = block(support, 'configure_relay() {', 5200, 'generated support');
 
     expect(usageBlock).toContain('configure-relay --relay-url');
     expect(caseBlock).toContain('configure-relay) configure_relay "$@" ;;');
@@ -44,95 +329,20 @@ describe('zterm daemon service script truth gates', () => {
     expect(configureBody).not.toContain('password=${relay_password}');
   });
 
-  it('writes relay config from the global command while preserving daemon config', () => {
-    const tempHome = mkdtempSync(join(tmpdir(), 'zterm-daemon-relay-config-'));
-    try {
-      const configPath = join(tempHome, '.zterm', 'config.json');
-      mkdirSync(join(tempHome, '.zterm'), { recursive: true });
-      writeFileSync(
-        configPath,
-        JSON.stringify(
-          {
-            mobile: {
-              daemon: {
-                host: '127.0.0.1',
-                port: 17680,
-                authToken: 'keep-daemon-token',
-              },
-            },
-          },
-          null,
-          2,
-        ),
-      );
-
-      const output = execFileSync(
-        'bash',
-        [
-          './scripts/zterm-daemon.sh',
-          'configure-relay',
-          '--relay-url',
-          'https://relay.example.com/relay/',
-          '--username',
-          'zterm-relay-smoke',
-          '--password',
-          'secret-password',
-          '--host-id',
-          'mac-studio',
-          '--device-name',
-          'Mac Studio',
-          '--no-restart',
-        ],
-        {
-          cwd: process.cwd(),
-          env: { ...process.env, HOME: tempHome },
-          encoding: 'utf8',
-        },
-      );
-
-      const config = JSON.parse(readFileSync(configPath, 'utf8'));
-      expect(config.mobile.daemon.authToken).toBe('keep-daemon-token');
-      expect(config.mobile.relay).toMatchObject({
-        relayUrl: 'https://relay.example.com/relay/',
-        username: 'zterm-relay-smoke',
-        password: 'secret-password',
-        hostId: 'mac-studio',
-        deviceName: 'Mac Studio',
-      });
-      expect(output).toContain('passwordSet=true');
-      expect(output).not.toContain('secret-password');
-    } finally {
-      rmSync(tempHome, { recursive: true, force: true });
-    }
-  });
-
-  it('keeps relay configuration available in generated global release installers', () => {
-    const script = readReleaseScript();
-
-    expect(script).toContain('zterm-daemon configure-relay --relay-url URL');
-    expect(script).toContain('configure-relay) configure_relay "$@" ;;');
-    expect(script).toContain('wait_for_service_unloaded()');
-    expect(script).toContain("resolve_node_package_dir '@roamhq/wrtc'");
-    expect(script).toContain('resolve_wrtc_platform_package_name');
-    expect(extractBlock(script, 'start_service() {', 700)).not.toContain('prime_daemon_install_permissions');
-    expect(extractBlock(script, 'restart_service() {', 700)).not.toContain('prime_daemon_install_permissions');
-    expect(script).toContain('start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status|run');
-  });
-
   it('migrates legacy ~/.wterm home before reading released daemon config', () => {
-    const script = readReleaseScript();
-    const configBlock = extractBlock(script, "const configPath = path.join(home, '.zterm', 'config.json');", 500);
+    const support = extractSupportHeredocBody();
+    const configBlock = block(support, "const configPath = path.join(home, '.zterm', 'config.json');", 500, 'generated support');
 
-    expect(script).toContain("const ztermHome = path.join(home, '.zterm');");
-    expect(script).toContain("const legacyWtermHome = path.join(home, '.wterm');");
-    expect(script).toContain('fs.renameSync(legacyWtermHome, ztermHome)');
-    expect(script.indexOf('fs.renameSync(legacyWtermHome, ztermHome)')).toBeLessThan(script.indexOf("const configPath = path.join(home, '.zterm', 'config.json');"));
+    expect(support).toContain("const ztermHome = path.join(home, '.zterm');");
+    expect(support).toContain("const legacyWtermHome = path.join(home, '.wterm');");
+    expect(support).toContain('fs.renameSync(legacyWtermHome, ztermHome)');
+    expect(support.indexOf('fs.renameSync(legacyWtermHome, ztermHome)')).toBeLessThan(support.indexOf("const configPath = path.join(home, '.zterm', 'config.json');"));
     expect(configBlock).toContain("const configPath = path.join(home, '.zterm', 'config.json');");
   });
 
   it('merges released daemon config per field so empty zterm config cannot mask legacy mobile auth', () => {
-    const script = readReleaseScript();
-    const configBlock = extractBlock(script, 'read_config() {', 3600);
+    const support = extractSupportHeredocBody();
+    const configBlock = block(support, 'read_config() {', 3600, 'generated support');
 
     expect(configBlock).toContain('const ztermDaemonConfig = ((config.zterm || {}).android || {}).daemon || {};');
     expect(configBlock).toContain('const mobileDaemonConfig = (config.mobile || {}).daemon || {};');
@@ -223,67 +433,68 @@ describe('zterm daemon service script truth gates', () => {
     expect(script).toContain('configure-relay');
   });
 
-  it('restages the current daemon runtime before bootstrapping launchd on service start', () => {
-    const script = readDaemonScript();
-    const body = extractBlock(script, 'start_service() {', 1400);
-    expect(body).toContain('write_launch_agent');
-    expect(body.indexOf('write_launch_agent')).toBeLessThan(body.indexOf('bootstrap_service'));
-    expect(body).toContain('wait_for_service_unloaded');
-    expect(body.indexOf('wait_for_service_unloaded')).toBeLessThan(body.indexOf('bootstrap_service'));
+  it('writes the version-scoped installed support and synchronized user-level CLI shims in the release installer', () => {
+    const script = readReleaseScript();
+    const installerBody = block(script, 'write_installer() {', 2600, 'release packager');
+
+    expect(installerBody).toContain('VERSION="$(cat "${PACKAGE_ROOT}/VERSION")"');
+    expect(installerBody).toContain('INSTALL_ROOT="${HOME}/.zterm/releases/zterm-daemon/${VERSION}"');
+    expect(installerBody).toContain('cp -R "${PACKAGE_ROOT}/support" "${INSTALL_ROOT}/support"');
+    expect(installerBody).toContain('cp "${INSTALL_ROOT}/support/zterm-daemon" "${HOME}/.zterm/bin/zterm-daemon"');
+    expect(installerBody).toContain('LOCAL_BIN="${HOME}/.local/bin"');
+    expect(installerBody).toContain('cat > "${LOCAL_BIN}/zterm-daemon" <<WRAP');
+    expect(installerBody).toContain('exec "${INSTALL_ROOT}/support/zterm-daemon.sh" "\\$@"');
+    expect(installerBody).toContain('cat > "${LOCAL_BIN}/wterm" <<WRAP');
+    expect(installerBody.indexOf('cp "${INSTALL_ROOT}/support/zterm-daemon"')).toBeLessThan(installerBody.indexOf('cat > "${LOCAL_BIN}/zterm-daemon" <<WRAP'));
   });
 
-  it('stages the DAGpipe native module and passes it to every daemon exec path', () => {
-    const script = readDaemonScript();
-    const stageBody = extractBlock(script, 'stage_daemon_runtime() {', 1800);
+  it('compiles and installs the daemon native binary before the global installer copies it', () => {
+    const script = readReleaseScript();
+    const stageBody = block(script, 'stage_native_daemon_binary() {', 1000, 'release packager');
+    const normalizeBody = block(script, 'normalize_release_tree_metadata() {', 1000, 'release packager');
 
-    expect(script).toContain('STAGED_DAGPIPE_NATIVE="${DAEMON_RUNTIME_DIR}/dagpipe.node"');
-    expect(stageBody).toContain('DAGPIPE_PROFILE=release bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"');
-    expect(stageBody).toContain('cp "${ROOT_DIR}/native/dagpipe/index.node" "${STAGED_DAGPIPE_NATIVE}"');
-    expect(script.match(/ZTERM_DAGPIPE_NATIVE=/g)?.length).toBeGreaterThanOrEqual(4);
+    expect(stageBody).toContain('swiftc -swift-version 5 -strict-concurrency=minimal "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"');
+    expect(script).not.toContain('ZTerm Remote Capture');
+    expect(script).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
+    expect(script).not.toContain('zterm-remote-window-capture');
+    expect(normalizeBody).toContain('"${release_tree}/support/zterm-daemon"');
+    expect(normalizeBody).not.toContain('Remote Capture');
   });
 
-  it('requires HTTP health for service readiness, status, and launchd preflight', () => {
-    const script = readDaemonScript();
-    const releaseScript = readReleaseScript();
-    const waitBody = extractBlock(script, 'wait_for_service_ready() {', 500);
-    const statusBody = extractBlock(script, 'status_service() {', 1200);
-    const launchBody = extractBlock(script, 'write_launch_agent() {', 4200);
-    const releaseWaitBody = extractBlock(releaseScript, 'wait_for_service_ready() {', 500);
-    const releaseStatusBody = extractBlock(releaseScript, 'status_service() {', 1200);
-    const releaseLaunchBody = extractBlock(releaseScript, 'write_launch_agent() {', 4200);
+  it('keeps source daemon global install from pointing launchd back at mutable source runtime', () => {
+    const script = readInstallGlobalDaemonCliScript();
 
-    expect(script).not.toContain('lsof -nP -iTCP');
-    expect(script).toContain('PROBE_SOCKET_HOST="$HOST"');
-    expect(script).toContain('PROBE_URL_HOST="$HOST"');
-    expect(script).toContain('PROBE_SOCKET_HOST="${PROBE_SOCKET_HOST#[}"');
-    expect(script).toContain('PROBE_URL_HOST="[${PROBE_SOCKET_HOST}]"');
+    expect(script).toContain('PREPARE_RELEASE_SCRIPT="${ROOT_DIR_REAL}/scripts/prepare-global-daemon-release.sh"');
+    expect(script).toContain('bash "$PREPARE_RELEASE_SCRIPT"');
+    expect(script).toContain('bash "${RELEASE_INSTALLER}"');
+    expect(script).toContain('release-dist');
+    expect(script).not.toContain('exec bash "${ROOT_DIR_REAL}/scripts/zterm-daemon.sh" "$@"');
+    expect(script).not.toContain('exec bash "${ROOT_DIR_REAL}/scripts/zterm-daemon.sh" run');
+  });
+
+  it('requires HTTP health for service readiness, status, and launchd preflight in generated support', () => {
+    const support = extractSupportHeredocBody();
+    const waitBody = block(support, 'wait_for_service_ready() {', 500, 'generated support');
+    const statusBody = block(support, 'status_service() {', 1200, 'generated support');
+    const launchBody = block(support, 'write_launch_agent() {', 5200, 'generated support');
+
+    expect(support).not.toContain('lsof -nP -iTCP');
+    expect(support).toContain('PROBE_SOCKET_HOST="$HOST"');
+    expect(support).toContain('PROBE_URL_HOST="$HOST"');
+    expect(support).toContain('PROBE_SOCKET_HOST="${PROBE_SOCKET_HOST#[}"');
+    expect(support).toContain('PROBE_URL_HOST="[${PROBE_SOCKET_HOST}]"');
     expect(waitBody).toContain('local max_attempts=150');
     expect(waitBody).toContain('daemon_health_ready');
     expect(statusBody).toContain('daemon_health_ready');
     expect(launchBody).toContain('health_ready()');
     expect(launchBody).toContain('http://\\${PROBE_URL_HOST}:\\${PORT}/health');
     expect(launchBody).not.toContain('launchd preflight: port $PORT already listening');
-    expect(script).not.toContain('nc -z 127.0.0.1 "${PORT}"');
-
-    expect(releaseScript).not.toContain('lsof -nP -iTCP');
-    expect(releaseScript).toContain('PROBE_SOCKET_HOST="$HOST"');
-    expect(releaseScript).toContain('PROBE_URL_HOST="$HOST"');
-    expect(releaseScript).toContain('PROBE_SOCKET_HOST="${PROBE_SOCKET_HOST#[}"');
-    expect(releaseScript).toContain('PROBE_URL_HOST="[${PROBE_SOCKET_HOST}]"');
-    expect(releaseWaitBody).toContain('local max_attempts=150');
-    expect(releaseWaitBody).toContain('daemon_health_ready');
-    expect(releaseStatusBody).toContain('daemon_health_ready');
-    expect(releaseLaunchBody).toContain('health_ready()');
-    expect(releaseLaunchBody).toContain('http://\\${PROBE_URL_HOST}:\\${PORT}/health');
-    expect(releaseLaunchBody).not.toContain('launchd preflight: port $PORT already listening');
-    expect(releaseScript).not.toContain('nc -z 127.0.0.1 "${PORT}"');
+    expect(support).not.toContain('nc -z 127.0.0.1 "${PORT}"');
   });
 
   it('keeps launchd as a parent watchdog that restarts only its explicit daemon child pid', () => {
-    const script = readDaemonScript();
-    const releaseScript = readReleaseScript();
-    const launchBody = extractBlock(script, 'write_launch_agent() {', 5200);
-    const releaseLaunchBody = extractBlock(releaseScript, 'write_launch_agent() {', 5200);
+    const support = extractSupportHeredocBody();
+    const launchBody = block(support, 'write_launch_agent() {', 5200, 'generated support');
 
     expect(launchBody).toContain('child_pid="\\$!"');
     expect(launchBody).toContain('STARTUP_HEALTH_GRACE_SECONDS=45');
@@ -297,162 +508,112 @@ describe('zterm daemon service script truth gates', () => {
     expect(launchBody).not.toContain('pkill');
     expect(launchBody).not.toContain('killall');
     expect(launchBody).not.toContain('xargs kill');
-
-    expect(releaseLaunchBody).toContain('child_pid="\\$!"');
-    expect(releaseLaunchBody).toContain('STARTUP_HEALTH_GRACE_SECONDS=45');
-    expect(releaseLaunchBody).toContain('waiting for startup health');
-    expect(releaseLaunchBody).toContain('while kill -0 "\\${child_pid}"');
-    expect(releaseLaunchBody).toContain('missed_health_checks');
-    expect(releaseLaunchBody).toContain('terminate_child()');
-    expect(releaseLaunchBody).toContain('kill -TERM "\\${child_pid}"');
-    expect(releaseLaunchBody).toContain('kill -KILL "\\${child_pid}"');
-    expect(releaseLaunchBody).toContain('exit 1');
-    expect(releaseLaunchBody).not.toContain('pkill');
-    expect(releaseLaunchBody).not.toContain('killall');
-    expect(releaseLaunchBody).not.toContain('xargs kill');
   });
 
-  it('restages the current daemon runtime before bootstrapping launchd on service restart', () => {
-    const script = readDaemonScript();
-    const body = extractBlock(script, 'restart_service() {', 1400);
-    expect(body).toContain('write_launch_agent');
-    expect(body.indexOf('write_launch_agent')).toBeLessThan(body.indexOf('bootstrap_service'));
-    expect(body).toContain('wait_for_service_unloaded');
-    expect(body.indexOf('wait_for_service_unloaded')).toBeLessThan(body.indexOf('bootstrap_service'));
-  });
+  it('restages the launch agent before bootstrapping launchd on service start and restart', () => {
+    const support = extractSupportHeredocBody();
+    const startBody = block(support, 'start_service() {', 1400, 'generated support');
+    const restartBody = block(support, 'restart_service() {', 1400, 'generated support');
 
-  it('keeps global CLI shims synchronized when writing launchd service runners', () => {
-    const script = readDaemonScript();
-    const body = extractBlock(script, 'install_user_shims() {', 900);
-    const launchBody = extractBlock(script, 'write_launch_agent() {', 500);
+    expect(startBody.indexOf('write_launch_agent')).toBeGreaterThanOrEqual(0);
+    expect(startBody.indexOf('write_launch_agent')).toBeLessThan(startBody.indexOf('bootstrap_service'));
+    expect(startBody.indexOf('wait_for_service_unloaded')).toBeGreaterThanOrEqual(0);
+    expect(startBody.indexOf('wait_for_service_unloaded')).toBeLessThan(startBody.indexOf('bootstrap_service'));
 
-    expect(script).toContain('USER_BIN_DIR="${HOME}/.local/bin"');
-    expect(body).toContain('rm -f "${USER_BIN_DIR}/zterm-daemon" "${USER_BIN_DIR}/wterm"');
-    expect(body).toContain('${USER_BIN_DIR}/zterm-daemon');
-    expect(body).toContain('${USER_BIN_DIR}/wterm');
-    expect(body).toContain('exec bash "${ROOT_DIR}/scripts/zterm-daemon.sh" "\\$@"');
-    expect(launchBody).toContain('install_user_shims');
-    expect(launchBody.indexOf('install_user_shims')).toBeLessThan(launchBody.indexOf('stage_daemon_runtime'));
-  });
-
-  it('keeps released service runner installs synchronized with user-level shims', () => {
-    const script = readReleaseScript();
-    const body = extractBlock(script, 'install_user_shims() {', 900);
-    const launchBody = extractBlock(script, 'write_launch_agent() {', 500);
-
-    expect(script).toContain('USER_BIN_DIR="${HOME}/.local/bin"');
-    expect(body).toContain('rm -f "${USER_BIN_DIR}/zterm-daemon" "${USER_BIN_DIR}/wterm"');
-    expect(body).toContain('${USER_BIN_DIR}/zterm-daemon');
-    expect(body).toContain('${USER_BIN_DIR}/wterm');
-    expect(body).toContain('exec "${PACKAGE_ROOT}/support/zterm-daemon.sh" "\\$@"');
-    expect(launchBody).toContain('install_user_shims');
-    expect(launchBody.indexOf('install_user_shims')).toBeLessThan(launchBody.indexOf('mkdir -p "${HOME}/Library/LaunchAgents"'));
-  });
-
-  it('keeps source daemon global install from pointing launchd back at mutable source runtime', () => {
-    const script = readFileSync(join(process.cwd(), 'scripts', 'install-global-daemon-cli.sh'), 'utf8');
-
-    expect(script).toContain('PREPARE_RELEASE_SCRIPT="${ROOT_DIR_REAL}/scripts/prepare-global-daemon-release.sh"');
-    expect(script).toContain('bash "$PREPARE_RELEASE_SCRIPT"');
-    expect(script).toContain('bash "${RELEASE_INSTALLER}"');
-    expect(script).toContain('release-dist');
-    expect(script).not.toContain('exec bash "${ROOT_DIR_REAL}/scripts/zterm-daemon.sh" "$@"');
-    expect(script).not.toContain('exec bash "${ROOT_DIR_REAL}/scripts/zterm-daemon.sh" run');
-  });
-
-  it('pins daemon iTerm2 Python API execution to a managed user venv', () => {
-    const script = readDaemonScript();
-    const launchBody = extractBlock(script, 'write_launch_agent() {', 2400);
-    const prepareBody = extractBlock(script, 'prepare_iterm2_python_env() {', 900);
-
-    expect(script).toContain('ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"');
-    expect(script).toContain('ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"');
-    expect(prepareBody).toContain('python3 -m venv "$ITERM2_PYTHON_VENV"');
-    expect(prepareBody).toContain('import iterm2');
-    expect(prepareBody).toContain('"$ITERM2_PYTHON_BIN" -m pip install --upgrade iterm2');
-    expect(launchBody).toContain('prepare_iterm2_python_env');
-    expect(launchBody).toContain('ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}"');
-  });
-
-  it('pins released daemon iTerm2 Python API execution to the same managed venv', () => {
-    const script = readReleaseScript();
-    const launchBody = extractBlock(script, 'write_launch_agent() {', 2400);
-    const prepareBody = extractBlock(script, 'prepare_iterm2_python_env() {', 900);
-
-    expect(script).toContain('ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"');
-    expect(script).toContain('ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"');
-    expect(prepareBody).toContain('python3 -m venv "$ITERM2_PYTHON_VENV"');
-    expect(prepareBody).toContain('import iterm2');
-    expect(prepareBody).toContain('"$ITERM2_PYTHON_BIN" -m pip install --upgrade iterm2');
-    expect(launchBody).toContain('prepare_iterm2_python_env');
-    expect(launchBody).toContain('ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}"');
+    expect(restartBody.indexOf('write_launch_agent')).toBeGreaterThanOrEqual(0);
+    expect(restartBody.indexOf('write_launch_agent')).toBeLessThan(restartBody.indexOf('bootstrap_service'));
+    expect(restartBody.indexOf('wait_for_service_unloaded')).toBeGreaterThanOrEqual(0);
+    expect(restartBody.indexOf('wait_for_service_unloaded')).toBeLessThan(restartBody.indexOf('bootstrap_service'));
   });
 
   it('does not fallback to tmux session when launchd service start or restart is unhealthy', () => {
-    const script = readDaemonScript();
-    const startBody = extractBlock(script, 'start_service() {', 1400);
-    const restartBody = extractBlock(script, 'restart_service() {', 1400);
+    const support = extractSupportHeredocBody();
+    const startBody = block(support, 'start_service() {', 1400, 'generated support');
+    const restartBody = block(support, 'restart_service() {', 1400, 'generated support');
+
     expect(startBody).not.toContain('falling back to tmux session');
     expect(startBody).not.toContain('start_tmux');
     expect(restartBody).not.toContain('falling back to tmux session');
     expect(restartBody).not.toContain('start_tmux');
+    expect(support).not.toContain('start_tmux() {');
+    expect(support).not.toContain('stop_tmux() {');
+    expect(support).not.toContain('status_tmux() {');
+    expect(support).not.toContain('tmux new-session -d -s "$SESSION_NAME"');
+    expect(support).not.toContain('tmux kill-session -t "$SESSION_NAME"');
   });
 
-  it('primes file-sync permissions during daemon service install before launchd bootstrap', () => {
-    const script = readDaemonScript();
-    const installBody = extractBlock(script, 'install_service() {', 900);
-    const preflightBody = extractBlock(script, 'prime_daemon_install_permissions() {', 2600);
-    expect(script).toContain('prime_daemon_install_permissions()');
-    expect(installBody).toContain('write_launch_agent');
-    expect(installBody).toContain('prime_daemon_install_permissions');
+  it('primes file-sync permissions during generated support service install before launchd bootstrap', () => {
+    const support = extractSupportHeredocBody();
+    const installBody = block(support, 'install_service() {', 900, 'generated support');
+    const preflightBody = block(support, 'prime_daemon_install_permissions() {', 2600, 'generated support');
+
+    expect(installBody.indexOf('write_launch_agent')).toBeGreaterThanOrEqual(0);
+    expect(installBody.indexOf('prime_daemon_install_permissions')).toBeGreaterThanOrEqual(0);
     expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
     expect(preflightBody).toContain('Downloads');
     expect(preflightBody).toContain('.zterm');
     expect(preflightBody).toContain('.zterm-permission-preflight');
-    expect(preflightBody).toContain("process.env.ZTERM_DAEMON_NATIVE");
-    expect(preflightBody).toContain("--permission-probe");
+    expect(preflightBody).toContain('ZTERM_DAEMON_NATIVE="$NATIVE_DAEMON_BIN"');
+    expect(preflightBody).toContain('--permission-probe');
     expect(preflightBody).toContain('ScreenCaptureKit permission preflight failed.');
   });
 
-  it('uses one installed daemon binary for permission and capture entries', () => {
-    const sourceScript = readDaemonScript();
-    const releaseScript = readReleaseScript();
-    const sourceStageBody = extractBlock(sourceScript, 'stage_native_daemon_binary() {', 1500);
-    const sourceRunBody = extractBlock(sourceScript, 'run_foreground() {', 700);
-    const sourceLaunchBody = extractBlock(sourceScript, 'write_launch_agent() {', 5000);
-    const sourcePreflightBody = extractBlock(sourceScript, 'prime_daemon_install_permissions() {', 2600);
-    const releaseStageBody = extractBlock(releaseScript, 'stage_native_daemon_binary() {', 1500);
-    const releaseRunBody = extractBlock(releaseScript, 'run_foreground() {', 700);
-    const releaseLaunchBody = extractBlock(releaseScript, 'write_launch_agent() {', 5000);
-    const releasePreflightBody = extractBlock(releaseScript, 'prime_daemon_install_permissions() {', 2600);
-    const releaseNormalizeBody = extractBlock(releaseScript, 'normalize_release_tree_metadata() {', 1000);
+  it('pins generated support iTerm2 Python API execution to a managed user venv', () => {
+    const support = extractSupportHeredocBody();
+    const launchBody = block(support, 'write_launch_agent() {', 5200, 'generated support');
+    const prepareBody = block(support, 'prepare_iterm2_python_env() {', 900, 'generated support');
 
-    expect(sourceScript).not.toContain('ZTerm Remote Capture');
+    expect(support).toContain('ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"');
+    expect(support).toContain('ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"');
+    expect(prepareBody).toContain('python3 -m venv "$ITERM2_PYTHON_VENV"');
+    expect(prepareBody).toContain('import iterm2');
+    expect(prepareBody).toContain('"$ITERM2_PYTHON_BIN" -m pip install --upgrade iterm2');
+    expect(launchBody).toContain('prepare_iterm2_python_env');
+    expect(launchBody).toContain('ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}"');
+  });
+
+  it('uses one installed daemon binary for permission, capture, and DAGpipe entries', () => {
+    const support = extractSupportHeredocBody();
+    const releaseScript = readReleaseScript();
+    const runBody = block(support, 'run_foreground() {', 700, 'generated support');
+    const launchBody = block(support, 'write_launch_agent() {', 5200, 'generated support');
+    const preflightBody = block(support, 'prime_daemon_install_permissions() {', 2600, 'generated support');
+    const directBody = block(support, 'start_direct() {', 1800, 'generated support');
+
+    expect(support).not.toContain('ZTerm Remote Capture');
     expect(releaseScript).not.toContain('ZTerm Remote Capture');
-    expect(sourceScript).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
+    expect(support).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
     expect(releaseScript).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
-    expect(sourceScript).not.toContain('zterm-remote-window-capture');
+    expect(support).not.toContain('zterm-remote-window-capture');
     expect(releaseScript).not.toContain('zterm-remote-window-capture');
-    expect(sourceStageBody).toContain('swiftc -swift-version 5 "$NATIVE_DAEMON_SOURCE" "$REMOTE_WINDOW_CAPTURE_SWIFT" -o "$NATIVE_DAEMON_BIN"');
-    expect(releaseStageBody).toContain('swiftc -swift-version 5 -strict-concurrency=minimal "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"');
-    expect(releaseNormalizeBody).toContain('"${release_tree}/support/zterm-daemon"');
-    expect(releaseNormalizeBody).not.toContain('Remote Capture');
-    for (const body of [
-      sourceRunBody,
-      sourceLaunchBody,
-      sourcePreflightBody,
-      releaseRunBody,
-      releaseLaunchBody,
-      releasePreflightBody,
-    ]) {
+    for (const body of [runBody, launchBody, preflightBody, directBody]) {
       expect(body).toMatch(/ZTERM_DAEMON_NATIVE=("\$\{NATIVE_DAEMON_BIN\}"|"\$NATIVE_DAEMON_BIN"|\$\{NATIVE_DAEMON_BIN\}|\$NATIVE_DAEMON_BIN)/u);
       expect(body).not.toMatch(/\/usr\/sbin\/screencapture|capture-screen/u);
     }
+    expect(support).toContain('NATIVE_DAEMON_BIN="${WTERM_BIN_DIR}/zterm-daemon"');
+    expect(support).toContain('ZTERM_DAGPIPE_NATIVE="${DAGPIPE_NATIVE_BIN}"');
+    expect(support.match(/ZTERM_DAGPIPE_NATIVE=/g)?.length ?? 0).toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps packaging-native compile assertions at the packaging owner and direct-pid paths stay out of source', () => {
+    const releaseScript = readReleaseScript();
+    const sourceScript = readDaemonScript();
+    const stageRuntimeBody = block(releaseScript, 'stage_runtime() {', 2600, 'release packager');
+    const stageNativeBody = block(releaseScript, 'stage_native_daemon_binary() {', 1000, 'release packager');
+
+    expect(stageRuntimeBody).toContain('DAGPIPE_PROFILE=release bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"');
+    expect(stageRuntimeBody).toContain('cp "${ROOT_DIR}/native/dagpipe/index.node" "${RUNTIME_DIR}/dagpipe.node"');
+    expect(stageNativeBody).toContain('swiftc -swift-version 5 -strict-concurrency=minimal "${NATIVE_DAEMON_SOURCE}" "${REMOTE_WINDOW_CAPTURE_SWIFT}" -o "${NATIVE_DAEMON_BIN}"');
+    expect(releaseScript.indexOf('stage_native_daemon_binary')).toBeLessThan(releaseScript.indexOf('write_support_script'));
+    expect(releaseScript.lastIndexOf('stage_runtime')).toBeLessThan(releaseScript.lastIndexOf('stage_native_daemon_binary'));
+    expect(sourceScript).not.toContain('ZTERM_DAGPIPE_NATIVE');
+    expect(sourceScript).not.toContain('stage_native_daemon_binary');
+    expect(sourceScript).not.toContain('build-dagpipe-native');
   });
 
   it('only emits package-resolve error after both require.resolve and filesystem fallback fail', () => {
-    const script = readDaemonScript();
-    const body = extractBlock(script, 'resolve_node_package_dir() {', 1600);
+    const script = readReleaseScript();
+    const body = block(script, 'resolve_node_package_dir() {', 1600, 'release packager');
     expect(body).toContain('find "${ROOT_DIR}/node_modules/.pnpm"');
     expect(body).toContain('find "${WORKSPACE_ROOT}/node_modules/.pnpm"');
     expect(body).toContain('if [[ -n "${candidate}" ]]');
@@ -460,34 +621,26 @@ describe('zterm daemon service script truth gates', () => {
     expect(body.indexOf('if [[ -n "${candidate}" ]]')).toBeLessThan(body.indexOf('echo "[zterm-daemon] unable to resolve ${package_name} in ${ROOT_DIR} or ${WORKSPACE_ROOT}" >&2'));
   });
 
-  it('uses direct background pid truth instead of tmux sessions when launchd service is not installed', () => {
-    const script = readDaemonScript();
-    const usageBlock = extractBlock(script, 'Behavior:', 300);
-    const startBody = extractBlock(script, 'start() {', 260);
-    const stopBody = extractBlock(script, 'stop() {', 260);
-    const restartBody = extractBlock(script, 'restart() {', 320);
-    const statusBody = extractBlock(script, 'status() {', 420);
-    const directStartBody = extractBlock(script, 'start_direct() {', 1800);
-    const directStopBody = extractBlock(script, 'stop_direct() {', 1200);
+  it('uses direct background pid truth instead of tmux sessions in generated support', () => {
+    const support = extractSupportHeredocBody();
+    const startBody = block(support, 'start_direct() {', 1800, 'generated support');
+    const stopBody = block(support, 'stop_direct() {', 1200, 'generated support');
 
-    expect(script).toContain('DAEMON_PID_FILE=');
-    expect(usageBlock).toContain('direct background daemon process');
-    expect(startBody).toContain('start_direct');
-    expect(stopBody).toContain('stop_direct');
-    expect(restartBody).toContain('stop_direct');
-    expect(restartBody).toContain('start_direct');
-    expect(statusBody).toContain('status_direct');
-    expect(directStartBody).toContain("printf '%s\\n' \"${daemon_pid}\" > \"${DAEMON_PID_FILE}\"");
-    expect(directStopBody).toContain('read_daemon_pid');
-    expect(script).not.toContain('start_tmux() {');
-    expect(script).not.toContain('stop_tmux() {');
-    expect(script).not.toContain('status_tmux() {');
-    expect(script).not.toContain('tmux new-session -d -s "$SESSION_NAME"');
-    expect(script).not.toContain('tmux kill-session -t "$SESSION_NAME"');
+    expect(support).toContain('DAEMON_PID_FILE="${RUNTIME_STATE_DIR}/zterm-daemon.pid"');
+    expect(support).toContain('start_direct');
+    expect(support).toContain('stop_direct');
+    expect(support).toContain('status_direct');
+    expect(startBody).toContain("printf '%s\\n' \"${daemon_pid}\" > \"${DAEMON_PID_FILE}\"");
+    expect(stopBody).toContain('read_daemon_pid');
+    expect(support).not.toContain('start_tmux() {');
+    expect(support).not.toContain('stop_tmux() {');
+    expect(support).not.toContain('status_tmux() {');
+    expect(support).not.toContain('tmux new-session -d -s "$SESSION_NAME"');
+    expect(support).not.toContain('tmux kill-session -t "$SESSION_NAME"');
   });
 
   it('keeps live mirror diff wired through the DAGpipe bridge instead of TS changed ranges', () => {
-    const serverSource = readFileSync(join(process.cwd(), 'src', 'server', 'server.ts'), 'utf8');
+    const serverSource = readFileSync(join(ANDROID_ROOT, 'src', 'server', 'server.ts'), 'utf8');
     expect(serverSource).toContain('mirrorPublishChangedRanges');
     expect(serverSource).toContain("from './dagpipe-bridge'");
     expect(serverSource).not.toContain('findChangedIndexedRanges');

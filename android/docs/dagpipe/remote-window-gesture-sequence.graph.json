@@ -1,0 +1,130 @@
+{
+  "id": "remote.window_gesture_sequence",
+  "version": "0.2",
+  "inputs": [
+    {
+      "id": "arc.gesture_sequence",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "classify_gesture_sequence",
+      "operator": "client.remote_window_touch_action.classify_sequence",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.gesture_sequence"
+      ],
+      "output": {
+        "id": "arc.gesture_class",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "apply_local_gesture_effect",
+      "operator": "client.remote_window_overlay.apply_gesture_local_effect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.gesture_class"
+      ],
+      "output": {
+        "id": "arc.gesture_local_effect",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "delegate_remote_gesture_delivery",
+      "operator": "client.remote_window_overlay.delegate_gesture_remote_delivery",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.gesture_class"
+      ],
+      "output": {
+        "id": "arc.gesture_remote_delivery",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_gesture_sequence",
+      "operator": "client.remote_window_overlay.settle_gesture_sequence",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.gesture_local_effect",
+        "arc.gesture_remote_delivery"
+      ],
+      "output": {
+        "id": "arc.gesture_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "classify_gesture_sequence",
+      "to": "apply_local_gesture_effect",
+      "arc_id": "arc.gesture_class"
+    },
+    {
+      "from": "classify_gesture_sequence",
+      "to": "delegate_remote_gesture_delivery",
+      "arc_id": "arc.gesture_class"
+    },
+    {
+      "from": "apply_local_gesture_effect",
+      "to": "settle_gesture_sequence",
+      "arc_id": "arc.gesture_local_effect"
+    },
+    {
+      "from": "delegate_remote_gesture_delivery",
+      "to": "settle_gesture_sequence",
+      "arc_id": "arc.gesture_remote_delivery"
+    }
+  ],
+  "outputs": [
+    "arc.gesture_result"
+  ]
+}

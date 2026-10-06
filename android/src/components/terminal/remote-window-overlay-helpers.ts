@@ -8,6 +8,7 @@ import type {
   RemoteWindowStreamStartedOfferV2Payload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowCloseResultPayload,
 } from '../../lib/types';
 import {
   getRemoteWindowSourceRect,
@@ -803,4 +804,139 @@ export function buildRemoteWindowAppTargetGroups(
 
 export function safeRemoteWindowGroupId(groupId: string) {
   return groupId.replace(/[^a-zA-Z0-9_-]+/g, '-');
+}
+
+/**
+ * Pure projection of the remote-close control round-trip into ZtermDialog props.
+ * The controller owns the `remoteCloseState` machine; this owner only maps a
+ * resolved phase to the exact typed dialog projection so the JSX stays a spread.
+ */
+export type RemoteWindowClosePhase =
+  | { phase: 'idle' }
+  | { phase: 'confirming' }
+  | { phase: 'closing' }
+  | { phase: 'not_closed' | 'unverified' | 'failed' | 'unsupported'; message: string };
+
+export type RemoteWindowCloseTone = 'warning' | 'error';
+
+export interface RemoteWindowCloseDialogProjection {
+  open: boolean;
+  tone: RemoteWindowCloseTone;
+  title: string;
+  message: string | undefined;
+  confirmLabel: string | undefined;
+  cancelLabel: string | undefined;
+  busy: boolean;
+  showCancel: boolean;
+  onCancel: (() => void) | undefined;
+  onConfirm: (() => void) | undefined;
+}
+
+export interface RemoteWindowCloseDialogActions {
+  onCancelConfirm: () => void;
+  onConfirm: () => void;
+  onExitLocal: () => void;
+}
+
+const REMOTE_WINDOW_CLOSE_OUTCOME_TITLE: Record<'not_closed' | 'unverified' | 'failed', string> = {
+  not_closed: '远端窗口未关闭',
+  failed: '远端关闭失败',
+  unverified: '关闭结果未确认',
+};
+
+export function resolveRemoteWindowCloseDialogProjection(
+  state: RemoteWindowClosePhase,
+  actions: RemoteWindowCloseDialogActions,
+): RemoteWindowCloseDialogProjection {
+  switch (state.phase) {
+    case 'idle':
+      return {
+        open: false,
+        tone: 'warning',
+        title: '',
+        message: undefined,
+        confirmLabel: undefined,
+        cancelLabel: undefined,
+        busy: false,
+        showCancel: false,
+        onCancel: undefined,
+        onConfirm: undefined,
+      };
+    case 'confirming':
+      return {
+        open: true,
+        tone: 'warning',
+        title: '关闭远端窗口？',
+        message: '这会请求远端关闭当前窗口并释放该串流资源，操作不可撤销。',
+        confirmLabel: '关闭远端窗口',
+        cancelLabel: '取消',
+        busy: false,
+        showCancel: true,
+        onCancel: actions.onCancelConfirm,
+        onConfirm: actions.onConfirm,
+      };
+    case 'closing':
+      return {
+        open: true,
+        tone: 'warning',
+        title: '正在关闭远端窗口…',
+        message: '关闭请求已发出，正在等待远端确认。',
+        confirmLabel: '关闭中…',
+        cancelLabel: '',
+        busy: true,
+        showCancel: false,
+        onCancel: undefined,
+        onConfirm: undefined,
+      };
+    case 'unsupported':
+      return {
+        open: true,
+        tone: 'warning',
+        title: '远端不支持关闭',
+        message: state.message,
+        confirmLabel: '本地退出',
+        cancelLabel: '',
+        busy: false,
+        showCancel: false,
+        onCancel: undefined,
+        onConfirm: actions.onExitLocal,
+      };
+    default:
+      return {
+        open: true,
+        tone: 'error',
+        title: REMOTE_WINDOW_CLOSE_OUTCOME_TITLE[state.phase],
+        message: state.message,
+        confirmLabel: '重试',
+        cancelLabel: '本地退出',
+        busy: false,
+        showCancel: true,
+        onCancel: actions.onExitLocal,
+        onConfirm: actions.onConfirm,
+      };
+  }
+}
+
+export type RemoteWindowCloseResolution =
+  | { kind: 'closed' }
+  | { kind: 'outcome'; phase: 'not_closed' | 'unverified' | 'failed' | 'unsupported'; message: string };
+
+export function resolveRemoteWindowCloseResult(result: unknown): RemoteWindowCloseResolution {
+  const payload = result as RemoteWindowCloseResultPayload | undefined;
+  const status = payload?.status;
+  const errorMessage = payload?.error;
+  if (status === 'closed') {
+    return { kind: 'closed' };
+  }
+  if (status === 'not_closed') {
+    return { kind: 'outcome', phase: 'not_closed', message: '远端窗口仍在运行，未确认关闭。' };
+  }
+  if (status === 'unsupported') {
+    return { kind: 'outcome', phase: 'unsupported', message: errorMessage || '该远端目标不支持远程关闭。' };
+  }
+  return {
+    kind: 'outcome',
+    phase: status === 'failed' ? 'failed' : 'unverified',
+    message: errorMessage || '无法确认远端窗口是否已关闭。',
+  };
 }

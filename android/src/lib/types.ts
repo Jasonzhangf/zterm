@@ -11,6 +11,7 @@ import type {
 import type {
   BridgeClientMessage,
   BridgeServerMessage,
+  RemoteWindowStreamCleanupResult,
 } from '@zterm/shared/protocol';
 import type {
   SessionBufferState as SharedSessionBufferState,
@@ -111,8 +112,12 @@ export type {
   RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
+  RemoteWindowStreamGroupBudget,
+  RemoteWindowStreamCleanupResult,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamStopRequestPayload,
+  RemoteWindowCloseRequestPayload,
+  RemoteWindowCloseResultPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowBrowserUserAgent,
@@ -121,6 +126,16 @@ export type {
   RemoteWindowVideoPreference,
   RemoteWindowVideoProfile,
 } from '@zterm/shared/protocol';
+
+/**
+ * Client-local result of one local exit / stream stop. `localStopped` reports the local receiver teardown, which
+ * always runs. `cleanup` is the daemon-typed remote resource release result; a missing cleanup report from an older
+ * server is projected as `unverified` and never as `released`.
+ */
+export interface RemoteWindowStopOutcome {
+  localStopped: boolean;
+  cleanup: RemoteWindowStreamCleanupResult;
+}
 export type {
   BufferHeadPayload,
   BufferSyncRequestPayload,
