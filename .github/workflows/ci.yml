@@ -156,6 +156,13 @@ jobs:
       - name: DAGpipe phase1 gates
         run: pnpm --dir android run test:dagpipe-phase1
 
+      - name: Materialize CI wrtc release input
+        run: |
+          MANIFEST_PATH="$(node android/scripts/prepare-daemon-ci-wrtc-input.mjs \
+            --output-dir "$RUNNER_TEMP/zterm-ci-wrtc-input")"
+          echo "ZTERM_DAEMON_WRTC_INPUT_MANIFEST=$MANIFEST_PATH" >> "$GITHUB_ENV"
+          cat "$MANIFEST_PATH"
+
       - name: Prepare daemon standalone release
         run: pnpm --dir android run daemon:prepare-release
 

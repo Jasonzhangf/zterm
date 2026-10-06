@@ -57,6 +57,17 @@ function validateManifest(manifest, manifestDir) {
   }
   const addonFile = requireString(addon, 'file', 'manifest.addon');
   const addonSha256 = requireString(addon, 'sha256', 'manifest.addon');
+  // Declared input kind and addon origin are optional: the patched release input
+  // omits them, while a non-release input (for example the CI packaging dry-run)
+  // must describe itself so the staged provenance is never misleading.
+  const inputKind = manifest.inputKind;
+  if (inputKind !== undefined && (typeof inputKind !== 'string' || inputKind.length === 0)) {
+    fail('manifest.inputKind must be a non-empty string when present');
+  }
+  const addonOrigin = addon.origin;
+  if (addonOrigin !== undefined && (typeof addonOrigin !== 'string' || addonOrigin.length === 0)) {
+    fail('manifest.addon.origin must be a non-empty string when present');
+  }
 
   if (!/^[a-z0-9-]+$/.test(platform) || !/^[a-z0-9-]+$/.test(arch)) {
     fail(`invalid platform/arch "${platform}-${arch}"`);
@@ -92,6 +103,8 @@ function validateManifest(manifest, manifestDir) {
     patchSha256,
     addonFile: addonPath,
     addonSha256,
+    inputKind,
+    addonOrigin,
   };
 }
 
@@ -163,6 +176,8 @@ function writeProvenance(runtimeDir, declared, addonSha256) {
     mainPackage: '@roamhq/wrtc',
     platformPackage: `@roamhq/wrtc-${declared.triple}`,
   };
+  if (declared.inputKind) provenance.inputKind = declared.inputKind;
+  if (declared.addonOrigin) provenance.addonOrigin = declared.addonOrigin;
   writeFileSync(
     join(runtimeDir, 'wrtc-provenance.json'),
     `${JSON.stringify(provenance, null, 2)}\n`,
