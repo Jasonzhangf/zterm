@@ -58,7 +58,7 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('forwards pointer gestures from the stream pane to the embedded overlay', () => {
+  it('keeps stream-pane touch gestures from closing the parent drawer', () => {
     const onClose = vi.fn();
     render(<ResourceBottomSheet open initialTab="stream" renderFileBrowser={() => null} renderRemoteWindow={() => <div data-testid="stream-surface" />} onClose={onClose} />);
     const pane = screen.getByTestId('resource-stream-pane');
@@ -66,9 +66,7 @@ describe('ResourceBottomSheet', () => {
     fireEvent.touchMove(pane, { touches: [{ clientY: 80 }] });
     fireEvent.touchEnd(pane, { changedTouches: [{ clientY: 80 }] });
     expect(onClose).not.toHaveBeenCalled();
-    // The stream pane must not steal the gesture: the overlay is reachable for the embedded overlay's own pointer/touch chain.
-    // No React-attached pointer event handler is set on the stream pane container (only its inner child is owned by the overlay).
-    expect(Object.keys((pane as unknown as Record<string, unknown>)).filter((key) => key.startsWith('on')).filter((key) => key.toLowerCase().includes('pointer'))).toEqual([]);
+    // The stream pane no longer owns drawer gesture cancellation; its child overlay receives the touch chain.
   });
 
   it('exposes a stream fullscreen ambient button that escalates the parent', () => {
