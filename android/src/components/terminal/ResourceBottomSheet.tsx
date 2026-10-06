@@ -234,7 +234,7 @@ export function ResourceBottomSheet({
           // pointercancel，取消已激活的 drawer gesture，导致"半截 -> 全屏"
           // 上滑永远拿不到 touchend/pointerup。把手是显式拖动面，必须声明
           // touch-action: none 才能让浏览器把手势交给本组件。
-          style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px', touchAction: 'none' }}
+          style={{ position: 'sticky', top: 0, zIndex: 100, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 30, padding: '6px 0 4px', background: 'var(--zterm-panel-bg)', borderBottom: '1px solid var(--zterm-panel-border)', touchAction: 'none' }}
           onTouchStart={(event) => { event.preventDefault(); event.stopPropagation(); handleTouchStart(event); }}
            onTouchMove={(event) => { event.preventDefault(); event.stopPropagation(); }}
           onTouchEnd={(event) => { event.stopPropagation(); handleTouchEnd(event); }}
@@ -255,7 +255,7 @@ export function ResourceBottomSheet({
             gestureRuntime.current.cancel(`pointer:${event.pointerId}`);
           }}
         >
-          <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
+          <span aria-hidden="true" style={{ width: 72, height: 6, borderRadius: 99, background: 'var(--zterm-panel-accent)' }} />
         </div> : null}
         {!streamExpanded && tab !== 'stream' ? <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
           <AmbientButton type="button" aria-label="关闭资源抽屉" style={{ ...buttonStyle, width: 44, padding: 0, border: 0, borderRadius: 22, fontSize: 13 }} onClick={onClose}>收起</AmbientButton>
