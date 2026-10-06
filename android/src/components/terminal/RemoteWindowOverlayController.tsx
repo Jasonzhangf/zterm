@@ -517,10 +517,8 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     pointerId: number;
     startScale: number;
   } | null>(null);
-  // The embedded floating preview is the same user-facing remote-window surface
-  // as standalone floating: it owns pointer/touch/scroll dispatch. Its toolbar
-  // remains passive (the resource drawer owns expansion), but the video surface
-  // must not be passive or taps and drags cannot reach the remote target.
+  // The drawer owns embedded floating expansion. Only standalone floating and
+  // embedded fullscreen run the remote-window input gesture arena.
   const remoteWindowInteractionEnabled = !embedded
     || (state.phase === 'targetLocked' && state.mode === 'fullscreen');
   const remoteWindowPublishesInput = remoteWindowInteractionEnabled;
