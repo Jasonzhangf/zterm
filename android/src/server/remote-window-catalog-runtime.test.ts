@@ -261,7 +261,7 @@ describe('remote window catalog runtime owner', () => {
     runtime.dispose();
   });
 
-  it('invalidates the resident snapshot when a refresh has source errors', async () => {
+  it('keeps healthy targets and appends a per-source error when one optional source degrades', async () => {
     vi.useFakeTimers();
     let refreshCount = 0;
     const runtime = createRuntime('darwin', {
@@ -294,10 +294,155 @@ describe('remote window catalog runtime owner', () => {
     });
 
     await vi.advanceTimersByTimeAsync(1_000);
+    // A degraded optional source must not invalidate the healthy app-window
+    // targets: the failure stays a per-source appended error.
     await expect(runtime.listTargets({ requestId: 'read-source-error' })).resolves.toMatchObject({
       requestId: 'read-source-error',
-      code: 'iterm2_api_unavailable',
+      targets: [expect.objectContaining({ streamTargetId: 'app-window:42:window-1' })],
+      errors: [expect.objectContaining({ code: 'iterm2_api_unavailable' })],
     });
+    runtime.dispose();
+  });
+
+  it('keeps app-window targets when no iTerm2 pane has a ScreenCaptureKit window', async () => {
+    vi.useFakeTimers();
+    const runtime = createRuntime('darwin', {
+      targetCatalogRefreshIntervalMs: 1_000,
+      runIterm2Python: vi.fn(async () => JSON.stringify({
+        windows: [{
+          windowId: 'iterm-1',
+          title: 'iTerm2',
+          pid: 7,
+          frame: { x: 0, y: 0, width: 400, height: 300 },
+          tabs: [{
+            tabId: 'tab-1',
+            root: {
+              type: 'session',
+              sessionId: 'session-1',
+              title: 'pane',
+              tty: '/dev/ttys001',
+              frame: { x: 0, y: 0, width: 400, height: 300 },
+            },
+          }],
+        }],
+      })),
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify({
+        windows: [{
+          windowId: 'window-1',
+          ownerName: 'Example',
+          appBundleId: 'com.example.app',
+          pid: 42,
+          title: 'Example',
+          frame: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      })),
+    });
+
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(runtime.listTargets({ requestId: 'read-pane-degraded' })).resolves.toMatchObject({
+      requestId: 'read-pane-degraded',
+      targets: [expect.objectContaining({ streamTargetId: 'app-window:42:window-1' })],
+      errors: [expect.objectContaining({ code: 'iterm2_capture_window_unavailable' })],
+    });
+    runtime.dispose();
+  });
+
+  it('does not surface a failure from a source the request excluded', async () => {
+    vi.useFakeTimers();
+    // The app-window source is enumerated first, so it owns the phase counter.
+    let phase = 0;
+    const runtime = createRuntime('darwin', {
+      targetCatalogRefreshIntervalMs: 1_000,
+      runIterm2Python: vi.fn(async () => {
+        if (phase >= 2) {
+          throw new Error('iTerm2 Python API unavailable');
+        }
+        return JSON.stringify({ windows: [] });
+      }),
+      runMacosAppWindowCatalog: vi.fn(async () => {
+        phase += 1;
+        if (phase >= 2) {
+          throw new Error('app window catalog unavailable');
+        }
+        return JSON.stringify({
+          windows: [{
+            windowId: 'window-1',
+            ownerName: 'Example',
+            appBundleId: 'com.example.app',
+            pid: 42,
+            title: 'Example',
+            frame: { x: 0, y: 0, width: 800, height: 600 },
+          }],
+        });
+      }),
+    });
+
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(runtime.listTargets({ requestId: 'read-warm' })).resolves.toMatchObject({
+      targets: [expect.objectContaining({ streamTargetId: 'app-window:42:window-1' })],
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    // The request excluded the app-window source, so the app-window failure
+    // must not be the answer; the read falls back to the not-ready contract.
+    const read = await runtime.listTargets({ requestId: 'read-iterm2-only', includeAppWindows: false });
+    expect(read).toMatchObject({ requestId: 'read-iterm2-only' });
+    expect((read as { code?: string }).code).not.toBe('app_window_catalog_unavailable');
+    runtime.dispose();
+  });
+
+  it('answers a read that overlaps a failed refresh with the structured catalog', async () => {
+    vi.useFakeTimers();
+    let phase = 0;
+    let failThirdCatalog: (error: Error) => void = () => undefined;
+    const runtime = createRuntime('darwin', {
+      targetCatalogRefreshIntervalMs: 1_000,
+      runIterm2Python: vi.fn(async () => {
+        if (phase >= 2) {
+          throw new Error('iTerm2 Python API unavailable');
+        }
+        return JSON.stringify({ windows: [] });
+      }),
+      runMacosAppWindowCatalog: vi.fn(async () => {
+        phase += 1;
+        if (phase === 2) {
+          throw new Error('app window catalog unavailable');
+        }
+        if (phase >= 3) {
+          return new Promise<string>((_resolve, reject) => {
+            failThirdCatalog = reject;
+          });
+        }
+        return JSON.stringify({
+          windows: [{
+            windowId: 'window-1',
+            ownerName: 'Example',
+            appBundleId: 'com.example.app',
+            pid: 42,
+            title: 'Example',
+            frame: { x: 0, y: 0, width: 800, height: 600 },
+          }],
+        });
+      }),
+    });
+
+    runtime.warm();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    // The request excluded the app-window source, so the resident failure is
+    // filtered out (F4) and the read falls through to the in-flight refresh.
+    const read = runtime.listTargets({ requestId: 'read-overlap-failure', includeAppWindows: false });
+    await vi.advanceTimersByTimeAsync(0);
+    failThirdCatalog(new Error('app window catalog unavailable'));
+    await vi.advanceTimersByTimeAsync(0);
+    const result = await read;
+    // The refresh result keeps the structured catalog shape so the caller can
+    // see every failure reason instead of only `errors[0]`.
+    expect(result).toMatchObject({ requestId: 'read-overlap-failure', targets: [] });
+    expect(Array.isArray((result as { errors?: unknown[] }).errors)).toBe(true);
     runtime.dispose();
   });
 
