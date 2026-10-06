@@ -100,7 +100,7 @@ export function createRemoteWindowCatalogRuntime(
 ): RemoteWindowCatalogRuntime {
   // The daemon owns one canonical full catalog snapshot; source-set selection is a read-time projection.
   let snapshot: RemoteWindowTargetCatalogCacheEntry | null = null;
-  let refreshFailure: RemoteWindowStreamErrorPayload | null = null;
+  let refreshFailure: RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload | null = null;
   let hasSuccessfulSnapshot = false;
   let refresh: Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> | null = null;
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -147,6 +147,25 @@ export function createRemoteWindowCatalogRuntime(
     includeIterm2: true,
   });
 
+  // Error codes owned by a source that the request explicitly excluded. A read
+  // must never surface the failure of a source it did not ask for.
+  const excludedSourceErrorCodes = (payload: RemoteWindowStreamRequestPayload): Set<string> => {
+    const includeAppWindows = payload.includeAppWindows !== false;
+    const includeIterm2 = payload.includeIterm2 !== false;
+    return new Set<string>([
+      ...(includeAppWindows ? [] : ['app_window_catalog_unavailable']),
+      ...(includeIterm2
+        ? []
+        : [
+            'iterm2_api_unavailable',
+            'tmux_client_catalog_unavailable',
+            'iterm2_capture_window_unavailable',
+            'remote_window_pane_geometry_invalid',
+            'remote_window_manifest_invalid',
+          ]),
+    ]);
+  };
+
   const projectSnapshot = (
     response: RemoteWindowStreamTargetsResponsePayload,
     payload: RemoteWindowStreamRequestPayload,
@@ -156,10 +175,7 @@ export function createRemoteWindowCatalogRuntime(
     if (includeAppWindows && includeIterm2) {
       return cloneRemoteWindowTargetCatalogResponse(response, payload.requestId);
     }
-    const excludedCodes = new Set<string>([
-      ...(includeAppWindows ? [] : ['app_window_catalog_unavailable']),
-      ...(includeIterm2 ? [] : ['iterm2_api_unavailable', 'tmux_client_catalog_unavailable']),
-    ]);
+    const excludedCodes = excludedSourceErrorCodes(payload);
     const errors = (response.errors ?? [])
       .filter((error) => !excludedCodes.has(error.code))
       .map((error) => ({ ...error, requestId: payload.requestId }));
@@ -262,11 +278,15 @@ export function createRemoteWindowCatalogRuntime(
 
     if (catalog) {
       try {
-        targets.push(...buildRemoteWindowStreamTargets(catalog, tmuxTargets, createdAt, {
+        const iterm2Build = buildRemoteWindowStreamTargets(catalog, tmuxTargets, createdAt, {
           includeAppWindowTargets: false,
           macosAppWindowCatalog,
           requireCaptureWindowForPanes: true,
-        }));
+        });
+        targets.push(...iterm2Build.targets);
+        for (const degradation of iterm2Build.degradations) {
+          errors.push(remoteWindowError(payload, degradation.code, degradation.message));
+        }
       } catch (error) {
         const message = summarizeRemoteWindowCatalogError(error, 'remote window target manifest invalid');
         errors.push(remoteWindowError(payload, 'remote_window_manifest_invalid', message || 'remote window target manifest invalid'));
@@ -280,14 +300,14 @@ export function createRemoteWindowCatalogRuntime(
       ...(macosAppWindowCatalogOk ? {} : { errorMessage: appWindowErrorMessage }),
     });
 
-    if (targets.length > 0) {
-      return {
-        requestId: payload.requestId,
-        targets,
-        ...(errors.length > 0 ? { errors } : {}),
-      };
-    }
-    return errors[0] || { requestId: payload.requestId, targets: [] };
+    // Always answer with the structured catalog shape. Collapsing to
+    // `errors[0]` would drop every other failure reason and would make one
+    // degraded source indistinguishable from a total failure.
+    return {
+      requestId: payload.requestId,
+      targets,
+      ...(errors.length > 0 ? { errors } : {}),
+    };
   };
 
   const startRefresh = (requestId: string) => {
@@ -306,7 +326,14 @@ export function createRemoteWindowCatalogRuntime(
       ))
       .then((result) => {
         if (!disposed && startedGeneration === generation) {
-          if ('targets' in result && !(result.errors?.length)) {
+          // A refresh that produced targets is fresh and usable even when one
+          // optional source degraded: commit it together with its per-source
+          // errors and let the read-time projection filter by the requested
+          // source set. Only a refresh that produced no target *and* reported
+          // errors invalidates the resident snapshot.
+          const hasTargets = 'targets' in result && result.targets.length > 0;
+          const hasErrors = 'targets' in result ? Boolean(result.errors?.length) : true;
+          if ('targets' in result && (hasTargets || !hasErrors)) {
             snapshot = {
               response: cloneRemoteWindowTargetCatalogResponse(result, result.requestId),
             };
@@ -314,11 +341,7 @@ export function createRemoteWindowCatalogRuntime(
             refreshFailure = null;
           } else {
             snapshot = null;
-            refreshFailure = hasSuccessfulSnapshot
-              ? 'targets' in result
-                ? { ...result.errors![0], requestId: result.requestId }
-                : { ...result }
-              : null;
+            refreshFailure = hasSuccessfulSnapshot ? cloneRemoteWindowTargetCatalogResult(result, result.requestId) : null;
           }
         }
         return result;
@@ -366,10 +389,11 @@ export function createRemoteWindowCatalogRuntime(
       return projectSnapshot(ready.response, payload);
     }
     if (refreshFailure) {
-      return {
-        ...refreshFailure,
-        requestId: payload.requestId,
-      };
+      return 'targets' in refreshFailure
+        ? projectSnapshot(refreshFailure, payload)
+        : excludedSourceErrorCodes(payload).has(refreshFailure.code)
+          ? remoteWindowError(payload, 'remote_window_catalog_not_ready', 'remote window target catalog is not ready')
+          : { ...refreshFailure, requestId: payload.requestId };
     }
     if (refresh) {
       const pending = await refresh;
@@ -384,7 +408,9 @@ export function createRemoteWindowCatalogRuntime(
           'remote window target catalog is not ready',
         );
       }
-      return cloneRemoteWindowTargetCatalogResult(pending, payload.requestId);
+      return 'targets' in pending
+        ? projectSnapshot(pending, payload)
+        : cloneRemoteWindowTargetCatalogResult(pending, payload.requestId);
     }
     return remoteWindowError(
       payload,

@@ -46,6 +46,7 @@ export interface RemoteWindowLockedToolbarProps {
   onToggleInputMode: () => void;
   onToggleMore: () => void;
   streamDebugInfo?: RemoteWindowStreamDebugInfo | null;
+  passivePreview?: boolean;
 }
 
 export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindowLockedToolbarProps>(function RemoteWindowLockedToolbar({
@@ -71,6 +72,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   onToggleAppSwitch,
   onToggleInputMode,
   onToggleMore,
+  passivePreview = false,
 }, ref) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const setRootRef = useCallback((node: HTMLDivElement | null) => {
@@ -176,7 +178,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           >
             {inputSupported ? '可操作' : '只读'}
           </span>
-          <AmbientButton
+          {!passivePreview ? <AmbientButton
             type="button"
             data-testid="remote-window-input-mode-toggle"
             data-no-drag="true"
@@ -186,7 +188,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
             title={inputMode === 'touch' ? '切换为鼠标模式' : '切换为触控模式'}
           >
             {inputMode === 'touch' ? '触控' : '鼠标'}
-          </AmbientButton>
+          </AmbientButton> : null}
         </div>
         <div data-testid="remote-window-tool-group" style={styles.lockedControlGroup}>
           <AmbientButton
@@ -201,7 +203,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
           >
             <RemoteWindowIcon name="screenshot" />
           </AmbientButton>
-          <AmbientButton
+          {!passivePreview ? <AmbientButton
             type="button"
             data-no-drag="true"
             aria-label="调起远程窗口键盘"
@@ -210,7 +212,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
             title="打开键盘"
           >
             <RemoteWindowIcon name="keyboard" />
-          </AmbientButton>
+          </AmbientButton> : null}
           <AmbientButton
             type="button"
             data-no-drag="true"

@@ -58,7 +58,7 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps stream gestures inside the stream pane', () => {
+  it('keeps stream-pane touch gestures from closing the parent drawer', () => {
     const onClose = vi.fn();
     render(<ResourceBottomSheet open initialTab="stream" renderFileBrowser={() => null} renderRemoteWindow={() => <div data-testid="stream-surface" />} onClose={onClose} />);
     const pane = screen.getByTestId('resource-stream-pane');
@@ -66,6 +66,27 @@ describe('ResourceBottomSheet', () => {
     fireEvent.touchMove(pane, { touches: [{ clientY: 80 }] });
     fireEvent.touchEnd(pane, { changedTouches: [{ clientY: 80 }] });
     expect(onClose).not.toHaveBeenCalled();
+    // The stream pane no longer owns drawer gesture cancellation; its child overlay receives the touch chain.
+  });
+
+  it('exposes a stream fullscreen ambient button that escalates the parent', () => {
+    const onExpand = vi.fn();
+    const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="remote-stream">stream</div> : null);
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={renderRemoteWindow}
+        onClose={vi.fn()}
+        onExpand={onExpand}
+      />,
+    );
+    const button = screen.getByTestId('resource-stream-fullscreen');
+    expect(button).toBeTruthy();
+    fireEvent.click(button);
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', true, expect.any(Function));
   });
 
   it('keeps file page vertical drags inside the content scope', () => {

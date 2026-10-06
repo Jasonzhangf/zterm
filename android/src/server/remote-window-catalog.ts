@@ -364,6 +364,16 @@ export function assertPaneCropWithinWindow(
   }
 }
 
+export interface RemoteWindowStreamTargetDegradation {
+  code: string;
+  message: string;
+}
+
+export interface RemoteWindowStreamTargetBuild {
+  targets: RemoteWindowStreamTargetManifest[];
+  degradations: RemoteWindowStreamTargetDegradation[];
+}
+
 export function buildRemoteWindowStreamTargets(
   catalog: Iterm2RawCatalog,
   tmuxTargets: Map<string, TmuxClientTarget>,
@@ -373,8 +383,9 @@ export function buildRemoteWindowStreamTargets(
     macosAppWindowCatalog?: MacosAppWindowCatalog | null;
     requireCaptureWindowForPanes?: boolean;
   } = {},
-): RemoteWindowStreamTargetManifest[] {
+): RemoteWindowStreamTargetBuild {
   const targets: RemoteWindowStreamTargetManifest[] = [];
+  const degradations: RemoteWindowStreamTargetDegradation[] = [];
   const includeAppWindowTargets = options.includeAppWindowTargets !== false;
   const appWindows = options.macosAppWindowCatalog?.windows || [];
   const requireCaptureWindowForPanes = options.requireCaptureWindowForPanes === true;
@@ -428,7 +439,14 @@ export function buildRemoteWindowStreamTargets(
       iTermPaneCount += panes.length;
       const contentBounds = computeContentBounds(panes);
       if (contentBounds.width > captureWindowFrame.width || contentBounds.height > captureWindowFrame.height) {
-        throw new Error(`window:${window.windowId}:tab:${tab.tabId} content bounds exceed window bounds`);
+        // One tab whose split layout does not fit the captured window is a
+        // per-tab geometry fact, not a catalog-wide failure. Skip that tab and
+        // report it, so unrelated tabs, windows and app-window targets survive.
+        degradations.push({
+          code: 'remote_window_pane_geometry_invalid',
+          message: `window:${window.windowId}:tab:${tab.tabId} content bounds exceed window bounds`,
+        });
+        continue;
       }
       const contentTopInsetPx = captureWindowFrame.height - contentBounds.height;
       for (const pane of panes) {
@@ -439,11 +457,20 @@ export function buildRemoteWindowStreamTargets(
           width: pane.frame.width,
           height: pane.frame.height,
         };
-        assertPaneCropWithinWindow(
-          captureWindowFrame,
-          cropRectTopLeftPx,
-          `window:${window.windowId}:tab:${tab.tabId}:pane:${pane.sessionId}`,
-        );
+        const paneLabel = `window:${window.windowId}:tab:${tab.tabId}:pane:${pane.sessionId}`;
+        try {
+          assertPaneCropWithinWindow(captureWindowFrame, cropRectTopLeftPx, paneLabel);
+        } catch (error) {
+          // Coordinate correctness stays fail-closed for this pane only. The
+          // remaining panes and every other source must not depend on it.
+          degradations.push({
+            code: 'remote_window_pane_geometry_invalid',
+            message: error instanceof Error
+              ? error.message
+              : `${paneLabel} crop rectangle is outside its window bounds`,
+          });
+          continue;
+        }
         targets.push({
           streamTargetId: `iterm2-pane:${window.windowId}:${tab.tabId}:${pane.sessionId}`,
           videoTarget: {
@@ -488,10 +515,15 @@ export function buildRemoteWindowStreamTargets(
   }
 
   if (requireCaptureWindowForPanes && iTermPaneCount === 0 && skippedPaneCount > 0) {
-    throw new Error('iTerm2 ScreenCaptureKit window id unavailable for all panes');
+    // "No iTerm2 pane has a ScreenCaptureKit window" degrades one optional
+    // source. Report it and keep every target the other sources produced.
+    degradations.push({
+      code: 'iterm2_capture_window_unavailable',
+      message: 'iTerm2 ScreenCaptureKit window id unavailable for all panes',
+    });
   }
 
-  return targets;
+  return { targets, degradations };
 }
 
 function findMatchingIterm2CaptureWindow(
