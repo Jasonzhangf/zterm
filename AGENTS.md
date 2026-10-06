@@ -36,6 +36,7 @@
 - 开发/修复/重构的每个流程节点完成、失败或阻塞时，立即在任务独占 run notes 记录：时间/节点｜结论/状态｜证据路径｜输入版本与必要环境｜下一步。假设明确标注，失败保留原错。
 - 下游执行、重试、恢复、交接先读相关节点笔记与证据，不凭聊天上下文重建事实。
 - Android APK / terminal / renderer / IME / session transport / OTA 任一影响真机行为的改动，必须先跑 `.agents/skills/zterm-mobile-dev/SKILL.md` 的 Android L5 真机硬门禁；单测、`vitest`、`tsc`、`daemon:mirror:close-loop`、本机 `dev` 浏览器或 local daemon preview 都不能冒充真机交付。缺 emulator/15T 截图、logcat、buildNumber 或 OTA/安装态证据时，按 `UNVERIFIED`/`INCOMPLETE` 处理。
+- Claim 功能交付必须有真实黑盒行为证据：使用在线 Android emulator 或在线真机（例如 15T）从真实用户入口操作，并记录可观察结果、截图/UI dump 与 logcat/运行日志；白盒代码、单元测试、组件测试、TypeScript、源码结构或 mock 只能作为开发辅助，不能作为交付条件，也不能替代 emulator/真机证据。缺少适用的 emulator/真机黑盒证据时，claim 只能标记为 `UNVERIFIED` 或 `INCOMPLETE`，不得宣称已修复或已交付。
 - 每次开发 / 修复 / 重构先审计本任务节点笔记；已记录且未失效的事实不重复读取/推导，再读受影响架构真源，再读代码：
   - 先读 `android/docs/architecture.md`
   - 再读 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`
