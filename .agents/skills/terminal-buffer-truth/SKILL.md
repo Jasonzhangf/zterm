@@ -112,7 +112,7 @@ terminal / daemon / client / renderer 相关任务完成前，先写清本轮影
 
 ### L5 packaged / device / real app smoke
 - 证明：真实 app 入口、打包产物、设备/桌面运行态按用户路径工作。
-- Android：每次影响 Android 真机行为且需要 Jason 复测的修复，都必须构建可升级 APK 包并发布到 update channel；默认命令 `pnpm --dir android run build:android`。汇报必须给出 `versionName`、`versionCode`、APK 路径、sha256；有 online ADB 设备时继续安装/启动/真机 smoke，没有设备时明确 L5 缺口。
+- Android：每次影响 Android 真机行为且本次任务处于常规交付授权范围时，都必须构建可升级 APK 包并在适用 update channel 发布；默认命令 `pnpm --dir android run build:android`。汇报必须给出 `versionName`、`versionCode`、APK 路径、sha256；有 online ADB 设备时继续安装/启动/真机 smoke，没有设备时明确 L5 缺口。
 - Mac：packaged `.app` 或唯一 dev Electron 实例，截图/DOM/进程证据，必要时资源采样。
 - 不证明：未覆盖的其它平台或远端网络路径。
 
