@@ -13,7 +13,7 @@ description: "审计、开发和验证 zterm Android 客户端；按当前架构
 - 纯审计或文档修复：只做读源、真实界面观察、文档/链接/命令校验与 review；不因此构建 APK、修改 buildNumber、安装或发布。
 - UI 解耦审计追踪 `App -> slot -> component/controller -> business owner`；检查状态归属和实际 I/O，不能用 slot wrapper 的无 import 测试证明下游纯投影。
 - UI 设计审计使用 frontend-ui-reference / impeccable：实际手机与大屏、键盘开关、长名称、加载/空/错误、触摸目标与读屏；记录 APK/viewport/截图，区分源码发现与运行态复现。
-- 完成适用验证后按全局 review 路由使用 AGY；只有 controller PASS 才算通过。review 不自动授权 commit/push/发布。独立工作树内保护其他 worker 的改动。
+- 完成适用验证后按全局 `codex-review` 路由；只有 controller PASS 才算通过。PASS 不新增流程外权限，常规交付按全局 AGENTS L2 授权执行。独立工作树内保护其他 worker 的改动。
 
 ## 项目概要
 
@@ -24,15 +24,15 @@ description: "审计、开发和验证 zterm Android 客户端；按当前架构
 
 ---
 
-## 一、节点笔记与真源读取顺序
+## 一、真源读取顺序
 
-先审计本任务已有节点笔记和证据，判明当前状态、已完成节点与缺口，再按受影响范围读取真源；已记录且未失效的事实不重复读取或推导。
+节点笔记、证据复用和状态机推进按全局 `coding-principals`；本节只列 zterm Android 项目真源，不重复维护通用流程。
 
 ```
-0. 任务独占 run notes        → 当前节点状态与已有证据（先读）
-1. ~/.codex/AGENTS.md               → 全局入口、硬护栏
+0. 任务独占 run notes        → 先按全局 coding-principals 审计当前状态与已有证据
+1. ~/.agents/AGENTS.md              → 全局入口、硬护栏
 2. ~/.codex/USER.md                 → 用户偏好（称呼 Jason）
-3. coding-principals/SKILL.md       → 开发方法论、节点笔记格式
+3. ~/.agents/skills/coding-principals/SKILL.md → 开发方法论、节点笔记格式
 4. 本任务受影响的项目真源（按域选读，不要求全量重读）：
    android/docs/spec.md     → 产品范围与验收
    android/docs/architecture.md → 模块边界与数据流
@@ -47,13 +47,7 @@ description: "审计、开发和验证 zterm Android 客户端；按当前架构
 5. 本 SKILL.md                     → 项目约束、可复用门禁
 ```
 
-重读触发仅限：代码、输入、配置、依赖、产物或必要环境变化，证据缺失/冲突/过期，或需要刷新 main/远端/PID/runtime 等可变状态；换轮、换 agent、单纯不放心不触发重读。
-
-### 1.1 节点笔记
-
-- 开发/修复/重构的每个流程节点完成、失败或阻塞时，立即写任务独占 run notes：`时间/节点｜结论或状态｜证据路径｜输入版本及必要环境｜下一步`；未证实的判断标假设，失败保留原错，不复制原始日志。
-- 进入下一节点、重试、恢复或交接前，先读相关节点笔记与证据再决定动作；上下文、记忆摘要和口头完成声明不替代落盘事实。
-- 同一事实确认一次即落盘并复用。已有有效证据不得反复检查、反复测试；只补因变化或缺口而失效的受影响项。
+只读受影响真源；证据失效与重读边界按全局 `coding-principals`。
 
 ---
 
@@ -88,9 +82,9 @@ description: "审计、开发和验证 zterm Android 客户端；按当前架构
 - 每次真机测试前，先确认配置恢复路径：优先使用应用内“导出配置”生成的 `zterm-config.json`，并保存导出文件路径、时间和 SHA-256；没有导出/备份证据就不能卸载、清数据或覆盖测试设备。测试只需要新数据时，使用独立设备、独立 Android 用户或 Jason 明确批准的隔离测试环境。
 - 覆盖安装后必须核对 `package:dataDir`、`firstInstallTime`/`lastUpdateTime` 和关键配置仍可读取；若配置缺失，立即停止后续安装/发布动作并报告，不得静默重置、重新初始化或把空配置当作成功。
 - `.build-meta.json` 是持久化版本真源，禁止手工编辑、跳号、回退或为了绕过 Android 版本检查抬高 `buildNumber`。版本分配只能由 `scripts/bump-build-version.mjs` 完成；构建前后记录 `buildNumber`、APK 内 `versionName/versionCode`、manifest 和 SHA-256，发现不一致必须停止。
-- OTA 发布是不可逆的外部状态变更：构建、bundle verify、三通道 GET/HEAD/hash 校验只能证明产物正确，不等于获得发布授权。没有 Jason 的明确发布授权，不得执行 Relay `scp`、覆盖 `latest.json`、发布 stable channel 或重启生产服务。
+- OTA 发布属于常规修复交付的长期授权范围，但只在该任务已获交付授权时执行；构建、bundle verify、三通道 GET/HEAD/hash 校验只证明产物正确，不替代实际发布与回执证据。任务仅授权源码或文档修复时，停在可审阅变更并明确 L5/发布缺口。
 - 构建结果必须进入升级通道：`android/update-dist/latest.json`、`android/update-dist/zterm-<version>.apk`、`android/update-dist/zterm-latest-debug.apk`、`~/.zterm/updates/latest.json`、`~/.zterm/updates/zterm-<version>.apk` sha/version 对齐。
-- 获授权的 Android 发布闭环必须覆盖本机、Tailscale daemon 与配置的 public Relay update route；先读取当时端口、地址、manifest URL，再验证 GET/HEAD、版本与 APK 下载 SHA-256。超时先诊断唯一服务 owner，仅在已有重启授权时做 service-scoped restart；不得用旧地址或自动重启代替现场证据。
+- 常规交付授权范围内的 Android 发布闭环必须覆盖本机、Tailscale daemon 与配置的 public Relay update route；先读取当时端口、地址、manifest URL，再验证 GET/HEAD、版本与 APK 下载 SHA-256。超时先诊断唯一 service owner，仅在已有重启授权时做 service-scoped restart；不得用旧地址或自动重启代替现场证据。
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
 - Android 回退发布必须使用同一正常构建号的子版本槽：正常版 `0.1.3.N`，回退版 `0.1.3.N.1`，下一正常版 `0.1.3.N+1`；APK 内必须同时满足 `versionCode(N) < versionCode(N.1) < versionCode(N+1)`。禁止用 bit 30、固定高位或任何会让后续正常版永久低于回退版的 namespace。发布前必须用 `apkanalyzer` 读取实际 APK 的 `versionName`/`versionCode`，并在不带 `adb install -d` 的真实设备上验证 normal N -> rollback N.1 -> normal N+1 可依次覆盖安装；manifest 文件名或 JSON 声明不能代替 APK 内 manifest 证据。
 - 构建后必须继续做 Android 运行态 smoke：优先使用在线 ADB 真机；若无在线真机，立即启动并使用可用 Android Emulator 完成安装、启动、重启和真实 UI/网络路径验证。只有在本机既无在线真机也无可启动 Emulator 时，才允许把 L5 记为环境阻塞；不得仅因 `adb devices` 为空就停止。
@@ -464,137 +458,11 @@ description: "审计、开发和验证 zterm Android 客户端；按当前架构
 - 升级到 L2 前必须先有多次 L1 低误报 run history、唯一 owner、required gates、maker/checker 分离和 Jason 明确批准；L3 unattended 默认关闭。
 - 任何 loop governance 变更必须跑 `pnpm --dir android run test:feature-registry -- --reporter dot`，其中 `src/lib/loop-governance-truth.test.ts` 会锁住 L1 禁动作、kill switch、manifest 和 mainline call ID。
 
-## 三、开发闭环流程
+## 三、Android 项目验证与交付命令
 
-### 3.0 测试闭环分层规则
+开发、调试、验证、review 和资源回收的生命周期按全局 `AGENTS.md` L1/L2 与 `coding-principals`；terminal 分层 gate 见 `terminal-buffer-truth`。本节只保留 zterm Android 项目专用命令和证据要求。
 
-Android / daemon / shared / Mac 任一 terminal 主链改动，都必须按影响面选择验证层级，不能用低层 gate 冒充高层完成。
-
-#### L0 架构与静态 gate
-- 证明：feature owner、function map、类型、禁止路径扫描没有明显破坏。
-- 不证明：真实 daemon/tmux/client/UI 可用。
-- 常用命令：`pnpm --dir android run test:feature-registry -- --reporter dot`、`pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`。
-
-#### L1 Android client 单元/集成 gate
-- 证明：open-tab restore/resume、SessionContext transport、buffer worker、TerminalPage/TerminalView 局部语义正确。
-- 不证明：真实 daemon/tmux 或真机 WebView 已闭环。
-- 要求：涉及状态机、retry、timeout、错误投影、IME、renderer 可见窗口时，必须有正向和反向测试。
-
-#### L2 daemon/tmux 真回环
-- 证明：当前 daemon 能真实启动，tmux oracle 与 daemon mirror/client replay 一致。
-- 默认命令：`pnpm --dir android run daemon:mirror:close-loop`。
-- 不证明：本地客户端入口一定连得上。
-
-#### L3 本地客户端核心连接 gate
-- 证明：仓库内本地 client transport/runtime 能连。若 Mac client 可用，必须跑 Mac gate，不能只用 daemon probe。
-- 默认命令：`pnpm --dir mac test -- --reporter dot` 与 `pnpm --dir mac run type-check`。
-- 覆盖面：remote daemon `bridge-transport`、local tmux `local-tmux-transport`、`terminal-runtime`、workbench active target。
-- 不证明：Android 真机或 Mac packaged app 运行态已经正常。
-
-#### L4 Android UI / WebView gate
-- 证明：TerminalPage、IME、drawer、pane、renderer shell 在 Android/WebView 语义下成立。
-- 若问题是键盘、容器上抬、输入法特殊键、touch、drawer、可视窗口，不能只跑 L2/L3。
-
-#### L5 APK / 真机 / 发布态 gate
-- 证明：真实安装态和用户路径可用。
-- 需要 APK smoke、真实设备、daemon debug、截图/logcat/evidence 中至少与本轮问题相关的证据。
-
-汇报要求：
-- 必须列出已跑到哪一层，以及没跑到的层级为什么不在本轮范围。
-- 不能把“daemon/tmux 真回环通过”写成本地客户端正常。
-- 不能把“Mac client 核心测试通过”写成 Android 真机正常。
-
-### 3.1 流程图
-
-```
-┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
-│ 1.规划  │───▶│ 2.开发  │───▶│ 3.测试  │───▶│ 4.提交  │───▶│ 5.沉淀  │
-└─────────┘    └─────────┘    └─────────┘    └─────────┘    └─────────┘
-     │              │              │              │              │
-     ▼              ▼              ▼              ▼              ▼
- 读笔记+task   读skill        补失效验证     Git commit    按需沉淀
- 定义成功       最小切片       写节点笔记     检查清单      经验沉淀
-```
-
-每个节点结束（含失败/阻塞）都落一条 run note；下一节点先读笔记再动，不重复同一事实的验证。
-
-### 3.2 Phase 1: 规划阶段
-
-**目标**: 明确任务范围、定义成功标准、冻结边界
-
-#### 规划输出模板
-
-每次任务开始前，先审计本任务 run notes 与 `android/task.md`，复用仍有效证据；再更新 `android/task.md` 和 `android/CACHE.md`：
-
-```markdown
-## Task-XXX
-- 目标：
-- 成功标准：
-- 验证入口：
-- 范围：
-- 不在范围：
-- 风险：
-- 证据输出位置：
-```
-
-#### 进入开发前的冻结检查
-
-| 检查项 | 必须确认 |
-|--------|---------|
-| 成功标准是否可验证？ | ✅ |
-| 验证入口是否明确？ | ✅ |
-| 是否有唯一真源？ | ✅ |
-| 是否只改本轮切片？ | ✅ |
-
-### 3.3 Phase 2: 开发阶段
-
-**目标**: 最小切片实现，每步可验证
-
-#### 开发顺序（Foundation Modules）
-
-```
-1. Config Module        → Host/Session 类型定义、存储方式
-2. Provider/Adapter     → WebSocket 消息协议
-3. Minimal Debug Entry  → 最小 UI 可见
-4. Observability        → 状态变更 event
-5. Testing/Harness      → 验证入口
-6. Build/Install        → Capacitor 配置
-```
-
-#### 最小切片规则
-
-```
-最小切片 = 1个文件 + 1个功能 + 1次验证
-
-示例：
-- 切片1: 创建 src/lib/types.ts → 定义 Host 类型 → tsc 编译通过
-- 切片2: 创建 src/hooks/useHostStorage.ts → localStorage 存取 → 浏览器验证
-- 切片3: 创建 src/components/HostList.tsx → 显示主机列表 → 浏览器查看
-```
-
-#### 禁止事项
-
-| 禁止 | 原因 |
-|------|------|
-| 一次改多个文件 | 违反最小切片原则 |
-| 添加未请求的功能 | 违反 Simplicity First |
-| 重构未要求的代码 | 违反 Surgical Changes |
-| 把 runtime 源码重新放回本仓库 | 项目约束：runtime 只通过发布后的 `@jsonstudio/wtermmod-*` 包消费 |
-
-### 3.4 Phase 3: 测试阶段
-
-**目标**: 四层验证，证据记录
-
-#### 四层验证框架
-
-| 层级 | 验证内容 | 验证方式 |
-|------|---------|---------|
-| **L1: Unit** | 纯函数、类型、状态机 | `tsc --noEmit` + vitest |
-| **L2: Function** | 模块主路径功能 | 浏览器手动验证 |
-| **L3: Orchestration** | 跨模块推进、多 Tab | 多场景手动验证 |
-| **L4: Runtime** | Android 运行态 | 模拟器/真机验证 |
-
-#### 远程 runtime 调试闭环（必须记住）
+### 3.1 远程 runtime 调试闭环（必须记住）
 
 当出现下面这类问题时，优先走 daemon 远程调试接口，而不是只靠猜：
 
@@ -652,38 +520,39 @@ pnpm daemon:runtime:remote logs --host 100.x.x.x --port 3333 --token <auth> --se
   - follow viewport sync 是否漏了无键盘场景
   - runtime state 里的 last request rows / viewportEndIndex 是否与当前真实底部一致
 
-#### 验证入口定义
+### 3.2 常用验证入口
+
+按全局生命周期和 `terminal-buffer-truth` 选择适用层级，不要求每轮全跑。
 
 ```bash
-# L1: Unit 验证
+# 静态 / 架构
 pnpm --dir android run type-check
 pnpm --dir android run test:feature-registry
 
-# L2: Function 验证（本地开发）
+# 本地开发入口
 pnpm --dir android run dev
 # 结构验证：浏览器访问 portless 输出的 *.localhost 地址
 # 真连通验证：pnpm --dir android run preview -- --host 127.0.0.1 --port 4173
 # 手动操作：添加主机 → 连接 bridge → 验证终端显示
 
-# L3: Orchestration 验证
+# 多 Tab 编排
 # 多 Tab 操作：新建 Tab1 → 新建 Tab2 → 切换 → 关闭
 
-# L4: Runtime Smoke（Android）
+# 安装态 smoke
 pnpm --dir android run build:android
 pnpm --dir android run sync:android
 pnpm --dir android run run:android
 ```
 
-#### 标准 APK 构建与发布流程（zterm Android，必须遵循）
+### 3.3 标准 APK 构建与发布流程（zterm Android，必须遵循）
 
 > 适用场景：需要给 Jason 交付可安装升级包、必须进入 update/release 渠道。
 
 ```bash
-cd android
-./scripts/build-android-debug.sh
+pnpm --dir android run build:android
 ```
 
-该命令是唯一标准入口，内部顺序固定：
+该命令是唯一标准入口，内部由 `android/scripts/build-android-debug.sh` 执行，顺序固定：
 
 1. `pnpm build`
    - 包含 prebuild 门禁：`test:terminal:regression`
@@ -691,9 +560,9 @@ cd android
 3. `native/android/gradlew assembleDebug`
 4. Gradle `:app:assembleDebug -PztermRollbackVariant=true` 构建 rollback，恢复 normal APK
 5. `node ./scripts/prepare-update-bundle.mjs <normal.apk> <rollback.apk>`
-6. `verify-update-bundle.mjs` 与实际 APK 身份校验；Relay 上传仅在 `ZTERM_PUBLISH_RELAY=true` 且已有发布授权时执行
+6. `verify-update-bundle.mjs` 与实际 APK 身份校验；Relay 上传仅在 `ZTERM_PUBLISH_RELAY=true` 且本次任务属于常规交付授权范围时执行
 
-该脚本会 bump buildNumber 并写本地 OTA，不是纯 build 命令。运行前完成源码审阅与适用验证，确认本地发布授权；已有版本交付授权无需重复询问。版本由 bump-build-version.mjs 分配，不手改；rollback 由 Gradle 生成，不用 `node patch-apk-version.py`。
+该命令会 bump buildNumber 并写本地 OTA，不是纯 build 命令。运行前完成源码审阅与适用验证，确认本次任务属于常规修复交付范围；已有交付授权无需重复询问。版本由 bump-build-version.mjs 分配，不手改；rollback 由 Gradle 生成，不用 `node patch-apk-version.py`。
 
 **发布目标目录（必须检查）：**
 
@@ -719,11 +588,11 @@ cd android
 
 **禁止事项：**
 
-- 禁止跳过 `build-android-debug.sh` 直接手工拷贝 APK 冒充发布。
+- 禁止跳过 `pnpm --dir android run build:android`（内部脚本 `build-android-debug.sh`）直接手工拷贝 APK 冒充发布。
 - 禁止只说“构建成功”但不核对 `latest.json` 与实际 APK hash。
 - 禁止使用旧版本 APK 复用旧 manifest。
 
-#### 证据记录模板
+### 3.4 证据记录模板
 
 每次验证后在 `android/evidence/<date-task>/` 保存：
 
@@ -739,293 +608,33 @@ cd android
 - APK 路径
 - 必要时 logcat
 
-### 3.5 Phase 4: 提交阶段
+### 3.5 项目提交与经验沉淀
 
-**目标**: 清晰的 commit，检查清单
+commit/merge/push、memory/skill 写入和资源回收按全局 `AGENTS.md` L1/L2 与 `coding-principals`。项目特有检查：
 
-#### Git Commit 规范
-
-```bash
-# Commit message 格式
-<type>: <subject>
-
-<body>
-
-# type 范围
-feat:     新功能
-fix:      修复
-refactor: 重构（仅限请求的重构）
-docs:     文档更新
-test:     测试添加/修改
-chore:    配置/构建变更
-
-# 示例
-feat: 添加 HostList 组件和 useHostStorage hook
-
-- 创建 src/lib/types.ts 定义 Host 类型
-- 创建 src/hooks/useHostStorage.ts 实现本地存储
-- 创建 src/components/HostList.tsx 显示主机列表
-
-验证: pnpm --dir android run dev → 浏览器访问 → 添加主机成功
-```
-
-#### 提交前检查清单
-
-| 检查项 | 命令 |
-|--------|------|
-| 类型检查通过 | `pnpm --dir android run type-check` |
-| 无未使用代码 | 手动检查 |
-| task.md 已更新 | `git diff android/task.md` |
-| CACHE/MEMORY 是否需要更新 | 检查是否有新约束 |
-| SKILL.md 是否需要更新 | 检查是否有新门禁 |
-
-### 3.6 Phase 5: 经验沉淀
-
-**目标**: 按需提炼已验证发现；记忆/规则写入须已获授权，不作为每轮完成门禁
-
-#### Skill 更新时机
-
-| 触发条件 | 更新内容 |
-|---------|---------|
-| 发现新的项目约束 | 核对唯一 owner，项目事实进入 AGENTS/decision，skill 仅引用 |
-| 发现新的验证入口 | 写入 "验证入口" |
-| 发现反模式/坑 | 写入 "常见问题" |
-| 发现可复用模式 | 写入 "最佳实践" |
-
-### 3.7 回归验证（下次启动）
-
-先读任务独占 run notes 与已有证据；下述命令只补失效/缺失项，不因新一轮或换 agent 无条件全跑：
-
-```bash
-# 1. 仅在需要确认当前分支/工作树真源时
-git log --oneline -5
-
-# 2. 仅在代码/依赖变化或该证据失效时
-pnpm --dir android run type-check
-
-# 3. 仅在需要真实入口验证且该证据缺失/失效时
-pnpm --dir android run dev
-
-# 4. 仅在需要真机/模拟器安装态证据时
-pnpm --dir android run run:android
-```
+- `android/task.md`、`android/CACHE.md` 仅在任务约定或内容变化时更新。
+- 新增项目约束先进入唯一 owner（`AGENTS.md`、decision、registry 或项目 skill），不要跨 skill 复制。
+- 验证命令只补失效项；不要因换轮或换 agent 全量重跑。
 
 ---
 
-## 四、完整功能规格
+## 四、项目真源索引
 
-### 4.1 主机管理
+产品范围、协议、类型和状态机不再在本 skill 复制；先读项目真源：
 
-| 字段 | 说明 |
-|------|------|
-| id | UUID |
-| name | 显示名称 |
-| bridgeHost | IP 或 Tailscale 域名 |
-| bridgePort | bridge 端口（默认由统一配置决定，当前 3333） |
-| sessionName | tmux session 名 |
-| authType | password / key |
-| password/privateKey | 凭据（暂不加密） |
-| tags | 分组标签（数组） |
-| pinned | 是否置顶首页 |
-| lastConnected | 最后连接时间戳 |
-| autoCommand | 连接后自动执行的命令 |
+- `android/docs/spec.md`：产品范围与验收
+- `android/docs/architecture.md`：模块边界与数据流
+- `android/docs/decisions/2026-09-05-runtime-memory-truth.md`：当前实现与最新目标
+- `android/src/lib/types.ts` 与 `packages/shared/src/connection/types.ts`：Host/Session/类型真源
+- `packages/shared/src/protocol` 与 `packages/shared/src/connection/protocol.ts`：wire 协议真源
+- `android/docs/resource-registry.json`、`android/docs/module-registry.json`、`android/docs/edge-registry.json`：资源/模块/边真源
+- `android/docs/dagpipe/`：业务/执行 DAG 真源
 
-- **分组/标签**: 支持（如"工作服务器"、"个人服务器"）
-- **搜索/过滤**: 不需要
-- **备注/描述**: 不需要
-
-### 4.2 虚拟键盘工具栏
-
-| 功能 | 说明 |
-|------|------|
-| 位置 | 底部，手机键盘上方 |
-| 基础按键 | Ctrl, Alt, Tab, ESC, 方向键 |
-| 扩展按键 | F1-F12（电脑键盘模式全显示） |
-| 自定义组合键 | 支持（如 Ctrl+C, Ctrl+D），可增删 |
-| 预设模板 | 默认提供 Ctrl+C/D/Z |
-| 拖拽排序 | 支持 |
-| 存储 | 用户配置文件 + WebDAV 导入导出 |
-
-### 4.3 应用启动行为
-
-| 功能 | 说明 |
-|------|------|
-| 自动连接 | 启动时自动连接上次活跃 Session |
-| Tab 状态恢复 | 保存上次关闭时的 Tab 状态 |
-| 快速重连 | 一键连接最近 3 个主机 |
-| 自动命令 | 主机级别默认 + 连接时可临时覆盖 |
-| 命令历史 | 每个 Tab 保存 host+autoCommand，WebDAV 同步 |
-
-### 4.4 Tab 栏设计
-
-| 功能 | 说明 |
-|------|------|
-| 位置 | 顶部 |
-| 显示内容 | 动态标题（来自 tmux / shell 标题），可手动重命名 |
-| 重命名持久化 | 支持 |
-| 最大 Tab 数 | 10 |
-
-### 4.5 后台保活
-
-| 功能 | 说明 |
-|------|------|
-| 通知栏 | 显示每个 Tab 连接状态 |
-| 自动重连 | 网络恢复后自动重连 |
-| 重连次数 | 可配置，默认 3 次 |
-| 心跳间隔 | 30 秒 |
-
-### 4.6 Session 历史
-
-| 功能 | 说明 |
-|------|------|
-| Tab 状态保存 | 上次关闭时的 Tab 配置 |
-| Session 快照 | 保存完整终端输出历史 |
-
-### 4.7 网络状态提示
-
-| 功能 | 说明 |
-|------|------|
-| 断开提示 | Toast 提示网络断开 |
-| 错误详情 | 显示具体错误（认证失败、超时、网络不可达） |
-
-### 4.8 Android 特有功能
-
-| 功能 | 说明 |
-|------|------|
-| 横屏模式 | 支持，终端尺寸自动调整 |
-| 外接键盘 | 支持 USB/蓝牙键盘 |
-| 分享功能 | 分享终端输出/命令 |
-
-### 4.9 数据同步
-
-| 功能 | 说明 |
-|------|------|
-| 配置导入导出 | WebDAV 支持 |
-| 快捷键配置 | WebDAV 同步 |
-| 命令历史 | WebDAV 同步 |
+旧功能规格、旧 wire 协议和旧状态机段落已删除；需要定位行为时先查上述真源，不改 skill 内的历史副本。
 
 ---
 
-## 五、WebSocket 消息协议
-
-### 客户端 → 服务端
-
-```typescript
-type ClientMessage =
-  | { type: 'connect', payload: HostConfig }
-  | { type: 'input', payload: string }
-  | { type: 'resize', payload: { cols: number, rows: number } }
-  | { type: 'ping' }
-  | { type: 'close' }
-```
-
-### 服务端 → 客户端
-
-```typescript
-type ServerMessage =
-  | { type: 'connected', payload: { sessionId: string } }
-  | { type: 'data', payload: string }
-  | { type: 'error', payload: { message: string } }
-  | { type: 'title', payload: string }
-  | { type: 'closed', payload: { reason: string } }
-  | { type: 'pong' }
-```
-
----
-
-## 六、状态机定义
-
-```
-idle → connecting → connected → closed
-            ↓           ↓
-          error      reconnecting → connected
-```
-
-```typescript
-interface Host {
-  id: string;
-  name: string;
-  bridgeHost: string;
-  bridgePort: number;
-  sessionName: string;
-  authType: 'password' | 'key';
-  password?: string;
-  privateKey?: string;
-  tags: string[];
-  pinned: boolean;
-  lastConnected?: number;
-  autoCommand?: string;
-}
-
-interface Session {
-  id: string;
-  hostId: string;
-  connectionName: string;
-  bridgeHost: string;
-  bridgePort: number;
-  sessionName: string;
-  title: string;
-  ws: WebSocket | null;
-  state: 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error' | 'closed';
-  hasUnread: boolean;
-  customName?: string;  // 用户重命名的名称
-}
-```
-
----
-
-## 七、文件夹结构
-
-```
-android/
-├── docs/                       # spec / architecture / workflow
-├── evidence/                   # 截图 / 日志 / APK / 真机证据
-├── task.md                     # 当前任务板
-├── CACHE.md                    # 短期上下文
-├── MEMORY.md                   # 长期经验
-├── android/                    # npx cap add android 生成
-├── src/
-│   ├── components/
-│   │   ├── TerminalTabs.tsx    # 顶部 Tab 栏
-│   │   ├── TerminalView.tsx    # 单个终端视图
-│   │   ├── HostList.tsx        # 主机列表页
-│   │   ├── HostForm.tsx        # 添加/编辑主机表单
-│   │   ├── QuickActions.tsx    # 快捷键工具栏
-│   │   └── ConnectionBar.tsx   # 连接状态栏
-│   ├── hooks/
-│   │   ├── useSession...       # session / bridge 状态管理
-│   │   ├── useHostStorage.ts   # 主机配置存储
-│   │   ├── useKeepAlive.ts     # 后台保活
-│   │   └── useQuickActions.ts  # 快捷键管理
-│   ├── contexts/
-│   │   └── SessionContext.tsx  # 多会话状态管理
-│   ├── lib/
-│   │   ├── types.ts            # Host, Session 类型
-│   │   ├── websocket.ts        # WebSocket 协议
-│   │   ├── storage.ts          # localStorage 封装
-│   │   └── webdav.ts           # WebDAV 同步
-│   ├── server/
-│   │   └── server.ts           # WebSocket → tmux 桥接
-│   ├── App.tsx
-│   └── main.tsx
-├── capacitor.config.ts
-├── package.json
-└── note.md                      # 历史记录（非主真源）
-```
-
----
-
-## 八、复用代码来源
-
-| 需求 | 来源 | 复用方式 |
-|------|------|---------|
-| WebSocket tmux 桥接 | `android/src/server/server.ts` | 当前真源 |
-| 终端渲染 | `@jsonstudio/wtermmod-react` | npm install |
-| WebSocket Transport | `@jsonstudio/wtermmod-core` | npm install |
-
----
-
-## 九、常见问题（按需更新）
+## 五、常见问题（按需更新）
 
 ### 问题: WebSocket 连接超时
 - **触发信号**: 网络不稳定或 Tailscale 未连接
@@ -1091,7 +700,7 @@ android/
 
 ---
 
-## 十、最佳实践（按需更新）
+## 六、最佳实践（按需更新）
 
 ### 模式: 最小切片开发
 - **适用场景**: 所有功能开发
