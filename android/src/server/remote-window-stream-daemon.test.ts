@@ -767,4 +767,60 @@ describe('remote window stream daemon v2 contract', () => {
     })).rejects.toMatchObject({ name: 'remote_window_stream_answer_cancelled' });
     await runtime.dispose();
   });
+
+  it('drains a quality request that arrives before capture is ready instead of rejecting it as unsupported', async () => {
+    // Regression for: the client fires its first `remote-window-stream-quality-request`
+    // ~300 ms after stream start, before the daemon's async ScreenCaptureKit
+    // factory has assigned `streamEntry.captureSource`. Without a queue the
+    // request surfaces as `remote_window_stream_quality_unsupported` on every
+    // fresh stream, which the UI renders as a permanent "rejected" state.
+    const harness = makeDeferredCaptureRuntime();
+    const { runtime } = harness;
+    const payload = start('quality-race');
+
+    let qualityResult: Promise<unknown> | null = null;
+    const started = runtime.startStream(payload, {
+      sendOffer: (offer) => {
+        void runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+        // The capture factory is still pending at this point: the offer
+        // handler resolves the answer promise, which resumes startStream
+        // into the `await captureSourceFactory(...)` call. Firing the
+        // quality request here reproduces the client's ~300 ms timing.
+        qualityResult = runtime.updateStreamQuality!({
+          requestId: 'rw-quality-race',
+          streamId: payload.streamId,
+          streamGroupId: payload.streamId,
+          mediaPlan: 'single-focus',
+          mediaPlanVersion: 2,
+          revision: 1,
+          targetId: 'app-window:app:window',
+          videoProfile: makeRemoteWindowVideoProfileFixture('smooth'),
+        });
+      },
+    });
+    // Let the start promise fully resolve: the deferred capture factory is
+    // released by the harness's releaseFactory, so we must release it to
+    // let startStream finish.
+    harness.releaseFactory();
+    await started;
+    // The quality request must have been queued, not rejected as unsupported,
+    // and must resolve to `applied` once the capture-source assignment drains
+    // the queue.
+    expect(qualityResult).not.toBeNull();
+    const result = await qualityResult!;
+    expect(result).toEqual(expect.objectContaining({
+      status: 'applied',
+      streamId: payload.streamId,
+      revision: 1,
+    }));
+    expect(result).not.toEqual(expect.objectContaining({
+      error: expect.objectContaining({ code: 'remote_window_stream_quality_unsupported' }),
+    }));
+    await runtime.dispose();
+  });
 });
