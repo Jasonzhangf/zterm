@@ -285,6 +285,15 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   reliableInputInFlightBySequence: Map<string, Promise<RemoteWindowInputAck>>;
   reliableInputCompletedBySequence: Map<string, RemoteWindowInputAck>;
   continuousGestureState: Map<string, { lastSampledAtMs: number; ended: boolean }>;
+  // Requests that arrived while the focus capture source was still pending.
+  // The client fires its first quality request immediately after stream start,
+  // before the daemon's async ScreenCaptureKit factory resolves and assigns
+  // streamEntry.captureSource. Without a queue those requests surface as
+  // `remote_window_stream_quality_unsupported` on every fresh stream.
+  pendingQualityRequests: Array<{
+    payload: RemoteWindowStreamQualityRequestPayload;
+    resolve: (result: RemoteWindowStreamQualityResultPayload | RemoteWindowStreamErrorPayload) => void;
+  }>;
 }
 
 interface RemoteWindowInputAck {
@@ -306,6 +315,25 @@ interface RemoteWindowStreamInputHelperRelease {
 interface RemoteWindowPendingMediaFrame {
   frame: RemoteWindowCaptureFrame;
   capturedAtMs: number;
+}
+
+/**
+ * Drain quality requests that arrived while the focus capture source was still
+ * being prepared. `applyQuality` is the runtime-scoped `updateStreamQuality`,
+ * passed in because this helper is declared outside the factory closure. Each
+ * queued re-entry sees the newly assigned `pendingQualityRevision` and exits
+ * as busy/stale, so multiple queued revisions converge to the newest one.
+ */
+function drainPendingRemoteWindowQualityRequests(
+  entry: ActiveRemoteWindowStream,
+  applyQuality: (payload: RemoteWindowStreamQualityRequestPayload) => Promise<RemoteWindowStreamQualityResultPayload | RemoteWindowStreamErrorPayload>,
+): void {
+  if (entry.pendingQualityRequests.length === 0 || entry.cleanupDone) {
+    return;
+  }
+  for (const queued of entry.pendingQualityRequests.splice(0)) {
+    void applyQuality(queued.payload).then(queued.resolve);
+  }
 }
 
 interface PendingRemoteWindowAnswer {
@@ -1208,6 +1236,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         reliableInputInFlightBySequence: new Map(),
         reliableInputCompletedBySequence: new Map(),
         continuousGestureState: new Map(),
+        pendingQualityRequests: [],
       };
       pendingIceCandidatesByStream.delete(iceGenerationKey(payload.streamId, payload.requestId));
       pendingIceCandidatesByStream.delete(payload.streamId);
@@ -1334,6 +1363,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         throw new Error('remote window stream was closed before capture started');
       }
       streamEntry.captureSource = captureSource;
+      drainPendingRemoteWindowQualityRequests(streamEntry, updateStreamQuality);
       // Source assignment is the readiness cause: dispatch the retained first
       // frame through the existing pending-frame drain, without a second
       // capture callback or a second ready state.
@@ -1764,6 +1794,17 @@ export function createRemoteWindowStreamDaemonRuntime(
           message: `DAGpipe remote window quality gate rejected: ${qualityGate.ok ? 'output contract missing' : qualityGate.error}`,
         },
       };
+    }
+    // The client's first quality request reaches the daemon before the async
+    // ScreenCaptureKit factory assigns entry.captureSource. Rather than reject
+    // the request as `quality_unsupported`, queue it and let the capture-ready
+    // transition drain it. This is the only place a quality request can race
+    // capture readiness, so a single drain point at the assignment site is
+    // enough; the drain re-enters this function and re-runs the full gate.
+    if (entry.captureSource === null) {
+      return new Promise<RemoteWindowStreamQualityResultPayload | RemoteWindowStreamErrorPayload>((resolve) => {
+        entry.pendingQualityRequests.push({ payload, resolve });
+      });
     }
     entry.pendingQualityRevision = payload.revision;
     try {
