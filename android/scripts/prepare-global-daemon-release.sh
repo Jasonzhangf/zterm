@@ -103,6 +103,12 @@ stage_runtime() {
   rm -rf "${RUNTIME_DIR}/node_modules/@roamhq/wrtc" "${RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
   cp -RL "${wrtc_package_dir}" "${RUNTIME_DIR}/node_modules/@roamhq/wrtc"
   cp -RL "${wrtc_platform_package_dir}" "${RUNTIME_DIR}/node_modules/@roamhq/${wrtc_platform_package_name##*/}"
+  # Native artifact selection is delegated to the single strict stage helper. It
+  # requires the explicit typed release input manifest (no prebuilt fallback) and
+  # fail-closes on missing/invalid/tampered input before writing provenance.
+  "${NODE_BIN}" "${ROOT_DIR}/scripts/prepare-daemon-release-wrtc-input.mjs" \
+    --manifest "${ZTERM_DAEMON_WRTC_INPUT_MANIFEST:-}" \
+    --runtime-dir "${RUNTIME_DIR}"
   DAGPIPE_PROFILE=release bash "${ROOT_DIR}/scripts/build-dagpipe-native.sh"
   cp "${ROOT_DIR}/native/dagpipe/index.node" "${RUNTIME_DIR}/dagpipe.node"
   chmod +x "${RUNTIME_DIR}"/node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null || true
@@ -177,7 +183,6 @@ RUNTIME_DIR="${PACKAGE_ROOT}/runtime"
 DAEMON_PID_FILE="${RUNTIME_STATE_DIR}/zterm-daemon.pid"
 DIRECT_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-run"
 LAUNCH_RUNNER="${WTERM_BIN_DIR}/zterm-daemon-launchd-run"
-USER_BIN_DIR="${HOME}/.local/bin"
 LAUNCH_AGENT_LABEL="com.zterm.android.zterm-daemon"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
 PREVIOUS_LAUNCH_AGENT_LABEL="com.zterm.android.daemon"
@@ -186,7 +191,7 @@ LEGACY_LAUNCH_AGENT_LABEL="com.zterm.mobile.daemon"
 LEGACY_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LEGACY_LAUNCH_AGENT_LABEL}.plist"
 STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"
 STAGED_NODE_PTY_HELPER_GLOB="${RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
-NATIVE_DAEMON_BIN="${PACKAGE_ROOT}/support/zterm-daemon"
+NATIVE_DAEMON_BIN="${WTERM_BIN_DIR}/zterm-daemon"
 DAGPIPE_NATIVE_BIN="${RUNTIME_DIR}/dagpipe.node"
 ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"
 ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"
@@ -629,28 +634,6 @@ stop_direct() {
   echo "zterm daemon stopped: pid=${pid}"
 }
 
-install_user_shims() {
-  mkdir -p "$USER_BIN_DIR" "$WTERM_BIN_DIR"
-  cp "$NATIVE_DAEMON_BIN" "${WTERM_BIN_DIR}/zterm-daemon"
-  chmod +x "${WTERM_BIN_DIR}/zterm-daemon"
-  rm -f "${USER_BIN_DIR}/zterm-daemon" "${USER_BIN_DIR}/wterm"
-  cat > "${USER_BIN_DIR}/zterm-daemon" <<RUNNER
-#!/usr/bin/env bash
-set -euo pipefail
-exec "${PACKAGE_ROOT}/support/zterm-daemon.sh" "\$@"
-RUNNER
-  chmod +x "${USER_BIN_DIR}/zterm-daemon"
-  cat > "${USER_BIN_DIR}/wterm" <<RUNNER
-#!/usr/bin/env bash
-set -euo pipefail
-if [[ "\${1:-}" == "daemon" ]]; then
-  shift
-fi
-exec "${PACKAGE_ROOT}/support/zterm-daemon.sh" "\$@"
-RUNNER
-  chmod +x "${USER_BIN_DIR}/wterm"
-}
-
 prepare_iterm2_python_env() {
   if [[ "$(uname -s)" != "Darwin" ]]; then
     return 0
@@ -670,7 +653,6 @@ PY
 }
 
 write_launch_agent() {
-  install_user_shims
   prepare_iterm2_python_env || echo "[zterm-daemon] iTerm2 Python API environment unavailable; remote-window pane catalog will report an explicit error" >&2
   mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$WTERM_BIN_DIR" "$RUNTIME_STATE_DIR"
   cat > "$DIRECT_RUNNER" <<RUNNER
@@ -1016,11 +998,14 @@ VERSION="$(cat "${PACKAGE_ROOT}/VERSION")"
 INSTALL_ROOT="${HOME}/.zterm/releases/zterm-daemon/${VERSION}"
 LOCAL_BIN="${HOME}/.local/bin"
 
-mkdir -p "${INSTALL_ROOT}" "${LOCAL_BIN}"
+mkdir -p "${INSTALL_ROOT}" "${LOCAL_BIN}" "${HOME}/.zterm/bin"
 rm -rf "${INSTALL_ROOT}/runtime" "${INSTALL_ROOT}/support"
 cp -R "${PACKAGE_ROOT}/runtime" "${INSTALL_ROOT}/runtime"
 cp -R "${PACKAGE_ROOT}/support" "${INSTALL_ROOT}/support"
 cp "${PACKAGE_ROOT}/VERSION" "${INSTALL_ROOT}/VERSION"
+
+cp "${INSTALL_ROOT}/support/zterm-daemon" "${HOME}/.zterm/bin/zterm-daemon"
+chmod +x "${HOME}/.zterm/bin/zterm-daemon"
 
 cat > "${LOCAL_BIN}/zterm-daemon" <<WRAP
 #!/usr/bin/env bash
@@ -1128,6 +1113,15 @@ verify_deterministic_archive() {
   fi
   rm -rf "${check_root}"
 }
+
+if [[ -z "${ZTERM_DAEMON_WRTC_INPUT_MANIFEST:-}" ]]; then
+  echo "[prepare-global-daemon-release] ZTERM_DAEMON_WRTC_INPUT_MANIFEST is required; refusing to build a daemon release without the strict stage manifest" >&2
+  exit 1
+fi
+if [[ ! -f "${ZTERM_DAEMON_WRTC_INPUT_MANIFEST}" ]]; then
+  echo "[prepare-global-daemon-release] manifest not found: ${ZTERM_DAEMON_WRTC_INPUT_MANIFEST}" >&2
+  exit 1
+fi
 
 mkdir -p "${RELEASE_DIST_DIR}"
 rm -rf "${RELEASE_DIR}" "${ARCHIVE_PATH}" "${SHA_PATH}"

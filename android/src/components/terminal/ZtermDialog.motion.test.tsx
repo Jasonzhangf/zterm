@@ -21,4 +21,21 @@ describe("ZtermDialog motion baseline", () => {
     const overlay = screen.getByTestId("zterm-dialog");
     expect(overlay.getAttribute("data-state")).toBe("closing");
   });
+
+  it("keeps the exiting node on the body portal layer", () => {
+    const { rerender } = render(
+      <div data-testid="clipping-ancestor" style={{ transform: "translateZ(0)", overflow: "hidden" }}>
+        <ZtermDialog open title="saved" onConfirm={vi.fn()} />
+      </div>,
+    );
+    rerender(
+      <div data-testid="clipping-ancestor" style={{ transform: "translateZ(0)", overflow: "hidden" }}>
+        <ZtermDialog open={false} title="saved" onConfirm={vi.fn()} />
+      </div>,
+    );
+
+    const overlay = screen.getByTestId("zterm-dialog");
+    expect(overlay.getAttribute("data-state")).toBe("closing");
+    expect(overlay.parentElement).toBe(document.body);
+  });
 });

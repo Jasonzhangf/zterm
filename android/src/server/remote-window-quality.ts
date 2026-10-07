@@ -5,6 +5,17 @@ import type {
 import type { RemoteWindowCaptureFrameSource } from './remote-window-capture';
 import { formatRemoteWindowVideoProfileError } from './remote-window-stream-daemon-helpers';
 
+export const REMOTE_WINDOW_STREAM_QUALITY_UNSUPPORTED_CODE =
+  'remote_window_stream_quality_unsupported';
+
+/**
+ * Raised only by the prepared capability checks below: a sender without the
+ * getter/setter pair, a capture source without profile control or dimensions,
+ * or a negotiated sender that exposes no encodings. Ordinary apply and
+ * rollback failures keep `remote_window_stream_quality_failed`.
+ */
+export class RemoteWindowQualityUnsupportedError extends Error {}
+
 export function resolveRemoteWindowStreamGroupBudget(options: {
   requested: RemoteWindowVideoProfile;
   hasOverview: boolean;
@@ -63,19 +74,19 @@ interface PreparedRemoteWindowQualityLane extends RemoteWindowQualityLane {
 
 function prepareLane(lane: RemoteWindowQualityLane): PreparedRemoteWindowQualityLane {
   if (!lane.sender || typeof lane.sender.getParameters !== 'function' || typeof lane.sender.setParameters !== 'function') {
-    throw new Error('remote window quality sender is unavailable');
+    throw new RemoteWindowQualityUnsupportedError('remote window quality sender is unavailable');
   }
   if (
     !lane.captureSource?.updateVideoProfile
     || !Number.isFinite(lane.captureSource.maxCaptureWidth)
     || !Number.isFinite(lane.captureSource.maxCaptureHeight)
   ) {
-    throw new Error('remote window capture profile control is unavailable');
+    throw new RemoteWindowQualityUnsupportedError('remote window capture profile control is unavailable');
   }
   const currentParameters = lane.sender.getParameters();
   const encodings = Array.isArray(currentParameters.encodings) ? currentParameters.encodings : [];
   if (encodings.length === 0) {
-    throw new Error('remote window quality sender has no encodings to update');
+    throw new RemoteWindowQualityUnsupportedError('remote window quality sender has no encodings to update');
   }
   const previousEncodingParameters = encodings.map((encoding) => ({
     maxBitrate: encoding.maxBitrate,

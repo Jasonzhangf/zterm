@@ -1,12 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   createRemoteWindowMessageRuntime,
+  isRemoteWindowStreamCleanupReleased,
   isRemoteWindowControlMessage,
+  projectRemoteWindowCleanupResult,
   REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS,
   REMOTE_WINDOW_INPUT_SMOOTH_FLUSH_INTERVAL_MS,
+  REMOTE_WINDOW_STREAM_CLOSE_REQUEST_TIMEOUT_MS,
   REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS,
   REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS,
 } from './remote-window-message-runtime';
+import type { RemoteWindowControlMessage, RemoteWindowInputDeliveryOutcomeV1 } from './remote-window-message-runtime';
 import type { ServerMessage } from './types';
 import type { RemoteWindowStreamTargetManifest } from './types';
 import { buildRemoteWindowVideoProfile } from './remote-window-video-quality';
@@ -22,6 +26,18 @@ function makeSocket() {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   } as any;
+}
+
+// The `remote-window-close-result` ServerMessage variant is owned by the backend protocol author. This test-local
+// helper keeps the runtime assertion honest until that shared variant lands; it does not bypass any runtime check.
+function makeCloseResultMessage(payload: {
+  requestId: string;
+  sessionId: string;
+  streamId: string;
+  targetId: string;
+  status: 'closed' | 'not_closed' | 'unverified' | 'failed' | 'unsupported';
+}): RemoteWindowControlMessage {
+  return { type: 'remote-window-close-result', payload } as RemoteWindowControlMessage;
 }
 
 function makeTarget(id = 'pane-1'): RemoteWindowStreamTargetManifest {
@@ -446,6 +462,161 @@ describe('remote window message runtime', () => {
       message: 'daemon stop failed',
     });
     expect(runtime.getPendingCount()).toBe(0);
+  });
+
+  it('sends a correlated close request and resolves only the matching close result', async () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 48 });
+    const ws = makeSocket();
+
+    const closeRequest = runtime.requestStreamClose('session-1', {
+      ws,
+      streamId: 'stream-9',
+      targetId: 'app-9',
+      sendSocketPayload,
+    });
+
+    const sent = JSON.parse(sendSocketPayload.mock.calls[0][2] as string);
+    expect(sent).toMatchObject({
+      type: 'remote-window-close-request',
+      payload: {
+        requestId: expect.stringMatching(/^rw-close-48-/),
+        sessionId: 'session-1',
+        streamId: 'stream-9',
+        targetId: 'app-9',
+      },
+    });
+    expect(isRemoteWindowControlMessage(makeCloseResultMessage({
+      requestId: sent.payload.requestId,
+      sessionId: 'session-1',
+      streamId: 'stream-9',
+      targetId: 'app-9',
+      status: 'closed',
+    }))).toBe(true);
+    expect(runtime.getPendingRequestIds()).toContain(sent.payload.requestId);
+
+    // A mismatched target never settles the pending close.
+    expect(runtime.dispatch(makeCloseResultMessage({
+      requestId: sent.payload.requestId,
+      sessionId: 'session-1',
+      streamId: 'stream-9',
+      targetId: 'app-other',
+      status: 'closed',
+    }))).toBe(false);
+    expect(runtime.getPendingCount()).toBe(1);
+
+    // A mismatched session never settles the pending close.
+    expect(runtime.dispatch(makeCloseResultMessage({
+      requestId: sent.payload.requestId,
+      sessionId: 'session-other',
+      streamId: 'stream-9',
+      targetId: 'app-9',
+      status: 'closed',
+    }))).toBe(false);
+    expect(runtime.getPendingCount()).toBe(1);
+
+    expect(runtime.dispatch(makeCloseResultMessage({
+      requestId: sent.payload.requestId,
+      sessionId: 'session-1',
+      streamId: 'stream-9',
+      targetId: 'app-9',
+      status: 'closed',
+    }))).toBe(true);
+    await expect(closeRequest).resolves.toMatchObject({
+      requestId: sent.payload.requestId,
+      streamId: 'stream-9',
+      targetId: 'app-9',
+      status: 'closed',
+    });
+    expect(runtime.getPendingCount()).toBe(0);
+  });
+
+  it('rejects a pending close when the daemon reports a close error by request id', async () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 49 });
+
+    const closeRequest = runtime.requestStreamClose('session-1', {
+      ws: makeSocket(),
+      streamId: 'stream-9',
+      targetId: 'app-9',
+      sendSocketPayload,
+    });
+    const requestId = JSON.parse(sendSocketPayload.mock.calls[0][2] as string).payload.requestId;
+
+    expect(runtime.dispatch({
+      type: 'remote-window-error',
+      payload: {
+        requestId,
+        streamId: 'stream-9',
+        code: 'remote_window_close_failed',
+        message: 'close failed',
+      },
+    })).toBe(true);
+    await expect(closeRequest).rejects.toMatchObject({
+      name: 'remote_window_close_failed',
+      message: 'close failed',
+    });
+    expect(runtime.getPendingCount()).toBe(0);
+  });
+
+  it('times out a close request that never receives a result', async () => {
+    const timeoutHandlers: Array<() => void> = [];
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 50,
+      setTimeoutFn: vi.fn((handler) => {
+        timeoutHandlers.push(handler as () => void);
+        return 3;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+
+    const closeRequest = runtime.requestStreamClose('session-1', {
+      ws: makeSocket(),
+      streamId: 'stream-9',
+      targetId: 'app-9',
+      sendSocketPayload: vi.fn(),
+    });
+
+    expect(REMOTE_WINDOW_STREAM_CLOSE_REQUEST_TIMEOUT_MS).toBe(20_000);
+    timeoutHandlers[0]?.();
+    await expect(closeRequest).rejects.toThrow('Remote window close result timed out');
+    expect(runtime.getPendingCount()).toBe(0);
+  });
+
+  it('projects a missing daemon cleanup report as unverified instead of released', () => {
+    const projected = projectRemoteWindowCleanupResult({ phase: 'stopped' });
+    expect(projected).toEqual({
+      status: 'unverified',
+      remainingResources: [],
+      errors: [{
+        code: 'remote_window_cleanup_unreported',
+        message: 'Daemon did not report remote resource cleanup for this stream',
+      }],
+    });
+    expect(isRemoteWindowStreamCleanupReleased(projected)).toBe(false);
+  });
+
+  it('preserves the daemon cleanup report and only treats an explicit released as success', () => {
+    const failed = projectRemoteWindowCleanupResult({
+      phase: 'stopped',
+      cleanup: {
+        status: 'cleanup_failed',
+        remainingResources: ['mirror:stream-9'],
+        errors: [{ code: 'tmux_attach_alive', message: 'subscriber still attached' }],
+      },
+    });
+    expect(failed).toEqual({
+      status: 'cleanup_failed',
+      remainingResources: ['mirror:stream-9'],
+      errors: [{ code: 'tmux_attach_alive', message: 'subscriber still attached' }],
+    });
+    expect(isRemoteWindowStreamCleanupReleased(failed)).toBe(false);
+
+    const released = projectRemoteWindowCleanupResult({
+      phase: 'stopped',
+      cleanup: { status: 'released', remainingResources: [], errors: [] },
+    });
+    expect(isRemoteWindowStreamCleanupReleased(released)).toBe(true);
   });
 
   it('sends stream quality requests and classifies the daemon result as remote-window control', () => {
@@ -1035,7 +1206,7 @@ describe('remote window message runtime', () => {
   it('retries a reliable ACK timeout once with the same sequence before advancing the barrier', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];
-    const listener = vi.fn();
+    const outcomes: RemoteWindowInputDeliveryOutcomeV1[] = [];
     const runtime = createRemoteWindowMessageRuntime({
       now: () => 250,
       setTimeoutFn: vi.fn((callback: () => void, delay: number) => {
@@ -1044,7 +1215,9 @@ describe('remote window message runtime', () => {
       }) as any,
       clearTimeoutFn: vi.fn() as any,
     });
-    runtime.subscribe(listener);
+    runtime.subscribeInputOutcome((outcome) => {
+      outcomes.push(outcome);
+    });
     const shared = { ws: makeSocket(), sendSocketPayload };
     runtime.sendInputEvent('session-1', {
       ...shared,
@@ -1082,25 +1255,25 @@ describe('remote window message runtime', () => {
 
     expect(timers[1]?.delay).toBe(REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS);
     timers[1]!.callback();
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'remote-window-input-ack',
-      control: expect.objectContaining({
+    expect(outcomes).toEqual([
+      expect.objectContaining({
         sequence: first.control.sequence,
-        accepted: false,
-        retryable: false,
+        status: 'failed',
+        source: 'client-timeout',
+        execution: 'unconfirmed',
         error: expect.objectContaining({ code: 'remote_window_input_ack_timeout' }),
       }),
-    }));
+    ]);
     expect(sendSocketPayload).toHaveBeenCalledTimes(3);
     const barrier = JSON.parse(sendSocketPayload.mock.calls[2]![2] as string);
     expect(barrier.payload.event.kind).toBe('close-window');
     expect(barrier.control.sequence).not.toBe(first.control.sequence);
   });
 
-  it('drops an expired reliable action on ACK timeout instead of retrying it', () => {
+  it('retries a reliable action whose legacy deadline has passed instead of dropping it', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<{ callback: () => void; delay: number }> = [];
-    const listener = vi.fn();
+    const outcomes: RemoteWindowInputDeliveryOutcomeV1[] = [];
     let clockMs = 1_000;
     const runtime = createRemoteWindowMessageRuntime({
       now: () => clockMs,
@@ -1110,7 +1283,9 @@ describe('remote window message runtime', () => {
       }) as any,
       clearTimeoutFn: vi.fn() as any,
     });
-    runtime.subscribe(listener);
+    runtime.subscribeInputOutcome((outcome) => {
+      outcomes.push(outcome);
+    });
     runtime.sendInputEvent('session-1', {
       ws: makeSocket(),
       sendSocketPayload,
@@ -1128,16 +1303,11 @@ describe('remote window message runtime', () => {
     clockMs = first.payload.deadlineMs + 1;
     timers[0]!.callback();
 
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
-    expect(listener).toHaveBeenCalledWith(expect.objectContaining({
-      type: 'remote-window-input-ack',
-      control: expect.objectContaining({
-        sequence: first.control.sequence,
-        accepted: false,
-        retryable: false,
-        error: expect.objectContaining({ code: 'remote_window_input_action_expired' }),
-      }),
-    }));
+    // The legacy absolute deadline is wire metadata only; it must not drop or skip a reliable action.
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    const retry = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
+    expect(retry.control).toMatchObject({ sequence: first.control.sequence, attempt: 2 });
+    expect(outcomes).toHaveLength(0);
   });
 
   it('coalesces pointer samples at the quality cadence', () => {
@@ -1192,9 +1362,10 @@ describe('remote window message runtime', () => {
     expect(sent.payload.event).toMatchObject({ kind: 'pointer', phase: 'move', x: 10, y: 20 });
   });
 
-  it('discards pending input on stream stop and ignores stale timeout callbacks', () => {
+  it('settles pending input on dispose and ignores stale timeout callbacks', () => {
     const sendSocketPayload = vi.fn();
     const timers: Array<() => void> = [];
+    const outcomes: RemoteWindowInputDeliveryOutcomeV1[] = [];
     const runtime = createRemoteWindowMessageRuntime({
       now: () => 290,
       setTimeoutFn: vi.fn((callback: () => void) => {
@@ -1202,6 +1373,9 @@ describe('remote window message runtime', () => {
         return timers.length;
       }) as any,
       clearTimeoutFn: vi.fn() as any,
+    });
+    runtime.subscribeInputOutcome((outcome) => {
+      outcomes.push(outcome);
     });
     const shared = { ws: makeSocket(), sendSocketPayload };
     runtime.sendInputEvent('session-1', {
@@ -1223,6 +1397,18 @@ describe('remote window message runtime', () => {
     runtime.dispose();
     timers.forEach((callback) => callback());
     expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'not-dispatched',
+      }),
+      expect.objectContaining({
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'unconfirmed',
+      }),
+    ]);
   });
 
   it('keeps continuous input independent from a reliable barrier', () => {
@@ -1263,5 +1449,438 @@ describe('remote window message runtime', () => {
     const reliable = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
     expect(reliable.control.lane).toBe('reliable');
     expect(reliable.payload.event.kind).toBe('close-window');
+  });
+});
+
+describe('remote window input delivery outcomes', () => {
+  function collectOutcomes(runtime: ReturnType<typeof createRemoteWindowMessageRuntime>) {
+    const outcomes: RemoteWindowInputDeliveryOutcomeV1[] = [];
+    const unsubscribe = runtime.subscribeInputOutcome((outcome) => {
+      outcomes.push(outcome);
+    });
+    return { outcomes, unsubscribe };
+  }
+
+  it('dispatches a reliable action that waited past the legacy 8s deadline instead of dropping it', () => {
+    const sendSocketPayload = vi.fn();
+    let clockMs = 1_000;
+    const runtime = createRemoteWindowMessageRuntime({ now: () => clockMs });
+    const { outcomes } = collectOutcomes(runtime);
+    const shared = { ws: makeSocket(), sendSocketPayload };
+
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: { streamId: 'stream-age', targetId: 'target-age', event: { kind: 'focus' } },
+    });
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-age',
+        targetId: 'target-age',
+        event: { kind: 'key', phase: 'down', key: 'A', code: 'KeyA' },
+      },
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const first = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    expect(first.payload.deadlineMs).toBeGreaterThan(first.payload.sampledAtMs);
+
+    clockMs = first.payload.deadlineMs + 60_000;
+
+    runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: first.control.sequence,
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: clockMs,
+      },
+      payload: { streamId: 'stream-age', targetId: 'target-age' },
+    } as any);
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    const second = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
+    expect(second.payload.event).toMatchObject({ kind: 'key', phase: 'down', key: 'A' });
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        sequence: first.control.sequence,
+        streamId: 'stream-age',
+        targetId: 'target-age',
+        status: 'delivered',
+        source: 'daemon-ack',
+        execution: 'confirmed',
+      }),
+    ]);
+  });
+
+  it('settles queued cancel as not-dispatched and in-flight cancel as unconfirmed exactly once', async () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 2_000 });
+    const { outcomes } = collectOutcomes(runtime);
+    const shared = { ws: makeSocket(), sendSocketPayload };
+
+    const inFlightSequence = runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: { streamId: 'stream-cancel', targetId: 'target-cancel', event: { kind: 'focus' } },
+    });
+    const queuedSequence = runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-cancel',
+        targetId: 'target-cancel',
+        event: { kind: 'key', phase: 'down', key: 'B', code: 'KeyB' },
+      },
+    });
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+
+    const stopRequest = runtime.stopStream('session-1', {
+      ...shared,
+      streamId: 'stream-cancel',
+    });
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        sequence: queuedSequence,
+        streamId: 'stream-cancel',
+        targetId: 'target-cancel',
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'not-dispatched',
+      }),
+      expect.objectContaining({
+        sequence: inFlightSequence,
+        streamId: 'stream-cancel',
+        targetId: 'target-cancel',
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'unconfirmed',
+      }),
+    ]);
+
+    // Late/duplicate ACK for an already-settled sequence must not produce a second outcome.
+    runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: queuedSequence,
+        accepted: true,
+        retryable: false,
+        duplicate: true,
+        receivedAtMs: 2_001,
+      },
+      payload: { streamId: 'stream-cancel', targetId: 'target-cancel' },
+    } as any);
+    expect(outcomes).toHaveLength(2);
+
+    const stopMessage = sendSocketPayload.mock.calls
+      .map((call) => JSON.parse(call[2] as string))
+      .find((message) => message.type === 'remote-window-stream-stop-request');
+    runtime.dispatch({
+      type: 'remote-window-stream-status',
+      payload: {
+        requestId: stopMessage.payload.requestId,
+        streamId: 'stream-cancel',
+        phase: 'stopped',
+      },
+    } as any);
+    await expect(stopRequest).resolves.toMatchObject({ streamId: 'stream-cancel', phase: 'stopped' });
+  });
+
+  it('settles a synchronous send failure as failed client-send unconfirmed', () => {
+    const sendSocketPayload = vi.fn(() => {
+      throw new Error('socket boom');
+    });
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 3_000 });
+    const { outcomes } = collectOutcomes(runtime);
+
+    expect(() => runtime.sendInputEvent('session-1', {
+      ws: makeSocket(),
+      sendSocketPayload,
+      payload: { streamId: 'stream-send', targetId: 'target-send', event: { kind: 'focus' } },
+    })).toThrow('socket boom');
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        streamId: 'stream-send',
+        targetId: 'target-send',
+        status: 'failed',
+        source: 'client-send',
+        execution: 'unconfirmed',
+        error: expect.objectContaining({ code: 'remote_window_input_send_failed' }),
+      }),
+    ]);
+  });
+
+  it('settles failed client-timeout unconfirmed when ACK retries are exhausted', () => {
+    const sendSocketPayload = vi.fn();
+    const timers: Array<{ callback: () => void; delay: number }> = [];
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 4_000,
+      setTimeoutFn: vi.fn((callback: () => void, delay: number) => {
+        timers.push({ callback, delay });
+        return timers.length;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+    const { outcomes } = collectOutcomes(runtime);
+
+    const sequence = runtime.sendInputEvent('session-1', {
+      ws: makeSocket(),
+      sendSocketPayload,
+      payload: { streamId: 'stream-timeout', targetId: 'target-timeout', event: { kind: 'focus' } },
+    });
+
+    expect(timers[0]?.delay).toBe(REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS);
+    timers[0]!.callback();
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    expect(timers[1]?.delay).toBe(REMOTE_WINDOW_INPUT_RELIABLE_ACK_TIMEOUT_MS);
+    timers[1]!.callback();
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        sequence,
+        status: 'failed',
+        source: 'client-timeout',
+        execution: 'unconfirmed',
+        error: expect.objectContaining({ code: 'remote_window_input_ack_timeout' }),
+      }),
+    ]);
+  });
+
+  it('does not revive or resend settled input when the stop request fails', async () => {
+    const sentTypes: string[] = [];
+    const sendSocketPayload = vi.fn((_sessionId: string, _ws: unknown, data: string | ArrayBuffer) => {
+      const message = JSON.parse(data as string);
+      sentTypes.push(message.type);
+      if (message.type === 'remote-window-stream-stop-request') {
+        throw new Error('stop send failed');
+      }
+    });
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 5_000 });
+    const { outcomes } = collectOutcomes(runtime);
+    const shared = { ws: makeSocket(), sendSocketPayload };
+
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: { streamId: 'stream-stopfail', targetId: 'target-stopfail', event: { kind: 'focus' } },
+    });
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-stopfail',
+        targetId: 'target-stopfail',
+        event: { kind: 'key', phase: 'down', key: 'C', code: 'KeyC' },
+      },
+    });
+
+    const stopRequest = runtime.stopStream('session-1', { ...shared, streamId: 'stream-stopfail' });
+    await expect(stopRequest).rejects.toThrow('stop send failed');
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({ status: 'cancelled', source: 'client-teardown', execution: 'not-dispatched' }),
+      expect.objectContaining({ status: 'cancelled', source: 'client-teardown', execution: 'unconfirmed' }),
+    ]);
+    expect(sentTypes.filter((type) => type === 'remote-window-input')).toHaveLength(1);
+  });
+
+  it('settles each pending input before clearing outcome subscribers on dispose', () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 6_000 });
+    const { outcomes } = collectOutcomes(runtime);
+    const shared = { ws: makeSocket(), sendSocketPayload };
+
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: { streamId: 'stream-dispose', targetId: 'target-dispose', event: { kind: 'focus' } },
+    });
+    const queuedSequence = runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-dispose',
+        targetId: 'target-dispose',
+        event: { kind: 'key', phase: 'down', key: 'D', code: 'KeyD' },
+      },
+    });
+
+    runtime.dispose('provider disposed');
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        sequence: queuedSequence,
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'not-dispatched',
+      }),
+      expect.objectContaining({
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'unconfirmed',
+      }),
+    ]);
+
+    runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: queuedSequence,
+        accepted: true,
+        retryable: false,
+        duplicate: true,
+        receivedAtMs: 6_001,
+      },
+      payload: { streamId: 'stream-dispose', targetId: 'target-dispose' },
+    } as any);
+    expect(outcomes).toHaveLength(2);
+  });
+
+  it('routes outcome listener errors through the typed listener-error callback without changing the settled result', () => {
+    const listenerErrors: Array<{ phase: string; error: unknown }> = [];
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 7_000,
+      onListenerError: (phase, error) => {
+        listenerErrors.push({ phase, error });
+      },
+    });
+    const received: RemoteWindowInputDeliveryOutcomeV1[] = [];
+    runtime.subscribeInputOutcome(() => {
+      throw new Error('outcome listener boom');
+    });
+    runtime.subscribeInputOutcome((outcome) => {
+      received.push(outcome);
+    });
+
+    runtime.sendInputEvent('session-1', {
+      ws: makeSocket(),
+      sendSocketPayload,
+      payload: { streamId: 'stream-listener', targetId: 'target-listener', event: { kind: 'focus' } },
+    });
+    const sent = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: sent.control.sequence,
+        accepted: true,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 7_001,
+      },
+      payload: { streamId: 'stream-listener', targetId: 'target-listener' },
+    } as any);
+
+    expect(listenerErrors).toEqual([
+      expect.objectContaining({ phase: 'input-outcome' }),
+    ]);
+    expect(received).toEqual([
+      expect.objectContaining({
+        status: 'delivered',
+        source: 'daemon-ack',
+        execution: 'confirmed',
+      }),
+    ]);
+  });
+
+  it('maps typed pre-submission daemon NACKs to not-dispatched and other NACKs to unconfirmed', () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 8_000 });
+    const { outcomes } = collectOutcomes(runtime);
+    const shared = { ws: makeSocket(), sendSocketPayload };
+
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: { streamId: 'stream-nack', targetId: 'target-nack', event: { kind: 'focus' } },
+    });
+    const first = JSON.parse(sendSocketPayload.mock.calls[0]![2] as string);
+    runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: first.control.sequence,
+        accepted: false,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 8_001,
+        error: { code: 'remote_window_input_stream_missing', message: 'stream gone' },
+      },
+      payload: { streamId: 'stream-nack', targetId: 'target-nack' },
+    } as any);
+
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-nack',
+        targetId: 'target-nack',
+        event: { kind: 'key', phase: 'down', key: 'E', code: 'KeyE' },
+      },
+    });
+    const second = JSON.parse(sendSocketPayload.mock.calls[1]![2] as string);
+    runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: second.control.sequence,
+        accepted: false,
+        retryable: false,
+        duplicate: false,
+        receivedAtMs: 8_002,
+        error: { code: 'remote_window_input_failed', message: 'helper failed' },
+      },
+      payload: { streamId: 'stream-nack', targetId: 'target-nack' },
+    } as any);
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        status: 'failed',
+        source: 'daemon-ack',
+        execution: 'not-dispatched',
+        error: expect.objectContaining({ code: 'remote_window_input_stream_missing' }),
+      }),
+      expect.objectContaining({
+        status: 'failed',
+        source: 'daemon-ack',
+        execution: 'unconfirmed',
+        error: expect.objectContaining({ code: 'remote_window_input_failed' }),
+      }),
+    ]);
+  });
+
+  it('settles reliable input for a torn-down transport as cancelled client-teardown', () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 9_000 });
+    const { outcomes } = collectOutcomes(runtime);
+    const shared = { ws: makeSocket(), sendSocketPayload };
+
+    runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: { streamId: 'stream-teardown', targetId: 'target-teardown', event: { kind: 'focus' } },
+    });
+    const queuedSequence = runtime.sendInputEvent('session-1', {
+      ...shared,
+      payload: {
+        streamId: 'stream-teardown',
+        targetId: 'target-teardown',
+        event: { kind: 'key', phase: 'down', key: 'F', code: 'KeyF' },
+      },
+    });
+
+    runtime.teardownTransport('session-1', 'transport closed');
+
+    expect(outcomes).toEqual([
+      expect.objectContaining({
+        sequence: queuedSequence,
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'not-dispatched',
+      }),
+      expect.objectContaining({
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'unconfirmed',
+      }),
+    ]);
   });
 });

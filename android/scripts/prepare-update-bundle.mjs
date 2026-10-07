@@ -36,8 +36,11 @@ const apkPath = process.argv[2] ? resolve(projectRoot, process.argv[2]) : DEFAUL
 const rollbackApkPath = process.argv[3] ? resolve(projectRoot, process.argv[3]) : DEFAULT_ROLLBACK_APK_PATH;
 const outputDir = resolve(projectRoot, 'update-dist');
 const releaseDistDir = resolve(projectRoot, 'release-dist');
-const daemonUpdatesDir = process.env.WTERM_UPDATES_DIR
+const explicitDaemonUpdatesDir = process.env.WTERM_UPDATES_DIR
   ? resolve(process.env.WTERM_UPDATES_DIR)
+  : null;
+const daemonUpdatesDir = explicitDaemonUpdatesDir
+  ? explicitDaemonUpdatesDir
   : resolve(homedir(), '.zterm/updates');
 const latestAliasName = 'zterm-latest-debug.apk';
 
@@ -168,7 +171,8 @@ writeFileSync(resolve(daemonUpdatesDir, 'latest.json'), `${JSON.stringify(manife
 // 兼容旧 launchd（.wterm wrapper 运行 npm 包 daemon，其 updates 目录是 ~/.wterm/updates）：
 // 双写一份，避免升级检查 404
 const legacyDaemonUpdatesDir = resolve(homedir(), '.wterm/updates');
-if (existsSync(resolve(homedir(), '.wterm')) || existsSync(resolve(homedir(), '.wterm/bin/zterm-daemon-launchd-run'))) {
+if (!explicitDaemonUpdatesDir
+  && (existsSync(resolve(homedir(), '.wterm')) || existsSync(resolve(homedir(), '.wterm/bin/zterm-daemon-launchd-run')))) {
   mkdirSync(legacyDaemonUpdatesDir, { recursive: true });
   copyFileSync(targetApkPath, resolve(legacyDaemonUpdatesDir, targetApkName));
   copyFileSync(targetApkPath, resolve(legacyDaemonUpdatesDir, latestAliasName));

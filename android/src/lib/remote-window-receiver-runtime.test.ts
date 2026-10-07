@@ -140,12 +140,16 @@ function makeTarget(): RemoteWindowStreamTargetManifest {
   };
 }
 
-function createRuntime(timeoutHandlers?: Array<() => void>) {
+function createRuntime(
+  timeoutHandlers?: Array<() => void>,
+  nowMs: () => number = Date.now,
+) {
   MockRTCPeerConnection.reset();
   return createRemoteWindowReceiverRuntime({
     peerConnectionFactory: (configuration) => new MockRTCPeerConnection(configuration) as unknown as RTCPeerConnection,
     mediaStreamFactory: () => new MockMediaStream() as unknown as MediaStream,
     trackTimeoutMs: 50,
+    nowMs,
     setTimeoutFn: vi.fn((handler) => {
       timeoutHandlers?.push(handler as () => void);
       return 1;
@@ -158,6 +162,35 @@ async function flushMicrotasks(times = 5) {
   for (let index = 0; index < times; index += 1) {
     await Promise.resolve();
   }
+}
+
+type InboundVideoStatsFixture = {
+  id: string;
+  trackId: string;
+  mid: string;
+  ssrc: number;
+  packetsReceived?: number;
+  packetsLost?: number;
+};
+
+function inboundStatsReport(
+  fixtures: InboundVideoStatsFixture[],
+): Map<string, unknown> {
+  return new Map<string, unknown>(
+    fixtures.map((fixture) => [
+      fixture.id,
+      {
+        type: 'inbound-rtp',
+        kind: 'video',
+        trackIdentifier: fixture.trackId,
+        mid: fixture.mid,
+        ssrc: fixture.ssrc,
+        transportId: 'transport-1',
+        packetsReceived: fixture.packetsReceived,
+        packetsLost: fixture.packetsLost,
+      },
+    ]),
+  );
 }
 
 describe('remote window receiver runtime', () => {
@@ -791,84 +824,760 @@ describe('remote window receiver runtime', () => {
     await expect(started).resolves.toMatchObject({ streamId: 'stream-early-ice' });
   });
 
-  it('collects WebRTC video stats for adaptive remote-window quality decisions', async () => {
-    const runtime = createRuntime();
+  it('isolates lane baselines and uses only the selected transport pair for RTT', async () => {
+    let now = 1_000;
+    const runtime = createRuntime(undefined, () => now);
+    const target = {
+      ...makeTarget(),
+      compositeWindows: [{
+        windowId: 'window-2',
+        title: 'second',
+        windowBoundsTopLeftPx: { x: 1000, y: 80, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 1000, y: 80, width: 800, height: 600 },
+      }],
+    } as RemoteWindowStreamTargetManifest;
+    const offer: RemoteWindowStreamStartedOfferV2Payload = {
+      requestId: 'rw-stats-lanes',
+      streamId: 'stream-stats-lanes',
+      targetId: 'pane-1',
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 2,
+      offer: { type: 'offer', sdp: 'host-offer' },
+      mediaBindings: [
+        { role: 'focus', epoch: 0, mediaStreamId: 'sender-focus-stream', trackId: 'sender-focus-track' },
+        { role: 'overview', epoch: 0, mediaStreamId: 'sender-overview-stream', trackId: 'sender-overview-track' },
+      ],
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 1920,
+        frameHeight: 1080,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    };
     const started = runtime.startStream({
-      streamId: 'stream-stats',
-      target: makeTarget(),
+      streamId: offer.streamId,
+      target,
+      protocolVersion: 2,
       sendIceCandidate: vi.fn(),
-      startRemote: vi.fn(async () => ({
-        requestId: 'rw-start-stats',
-        streamId: 'stream-stats',
-        targetId: 'pane-1',
-        mediaPlan: 'single-focus' as const,
-        mediaPlanVersion: 1 as const,
-        answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
-        capture: {
-          source: 'ScreenCaptureKit' as const,
-          frameWidth: 640,
-          frameHeight: 360,
-          frameRate: 30,
-          targetKind: 'iterm2-pane' as const,
-        },
-        transport: { kind: 'webrtc-video' as const },
-      })),
+      sendAnswer: vi.fn(),
+      startRemote: vi.fn(async () => offer),
     });
-    await flushMicrotasks();
+    await flushMicrotasks(20);
     const peer = MockRTCPeerConnection.instances[0]!;
-    peer.emitVideoTrack();
+    const focusTrack = new MockMediaTrack();
+    focusTrack.id = 'receiver-focus-track';
+    const focusStream = new MockMediaStream([focusTrack]);
+    focusStream.id = 'receiver-focus-stream';
+    peer.emitVideoTrack(focusStream, '0');
+    const overviewTrack = new MockMediaTrack();
+    overviewTrack.id = 'receiver-overview-track';
+    const overviewStream = new MockMediaStream([overviewTrack]);
+    overviewStream.id = 'receiver-overview-stream';
+    peer.emitVideoTrack(overviewStream, '1');
     const result = await started;
+
     peer.getStats.mockResolvedValue(new Map<string, unknown>([
-      ['inbound-video', {
+      ['inbound-focus', {
         type: 'inbound-rtp',
         kind: 'video',
-        framesPerSecond: 18,
-        framesDropped: 9,
-        freezeCount: 1,
-        jitterBufferDelay: 0.32,
-        jitterBufferEmittedCount: 1,
+        trackIdentifier: focusTrack.id,
+        mid: '0',
+        ssrc: 111,
+        transportId: 'transport-1',
+        framesPerSecond: 30,
+        bytesReceived: 1_000,
+        framesDropped: 2,
+        freezeCount: 0,
+        jitterBufferDelay: 0.2,
+        jitterBufferEmittedCount: 10,
       }],
-      ['candidate', {
+      ['inbound-overview', {
+        type: 'inbound-rtp',
+        kind: 'video',
+        trackIdentifier: overviewTrack.id,
+        mid: '1',
+        ssrc: 222,
+        transportId: 'transport-1',
+        framesPerSecond: 5,
+        bytesReceived: 2_000,
+        framesDropped: 20,
+        freezeCount: 5,
+        jitterBufferDelay: 1,
+        jitterBufferEmittedCount: 20,
+      }],
+      ['transport-1', {
+        type: 'transport',
+        id: 'transport-1',
+        selectedCandidatePairId: 'pair-selected',
+      }],
+      ['pair-selected', {
         type: 'candidate-pair',
+        id: 'pair-selected',
         state: 'succeeded',
-        availableIncomingBitrate: 5_000_000,
-        currentRoundTripTime: 0.18,
-        availableOutgoingBitrate: 4_000_000,
+        nominated: true,
+        currentRoundTripTime: 0.05,
+        availableIncomingBitrate: 123_456,
+      }],
+      ['pair-other', {
+        type: 'candidate-pair',
+        id: 'pair-other',
+        state: 'succeeded',
+        nominated: false,
+        currentRoundTripTime: 0.9,
       }],
       ['remote-inbound', {
         type: 'remote-inbound-rtp',
         kind: 'video',
-        roundTripTime: 0.21,
+        roundTripTime: 0.8,
       }],
     ]));
 
-    await expect(result.collectStats?.()).resolves.toMatchObject({
-      framesPerSecond: 18,
-      framesDropped: 9,
-      freezeCount: 1,
-      jitterBufferDelayMs: 320,
-      rttMs: 210,
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      lane: 'focus',
+      trackId: focusTrack.id,
+      mediaEpoch: 0,
+      ssrc: 111,
+      mid: '0',
+      transportId: 'transport-1',
+      selectedCandidatePairId: 'pair-selected',
+      framesPerSecond: 30,
+      framesDropped: null,
+      freezeCount: null,
+      jitterBufferDelayMs: null,
+      receivedBitrateBps: null,
+      rttMs: 50,
+      availableIncomingBitrateBps: 123_456,
+    });
+    now = 1_500;
+    await expect(runtime.getStatsSample(offer.streamId, 'overview')).resolves.toMatchObject({
+      lane: 'overview',
+      trackId: overviewTrack.id,
+      ssrc: 222,
+      mid: '1',
+      framesPerSecond: 5,
+      framesDropped: null,
+      freezeCount: null,
+      jitterBufferDelayMs: null,
+      receivedBitrateBps: null,
     });
 
+    now = 2_000;
     peer.getStats.mockResolvedValue(new Map<string, unknown>([
-      ['inbound-video', {
+      ['inbound-focus', {
         type: 'inbound-rtp',
         kind: 'video',
-        framesPerSecond: 30,
-        framesDropped: 10,
+        trackIdentifier: focusTrack.id,
+        mid: '0',
+        ssrc: 111,
+        transportId: 'transport-1',
+        framesPerSecond: 28,
+        bytesReceived: 2_000,
+        framesDropped: 5,
         freezeCount: 1,
-        jitterBufferDelay: 0.34,
-        jitterBufferEmittedCount: 11,
+        jitterBufferDelay: 0.5,
+        jitterBufferEmittedCount: 20,
+      }],
+      ['inbound-overview', {
+        type: 'inbound-rtp',
+        kind: 'video',
+        trackIdentifier: overviewTrack.id,
+        mid: '1',
+        ssrc: 222,
+        transportId: 'transport-1',
+        framesPerSecond: 4,
+        bytesReceived: 4_000,
+        framesDropped: 30,
+        freezeCount: 7,
+        jitterBufferDelay: 1.5,
+        jitterBufferEmittedCount: 40,
+      }],
+      ['transport-1', {
+        type: 'transport',
+        id: 'transport-1',
+        selectedCandidatePairId: 'pair-selected',
+      }],
+      ['pair-selected', {
+        type: 'candidate-pair',
+        id: 'pair-selected',
+        state: 'succeeded',
+        nominated: true,
+        currentRoundTripTime: 0.07,
+      }],
+      ['pair-other', {
+        type: 'candidate-pair',
+        id: 'pair-other',
+        state: 'succeeded',
+        nominated: true,
+        currentRoundTripTime: 0.9,
       }],
     ]));
 
-    const nextSample = await result.collectStats?.();
-    expect(nextSample).toMatchObject({
-      framesPerSecond: 30,
-      framesDropped: 1,
-      freezeCount: 0,
+    await expect(runtime.getStatsSample(offer.streamId, 'overview')).resolves.toMatchObject({
+      lane: 'overview',
+      framesDropped: 10,
+      freezeCount: 2,
+      jitterBufferDelayMs: 25,
+      receivedBitrateBps: 32_000,
+      rttMs: 70,
     });
-    expect(nextSample?.jitterBufferDelayMs).toBeCloseTo(2);
+    now = 2_500;
+    const focusSample = await runtime.getStatsSample(offer.streamId, 'focus');
+    expect(focusSample).toMatchObject({
+      lane: 'focus',
+      framesDropped: 3,
+      freezeCount: 1,
+      jitterBufferDelayMs: 30,
+      rttMs: 70,
+    });
+    expect(focusSample?.receivedBitrateBps).toBeCloseTo(5_333.333333333333);
+    expect(result.collectStats).toBeDefined();
+  });
+
+  it('computes received packet loss ratio from inbound counter deltas', async () => {
+    let now = 1_000;
+    const runtime = createRuntime(undefined, () => now);
+    const offer: RemoteWindowStreamStartedOfferV2Payload = {
+      requestId: 'rw-stats-loss',
+      streamId: 'stream-stats-loss',
+      targetId: 'pane-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      offer: { type: 'offer', sdp: 'host-offer' },
+      mediaBindings: [{
+        role: 'focus',
+        epoch: 0,
+        mediaStreamId: 'sender-focus-stream',
+        trackId: 'sender-focus-track',
+      }],
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    };
+    const started = runtime.startStream({
+      streamId: offer.streamId,
+      target: makeTarget(),
+      protocolVersion: 2,
+      sendIceCandidate: vi.fn(),
+      sendAnswer: vi.fn(),
+      startRemote: vi.fn(async () => offer),
+    });
+    await flushMicrotasks(20);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    const track = new MockMediaTrack();
+    track.id = 'receiver-focus-track';
+    peer.emitVideoTrack(new MockMediaStream([track]), '0');
+    await started;
+
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 0, packetsLost: 0 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      lane: 'focus',
+      ssrc: 111,
+      receivedPacketLossRatio: null,
+    });
+
+    now = 2_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 100, packetsLost: 9 },
+    ]));
+    const lossSample = await runtime.getStatsSample(offer.streamId, 'focus');
+    expect(lossSample?.receivedPacketLossRatio).toBe(9 / 109);
+
+    now = 3_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 200, packetsLost: 9 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: 0,
+    });
+
+    now = 4_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 200, packetsLost: 9 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: null,
+    });
+
+    now = 5_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 199, packetsLost: 9 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: null,
+    });
+
+    now = 6_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 201, packetsLost: 8 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: null,
+    });
+
+    now = 7_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 201, packetsLost: 8 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: null,
+    });
+
+    now = 8_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 201, packetsLost: 20 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: 12 / 12,
+    });
+  });
+
+  it('keeps lane packet loss baselines independent', async () => {
+    let now = 1_000;
+    const runtime = createRuntime(undefined, () => now);
+    const target = {
+      ...makeTarget(),
+      compositeWindows: [{
+        windowId: 'window-2',
+        title: 'second',
+        windowBoundsTopLeftPx: { x: 1000, y: 80, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 1000, y: 80, width: 800, height: 600 },
+      }],
+    } as RemoteWindowStreamTargetManifest;
+    const offer: RemoteWindowStreamStartedOfferV2Payload = {
+      requestId: 'rw-stats-loss-lanes',
+      streamId: 'stream-stats-loss-lanes',
+      targetId: 'pane-1',
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 2,
+      offer: { type: 'offer', sdp: 'host-offer' },
+      mediaBindings: [
+        { role: 'focus', epoch: 0, mediaStreamId: 'sender-focus-stream', trackId: 'sender-focus-track' },
+        { role: 'overview', epoch: 0, mediaStreamId: 'sender-overview-stream', trackId: 'sender-overview-track' },
+      ],
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 1920,
+        frameHeight: 1080,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    };
+    const started = runtime.startStream({
+      streamId: offer.streamId,
+      target,
+      protocolVersion: 2,
+      sendIceCandidate: vi.fn(),
+      sendAnswer: vi.fn(),
+      startRemote: vi.fn(async () => offer),
+    });
+    await flushMicrotasks(20);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    const focusTrack = new MockMediaTrack();
+    focusTrack.id = 'receiver-focus-track';
+    peer.emitVideoTrack(new MockMediaStream([focusTrack]), '0');
+    const overviewTrack = new MockMediaTrack();
+    overviewTrack.id = 'receiver-overview-track';
+    peer.emitVideoTrack(new MockMediaStream([overviewTrack]), '1');
+    await started;
+
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: focusTrack.id, mid: '0', ssrc: 111, packetsReceived: 0, packetsLost: 0 },
+      { id: 'inbound-overview', trackId: overviewTrack.id, mid: '1', ssrc: 222, packetsReceived: 50, packetsLost: 5 },
+    ]));
+    await runtime.getStatsSample(offer.streamId, 'focus');
+    await runtime.getStatsSample(offer.streamId, 'overview');
+
+    now = 2_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: focusTrack.id, mid: '0', ssrc: 111, packetsReceived: 100, packetsLost: 9 },
+      { id: 'inbound-overview', trackId: overviewTrack.id, mid: '1', ssrc: 222, packetsReceived: 50, packetsLost: 5 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'overview')).resolves.toMatchObject({
+      lane: 'overview',
+      receivedPacketLossRatio: null,
+    });
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: 9 / 109,
+    });
+
+    now = 3_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: focusTrack.id, mid: '0', ssrc: 111, packetsReceived: 100, packetsLost: 9 },
+      { id: 'inbound-overview', trackId: overviewTrack.id, mid: '1', ssrc: 222, packetsReceived: 60, packetsLost: 6 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'overview')).resolves.toMatchObject({
+      receivedPacketLossRatio: 1 / 11,
+    });
+
+    now = 4_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: focusTrack.id, mid: '0', ssrc: 111, packetsReceived: 150, packetsLost: 9 },
+      { id: 'inbound-overview', trackId: overviewTrack.id, mid: '1', ssrc: 222, packetsReceived: 60, packetsLost: 6 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      lane: 'focus',
+      receivedPacketLossRatio: 0,
+    });
+  });
+
+  it('resets the packet loss baseline only for the replaced lane', async () => {
+    let now = 1_000;
+    const runtime = createRuntime(undefined, () => now);
+    const offer: RemoteWindowStreamStartedOfferV2Payload = {
+      requestId: 'rw-stats-loss-reset',
+      streamId: 'stream-stats-loss-reset',
+      targetId: 'pane-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      offer: { type: 'offer', sdp: 'host-offer' },
+      mediaBindings: [{
+        role: 'focus',
+        epoch: 0,
+        mediaStreamId: 'sender-focus-stream',
+        trackId: 'sender-focus-track',
+      }],
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    };
+    const started = runtime.startStream({
+      streamId: offer.streamId,
+      target: makeTarget(),
+      protocolVersion: 2,
+      sendIceCandidate: vi.fn(),
+      sendAnswer: vi.fn(),
+      startRemote: vi.fn(async () => offer),
+    });
+    await flushMicrotasks(20);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    const oldTrack = new MockMediaTrack();
+    oldTrack.id = 'receiver-focus-track-0';
+    peer.emitVideoTrack(new MockMediaStream([oldTrack]), '0');
+    await started;
+
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: oldTrack.id, mid: '0', ssrc: 111, packetsReceived: 0, packetsLost: 0 },
+    ]));
+    await runtime.getStatsSample(offer.streamId, 'focus');
+
+    now = 2_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: oldTrack.id, mid: '0', ssrc: 111, packetsReceived: 40, packetsLost: 4 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: 4 / 44,
+    });
+
+    now = 3_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: oldTrack.id, mid: '0', ssrc: 999, packetsReceived: 50, packetsLost: 10 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      ssrc: 999,
+      receivedPacketLossRatio: null,
+    });
+
+    now = 4_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: oldTrack.id, mid: '0', ssrc: 999, packetsReceived: 60, packetsLost: 12 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: 2 / 12,
+    });
+
+    now = 5_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: oldTrack.id, mid: '1', ssrc: 999, packetsReceived: 100, packetsLost: 20 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      mid: '1',
+      receivedPacketLossRatio: null,
+    });
+
+    now = 6_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: oldTrack.id, mid: '1', ssrc: 999, packetsReceived: 101, packetsLost: 21 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: 1 / 2,
+    });
+  });
+
+  it('keeps packet loss ratio unknown for missing or non-finite counters', async () => {
+    let now = 1_000;
+    const runtime = createRuntime(undefined, () => now);
+    const offer: RemoteWindowStreamStartedOfferV2Payload = {
+      requestId: 'rw-stats-loss-nonsensical',
+      streamId: 'stream-stats-loss-nonsensical',
+      targetId: 'pane-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      offer: { type: 'offer', sdp: 'host-offer' },
+      mediaBindings: [{
+        role: 'focus',
+        epoch: 0,
+        mediaStreamId: 'sender-focus-stream',
+        trackId: 'sender-focus-track',
+      }],
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    };
+    const started = runtime.startStream({
+      streamId: offer.streamId,
+      target: makeTarget(),
+      protocolVersion: 2,
+      sendIceCandidate: vi.fn(),
+      sendAnswer: vi.fn(),
+      startRemote: vi.fn(async () => offer),
+    });
+    await flushMicrotasks(20);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    const track = new MockMediaTrack();
+    track.id = 'receiver-focus-track';
+    peer.emitVideoTrack(new MockMediaStream([track]), '0');
+    await started;
+
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 0, packetsLost: 0 },
+    ]));
+    await runtime.getStatsSample(offer.streamId, 'focus');
+
+    const cases: Array<{ label: string; sample: InboundVideoStatsFixture }> = [
+      {
+        label: 'missing packetsLost',
+        sample: { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 50 },
+      },
+      {
+        label: 'missing packetsReceived',
+        sample: { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsLost: 5 },
+      },
+      {
+        label: 'NaN packetsReceived',
+        sample: { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: Number.NaN, packetsLost: 10 },
+      },
+      {
+        label: 'Infinity packetsLost',
+        sample: { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 90, packetsLost: Number.POSITIVE_INFINITY },
+      },
+    ];
+    for (const [index, testCase] of cases.entries()) {
+      now = 2_000 + index * 1_000;
+      peer.getStats.mockResolvedValue(inboundStatsReport([testCase.sample]));
+      const sample = await runtime.getStatsSample(offer.streamId, 'focus');
+      expect(sample?.receivedPacketLossRatio, testCase.label).toBe(null);
+    }
+
+    now = 6_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 90, packetsLost: 9 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: null,
+    });
+
+    now = 7_000;
+    peer.getStats.mockResolvedValue(inboundStatsReport([
+      { id: 'inbound-focus', trackId: track.id, mid: '0', ssrc: 111, packetsReceived: 150, packetsLost: 9 },
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      receivedPacketLossRatio: 0,
+    });
+  });
+
+  it('keeps RTT unknown when the selected candidate-pair identity is missing', async () => {
+    const runtime = createRuntime();
+    const offer: RemoteWindowStreamStartedOfferV2Payload = {
+      requestId: 'rw-stats-selected-pair',
+      streamId: 'stream-stats-selected-pair',
+      targetId: 'pane-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      offer: { type: 'offer', sdp: 'host-offer' },
+      mediaBindings: [{
+        role: 'focus',
+        epoch: 0,
+        mediaStreamId: 'sender-focus-stream',
+        trackId: 'sender-focus-track',
+      }],
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    };
+    const started = runtime.startStream({
+      streamId: offer.streamId,
+      target: makeTarget(),
+      protocolVersion: 2,
+      sendIceCandidate: vi.fn(),
+      sendAnswer: vi.fn(),
+      startRemote: vi.fn(async () => offer),
+    });
+    await flushMicrotasks(20);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    const track = new MockMediaTrack();
+    track.id = 'receiver-focus-track';
+    const stream = new MockMediaStream([track]);
+    peer.emitVideoTrack(stream, '0');
+    await started;
+    peer.getStats.mockResolvedValue(new Map<string, unknown>([
+      ['inbound-focus', {
+        type: 'inbound-rtp',
+        kind: 'video',
+        trackIdentifier: track.id,
+        mid: '0',
+        transportId: 'transport-1',
+      }],
+      ['transport-1', {
+        type: 'transport',
+        id: 'transport-1',
+      }],
+      ['pair-succeeded', {
+        type: 'candidate-pair',
+        id: 'pair-succeeded',
+        state: 'succeeded',
+        nominated: true,
+        currentRoundTripTime: 0.9,
+      }],
+      ['remote-inbound', {
+        type: 'remote-inbound-rtp',
+        kind: 'video',
+        roundTripTime: 0.8,
+      }],
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId)).resolves.toMatchObject({
+      lane: 'focus',
+      rttMs: null,
+      selectedCandidatePairId: null,
+    });
+  });
+
+  it('resets only the replaced lane baseline', async () => {
+    let now = 1_000;
+    const runtime = createRuntime(undefined, () => now);
+    const offer: RemoteWindowStreamStartedOfferV2Payload = {
+      requestId: 'rw-stats-reset',
+      streamId: 'stream-stats-reset',
+      targetId: 'pane-1',
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      offer: { type: 'offer', sdp: 'host-offer' },
+      mediaBindings: [{
+        role: 'focus',
+        epoch: 0,
+        mediaStreamId: 'sender-focus-stream',
+        trackId: 'sender-focus-track',
+      }],
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 30,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    };
+    const started = runtime.startStream({
+      streamId: offer.streamId,
+      target: makeTarget(),
+      protocolVersion: 2,
+      sendIceCandidate: vi.fn(),
+      sendAnswer: vi.fn(),
+      startRemote: vi.fn(async () => offer),
+    });
+    await flushMicrotasks(20);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    const oldTrack = new MockMediaTrack();
+    oldTrack.id = 'receiver-focus-track-0';
+    const oldStream = new MockMediaStream([oldTrack]);
+    peer.emitVideoTrack(oldStream, '0');
+    const result = await started;
+    peer.getStats.mockResolvedValue(new Map<string, unknown>([
+      ['inbound-focus', {
+        type: 'inbound-rtp',
+        kind: 'video',
+        trackIdentifier: oldTrack.id,
+        mid: '0',
+        ssrc: 111,
+        transportId: 'transport-1',
+        bytesReceived: 1_000,
+        framesDropped: 4,
+      }],
+    ]));
+    await runtime.getStatsSample(offer.streamId, 'focus');
+
+    now = 2_000;
+    peer.getStats.mockResolvedValue(new Map<string, unknown>([
+      ['inbound-focus', {
+        type: 'inbound-rtp',
+        kind: 'video',
+        trackIdentifier: oldTrack.id,
+        mid: '0',
+        ssrc: 111,
+        transportId: 'transport-1',
+        bytesReceived: 2_000,
+        framesDropped: 6,
+      }],
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      framesDropped: 2,
+      receivedBitrateBps: 8_000,
+    });
+
+    await expect(result.replaceLaneBinding?.({
+      role: 'focus',
+      epoch: 1,
+      mediaStreamId: 'sender-focus-stream-1',
+      trackId: 'sender-focus-track-1',
+    }, { type: 'offer', sdp: 'replacement-offer' }, vi.fn())).resolves.toBe(true);
+    const replacementTrack = new MockMediaTrack();
+    replacementTrack.id = 'receiver-focus-track-1';
+    const replacementStream = new MockMediaStream([replacementTrack]);
+    peer.emitVideoTrack(replacementStream, '0');
+    now = 3_000;
+    peer.getStats.mockResolvedValue(new Map<string, unknown>([
+      ['inbound-focus', {
+        type: 'inbound-rtp',
+        kind: 'video',
+        trackIdentifier: replacementTrack.id,
+        mid: '0',
+        ssrc: 222,
+        transportId: 'transport-1',
+        bytesReceived: 3_000,
+        framesDropped: 10,
+      }],
+    ]));
+    await expect(runtime.getStatsSample(offer.streamId, 'focus')).resolves.toMatchObject({
+      mediaEpoch: 1,
+      trackId: replacementTrack.id,
+      ssrc: 222,
+      framesDropped: null,
+      receivedBitrateBps: null,
+    });
   });
 
   it('cleans the peer exactly once on stop and ignores late candidates', async () => {

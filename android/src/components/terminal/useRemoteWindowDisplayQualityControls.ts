@@ -1,71 +1,94 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  resolveRemoteWindowBitrateMultiplier,
-  type RemoteWindowQualityMaxFrameRate,
-  type RemoteWindowVideoBudgetMultiplier,
+  resolveRemoteWindowVideoCapBps,
+  resolveRemoteWindowVideoTargetKey,
+  type RemoteWindowVideoQualitySettings,
 } from '../../lib/remote-window-video-quality';
 import {
-  readRemoteWindowBitrateMultiplierSelection,
   readRemoteWindowDisplayOrientation,
-  readRemoteWindowMaxFrameRate,
-  writeRemoteWindowBitrateMultiplierSelection,
+  readRemoteWindowVideoQualitySettings,
   writeRemoteWindowDisplayOrientation,
-  writeRemoteWindowMaxFrameRate,
-  type RemoteWindowBitrateMultiplierSelection,
+  writeRemoteWindowVideoQualitySettings,
 } from './remote-window-overlay-storage';
+import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
 import type { RemoteWindowOrientationPolicy } from './remote-window-overlay-helpers';
+
+const DEFAULT_QUALITY_SETTINGS: RemoteWindowVideoQualitySettings = {
+  preference: 'smooth',
+  maxBitrateCapMbps: null,
+  maxFrameRateFps: 30,
+};
 
 export interface RemoteWindowDisplayQualityControls {
   displayOrientation: RemoteWindowOrientationPolicy;
   displayOrientationRef: { readonly current: RemoteWindowOrientationPolicy };
-  bitrateMultiplierSelection: RemoteWindowBitrateMultiplierSelection;
-  budgetMultiplier: RemoteWindowVideoBudgetMultiplier | undefined;
-  maxFrameRateFps: RemoteWindowQualityMaxFrameRate;
+  qualitySettings: RemoteWindowVideoQualitySettings;
+  maxBitrateCapBps: number | null;
   setDisplayOrientation: (orientation: RemoteWindowOrientationPolicy) => void;
-  setBitrateMultiplierSelection: (selection: RemoteWindowBitrateMultiplierSelection) => void;
-  setMaxFrameRateFps: (frameRate: RemoteWindowQualityMaxFrameRate) => void;
+  commitQualitySettings: (
+    settings: RemoteWindowVideoQualitySettings,
+  ) => boolean;
 }
 
-export function useRemoteWindowDisplayQualityControls(): RemoteWindowDisplayQualityControls {
+export interface UseRemoteWindowDisplayQualityControlsOptions {
+  target: RemoteWindowStreamTargetManifest | null;
+}
+
+export function useRemoteWindowDisplayQualityControls(
+  options: UseRemoteWindowDisplayQualityControlsOptions = { target: null },
+): RemoteWindowDisplayQualityControls {
+  const { target } = options;
   const [displayOrientation, setDisplayOrientationState] = useState<RemoteWindowOrientationPolicy>(
     () => readRemoteWindowDisplayOrientation(),
   );
-  const [bitrateMultiplierSelection, setBitrateMultiplierSelectionState] = useState<RemoteWindowBitrateMultiplierSelection>(
-    () => readRemoteWindowBitrateMultiplierSelection(),
+  const [qualitySettings, setQualitySettings] = useState<RemoteWindowVideoQualitySettings>(
+    () => target ? readRemoteWindowVideoQualitySettings(target) : DEFAULT_QUALITY_SETTINGS,
   );
-  const [maxFrameRateFps, setMaxFrameRateFpsState] = useState<RemoteWindowQualityMaxFrameRate>(
-    () => readRemoteWindowMaxFrameRate(),
-  );
+  const targetKey = target ? resolveRemoteWindowVideoTargetKey(target) : null;
+  const loadedTargetKeyRef = useRef<string | null>(targetKey);
   const displayOrientationRef = useRef(displayOrientation);
+
+  // Reload the committed settings when the selected remote target changes.
+  useEffect(() => {
+    if (!targetKey || targetKey === loadedTargetKeyRef.current) {
+      return;
+    }
+    loadedTargetKeyRef.current = targetKey;
+    setQualitySettings(readRemoteWindowVideoQualitySettings(target as RemoteWindowStreamTargetManifest));
+  }, [target, targetKey]);
+
   useEffect(() => {
     displayOrientationRef.current = displayOrientation;
   }, [displayOrientation]);
-  // Single truth: the derived budget multiplier follows the selection state on
-  // the render path, so a change can never be read one render late. The mapping
-  // itself stays owned by resolveRemoteWindowBitrateMultiplier.
-  const budgetMultiplier = resolveRemoteWindowBitrateMultiplier(bitrateMultiplierSelection);
+
+  // The cap is a render-path derivation of the committed Mbps setting, so a
+  // commit is never read one render late through a synced ref.
+  const maxBitrateCapBps = qualitySettings.maxBitrateCapMbps === null
+    ? null
+    : resolveRemoteWindowVideoCapBps(qualitySettings.maxBitrateCapMbps);
 
   const setDisplayOrientation = useCallback((orientation: RemoteWindowOrientationPolicy) => {
     displayOrientationRef.current = orientation;
     setDisplayOrientationState(orientation);
     writeRemoteWindowDisplayOrientation(orientation);
   }, []);
-  const setBitrateMultiplierSelection = useCallback((selection: RemoteWindowBitrateMultiplierSelection) => {
-    setBitrateMultiplierSelectionState(selection);
-    writeRemoteWindowBitrateMultiplierSelection(selection);
-  }, []);
-  const setMaxFrameRateFps = useCallback((frameRate: RemoteWindowQualityMaxFrameRate) => {
-    setMaxFrameRateFpsState(frameRate);
-    writeRemoteWindowMaxFrameRate(frameRate);
-  }, []);
+
+  // Apply persists the desired truth and updates the single committed state in
+  // one action. Drafts and Cancel never reach this entry point.
+  const commitQualitySettings = useCallback((settings: RemoteWindowVideoQualitySettings) => {
+    if (!writeRemoteWindowVideoQualitySettings(target as RemoteWindowStreamTargetManifest, settings)) {
+      return false;
+    }
+    setQualitySettings(settings);
+    return true;
+  }, [target]);
+
   return {
     displayOrientation,
     displayOrientationRef,
-    bitrateMultiplierSelection,
-    budgetMultiplier,
-    maxFrameRateFps,
+    qualitySettings,
+    maxBitrateCapBps,
     setDisplayOrientation,
-    setBitrateMultiplierSelection,
-    setMaxFrameRateFps,
+    commitQualitySettings,
   };
 }

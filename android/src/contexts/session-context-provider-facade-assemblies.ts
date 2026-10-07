@@ -261,6 +261,7 @@ export function useSessionProviderFacadeAssemblies(
     updateRemoteWindowFocus,
     setRemoteWindowBrowserUserAgent,
     stopRemoteWindowStream,
+    closeRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
   } = sessionInteractionRuntime;
@@ -326,6 +327,7 @@ export function useSessionProviderFacadeAssemblies(
     setRemoteWindowBrowserUserAgent,
     updateRemoteWindowFocus,
     stopRemoteWindowStream,
+    closeRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
     updateSessionViewport,
@@ -378,6 +380,7 @@ export function useSessionProviderFacadeAssemblies(
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
     stopRemoteWindowStream,
+    closeRemoteWindowStream,
     switchSession,
     toggleScheduleJob,
     updateSessionViewport,

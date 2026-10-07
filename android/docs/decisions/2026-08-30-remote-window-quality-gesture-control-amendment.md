@@ -279,3 +279,49 @@ rejected wire result with an explicit capability code. Client-local delivery
 settle/cancel outcomes do not forge daemon ACK/receive timestamps. Native focus
 optimization, client delivery termination, daemon held-input release, and
 destructive window-close results remain separately scoped admission items.
+
+## 2026-10-04 superseding local mode and gesture contract
+
+Status: design contract. This section supersedes the zoomed single-finger
+clauses in "Direct Touch contract" and the "2026-10-02 execution proposal:
+independent limits and operable zoom" replacement clauses above. The
+historical clauses and the installed 3207 red evidence remain recorded as
+evidence; they are not the implementation target. The bounded business design,
+Chinese semantic diagrams, state machines, black-box acceptance, and
+implementation allowlist live in `2026-10-02-stream-control-design.md`
+(appendix "2026-10-04 本地模式与手势最终契约"). Independent design review is
+still required before product repair.
+
+The user confirmed the target semantics against installed 3207:
+
+- Client mode (`local preview` / `fullscreen`) is an independent local display
+  state. Switching mode changes only the local projection. It does not write
+  remote window geometry, quality profile, stream start, or stream stop. It
+  does not restart or replace the stream/track and does not wait for a resize
+  ACK. The same stream identity, receiver track, and source ratio persist
+  across `half <-> fullscreen` cycles.
+- Local viewport (`scale`, `panX`, `panY`, `displayMode`) is an independent
+  local state owner. It is measured from the real surface rect and clamped
+  locally. It never becomes daemon truth.
+- Media lifecycle readiness is an independent state owner. Readiness means an
+  actual capture plus an actual decoded frame on the client, not an offer,
+  answer, or local-description intent.
+- Gesture sequence is an independent state owner. A new user gesture is a new
+  execution; the lifecycle may cycle across executions, but no execution
+  creates a graph cycle.
+
+At zoomed scale, one finger pans the local viewport and emits no remote input.
+Two-finger same-direction motion commits to realtime remote scroll. Pinch
+commits to local scale only. The touch/mouse input mode cannot flip the
+zoomed-single-finger semantic. The embedded half-sheet preview stays passive.
+When a second finger arrives, it ends the prior single-finger ownership; the
+implementation must not arbitrarily restore an already-applied local pan
+unless the contract explicitly requires it. Pointer cancel and pointer up
+release any remote down that this gesture owns exactly once, and the terminal
+pointer count must reach zero. Focus and capture transfer follows the local
+projection and cannot trigger unrelated stream operations.
+
+An explicit remote resize is a distinct input operation with a real geometry
+readback. It is not an automatic side effect of mode, orientation, container
+size, or display-mode change. The existing `requestRemoteTargetFillResize`
+automatic effects are a known wrong edge and are not part of this contract.

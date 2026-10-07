@@ -58,7 +58,7 @@ describe('ResourceBottomSheet', () => {
     expect(onClose).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps stream gestures inside the stream pane', () => {
+  it('keeps stream-pane touch gestures from closing the parent drawer', () => {
     const onClose = vi.fn();
     render(<ResourceBottomSheet open initialTab="stream" renderFileBrowser={() => null} renderRemoteWindow={() => <div data-testid="stream-surface" />} onClose={onClose} />);
     const pane = screen.getByTestId('resource-stream-pane');
@@ -66,6 +66,28 @@ describe('ResourceBottomSheet', () => {
     fireEvent.touchMove(pane, { touches: [{ clientY: 80 }] });
     fireEvent.touchEnd(pane, { changedTouches: [{ clientY: 80 }] });
     expect(onClose).not.toHaveBeenCalled();
+    // The stream pane no longer owns drawer gesture cancellation; its child overlay receives the touch chain.
+  });
+
+  it('uses the drawer grip as the stream fullscreen affordance', () => {
+    const onExpand = vi.fn();
+    const renderRemoteWindow = vi.fn((open: boolean) => open ? <div data-testid="remote-stream">stream</div> : null);
+    render(
+      <ResourceBottomSheet
+        open
+        initialTab="stream"
+        renderFileBrowser={() => null}
+        renderRemoteWindow={renderRemoteWindow}
+        onClose={vi.fn()}
+        onExpand={onExpand}
+      />,
+    );
+    expect(screen.queryByTestId('resource-stream-fullscreen')).toBeNull();
+    const handle = screen.getByTestId('resource-bottom-sheet-grip');
+    fireEvent.touchStart(handle, { touches: [{ clientY: 600 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientY: 500 }] });
+    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 500 }] });
+    expect(onExpand).toHaveBeenCalledTimes(1);
   });
 
   it('keeps file page vertical drags inside the content scope', () => {
@@ -511,8 +533,9 @@ describe('ResourceBottomSheet', () => {
 
     expect(screen.getByRole('navigation', { name: '资源类型' })).toBeTruthy();
     const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
-    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }] });
-    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }], changedTouches: [{ clientY: 300 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientY: 180 }], changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchEnd(handle, { touches: [], changedTouches: [{ clientY: 180 }] });
 
     expect(renderRemoteWindow).toHaveBeenLastCalledWith(true, 'stream', true, expect.any(Function));
     expect(screen.queryByRole('navigation', { name: '资源类型' })).toBeNull();
@@ -539,8 +562,9 @@ describe('ResourceBottomSheet', () => {
     );
 
     const handle = screen.getByLabelText('资源').querySelector('[data-resource-drawer-handle]') as HTMLElement;
-    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }] });
-    fireEvent.touchEnd(handle, { changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchStart(handle, { touches: [{ clientY: 300 }], changedTouches: [{ clientY: 300 }] });
+    fireEvent.touchMove(handle, { touches: [{ clientY: 180 }], changedTouches: [{ clientY: 180 }] });
+    fireEvent.touchEnd(handle, { touches: [], changedTouches: [{ clientY: 180 }] });
     expect(screen.queryByRole('navigation', { name: '资源类型' })).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: '退出串流全屏' }));

@@ -71,3 +71,48 @@ evidence/
 - 设备身份：15t `100.104.163.65:5555`（PLZ110）安装 `0.1.3.3069`，`firstInstallTime 2026-09-18 12:20:15` 保留，安装态 APK sha256 `da63181c...` 与 host 完全一致。
 - 最终产物复测（真实 `zterm-3` → Finder `app-window:29243:37285`，解码视频 `readyState 4`、`987x719`、`currentTime` 推进）：A 缩放后全屏单指真实 swipe 后 rect `dx=dy=dw=dh=0` 且远端输入 0；B 真实双击后 rect 不变；C 双指同向产生 9 条 `remote-window-input`（`kind=scroll`，start+8 update）；D pinch out 精确还原 `{8,239,331,515}`；E 1x 单击恰好 1 条 `kind=click`/`button=left`；F 工具栏「缩小」`fullscreen→floating`、「关闭」使 overlay 与 bottom sheet 同时消失，无需杀 App。全部 PASS。
 - 观测层与限制：远端输入在真实传输边界（`Capacitor.nativePromise`/`toNative`，plugin `AndroidConnectionService`）取证；adb tap 在无关 `com.oplus.ota` 窗口抢占输入焦点期间不达 WebView，故 1x 单击与两个工具栏点击改由 CDP touch 驱动（仍走真实 pointer runtime），A/B 使用真实 `adb shell input`。
+
+## latency-1003 连接/输入延迟修复索引
+
+候选 `52aa458e`（`codex/connection-input-latency-1003`，base `b18dcf91` = origin/main，PR #158）修复 native 命令拒绝把整个 socket 投影拆掉（返回台 `No listeners found` 卡死）以及 idle head 轮询过密；原始记录保留在本地 ignored 目录 `android/evidence/latency-1003-fixed/`。
+
+- 改动点：`android-connection-service-socket.ts` 命令拒绝改为 channel-scoped（仅关闭命中 channel，投影存活；无法归 channel 的拒绝不再触发整链 `reportFailure`）；`mobile-config.ts` `headStalePingMs` 抬到 700–1000（约 1Hz）。
+- 聚焦测试：`tsc --noEmit` PASS；`test:feature-registry` 13 文件/107 PASS；定向 vitest 11 文件/297 PASS（含 `android-connection-service-socket.test.ts` 新增 2 条 promise-reject 用例）。
+- 产物：`0.1.3.3206` / `versionCode 1100032060` / `buildNumber 3206`；APK sha256 `50b189d8a8b68792404e74717d675855797c0d2dba965cec34fea7e053ef4157`；rollback `0.1.3.3206.1` sha256 `f351df4b964d7396e0dd0cf21a4f1fa4ac832a36de68772edebfb95dbe841449`。
+- 安装态 / OTA：`~/.zterm/updates/latest.json` 指向 `0.1.3.3206`（同 sha256、size 77507455、channel stable）；emulator-5554 安装 `0.1.3.3206`，`firstInstallTime 2026-09-29 19:28:42` 保留（`adb install -r`）。
+- 真机/模拟器回放（真实 daemon `mac-studio` → tmux `_collab_test`）：HOME 后台再回前台，连接服务在后台 `androidConnectionChannelClosed`、回前台 `list-sessions -> openChannel -> body-subscription -> buffer-head-request` 全部送达，`androidConnectionChannelOpened/Message` 持续通知，连接服务未出现 `No listeners found`（仅 `Capacitor/AppPlugin` 的 pause/resume 事件无监听，与本修复无关）。证据 `latency-1003-fixed/logcat-bgfg.txt`；listener 计数 `removeListener=0 noListeners=0 headRate15s=14`（约 1Hz，`bgfg-listener-count.txt`）；daemon `/debug/runtime` health `sessions 1/1/1`、`mirrors 1/1/1`、performanceTrace `recordCount 2118 lastRevision 90`（`daemon-runtime-debug.json`）。
+- 未覆盖 / 声明不适用：本轮无在线真机，按 `zterm-mobile-dev` 用 emulator 完成运行态验证；promise-reject 分支（native 命令调用本身拒绝，如 Android 12+ 后台前台服务启动限制）无法在 emulator 上确定性触发，不做设备侧强制复现，改由 `android-connection-service-socket.test.ts` 的 mock 拒绝用例 + 上述真实后台/前台端到端存活证据覆盖。公开 Relay OTA 发布为 merge 后独立授权步骤。
+
+## latency-1003 交付收口（closed）
+
+- 独立架构 review：`codex-review` profile `gcm` / model `gpt-6.1-sol`，task `review-connection-input-latency-1003-r3b`，base `b18dcf91`，`state=completed`、`verdict=pass`、`controller_no_blocking_findings`、0 findings。前两轮（r1/r2）reviewer 输出被 ```json 围栏 / 前置句子包裹导致 controller `review_output_invalid_json`（protocol_failure），已按 skill 用 `review_retry` 新建 task；原始证据 `android/evidence/latency-1003-fixed/review/`。
+- 候选与合并等价：候选树 `c62a423d`（= `7b3d5776`，`git diff c62a423d 7b3d5776` 空）；`git diff c62a423d main` 空，证明 main 与已验候选逐字节一致。
+- main / 远端：PR #158 admin merge，merge commit `e27780bab048f1b799a3c3d899a423b38dd92b84`（`mergedAt 2026-10-04T10:52:54Z`）；本地 `main == origin/main == e27780ba`，`git status` clean。修复 commit `52aa458e` 在 main 历史内。
+- 产物身份：`0.1.3.3206` / `versionCode 1100032060` / `buildNumber 3206`；normal APK sha256 `50b189d8a8b68792404e74717d675855797c0d2dba965cec34fea7e053ef4157`；rollback `0.1.3.3206.1` sha256 `f351df4b964d7396e0dd0cf21a4f1fa4ac832a36de68772edebfb95dbe841449`。
+- 本机 OTA：`~/.zterm/updates/latest.json` 指向 `0.1.3.3206`（同 sha256）。
+- 公网 Relay OTA：`https://relay.codewhisper.cc:18443/relay/updates/latest.json` 现服务 `0.1.3.3206` / `versionCode 1100032060`；normal + rollback APK `HEAD/GET` 均 `200`；公网下载 normal APK sha256 `50b189d8...` 与 manifest 一致（size 77507455）。
+- 已知遗留（P2 advisory，非阻断，未纳入本次修复）：(a) `android/docs/dagpipe/android-connection-service.graph.json` 尚未登记 command-rejection -> channel 退役节点；新增节点需在 native registry `android/native/dagpipe/src/phase8_core.rs` 注册同名 operator，属超出本次范围的 native 变更，故先 revert 保持 CI 绿；(b) 无 `channelId` 的拒绝（`mux-target-message`）在 send().catch 与 `androidConnectionError` 监听均为 no-op，未做 fail-fast 诊断，失败仍受下游 tmux control 请求超时约束。
+
+## stream-delivery joint 3208 交付索引（进行中）
+
+候选分支 `codex/stream-delivery-freshmain-1004`，base `c5f2860a` = `origin/main`。原始证据保留在本地 ignored 目录
+`~/.codex/.chatgpt-projects/g-p-6a82ba0c561881919039d12d78708a8e/artifacts/stream-execution-20261003/joint-delivery/root-joint-verification/`。
+
+### daemon wrtc packaging gate 执行回执（候选 `c1291e018deb72a651c546bf7678663dc3375418`）
+
+- 环境：Node `v22.22.2`，`darwin-arm64`，pnpm workspace `--frozen-lockfile` 安装的 `@roamhq/wrtc` `0.10.0`；候选 worktree `git status --porcelain` 为空。
+- 命令与结果（均可直接复现）：
+  - `cd android && pnpm run test:daemon-wrtc-packaging` → exit `0`；`ok` 断言 79 项、`FAIL` 0 项；末行 `[verify-daemon-wrtc-packaging] PASS`；`own fixture/tmp removed` ok（harness 自建的 `android/.tmp-wrtc-packaging-*` 已删除）。
+  - `pnpm run verify:ci` → exit `0`（13 files / 106 tests）。
+  - `cd android && pnpm run type-check` → exit `0`，含 `[source-js-pollution] clean`。
+  - `pnpm --dir android run daemon:prepare-release`（不设 `ZTERM_DAEMON_WRTC_INPUT_MANIFEST`）→ exit `1`，fail-closed 文案 `ZTERM_DAEMON_WRTC_INPUT_MANIFEST is required; refusing to build a daemon release without the strict stage manifest`。
+  - GitHub Actions run `37421603700`（PR #161，SHA `c1291e01`）→ 6/6 job `pass`，含 `Daemon package dry-run`。
+- 该候选新增/变更的覆盖点：`prepare-daemon-ci-wrtc-input.mjs`（CI dry-run 输入生产者）、`prepare-daemon-release-wrtc-input.mjs`（可选 `inputKind`/`addon.origin` 校验并写入 provenance）、`verify-daemon-wrtc-packaging.mjs` 的 `[ci-input]` 段（19 项断言：manifest 字段、已安装平台 addon 字节、严格 helper 接受、provenance 保留 `inputKind=ci-prebuilt-dry-run` 与 `addonOrigin=npm-prebuilt`、补丁版 release 输入不获得 CI 标记、包版本不匹配 fail-closed、已安装 addon 缺失 fail-closed）、`.github/workflows/ci.yml` daemon-package job 增加该门禁。
+- 本地原始日志：`review-fixes/wrtc-packaging-gate-receipt.log`（sha256 `b3211c20e2f4bd8a44f650f8f22b26ac7d13eeffec7c4088126d6cdaeb9c488b`）、`verify-ci-receipt.log`、`type-check-receipt.log`、`pr-checks-r4.log`。
+- 回执与提交的绑定方式（避免"回执属于另一个 SHA"的歧义）：上述命令在 `c1291e018deb72a651c546bf7678663dc3375418` 执行；本索引提交相对该 SHA 的唯一差异是 `android/evidence/README.md` 自身（`git diff --name-only c1291e01 HEAD` 只输出该文件），因此被验证的源码在本提交中逐字节相同。可直接核对的被验证源码摘要：
+  - `android/scripts/prepare-daemon-ci-wrtc-input.mjs` sha256 `549f110289fd7f14828e91ff76a03eec18fe1c8696eb918b926fab6f99d66ab7`
+  - `android/scripts/prepare-daemon-release-wrtc-input.mjs` sha256 `f627e40328930e2aa537458805476515d8dc19d7195d73541a242314e10267e3`
+  - `android/scripts/verify-daemon-wrtc-packaging.mjs` sha256 `5696aaf73e3237f436448bfc974f746afb8fe381af85145e12fbcdc93a3578b3`
+  - `android/package.json` sha256 `574977d15a6087057c9787e209ce76c79a48222127647b268b7194385fac26e9`
+  - `.github/workflows/ci.yml` sha256 `5d7e5a5dc8131a9e60167fb4eef5b47381a188140c2b5162036f8413af15c4d9`
+- 同一交付的既有有效证据（不重跑）：真实 ABR 压力→恢复两次 `ok=true`（`abr-recovery-r4-diag/`、`abr-recovery-r5-confirm/`，pressure rev3 → recovery rev4 / 8 Mbps / 30 FPS，41 healthy samples，`cleanup.released=true`）；安装态 emulator 真实入口（`l5-device/`，`com.zterm.android` `0.1.3.3208`，`firstInstallTime` 保留）；独立架构 review 对 `bfc5436f` 的 PASS（`review-r2/`）。

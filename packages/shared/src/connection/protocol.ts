@@ -430,6 +430,8 @@ export interface RemoteWindowStreamStartRequestV2Payload {
   videoProfile: RemoteWindowVideoProfile;
 }
 
+export const REMOTE_WINDOW_STREAM_ANSWER_CANCELLED_CODE = 'remote_window_stream_answer_cancelled';
+
 export function isRemoteWindowStreamStartRequestV2(
   value: unknown,
 ): value is RemoteWindowStreamStartRequestV2Payload {
@@ -444,6 +446,46 @@ export function isRemoteWindowStreamStartRequestV2(
     && (payload.mediaPlan === 'single-focus' || payload.mediaPlan === 'overview-plus-focus')
     && payload.mediaPlanVersion === 2
     && !Object.prototype.hasOwnProperty.call(payload, 'offer');
+}
+
+const REMOTE_WINDOW_CLOSE_STATUSES: readonly RemoteWindowCloseStatus[] = [
+  'closed',
+  'not_closed',
+  'unverified',
+  'failed',
+  'unsupported',
+];
+
+export function isRemoteWindowCloseRequestPayload(value: unknown): value is RemoteWindowCloseRequestPayload {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const payload = value as Record<string, unknown>;
+  return typeof payload.requestId === 'string'
+    && payload.requestId.length > 0
+    && typeof payload.sessionId === 'string'
+    && payload.sessionId.length > 0
+    && typeof payload.streamId === 'string'
+    && payload.streamId.length > 0
+    && typeof payload.targetId === 'string'
+    && payload.targetId.length > 0;
+}
+
+export function isRemoteWindowCloseResultPayload(value: unknown): value is RemoteWindowCloseResultPayload {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const payload = value as Record<string, unknown>;
+  return typeof payload.requestId === 'string'
+    && payload.requestId.length > 0
+    && typeof payload.sessionId === 'string'
+    && payload.sessionId.length > 0
+    && typeof payload.streamId === 'string'
+    && payload.streamId.length > 0
+    && typeof payload.targetId === 'string'
+    && payload.targetId.length > 0
+    && typeof payload.status === 'string'
+    && (REMOTE_WINDOW_CLOSE_STATUSES as readonly string[]).includes(payload.status);
 }
 
 // 双流：切换高码率主窗口（focus）流的捕获目标；低码率总览（overview）流保持不变
@@ -548,12 +590,66 @@ export interface RemoteWindowStreamStatusPayload {
   frameHeight?: number;
   message?: string;
   canvasLayout?: RemoteWindowCanvasLayoutV1;
+  /** Typed cleanup result attached to the terminal remote-window stop status. */
+  cleanup?: RemoteWindowStreamCleanupResult;
+  /** Optional projection of the daemon input-helper release result for the current UX. */
+  inputRelease?: RemoteWindowStreamInputReleaseProjection;
 }
 
 export interface RemoteWindowStreamStopRequestPayload {
   requestId: string;
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
+}
+
+export type RemoteWindowStreamCleanupStatus =
+  | 'released'
+  | 'cleanup_failed'
+  | 'failed'
+  | 'unverified'
+  | 'absent';
+
+export interface RemoteWindowStreamCleanupResourceError {
+  resource?: string;
+  code?: string;
+  message: string;
+}
+
+export interface RemoteWindowStreamCleanupResult {
+  status: RemoteWindowStreamCleanupStatus;
+  remainingResources: string[];
+  errors: RemoteWindowStreamCleanupResourceError[];
+}
+
+export interface RemoteWindowStreamInputReleaseProjection {
+  status: 'released' | 'failed' | 'unverified';
+  released: string[];
+  sharedReleased: string[];
+  remaining: string[];
+  errors: string[];
+}
+
+export interface RemoteWindowCloseRequestPayload {
+  requestId: string;
+  sessionId: string;
+  streamId: string;
+  targetId: string;
+}
+
+export type RemoteWindowCloseStatus =
+  | 'closed'
+  | 'not_closed'
+  | 'unverified'
+  | 'failed'
+  | 'unsupported';
+
+export interface RemoteWindowCloseResultPayload {
+  requestId: string;
+  sessionId: string;
+  streamId: string;
+  targetId: string;
+  status: RemoteWindowCloseStatus;
+  error?: string;
 }
 
 export interface RemoteWindowStreamQualityRequestPayload {
@@ -893,6 +989,7 @@ export type BridgeClientMessage =
   | { type: 'remote-window-stream-update-focus'; payload: RemoteWindowStreamUpdateFocusRequestPayload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-stop-request'; payload: RemoteWindowStreamStopRequestPayload }
+  | { type: 'remote-window-close-request'; payload: RemoteWindowCloseRequestPayload }
   | { type: 'remote-window-stream-quality-request'; payload: RemoteWindowStreamQualityRequestPayload }
   | {
       type: 'remote-window-input';
@@ -973,6 +1070,7 @@ export type BridgeServerControlMessage =
   | { type: 'remote-window-stream-offer-v2'; payload: RemoteWindowStreamStartedOfferV2Payload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-status'; payload: RemoteWindowStreamStatusPayload }
+  | { type: 'remote-window-close-result'; payload: RemoteWindowCloseResultPayload }
   | { type: 'remote-window-stream-focus-result'; payload: RemoteWindowStreamFocusResultPayload }
   | { type: 'remote-window-stream-quality-result'; payload: RemoteWindowStreamQualityResultPayload }
   | {

@@ -15,6 +15,62 @@ struct InputConfig: Decodable {
     let focusPolicy: String
     let window: RemoteInputWindow
     let event: RemoteInputEvent
+    let native: RemoteInputNativeCarrier?
+}
+
+// Final-holder release is target-free by contract: the daemon helper owns the
+// exact native carrier, so the wire payload carries only the release operation.
+// This envelope decodes that payload without requiring a target window/event.
+struct InputReleaseEnvelope: Decodable {
+    let release: RemoteInputReleaseOperation?
+}
+
+struct RemoteInputModifierFlags: Decodable {
+    let shiftKey: Bool?
+    let altKey: Bool?
+    let ctrlKey: Bool?
+    let metaKey: Bool?
+}
+
+struct RemoteInputNativeCarrier: Decodable {
+    let kind: String
+    let nativeKeyCode: Int?
+    let nativeKeyText: String?
+    let flags: RemoteInputModifierFlags?
+}
+
+struct RemoteInputReleaseOperation: Decodable {
+    let carrierKey: String
+    let kind: String
+    let nativeKeyCode: Int?
+    let nativeKeyText: String?
+    let flags: RemoteInputModifierFlags?
+    let button: String?
+    let x: Double?
+    let y: Double?
+    let observeKeyCode: Int?
+    let observeDeadlineMs: Int?
+}
+
+struct RemoteInputReleaseResult: Encodable {
+    let status: String
+    let error: String?
+}
+
+struct RemoteInputResizePosition: Encodable {
+    let x: Double
+    let y: Double
+}
+
+struct RemoteInputResizeSize: Encodable {
+    let width: Double
+    let height: Double
+}
+
+struct RemoteInputResizeObservation: Encodable {
+    let kind: String
+    let position: RemoteInputResizePosition
+    let size: RemoteInputResizeSize
 }
 
 struct Rect: Decodable {
@@ -230,7 +286,40 @@ func findTargetWindow(_ config: InputConfig) throws -> AXUIElement {
     return window
 }
 
-func resizeTargetWindow(_ config: InputConfig) throws {
+func readTargetPositionAndSize(_ window: AXUIElement) throws -> RemoteInputResizeObservation {
+    var positionRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionRef) == .success,
+          let positionRefValue = positionRef,
+          CFGetTypeID(positionRefValue) == AXValueGetTypeID()
+    else {
+        throw inputError("remote window resize position readback failed")
+    }
+    let positionValue = positionRefValue as! AXValue
+    var position = CGPoint.zero
+    guard AXValueGetValue(positionValue, .cgPoint, &position) else {
+        throw inputError("remote window resize position readback invalid")
+    }
+
+    var sizeRef: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeRef) == .success,
+          let sizeRefValue = sizeRef,
+          CFGetTypeID(sizeRefValue) == AXValueGetTypeID()
+    else {
+        throw inputError("remote window resize size readback failed")
+    }
+    let sizeValue = sizeRefValue as! AXValue
+    var size = CGSize.zero
+    guard AXValueGetValue(sizeValue, .cgSize, &size) else {
+        throw inputError("remote window resize size readback invalid")
+    }
+    return RemoteInputResizeObservation(
+        kind: "window-resize",
+        position: RemoteInputResizePosition(x: Double(position.x), y: Double(position.y)),
+        size: RemoteInputResizeSize(width: Double(size.width), height: Double(size.height))
+    )
+}
+
+func resizeTargetWindow(_ config: InputConfig) throws -> RemoteInputResizeObservation {
     guard
         let width = config.event.width,
         let height = config.event.height,
@@ -248,17 +337,98 @@ func resizeTargetWindow(_ config: InputConfig) throws {
     if result != .success {
         throw inputError("remote window resize failed")
     }
+    return try readTargetPositionAndSize(window)
 }
 
 let source = CGEventSource(stateID: .hidSystemState)
 
-func flags(_ event: RemoteInputEvent) -> CGEventFlags {
+func flags(from carrierFlags: RemoteInputModifierFlags) -> CGEventFlags {
     var result = CGEventFlags()
-    if event.shiftKey == true { result.insert(.maskShift) }
-    if event.altKey == true { result.insert(.maskAlternate) }
-    if event.ctrlKey == true { result.insert(.maskControl) }
-    if event.metaKey == true { result.insert(.maskCommand) }
+    if carrierFlags.shiftKey == true { result.insert(.maskShift) }
+    if carrierFlags.altKey == true { result.insert(.maskAlternate) }
+    if carrierFlags.ctrlKey == true { result.insert(.maskControl) }
+    if carrierFlags.metaKey == true { result.insert(.maskCommand) }
     return result
+}
+
+func postNativeKeyCarrier(_ carrier: RemoteInputNativeCarrier, down: Bool) throws {
+    guard carrier.kind == "key" else {
+        throw inputError("remote native carrier is not a key")
+    }
+    let event: CGEvent?
+    if let keyCode = carrier.nativeKeyCode {
+        event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: down)
+    } else if let text = carrier.nativeKeyText, !text.isEmpty {
+        var utf16 = Array(text.utf16).map { UniChar($0) }
+        event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)
+        event?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+    } else {
+        throw inputError("remote native key carrier is empty")
+    }
+    guard let posted = event else {
+        throw inputError("remote native key event construction failed")
+    }
+    posted.flags = flags(from: carrier.flags ?? RemoteInputModifierFlags(shiftKey: false, altKey: false, ctrlKey: false, metaKey: false))
+    posted.post(tap: .cghidEventTap)
+}
+
+func keyStateIsDown(_ keyCode: Int) -> Bool {
+    return CGEventSource.keyState(CGEventSourceStateID.combinedSessionState, key: CGKeyCode(keyCode))
+}
+
+func buttonStateIsDown(_ button: CGMouseButton) -> Bool {
+    return CGEventSource.buttonState(CGEventSourceStateID.combinedSessionState, button: button)
+}
+
+func observeRelease(operation: RemoteInputReleaseOperation) -> RemoteInputReleaseResult {
+    let deadlineMs = operation.observeDeadlineMs ?? 2500
+    let deadline = Date().timeIntervalSince1970 + Double(deadlineMs) / 1000.0
+    while Date().timeIntervalSince1970 < deadline {
+        if operation.kind == "pointer" {
+            if !buttonStateIsDown(mouseButton(operation.button)) {
+                return RemoteInputReleaseResult(status: "released", error: nil)
+            }
+        } else if let observeKeyCode = operation.observeKeyCode {
+            if !keyStateIsDown(observeKeyCode) {
+                return RemoteInputReleaseResult(status: "released", error: nil)
+            }
+        } else {
+            return RemoteInputReleaseResult(status: "unverified", error: nil)
+        }
+        let remaining = deadline - Date().timeIntervalSince1970
+        if remaining <= 0 {
+            break
+        }
+        Thread.sleep(forTimeInterval: min(0.05, remaining))
+    }
+    return RemoteInputReleaseResult(status: "unverified", error: nil)
+}
+
+func handleRelease(operation: RemoteInputReleaseOperation) throws -> RemoteInputReleaseResult {
+    if operation.kind == "pointer" {
+        guard let x = operation.x, let y = operation.y else {
+            throw inputError("remote native pointer release missing coordinates")
+        }
+        let event = CGEvent(
+            mouseEventSource: source,
+            mouseType: mouseType(phase: "up", button: operation.button, buttons: 0),
+            mouseCursorPosition: CGPoint(x: x, y: y),
+            mouseButton: mouseButton(operation.button)
+        )
+        guard event != nil else {
+            throw inputError("remote native pointer release event construction failed")
+        }
+        event?.post(tap: .cghidEventTap)
+    } else {
+        let carrier = RemoteInputNativeCarrier(
+            kind: operation.kind,
+            nativeKeyCode: operation.nativeKeyCode,
+            nativeKeyText: operation.nativeKeyText,
+            flags: operation.flags
+        )
+        try postNativeKeyCarrier(carrier, down: false)
+    }
+    return observeRelease(operation: operation)
 }
 
 func mouseButton(_ button: String?) -> CGMouseButton {
@@ -374,39 +544,23 @@ func postGestureSwipeScrollEvent(
     }
 }
 
-let keyCodes: [String: CGKeyCode] = [
-    "Enter": 36,
-    "NumpadEnter": 76,
-    "Escape": 53,
-    "Backspace": 51,
-    "Tab": 48,
-    "Space": 49,
-    "ArrowLeft": 123,
-    "ArrowRight": 124,
-    "ArrowDown": 125,
-    "ArrowUp": 126,
-    "KeyV": 9,
-    "KeyW": 13,
-    "Delete": 117,
-    "Home": 115,
-    "End": 119,
-    "PageUp": 116,
-    "PageDown": 121,
-]
-
 func handleConfig(_ config: InputConfig) throws {
     if config.event.kind == "close-window" {
         try focusTargetWindow(config)
-        let commandDown = CGEvent(keyboardEventSource: source, virtualKey: keyCodes["KeyW"]!, keyDown: true)
-        commandDown?.flags = [.maskCommand]
-        commandDown?.post(tap: .cghidEventTap)
-        let commandUp = CGEvent(keyboardEventSource: source, virtualKey: keyCodes["KeyW"]!, keyDown: false)
-        commandUp?.flags = [.maskCommand]
-        commandUp?.post(tap: .cghidEventTap)
+        guard let carrier = config.native else {
+            throw inputError("remote window close input missing normalized native carrier")
+        }
+        try postNativeKeyCarrier(carrier, down: true)
+        try postNativeKeyCarrier(carrier, down: false)
         return
     }
     if config.event.kind == "window-resize" {
-        try resizeTargetWindow(config)
+        let observed = try resizeTargetWindow(config)
+        writeResult(ok: true, operation: [
+            "kind": observed.kind,
+            "position": ["x": observed.position.x, "y": observed.position.y],
+            "size": ["width": observed.size.width, "height": observed.size.height],
+        ])
         return
     }
     // Continuous motion is intentionally delivered without Accessibility/System
@@ -479,30 +633,30 @@ func handleConfig(_ config: InputConfig) throws {
         guard let phase = config.event.phase else {
             throw inputError("remote key input missing phase")
         }
-        let down = phase == "down"
-        let code = config.event.code ?? ""
-        if let keyCode = keyCodes[code] {
-            let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: down)
-            event?.flags = flags(config.event)
-            event?.post(tap: .cghidEventTap)
-        } else if !(config.event.text ?? config.event.key ?? "").isEmpty {
-            var utf16 = (config.event.text ?? config.event.key ?? "").utf16.map { UniChar($0) }
-            let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)
-            event?.flags = flags(config.event)
-            event?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
-            event?.post(tap: .cghidEventTap)
-        } else {
-            throw inputError("remote key input unsupported: \(code)")
+        guard let carrier = config.native else {
+            throw inputError("remote key input missing normalized native carrier")
         }
+        try postNativeKeyCarrier(carrier, down: phase == "down")
     } else {
         throw inputError("remote input event kind unsupported")
     }
 }
 
-func writeResult(ok: Bool, error: String? = nil) {
+func writeResult(
+    ok: Bool,
+    error: String? = nil,
+    release: [String: Any]? = nil,
+    operation: [String: Any]? = nil
+) {
     var result: [String: Any] = ["ok": ok]
     if let error = error {
         result["error"] = error
+    }
+    if let release = release {
+        result["release"] = release
+    }
+    if let operation = operation {
+        result["operation"] = operation
     }
     if let data = try? JSONSerialization.data(withJSONObject: result, options: []) {
         FileHandle.standardOutput.write(data)
@@ -510,11 +664,29 @@ func writeResult(ok: Bool, error: String? = nil) {
     }
 }
 
+func releaseDict(_ result: RemoteInputReleaseResult) -> [String: Any] {
+    var dict: [String: Any] = ["status": result.status]
+    if let error = result.error {
+        dict["error"] = error
+    }
+    return dict
+}
+
 @discardableResult
 func handleRawConfig(_ rawConfig: String, exitOnFailure: Bool) -> Bool {
     do {
         guard let data = rawConfig.data(using: .utf8) else {
             throw inputError("remote input config is not utf8")
+        }
+        let envelope = try JSONDecoder().decode(InputReleaseEnvelope.self, from: data)
+        if let release = envelope.release {
+            do {
+                let releaseResult = try handleRelease(operation: release)
+                writeResult(ok: true, release: releaseDict(releaseResult))
+            } catch {
+                writeResult(ok: true, release: ["status": "failed", "error": error.localizedDescription])
+            }
+            return true
         }
         let config = try JSONDecoder().decode(InputConfig.self, from: data)
         try handleConfig(config)

@@ -464,7 +464,7 @@ export const styles: Record<string, CSSProperties> = {
   lockedControlStrip: {
     minWidth: 0,
     display: 'flex',
-    gap: 5,
+    gap: 8,
     alignItems: 'center',
     justifyContent: 'flex-start',
     overflowX: 'auto',
@@ -473,6 +473,30 @@ export const styles: Record<string, CSSProperties> = {
     WebkitOverflowScrolling: 'touch',
     scrollbarWidth: 'none',
     touchAction: 'manipulation',
+  },
+  // The persistent strip stays one row: the local exit lives in the top bar,
+  // so the remaining 48px controls fit a 320px viewport without wrapping. Any
+  // overflow stays inside the strip (scrollbar hidden by the controller style)
+  // instead of growing the toolbar over the video.
+  lockedControlGroup: {
+    flex: '0 0 auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 0,
+  },
+  exitStreamButton: {
+    flex: '0 0 auto',
+    height: 48,
+    minWidth: 48,
+    minHeight: 48,
+    padding: '0 10px',
+    borderRadius: 10,
+    border: '1px solid var(--zterm-panel-border)',
+    background: 'var(--zterm-panel-surface)',
+    color: 'var(--zterm-panel-active-text)',
+    fontSize: 12,
+    fontWeight: 850,
+    whiteSpace: 'nowrap',
   },
   // Stream status and the gesture hint share one compact meta row so the
   // locked toolbar keeps its height for the video instead of stacking rows.
@@ -694,6 +718,33 @@ export const styles: Record<string, CSSProperties> = {
     justifyContent: 'space-between',
     gap: 12,
   },
+  moreDangerRow: {
+    minHeight: 48,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: '6px 8px',
+    borderRadius: 10,
+    border: '1px solid var(--zterm-panel-danger-border)',
+    background: 'var(--zterm-panel-danger-soft)',
+  },
+  moreDangerCopy: {
+    minWidth: 0,
+    display: 'grid',
+    gap: 2,
+    color: 'var(--zterm-panel-danger)',
+    fontSize: 12,
+    fontWeight: 850,
+  },
+  moreDangerHint: {
+    // Danger-on-soft only reaches ~4.0:1 and muted only ~3.6:1 on the light
+    // skin, so the hint uses the base panel text token which is >=4.5:1 on
+    // both the panel and the danger-soft surface (AA normal text).
+    color: 'var(--zterm-panel-text)',
+    fontSize: 11,
+    fontWeight: 600,
+  },
   debugDiagnostics: {
     marginTop: 4,
     paddingTop: 8,
@@ -717,14 +768,14 @@ export const styles: Record<string, CSSProperties> = {
   },
   inputModeBadge: {
     flex: '0 0 auto',
-    minWidth: 48,
+    display: 'inline-flex',
+    alignItems: 'center',
     minHeight: 48,
-    padding: '2px 6px',
-    borderRadius: 8,
-    border: '1px solid var(--zterm-panel-border)',
+    padding: '0 4px',
     color: 'var(--zterm-panel-muted)',
     fontSize: 11,
     fontWeight: 850,
+    whiteSpace: 'nowrap',
   },
   lockedActions: {
     display: 'flex',

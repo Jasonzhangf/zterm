@@ -51,6 +51,10 @@ Phase 4 stream-control design candidates (2026-10-02):
   target-side result or explicit delivery failure.
 - `remote-window-stop.graph.json`: one stop request -> remote/local resource
   result, retaining failures after UI exit.
+- `remote-window-close.graph.json` (v0.3): one close intent -> confirm ->
+  remote close request -> single settle result.
+- `remote-window-binding-experiment.graph.json` (v0.6): one binding experiment
+  request -> admission decision.
 
 These four graphs are design candidates only; their named Operators are not
 registered in `phase4_core.rs` or wired to runtime. Static topology validation
@@ -58,6 +62,33 @@ does not prove SDK compilation, media/input behavior, or coding admission.
 See `../decisions/2026-10-02-stream-control-design.md`. The existing
 `remote-window-stream-overlay` graph retains its ARC admission/parity consumer
 contract; it does not demonstrate a live batch completing independent requests.
+
+Phase 4 local mode / gesture design candidates (2026-10-04):
+
+- `remote-window-local-display.graph.json`: one local mode/display request ->
+  local projection result or explicit local failure; no remote geometry,
+  profile, start, stop, or ACK wait.
+- `remote-window-gesture-sequence.graph.json` (v0.2): one user gesture sequence
+  -> one gesture result. After `classify_gesture_sequence`, wave 2 splits into
+  two explicit nodes: `apply_local_gesture_effect` (local pan/scale only, never
+  injects) and `delegate_remote_gesture_delivery` (delegates the existing
+  input-delivery owner/contract; no second ACK). Both feed the single
+  `settle_gesture_sequence`, which merges applied/inactive/failed/rejection-
+  failed/admission-failed/cleanup-failed into one `arc.gesture_result`.
+
+These two graphs are design candidates for project-owned TypeScript owners
+(`remote-window-overlay-runtime.ts`, `useRemoteWindowViewport.ts`,
+`remote-window-touch-action-runtime.ts`, `RemoteWindowOverlayController.tsx`).
+Their named Operators are **not** registered Rust executors and are not wired
+to runtime; `dagpipe graph validate`/`inspect` prove static topology and
+syntactic bindings only. Each graph is single-input/single-output SESE and has
+no cross back-edge to the video/quality/start/stop graphs; the gesture graph
+keeps one external source and one result sink, and the remote branch depends on
+the existing `remote-window-input-delivery` graph by delegation, not by a graph
+edge or a second runtime. See the superseding
+appendix in `../decisions/2026-10-02-stream-control-design.md` and the
+2026-10-04 section in
+`../decisions/2026-08-30-remote-window-quality-gesture-control-amendment.md`.
 
 Phase 5 static graphs:
 

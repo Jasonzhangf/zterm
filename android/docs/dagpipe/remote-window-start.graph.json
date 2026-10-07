@@ -2,9 +2,9 @@
   "id": "remote.window_start", "version": "0.1",
   "inputs": [{"id":"arc.start_request","schema":"Object"}],
   "nodes": [
-    {"id":"admit_start","operator":"client.remote_window_lifecycle.admit_start","operator_version":"0.1","inputs":["arc.start_request"],"output":{"id":"arc.admitted_start","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"},
+    {"id":"admit_start","operator":"client.remote_window_overlay.admit_start","operator_version":"0.1","inputs":["arc.start_request"],"output":{"id":"arc.admitted_start","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"},
     {"id":"open_media","operator":"daemon.remote_window_stream.open_media","operator_version":"0.1","inputs":["arc.admitted_start"],"output":{"id":"arc.media_open_result","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"},
-    {"id":"settle_start","operator":"client.remote_window_lifecycle.settle_start","operator_version":"0.1","inputs":["arc.media_open_result"],"output":{"id":"arc.start_result","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"}
+    {"id":"settle_start","operator":"client.remote_window_overlay.settle_start","operator_version":"0.1","inputs":["arc.media_open_result"],"output":{"id":"arc.start_result","schema":"Object"},"input_selector":{"include":[],"exclude":[],"predicate":null},"output_selector":{"include":[],"exclude":[],"predicate":null},"iterator":"Whole"}
   ],
   "edges": [{"from":"admit_start","to":"open_media","arc_id":"arc.admitted_start"},{"from":"open_media","to":"settle_start","arc_id":"arc.media_open_result"}],
   "outputs": ["arc.start_result"]

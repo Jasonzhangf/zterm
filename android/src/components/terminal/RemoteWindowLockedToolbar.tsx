@@ -17,7 +17,8 @@ export interface RemoteWindowStreamDebugInfo {
   fps: number | null;
   uplinkBps: number | null;
   downlinkBps: number | null;
-  targetBps: number;
+  // Null until a quality ACK confirms the applied profile; never the draft cap.
+  targetBps: number | null;
   sample: RemoteWindowVideoStatsSample | null;
 }
 
@@ -37,7 +38,6 @@ export interface RemoteWindowLockedToolbarProps {
   streamStatusText: string;
   targetKindLabel: string;
   onClose: () => void;
-  onRemoteClose: () => void;
   onFullscreen: () => void;
   onRequestKeyboard: () => void;
   onScreenshot: () => void;
@@ -46,6 +46,7 @@ export interface RemoteWindowLockedToolbarProps {
   onToggleInputMode: () => void;
   onToggleMore: () => void;
   streamDebugInfo?: RemoteWindowStreamDebugInfo | null;
+  passivePreview?: boolean;
 }
 
 export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindowLockedToolbarProps>(function RemoteWindowLockedToolbar({
@@ -64,7 +65,6 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   streamStatusText,
   targetKindLabel,
   onClose,
-  onRemoteClose,
   onFullscreen,
   onRequestKeyboard,
   onScreenshot,
@@ -72,6 +72,7 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
   onToggleAppSwitch,
   onToggleInputMode,
   onToggleMore,
+  passivePreview = false,
 }, ref) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const setRootRef = useCallback((node: HTMLDivElement | null) => {
@@ -152,63 +153,79 @@ export const RemoteWindowLockedToolbar = forwardRef<HTMLDivElement, RemoteWindow
               <RemoteWindowIcon name="fullscreen" />
             </AmbientButton>
           )}
-          <AmbientButton type="button" data-testid="remote-window-remote-close" aria-label="远程关闭当前窗口" title="远程关闭当前窗口" onClick={onRemoteClose} style={styles.headerIconButtonDanger}>
-            <RemoteWindowIcon name="close-window" />
-          </AmbientButton>
-          <AmbientButton type="button" aria-label="关闭远程窗口" title="关闭" onClick={onClose} style={styles.headerIconButton}>
-            <RemoteWindowIcon name="close" />
+          {/* The local exit lives in the persistent top bar so the control strip
+              stays one compact row on narrow viewports and the exit is always
+              reachable without scrolling the strip. */}
+          <AmbientButton
+            type="button"
+            data-no-drag="true"
+            data-testid="remote-window-exit-stream"
+            aria-label="退出串流"
+            onClick={onClose}
+            style={styles.exitStreamButton}
+            title="退出串流"
+          >
+            退出串流
           </AmbientButton>
         </div>
       </div>
       <div data-testid="remote-window-control-strip" data-no-drag="true" style={styles.lockedControlStrip}>
-        <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
-          {inputSupported ? '可操作' : '只读'}
-        </span>
-          <AmbientButton
-          type="button"
-          data-testid="remote-window-input-mode-toggle"
-          data-no-drag="true"
-          aria-label={inputMode === 'touch' ? '切换为鼠标模式' : '切换为触控模式'}
-          onClick={onToggleInputMode}
-          style={inputMode === 'touch' ? styles.headerModeButtonActive : styles.headerModeButton}
+        <div data-testid="remote-window-input-group" style={styles.lockedControlGroup}>
+          <span
+            data-testid="remote-window-input-mode"
+            aria-label={inputSupported ? '输入状态：可操作' : '输入状态：只读'}
+            style={styles.inputModeBadge}
+          >
+            {inputSupported ? '可操作' : '只读'}
+          </span>
+          {!passivePreview ? <AmbientButton
+            type="button"
+            data-testid="remote-window-input-mode-toggle"
+            data-no-drag="true"
+            aria-label={inputMode === 'touch' ? '切换为鼠标模式' : '切换为触控模式'}
+            onClick={onToggleInputMode}
+            style={inputMode === 'touch' ? styles.headerModeButtonActive : styles.headerModeButton}
             title={inputMode === 'touch' ? '切换为鼠标模式' : '切换为触控模式'}
           >
-          {inputMode === 'touch' ? '触控' : '鼠标'}
-        </AmbientButton>
+            {inputMode === 'touch' ? '触控' : '鼠标'}
+          </AmbientButton> : null}
+        </div>
+        <div data-testid="remote-window-tool-group" style={styles.lockedControlGroup}>
           <AmbientButton
-          type="button"
-          data-no-drag="true"
-          aria-label="截屏远程窗口"
-          aria-busy={screenshotBusy ? 'true' : undefined}
-          disabled={screenshotBusy}
-          onClick={onScreenshot}
-          style={screenshotButtonStyle}
+            type="button"
+            data-no-drag="true"
+            aria-label="截屏远程窗口"
+            aria-busy={screenshotBusy ? 'true' : undefined}
+            disabled={screenshotBusy}
+            onClick={onScreenshot}
+            style={screenshotButtonStyle}
             title="截取当前窗口"
           >
-          <RemoteWindowIcon name="screenshot" />
-        </AmbientButton>
-          <AmbientButton
-          type="button"
-          data-no-drag="true"
-          aria-label="调起远程窗口键盘"
-          onClick={onRequestKeyboard}
-          style={styles.headerIconButton}
+            <RemoteWindowIcon name="screenshot" />
+          </AmbientButton>
+          {!passivePreview ? <AmbientButton
+            type="button"
+            data-no-drag="true"
+            aria-label="调起远程窗口键盘"
+            onClick={onRequestKeyboard}
+            style={styles.headerIconButton}
             title="打开键盘"
           >
-          <RemoteWindowIcon name="keyboard" />
-        </AmbientButton>
+            <RemoteWindowIcon name="keyboard" />
+          </AmbientButton> : null}
           <AmbientButton
-          type="button"
-          data-no-drag="true"
-          data-testid="remote-window-more-toggle"
-          aria-label="更多远程窗口控制"
-          aria-expanded={moreOpen ? 'true' : 'false'}
-          onClick={onToggleMore}
-          style={moreOpen ? styles.headerIconButtonBusy : styles.headerIconButton}
+            type="button"
+            data-no-drag="true"
+            data-testid="remote-window-more-toggle"
+            aria-label="更多远程窗口控制"
+            aria-expanded={moreOpen ? 'true' : 'false'}
+            onClick={onToggleMore}
+            style={moreOpen ? styles.headerIconButtonBusy : styles.headerIconButton}
             title="更多串流设置"
           >
-          <RemoteWindowIcon name="more" />
-        </AmbientButton>
+            <RemoteWindowIcon name="more" />
+          </AmbientButton>
+        </div>
       </div>
       <div data-testid="remote-window-toolbar-status" role="status" style={styles.compactStatusLine}>
         {mode === 'fullscreen' ? <span>{streamStatusText}</span> : null}

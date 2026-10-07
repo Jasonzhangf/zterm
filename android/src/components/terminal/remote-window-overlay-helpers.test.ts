@@ -15,6 +15,8 @@ import {
   resolveRemoteWindowContainerViewport,
   resolveRemoteWindowTargetAspectRatio,
   resolveRemoteWindowTargetResizeSize,
+  resolveRemoteWindowCloseDialogProjection,
+  resolveRemoteWindowCloseResult,
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
 import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
@@ -326,5 +328,48 @@ describe('remote-window-overlay-helpers', () => {
     ]);
     expect(groups.length).toBeGreaterThan(0);
     expect(groups.some((g) => g.targets.length >= 2)).toBe(true);
+  });
+
+  it('projects the remote-close dialog from the typed phase without changing behavior', () => {
+    const actions = { onCancelConfirm: () => {}, onConfirm: () => {}, onExitLocal: () => {} };
+    expect(resolveRemoteWindowCloseDialogProjection({ phase: 'idle' }, actions).open).toBe(false);
+
+    const confirming = resolveRemoteWindowCloseDialogProjection({ phase: 'confirming' }, actions);
+    expect(confirming).toMatchObject({ open: true, tone: 'warning', showCancel: true, busy: false });
+    expect(confirming.onCancel).toBe(actions.onCancelConfirm);
+    expect(confirming.onConfirm).toBe(actions.onConfirm);
+
+    const closing = resolveRemoteWindowCloseDialogProjection({ phase: 'closing' }, actions);
+    expect(closing).toMatchObject({ open: true, tone: 'warning', showCancel: false, busy: true });
+    expect(closing.onConfirm).toBeUndefined();
+
+    const unsupported = resolveRemoteWindowCloseDialogProjection(
+      { phase: 'unsupported', message: '该远端目标不支持远程关闭。' },
+      actions,
+    );
+    expect(unsupported).toMatchObject({ tone: 'warning', confirmLabel: '本地退出', showCancel: false });
+    expect(unsupported.onConfirm).toBe(actions.onExitLocal);
+
+    for (const phase of ['not_closed', 'unverified', 'failed'] as const) {
+      const outcome = resolveRemoteWindowCloseDialogProjection({ phase, message: 'x' }, actions);
+      expect(outcome).toMatchObject({ tone: 'error', showCancel: true, confirmLabel: '重试', cancelLabel: '本地退出' });
+      expect(outcome.onCancel).toBe(actions.onExitLocal);
+    }
+  });
+
+  it('maps typed remote-close results and failures onto close outcomes', () => {
+    expect(resolveRemoteWindowCloseResult({ status: 'closed' })).toEqual({ kind: 'closed' });
+    expect(resolveRemoteWindowCloseResult({ status: 'not_closed' })).toMatchObject({ kind: 'outcome', phase: 'not_closed' });
+    expect(resolveRemoteWindowCloseResult({ status: 'unsupported', error: 'no route' })).toEqual({
+      kind: 'outcome',
+      phase: 'unsupported',
+      message: 'no route',
+    });
+    expect(resolveRemoteWindowCloseResult({ status: 'failed', error: 'boom' })).toEqual({
+      kind: 'outcome',
+      phase: 'failed',
+      message: 'boom',
+    });
+    expect(resolveRemoteWindowCloseResult(undefined)).toMatchObject({ kind: 'outcome', phase: 'unverified' });
   });
 });

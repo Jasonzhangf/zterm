@@ -1,4 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
+import { WebSocket, WebSocketServer } from 'ws';
+import type { AddressInfo } from 'node:net';
 import {
   handleTargetMuxTransportFailureRuntime,
   notifyTargetNetworkSignalRuntime,
@@ -6,6 +8,10 @@ import {
   resolveMuxChannelClosedWithControlStatusRuntime,
   routeTargetSocketFailureRuntime,
 } from './session-context-transport-orchestration-runtime';
+import {
+  createRemoteWindowMessageRuntime,
+  type RemoteWindowInputDeliveryOutcomeV1,
+} from '../lib/remote-window-message-runtime';
 import { createSessionTargetNetworkProbeRuntime } from './session-context-target-network-probe-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
@@ -710,6 +716,7 @@ describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
     const runtimeDebug = vi.fn();
+    const onTransportTeardown = vi.fn();
 
     resolveMuxChannelClosedWithControlStatusRuntime({
       sessionId: 'session-1',
@@ -723,6 +730,7 @@ describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
         ...makeClosedChannel('demo'),
         channelId: 'channel-2',
       }),
+      onTransportTeardown,
       scheduleReconnect,
       updateSessionSync,
       emitSessionStatus,
@@ -733,6 +741,8 @@ describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
     expect(queryTargetSessions).not.toHaveBeenCalled();
     expect(scheduleReconnect).not.toHaveBeenCalled();
     expect(emitSessionStatus).not.toHaveBeenCalled();
+    // A superseded channel close must not cancel input owned by the current (newer) transport.
+    expect(onTransportTeardown).not.toHaveBeenCalled();
     expect(runtimeDebug).toHaveBeenCalledWith('session.mux.channel-closed.control-status.stale', {
       sessionId: 'session-1',
       channelId: 'channel-1',
@@ -1023,5 +1033,148 @@ describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
     }));
     expect(routeTargetControlUnavailable).not.toHaveBeenCalled();
     expect(emitSessionStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('real WS transport close settles reliable input through the mux close entry', () => {
+  it('settles only the closed session once and keeps the other session deliverable', async () => {
+    const server = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+
+    const runtime = createRemoteWindowMessageRuntime({ now: () => Date.now() });
+    const outcomes: RemoteWindowInputDeliveryOutcomeV1[] = [];
+    runtime.subscribeInputOutcome((outcome) => { outcomes.push(outcome); });
+
+    const sendSocketPayload = (
+      _sessionId: string,
+      ws: BridgeTransportSocket,
+      data: string | ArrayBuffer,
+    ) => {
+      (ws as unknown as WebSocket).send(data as string);
+    };
+
+    // Local server owns only the public wire: it records real input frames and ACKs session-b input.
+    server.on('connection', (socket) => {
+      socket.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString());
+        if (msg.type !== 'remote-window-input' || msg.payload.targetId !== 'target-b') {
+          return;
+        }
+        socket.send(JSON.stringify({
+          type: 'remote-window-input-ack',
+          control: {
+            version: 1,
+            sequence: msg.control.sequence,
+            accepted: true,
+            retryable: false,
+            duplicate: false,
+            receivedAtMs: Date.now(),
+          },
+          payload: { streamId: msg.payload.streamId, targetId: msg.payload.targetId },
+        }));
+      });
+    });
+
+    const openClient = async () => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', () => resolve());
+        socket.once('error', reject);
+      });
+      socket.on('message', (raw) => { runtime.dispatch(JSON.parse(raw.toString())); });
+      return socket;
+    };
+
+    const socketA = await openClient();
+    const socketB = await openClient();
+    const wsA = socketA as unknown as BridgeTransportSocket;
+    const wsB = socketB as unknown as BridgeTransportSocket;
+
+    // A's first action is in-flight; A's second action and B's action wait behind the single-flight barrier.
+    runtime.sendInputEvent('session-a', {
+      ws: wsA,
+      sendSocketPayload,
+      payload: { streamId: 'stream-a', targetId: 'target-a', event: { kind: 'focus' } },
+    });
+    const queuedA = runtime.sendInputEvent('session-a', {
+      ws: wsA,
+      sendSocketPayload,
+      payload: {
+        streamId: 'stream-a',
+        targetId: 'target-a',
+        event: { kind: 'key', phase: 'down', key: 'A', code: 'KeyA' },
+      },
+    });
+    runtime.sendInputEvent('session-b', {
+      ws: wsB,
+      sendSocketPayload,
+      payload: { streamId: 'stream-b', targetId: 'target-b', event: { kind: 'focus' } },
+    });
+
+    const closeCurrentChannelA = () => resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-a',
+      sessionName: 'demo-a',
+      channelId: 'channel-a',
+      reason: 'mux data channel closed',
+      shouldReconnectNow: false,
+      queryTargetSessions: vi.fn(async () => null),
+      readSessionTerminalChannel: () => ({
+        ...makeClosedChannel('demo-a'),
+        sessionId: 'session-a',
+        channelId: 'channel-a',
+      }),
+      onTransportTeardown: (sessionId, reason) => runtime.teardownTransport(sessionId, reason),
+      scheduleReconnect: vi.fn(),
+      updateSessionSync: vi.fn(),
+      emitSessionStatus: vi.fn(),
+      runtimeDebug: vi.fn(),
+    });
+
+    closeCurrentChannelA();
+    // B is dispatched once A settles; the local server ACKs it over the real socket.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(outcomes.filter((outcome) => outcome.streamId === 'stream-a')).toEqual([
+      expect.objectContaining({
+        sequence: queuedA,
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'not-dispatched',
+      }),
+      expect.objectContaining({
+        status: 'cancelled',
+        source: 'client-teardown',
+        execution: 'unconfirmed',
+      }),
+    ]);
+    expect(outcomes.filter((outcome) => outcome.streamId === 'stream-b')).toEqual([
+      expect.objectContaining({
+        status: 'delivered',
+        source: 'daemon-ack',
+        execution: 'confirmed',
+      }),
+    ]);
+
+    const settledA = outcomes.filter((outcome) => outcome.streamId === 'stream-a');
+    runtime.dispatch({
+      type: 'remote-window-input-ack',
+      control: {
+        version: 1,
+        sequence: settledA[0]!.sequence,
+        accepted: true,
+        retryable: false,
+        duplicate: true,
+        receivedAtMs: Date.now(),
+      },
+      payload: { streamId: 'stream-a', targetId: 'target-a' },
+    } as never);
+    // A late duplicate ACK and a late duplicate close never re-settle an already-settled session.
+    closeCurrentChannelA();
+    expect(outcomes.filter((outcome) => outcome.streamId === 'stream-a')).toHaveLength(2);
+
+    socketA.close();
+    socketB.close();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 });

@@ -180,4 +180,54 @@ describe('ZtermDialog', () => {
     expect(screen.getByTestId('zterm-dialog').style.backgroundColor).toContain('--zterm-sheet-overlay');
     expect(screen.getByTestId('zterm-dialog-glyph').style.color).toMatch(/--zterm-dialog-error|--zterm-panel-danger/);
   });
+
+  it('escapes a transformed, clipped ancestor by portalling to the modal layer', () => {
+    document.documentElement.style.setProperty('--zterm-panel-bg', '#101622');
+    render(
+      <div
+        data-testid="remote-window-clipping-ancestor"
+        style={{ transform: 'translateZ(0)', overflow: 'hidden', contain: 'layout paint' }}
+      >
+        <ZtermDialog
+          open
+          title="关闭远端窗口？"
+          showCancel
+          confirmLabel="关闭远端窗口"
+          cancelLabel="取消"
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+        />
+      </div>,
+    );
+
+    const ancestor = screen.getByTestId('remote-window-clipping-ancestor');
+    const dialog = screen.getByTestId('zterm-dialog');
+
+    // A fixed-position child of this ancestor cannot escape its containing
+    // block / paint clip. The dialog must live outside it on the body layer.
+    expect(ancestor.contains(dialog)).toBe(false);
+    expect(dialog.parentElement).toBe(document.body);
+    expect(dialog.style.position).toBe('fixed');
+    expect(dialog.style.zIndex).toBe('240');
+    expect(screen.getByTestId('zterm-dialog-panel').style.background).toContain('--zterm-panel-bg');
+  });
+
+  it('removes the portalled dialog and its node after closing', async () => {
+    const { rerender } = render(
+      <div data-testid="remote-window-clipping-ancestor" style={{ transform: 'scale(1)', overflow: 'hidden' }}>
+        <ZtermDialog open title="关闭远端窗口？" showCancel onConfirm={vi.fn()} onCancel={vi.fn()} />
+      </div>,
+    );
+    expect(document.body.querySelector('[data-testid="zterm-dialog"]')).not.toBeNull();
+
+    rerender(
+      <div data-testid="remote-window-clipping-ancestor" style={{ transform: 'scale(1)', overflow: 'hidden' }}>
+        <ZtermDialog open={false} title="关闭远端窗口？" showCancel onConfirm={vi.fn()} onCancel={vi.fn()} />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(document.body.querySelector('[data-testid="zterm-dialog"]')).toBeNull();
+    }, { timeout: 400 });
+  });
 });

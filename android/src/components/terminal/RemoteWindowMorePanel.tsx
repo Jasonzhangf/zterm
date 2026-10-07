@@ -1,33 +1,29 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { RemoteWindowBrowserUserAgent, RemoteWindowVideoPreference } from '../../lib/types';
 import {
   REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS,
+  REMOTE_WINDOW_VIDEO_CAP_MIN_MBPS,
+  REMOTE_WINDOW_VIDEO_CAP_MAX_MBPS,
   type RemoteWindowQualityMaxFrameRate,
-  type RemoteWindowVideoBudgetMultiplier,
+  type RemoteWindowVideoQualitySettings,
 } from '../../lib/remote-window-video-quality';
 import { styles } from './remote-window-overlay-styles';
-import { AmbientButton, AmbientSelect } from '../ambient';
+import { RemoteWindowIcon } from './remote-window-icons';
+import { AmbientButton, AmbientInput, AmbientSelect } from '../ambient';
 import type { RemoteWindowOrientationPolicy } from './remote-window-overlay-helpers';
-import {
-  REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
-  type RemoteWindowBitrateMultiplierSelection,
-} from './remote-window-overlay-storage';
 
 export interface RemoteWindowMorePanelProps {
   fullscreen: boolean;
-  videoPreference: RemoteWindowVideoPreference;
   streamStatusText: string;
   networkStatusText: string;
   developerDiagnostics: ReactNode;
   onDismiss?: () => void;
+  onRemoteClose?: () => void;
   onToggleFullscreenDisplayMode: () => void;
-  onVideoPreferenceChange: (preference: RemoteWindowVideoPreference) => void;
   displayOrientation?: RemoteWindowOrientationPolicy;
   onDisplayOrientationChange?: (orientation: RemoteWindowOrientationPolicy) => void;
-  bitrateMultiplierSelection?: RemoteWindowBitrateMultiplierSelection;
-  onBitrateMultiplierChange?: (selection: RemoteWindowBitrateMultiplierSelection) => void;
-  maxFrameRateFps?: RemoteWindowQualityMaxFrameRate;
-  onMaxFrameRateChange?: (frameRate: RemoteWindowQualityMaxFrameRate) => void;
+  qualitySettings: RemoteWindowVideoQualitySettings;
+  onQualityApply: (settings: RemoteWindowVideoQualitySettings) => void;
   browserMode?: boolean;
   browserUserAgent?: RemoteWindowBrowserUserAgent;
   browserUserAgentStatus?: 'idle' | 'pending' | 'applied' | 'rejected';
@@ -37,25 +33,67 @@ export interface RemoteWindowMorePanelProps {
 
 export function RemoteWindowMorePanel({
   fullscreen,
-  videoPreference,
   streamStatusText,
   networkStatusText,
   developerDiagnostics,
   onDismiss = () => {},
+  onRemoteClose,
   onToggleFullscreenDisplayMode,
-  onVideoPreferenceChange,
   displayOrientation = 'follow-device',
   onDisplayOrientationChange,
-  bitrateMultiplierSelection = REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
-  onBitrateMultiplierChange,
-  maxFrameRateFps = 30,
-  onMaxFrameRateChange,
+  qualitySettings,
+  onQualityApply,
   browserMode = false,
   browserUserAgent = 'desktop',
   browserUserAgentStatus = 'idle',
   browserUserAgentError = null,
   onBrowserUserAgentChange,
 }: RemoteWindowMorePanelProps) {
+  const [draftPreference, setDraftPreference] = useState<RemoteWindowVideoPreference>(qualitySettings.preference);
+  const [draftMaxBitrateCapMbps, setDraftMaxBitrateCapMbps] = useState<string | null>(
+    qualitySettings.maxBitrateCapMbps === null ? null : String(qualitySettings.maxBitrateCapMbps),
+  );
+  const [draftMaxFrameRateFps, setDraftMaxFrameRateFps] = useState<RemoteWindowQualityMaxFrameRate>(
+    qualitySettings.maxFrameRateFps,
+  );
+
+  useEffect(() => {
+    setDraftPreference(qualitySettings.preference);
+    setDraftMaxBitrateCapMbps(qualitySettings.maxBitrateCapMbps === null ? null : String(qualitySettings.maxBitrateCapMbps));
+    setDraftMaxFrameRateFps(qualitySettings.maxFrameRateFps);
+  }, [qualitySettings]);
+
+  // An empty field means "default budget", not an out-of-range 0.
+  const draftCapMbps = draftMaxBitrateCapMbps === null || draftMaxBitrateCapMbps.trim() === ''
+    ? null
+    : Number(draftMaxBitrateCapMbps);
+  const capInRange = draftCapMbps === null
+    || (Number.isFinite(draftCapMbps)
+      && draftCapMbps >= REMOTE_WINDOW_VIDEO_CAP_MIN_MBPS
+      && draftCapMbps <= REMOTE_WINDOW_VIDEO_CAP_MAX_MBPS);
+  const dirty = draftPreference !== qualitySettings.preference
+    || draftCapMbps !== qualitySettings.maxBitrateCapMbps
+    || draftMaxFrameRateFps !== qualitySettings.maxFrameRateFps;
+
+  const handleApply = () => {
+    if (!capInRange || !dirty) {
+      return;
+    }
+    onQualityApply({
+      preference: draftPreference,
+      maxBitrateCapMbps: draftCapMbps,
+      maxFrameRateFps: draftMaxFrameRateFps,
+    });
+    onDismiss();
+  };
+
+  const handleCancel = () => {
+    setDraftPreference(qualitySettings.preference);
+    setDraftMaxBitrateCapMbps(qualitySettings.maxBitrateCapMbps === null ? null : String(qualitySettings.maxBitrateCapMbps));
+    setDraftMaxFrameRateFps(qualitySettings.maxFrameRateFps);
+    onDismiss();
+  };
+
   return (
     <div data-testid="remote-window-stream-status-panel" data-no-drag="true" style={styles.streamStatusPanel}>
       <div style={styles.morePanelHeader}>
@@ -68,9 +106,27 @@ export function RemoteWindowMorePanel({
           onClick={onDismiss}
           style={styles.morePanelCloseButton}
         >
-          关闭
+          收起
         </AmbientButton>
       </div>
+      {onRemoteClose ? (
+        <div style={styles.moreDangerRow}>
+          <div style={styles.moreDangerCopy}>
+            <span>关闭远端窗口</span>
+            <span style={styles.moreDangerHint}>此操作会关闭所选远端窗口</span>
+          </div>
+          <AmbientButton
+            type="button"
+            data-testid="remote-window-remote-close"
+            aria-label="远程关闭当前窗口"
+            title="远程关闭当前窗口"
+            onClick={onRemoteClose}
+            style={styles.headerIconButtonDanger}
+          >
+            <RemoteWindowIcon name="close-window" />
+          </AmbientButton>
+        </div>
+      ) : null}
       {fullscreen ? (
         <AmbientButton
           type="button"
@@ -86,10 +142,9 @@ export function RemoteWindowMorePanel({
         <AmbientSelect
           aria-label="远程窗口串流偏好"
           data-testid="remote-window-video-preference-select"
-          value={videoPreference}
+          value={draftPreference}
           onChange={(event) => {
-            onVideoPreferenceChange(event.currentTarget.value as RemoteWindowVideoPreference);
-            onDismiss();
+            setDraftPreference(event.currentTarget.value as RemoteWindowVideoPreference);
           }}
           style={styles.bitrateSelect}
         >
@@ -117,36 +172,31 @@ export function RemoteWindowMorePanel({
         </label>
       ) : null}
       <label style={styles.moreField}>
-        <span>码率倍数</span>
-        <AmbientSelect
-          aria-label="远程窗口码率倍数"
-          data-testid="remote-window-bitrate-multiplier-select"
-          value={bitrateMultiplierSelection}
-          onChange={(event) => {
-            onBitrateMultiplierChange?.(
-              event.currentTarget.value === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
-                ? REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO
-                : Number(event.currentTarget.value) as RemoteWindowVideoBudgetMultiplier,
-            );
-            onDismiss();
-          }}
-          style={styles.bitrateSelect}
-        >
-          <option value="auto">默认</option>
-          <option value={1}>1x</option>
-          <option value={2}>2x</option>
-          <option value={4}>4x</option>
-        </AmbientSelect>
+        <span>总码率上限</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <AmbientInput
+            aria-label="远程窗口总码率上限 Mbps"
+            data-testid="remote-window-bitrate-cap-input"
+            type="number"
+            min={REMOTE_WINDOW_VIDEO_CAP_MIN_MBPS}
+            max={REMOTE_WINDOW_VIDEO_CAP_MAX_MBPS}
+            step={0.5}
+            value={draftMaxBitrateCapMbps ?? ''}
+            placeholder="默认"
+            onChange={(event) => setDraftMaxBitrateCapMbps(event.currentTarget.value)}
+            style={{ width: 96 }}
+          />
+          <span>Mbps</span>
+        </span>
       </label>
       <label style={styles.moreField}>
         <span>帧率上限</span>
         <AmbientSelect
           aria-label="远程窗口帧率上限"
           data-testid="remote-window-max-frame-rate-select"
-          value={maxFrameRateFps}
+          value={draftMaxFrameRateFps}
           onChange={(event) => {
-            onMaxFrameRateChange?.(Number(event.currentTarget.value) as RemoteWindowQualityMaxFrameRate);
-            onDismiss();
+            setDraftMaxFrameRateFps(Number(event.currentTarget.value) as RemoteWindowQualityMaxFrameRate);
           }}
           style={styles.bitrateSelect}
         >
@@ -155,6 +205,28 @@ export function RemoteWindowMorePanel({
           ))}
         </AmbientSelect>
       </label>
+      {!capInRange ? (
+        <div style={styles.moreDangerHint}>请输入 0.5-25 Mbps</div>
+      ) : null}
+      <div style={styles.moreField}>
+        <AmbientButton
+          type="button"
+          data-testid="remote-window-quality-apply"
+          disabled={!dirty || !capInRange}
+          onClick={handleApply}
+          style={styles.headerButton}
+        >
+          应用
+        </AmbientButton>
+        <AmbientButton
+          type="button"
+          data-testid="remote-window-quality-cancel"
+          onClick={handleCancel}
+          style={styles.headerButton}
+        >
+          取消
+        </AmbientButton>
+      </div>
       {browserMode && onBrowserUserAgentChange ? (
         <label style={styles.moreField}>
           <span>浏览器排版</span>

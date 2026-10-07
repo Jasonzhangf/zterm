@@ -26,15 +26,15 @@ describe('remote screenshot daemon black-box contract', () => {
   });
 
   it('primes screenshot permission from daemon install-service before bootstrap', () => {
-    const script = readProjectFile('scripts/zterm-daemon.sh');
+    const script = readProjectFile('scripts/prepare-global-daemon-release.sh');
     const installBody = extractBlock(script, 'install_service() {', 1100);
     const stageNativeBody = extractBlock(script, 'stage_native_daemon_binary() {', 900);
-    const preflightBody = extractBlock(script, 'prime_daemon_install_permissions() {', 2200);
+    const preflightBody = extractBlock(script, 'prime_daemon_install_permissions() {', 2600);
 
     expect(installBody).toContain('prime_daemon_install_permissions');
     expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
-    expect(stageNativeBody).toContain('-nt "$NATIVE_DAEMON_SOURCE"');
-    expect(stageNativeBody).toContain('-nt "$REMOTE_WINDOW_CAPTURE_SOURCE"');
+    expect(stageNativeBody).toContain('-nt "${NATIVE_DAEMON_SOURCE}"');
+    expect(stageNativeBody).toContain('-nt "${REMOTE_WINDOW_CAPTURE_SOURCE}"');
     expect(preflightBody).toMatch(/screen|screenshot|screencapture|ScreenCaptureKit/u);
     expect(preflightBody).toContain('zterm-daemon');
     expect(preflightBody).toContain("process.env.ZTERM_DAEMON_NATIVE");
@@ -63,12 +63,14 @@ describe('remote screenshot daemon black-box contract', () => {
     expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
   });
 
-  it('keeps the installed daemon screenshot binary aligned with the packaged support binary', () => {
+  it('installs the canonical daemon native binary through the global installer', () => {
     const releaseScript = readProjectFile('scripts/prepare-global-daemon-release.sh');
-    const shimBlock = extractBlock(releaseScript, 'install_user_shims() {', 520);
+    const installerBody = extractBlock(releaseScript, 'write_installer() {', 1600);
 
-    expect(shimBlock).toContain('cp "$NATIVE_DAEMON_BIN" "${WTERM_BIN_DIR}/zterm-daemon"');
-    expect(shimBlock).toContain('chmod +x "${WTERM_BIN_DIR}/zterm-daemon"');
+    expect(releaseScript).not.toContain('install_user_shims');
+    expect(installerBody).toContain('mkdir -p "${INSTALL_ROOT}" "${LOCAL_BIN}" "${HOME}/.zterm/bin"');
+    expect(installerBody).toContain('cp "${INSTALL_ROOT}/support/zterm-daemon" "${HOME}/.zterm/bin/zterm-daemon"');
+    expect(installerBody).toContain('chmod +x "${HOME}/.zterm/bin/zterm-daemon"');
   });
 
   it('captures screenshots with ScreenCaptureKit inside one daemon identity', () => {

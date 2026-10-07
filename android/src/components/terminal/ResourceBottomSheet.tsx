@@ -234,8 +234,9 @@ export function ResourceBottomSheet({
           // pointercancel，取消已激活的 drawer gesture，导致"半截 -> 全屏"
           // 上滑永远拿不到 touchend/pointerup。把手是显式拖动面，必须声明
           // touch-action: none 才能让浏览器把手势交给本组件。
-          style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px', touchAction: 'none' }}
-          onTouchStart={(event) => { event.stopPropagation(); handleTouchStart(event); }}
+          style={{ position: 'sticky', top: 0, zIndex: 100, display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 30, padding: '6px 0 4px', background: 'var(--zterm-panel-bg)', borderBottom: '1px solid var(--zterm-panel-border)', touchAction: 'none' }}
+          onTouchStart={(event) => { event.preventDefault(); event.stopPropagation(); handleTouchStart(event); }}
+           onTouchMove={(event) => { event.preventDefault(); event.stopPropagation(); }}
           onTouchEnd={(event) => { event.stopPropagation(); handleTouchEnd(event); }}
           onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }}
           onPointerDown={(event) => {
@@ -254,12 +255,12 @@ export function ResourceBottomSheet({
             gestureRuntime.current.cancel(`pointer:${event.pointerId}`);
           }}
         >
-          <span aria-hidden="true" style={{ width: 38, height: 4, borderRadius: 99, background: 'var(--zterm-panel-border)' }} />
+          <span aria-hidden="true" style={{ width: 72, height: 6, borderRadius: 99, background: 'var(--zterm-panel-accent)' }} />
         </div> : null}
-        {!streamExpanded ? <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
+        {!streamExpanded && tab !== 'stream' ? <header style={{ display: 'grid', gridTemplateColumns: '44px 1fr 96px', alignItems: 'center', gap: 8, padding: '8px 16px 14px', borderBottom: '1px solid var(--zterm-panel-border)' }}>
           <AmbientButton type="button" aria-label="关闭资源抽屉" style={{ ...buttonStyle, width: 44, padding: 0, border: 0, borderRadius: 22, fontSize: 13 }} onClick={onClose}>收起</AmbientButton>
-          <div style={{ textAlign: 'center', fontSize: tab === 'stream' ? 16 : 22, fontWeight: 800, letterSpacing: '-0.02em' }}>{tab === 'stream' ? '窗口串流' : '预览'}</div>
-          {tab === 'stream' ? null : <AmbientButton type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</AmbientButton>}
+          <div style={{ textAlign: 'center', fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em' }}>预览</div>
+          <AmbientButton type="button" aria-label="下载当前资源" disabled={!onDownload} onClick={onDownload} style={{ ...buttonStyle, border: 0, background: 'var(--zterm-panel-surface)', fontSize: 16, opacity: onDownload ? 1 : 0.5 }}>下载</AmbientButton>
         </header> : null}
         {!streamExpanded ? <nav aria-label="资源类型" {...{ [RESOURCE_DRAWER_GESTURE_ATTRS.page]: RESOURCE_DRAWER_GESTURE_PAGE_IDS.toolbar, [RESOURCE_DRAWER_GESTURE_ATTRS.scope]: RESOURCE_DRAWER_GESTURE_SCOPE_IDS.toolbar }} style={{ display: 'flex', gap: 6, padding: '10px 16px 8px' }} onTouchStart={(event) => event.stopPropagation()} onTouchEnd={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()} onPointerUp={(event) => event.stopPropagation()}>
           {(['files', 'stream', 'web'] as const).map((item) => (
@@ -290,16 +291,12 @@ export function ResourceBottomSheet({
             data-testid="resource-stream-pane"
             data-resource-drawer-page={RESOURCE_DRAWER_GESTURE_PAGE_IDS.stream}
             data-resource-drawer-scope={RESOURCE_DRAWER_GESTURE_SCOPE_IDS.remoteWindowSurface}
-            style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible' }}
-            onTouchStart={(event) => event.stopPropagation()}
-            onTouchMove={(event) => event.stopPropagation()}
-            onTouchEnd={(event) => event.stopPropagation()}
-            onTouchCancel={(event) => { event.stopPropagation(); handleTouchCancel(event); }}
-            onPointerDown={(event) => event.stopPropagation()}
-            onPointerUp={(event) => event.stopPropagation()}
-            onPointerCancel={(event) => { event.stopPropagation(); gestureRuntime.current.cancel(`pointer:${event.pointerId}`); }}
+            style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column' }}
           >
-            {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
+
+            <div style={{ minHeight: 0, flex: 1, position: 'relative', overflow: 'hidden' }}>
+              {remoteWindowNode || <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: 'var(--zterm-panel-muted)' }}>窗口串流不可用</div>}
+            </div>
           </div>
         ) : null}
         {tab === 'web' ? (

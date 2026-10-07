@@ -195,9 +195,12 @@ describe('resource registry truth gate', () => {
     const npmPackager = read('../android/scripts/prepare-daemon-npm-package.mjs');
     const windowsRunner = read('../android/scripts/windows/zterm-daemon.ps1');
 
-    expect(devCli).toContain('STAGED_DAEMON_ENTRY="${DAEMON_RUNTIME_DIR}/server.cjs"');
-    expect(devCli).toContain('"$NODE_BIN" "$STAGED_DAEMON_ENTRY"');
-    expect(devCli).not.toContain('"$NODE_BIN" "$DAEMON_ENTRY"');
+    // The dev CLI is a thin delegate: it never runs the daemon runtime itself, and only execs the fixed support
+    // script installed by the approved global installer. That keeps one runtime entry and one install path.
+    expect(devCli).toContain('INSTALLED_SUPPORT="${HOME}/.zterm/releases/zterm-daemon/${PACKAGE_VERSION}/support/zterm-daemon.sh"');
+    expect(devCli).toContain('exec bash "${INSTALLED_SUPPORT}" "$@"');
+    expect(devCli).toContain('run daemon:install-global first');
+    expect(devCli).not.toContain('"$NODE_BIN" "$STAGED_DAEMON_ENTRY"');
     expect(devCli).not.toContain('tsx src/server/server.ts');
 
     expect(releaseBuilder).toContain('STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"');

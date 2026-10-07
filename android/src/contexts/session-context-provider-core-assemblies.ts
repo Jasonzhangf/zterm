@@ -308,6 +308,9 @@ export function useSessionProviderCoreAssemblies(
     clientDeviceId: options.bridgeSettings.traversalRelay?.deviceId?.trim() || undefined,
     sessionHandshakeTimeoutMs: SESSION_HANDSHAKE_TIMEOUT_MS,
     sessionTerminalReadyTimeoutMs: SESSION_TERMINAL_READY_TIMEOUT_MS,
+    onSessionTransportTeardown: (sessionId, reason) => {
+      remoteWindowMessageRuntimeRef.current?.teardownTransport(sessionId, reason);
+    },
     refreshHostForReconnect: options.latestSessionHostsRef
       ? (host) => mergeHostWithLatestProjection(host, options.latestSessionHostsRef?.current || [])
       : undefined,

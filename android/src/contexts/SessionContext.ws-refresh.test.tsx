@@ -2982,7 +2982,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       ws2.sent.length = 0;
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(600);
+        await vi.advanceTimersByTimeAsync(1200);
       });
 
       expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request').length).toBeGreaterThan(0);
@@ -3010,7 +3010,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       ws2.sent.length = 0;
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(600);
+        await vi.advanceTimersByTimeAsync(1200);
       });
 
       expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request').length).toBeGreaterThan(0);
@@ -3055,7 +3055,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       ws2.sent.length = 0;
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(260);
+        await vi.advanceTimersByTimeAsync(1100);
       });
 
       expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
@@ -7014,8 +7014,8 @@ describe('SessionContext websocket dynamic refresh', () => {
       });
       ws2.sent.length = 0;
 
-      now = new Date('2026-04-27T00:00:00.600Z').getTime();
-      await new Promise((resolve) => setTimeout(resolve, 80));
+      now = new Date('2026-04-27T00:00:01.100Z').getTime();
+      await new Promise((resolve) => setTimeout(resolve, 200));
 
       expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(screen.getByTestId('session-2-state').textContent).toBe('connected');

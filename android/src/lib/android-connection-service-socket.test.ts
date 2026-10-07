@@ -763,6 +763,116 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     }]);
   });
 
+  it('keeps the service projection alive when a channel command promise rejects', async () => {
+    const { listeners, removes, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    const opened = vi.fn();
+    const closed = vi.fn();
+    const messages: string[] = [];
+    socket.onopen = opened;
+    socket.onclose = closed;
+    socket.onmessage = (event) => messages.push(String(event.data));
+
+    await socket.start();
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-promise-reject',
+      target,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'open', sessionName: 'shell' }],
+      lastHeartbeatAt: 30,
+      lastActivityAt: 30,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    await Promise.resolve();
+    messages.length = 0;
+
+    plugin.sendCommand.mockRejectedValueOnce(new Error('tmux channel not open for this session'));
+
+    socket.send(JSON.stringify({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-1',
+        message: { type: 'buffer-head-request' },
+      },
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    // A rejected channel command is a channel fact, not a physical transport
+    // fact: the service-owned projection must stay attached and re-usable.
+    expect(closed).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    expect([...removes.values()].some((remove) => remove.mock.calls.length > 0)).toBe(false);
+    expect(messages.map((message) => JSON.parse(message))).toEqual([{
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-1',
+        reason: 'tmux channel not open for this session',
+        code: 'native_command_rejected',
+      },
+    }]);
+  });
+
+  it('does not tear down the projection when a rejected channel command targets an already-closed channel', async () => {
+    const { listeners, removes, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    const closed = vi.fn();
+    const messages: string[] = [];
+    socket.onopen = vi.fn();
+    socket.onclose = closed;
+    socket.onmessage = (event) => messages.push(String(event.data));
+
+    await socket.start();
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-closed-reject',
+      target,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'open', sessionName: 'shell' }],
+      lastHeartbeatAt: 31,
+      lastActivityAt: 31,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    await Promise.resolve();
+    messages.length = 0;
+
+    // Foreground-resume shape: native closes the channel first, then a frame
+    // that raced the close is rejected because the channel is gone.
+    listeners.get('androidConnectionChannelClosed')?.({
+      kind: 'channel-closed',
+      targetKey: target.targetKey,
+      generation: 'g-closed-reject',
+      channelId: 'channel-1',
+      reason: 'service-reconnect',
+      code: 'native_reconnect',
+    });
+    await Promise.resolve();
+    const messagesAfterClose = messages.length;
+
+    plugin.sendCommand.mockRejectedValueOnce(new Error('tmux channel not open for this session'));
+    socket.send(JSON.stringify({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-1',
+        message: { type: 'buffer-head-request' },
+      },
+    }));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(closed).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    expect([...removes.values()].some((remove) => remove.mock.calls.length > 0)).toBe(false);
+    expect(messages).toHaveLength(messagesAfterClose);
+  });
+
   it('forwards native channel-close reason and code into the mux frame', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);

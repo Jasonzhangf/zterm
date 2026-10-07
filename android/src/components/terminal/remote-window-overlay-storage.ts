@@ -3,13 +3,6 @@
  * 浮钮位置 / 触摸滚动参数 / 输入模式只经本模块读写 localStorage；
  * 组件禁止直写 raw storage key。
  */
-import {
-  REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS,
-  REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO,
-  type RemoteWindowQualityMaxFrameRate,
-  type RemoteWindowBitrateMultiplierSelection,
-  type RemoteWindowVideoBudgetMultiplier,
-} from '../../lib/remote-window-video-quality';
 import { REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION } from '../../lib/remote-window-touch-action-runtime';
 import type { RemoteWindowInputMode } from './remote-window-overlay-constants';
 import type { RemoteWindowOrientationPolicy } from './remote-window-overlay-helpers';
@@ -26,10 +19,11 @@ export const REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY =
   'zterm:remote-window:input-mode-v1';
 export const REMOTE_WINDOW_DISPLAY_ORIENTATION_STORAGE_KEY =
   'zterm:remote-window:display-orientation-v1';
-export const REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY =
-  'zterm:remote-window:quality-bitrate-multiplier-v1';
-export const REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY =
-  'zterm:remote-window:quality-max-frame-rate-v1';
+export {
+  REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY,
+  REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY,
+  REMOTE_WINDOW_VIDEO_CAP_STORAGE_KEY,
+} from '../../lib/remote-window-video-quality';
 
 export const REMOTE_WINDOW_DISPLAY_ORIENTATION_OPTIONS = [
   'portrait',
@@ -175,59 +169,11 @@ export function writeRemoteWindowDisplayOrientation(orientation: RemoteWindowOri
   window.localStorage.setItem(REMOTE_WINDOW_DISPLAY_ORIENTATION_STORAGE_KEY, orientation);
 }
 
-function resolveRemoteWindowBitrateMultiplier(value: unknown): RemoteWindowVideoBudgetMultiplier | null {
-  const parsed = typeof value === 'number' ? value : Number(value);
-  return parsed === 1 || parsed === 2 || parsed === 4 ? parsed : null;
-}
-
-function resolveRemoteWindowMaxFrameRate(value: unknown): RemoteWindowQualityMaxFrameRate | null {
-  const parsed = typeof value === 'number' ? value : Number(value);
-  return (REMOTE_WINDOW_QUALITY_FRAME_RATE_OPTIONS as readonly number[]).includes(parsed)
-    ? parsed as RemoteWindowQualityMaxFrameRate
-    : null;
-}
-
-export { REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO, type RemoteWindowBitrateMultiplierSelection };
-
-// `auto` means the user has not overridden the bitrate budget, so the resolved
-// profile keeps its per-preference baseline (smooth 2x / quality 4x).
-export function readRemoteWindowBitrateMultiplierSelection(): RemoteWindowBitrateMultiplierSelection {
-  if (typeof window === 'undefined') {
-    return REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO;
-  }
-  return resolveRemoteWindowBitrateMultiplier(
-    window.localStorage.getItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY),
-  ) ?? REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO;
-}
-
-export function writeRemoteWindowBitrateMultiplierSelection(
-  selection: RemoteWindowBitrateMultiplierSelection,
-) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  if (selection === REMOTE_WINDOW_BITRATE_MULTIPLIER_AUTO) {
-    window.localStorage.removeItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY);
-    return;
-  }
-  if (resolveRemoteWindowBitrateMultiplier(selection) === null) {
-    return;
-  }
-  window.localStorage.setItem(REMOTE_WINDOW_QUALITY_BITRATE_MULTIPLIER_STORAGE_KEY, String(selection));
-}
-
-export function readRemoteWindowMaxFrameRate(): RemoteWindowQualityMaxFrameRate {
-  if (typeof window === 'undefined') {
-    return 30;
-  }
-  return resolveRemoteWindowMaxFrameRate(
-    window.localStorage.getItem(REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY),
-  ) ?? 30;
-}
-
-export function writeRemoteWindowMaxFrameRate(frameRate: RemoteWindowQualityMaxFrameRate) {
-  if (typeof window === 'undefined' || resolveRemoteWindowMaxFrameRate(frameRate) === null) {
-    return;
-  }
-  window.localStorage.setItem(REMOTE_WINDOW_QUALITY_MAX_FRAME_RATE_STORAGE_KEY, String(frameRate));
-}
+// Quality settings are stored per remote target by the lib owner so the
+// legacy multiplier migration happens exactly once; components stay free of
+// raw keys by importing the typed facade there.
+export {
+  readRemoteWindowVideoQualitySettings,
+  writeRemoteWindowVideoQualitySettings,
+} from '../../lib/remote-window-video-quality';
+export type { RemoteWindowVideoQualitySettings } from '../../lib/remote-window-video-quality';

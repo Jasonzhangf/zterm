@@ -5,22 +5,22 @@ description: zterm Windows Electron 客户端与 WezTerm daemon 开发闭环，�
 
 # zterm Windows Dev
 
-## 节点笔记与必读
+## 真源与必读
 
-先审计本任务已有节点笔记和证据，判明当前状态与缺口，再按受影响范围读取真源；已记录且未失效的事实不重复读取、不重复验证。
+节点笔记、证据复用和状态机推进按全局 `coding-principals`；本节只列 Windows 项目真源，不重复维护通用流程。
 
 ```
-0. 任务独占 run notes        → 当前节点状态与已有证据（先读）
-1. `win/docs/architecture.md`
-2. `android/docs/dagpipe/windows-remote-access-client.graph.json`
-3. `android/docs/dagpipe/README.md`
-4. `win/docs/testing/windows-desktop-shell-test-design.md`
-5. `win/MEMORY.md`
+0. 任务独占 run notes        → 先按全局 coding-principals 审计当前状态与已有证据
+1. `~/.agents/AGENTS.md`
+2. `~/.agents/skills/coding-principals/SKILL.md`
+3. `win/docs/architecture.md`
+4. `android/docs/dagpipe/windows-remote-access-client.graph.json`
+5. `android/docs/dagpipe/README.md`
+6. `win/docs/testing/windows-desktop-shell-test-design.md`
+7. `win/MEMORY.md`
 ```
 
-重读触发仅限：代码、输入、配置、依赖、产物或必要环境变化，证据缺失/冲突/过期，或需刷新 main/远端/PID/runtime 等可变状态；换轮、换 agent、单纯不放心不触发重读。
-
-节点笔记是阶段状态唯一载体：开发/修复/重构的每个流程节点完成、失败或阻塞时立即写 `时间/节点｜结论或状态｜证据路径｜输入版本及必要环境｜下一步`；未证实的判断标假设，失败保留原错。进入下一节点、重试、恢复或交接前先读笔记再动作；已有有效证据直接复用，不重复检查。
+只读受影响真源；证据失效与重读边界按全局 `coding-principals`。
 
 ## 边界
 

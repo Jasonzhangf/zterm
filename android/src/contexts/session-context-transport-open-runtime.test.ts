@@ -579,4 +579,44 @@ describe('pending transport open no_body_demand close', () => {
     }));
     expect(emitSessionStatus).not.toHaveBeenCalled();
   });
+
+  it('settles the owning session input when the reconnect open intent closes', () => {
+    const onSessionTransportTeardown = vi.fn();
+    const intent = buildReconnectTransportOpenIntentOptionsRuntime({
+      sessionId: 'session-1',
+      host: makeHost(),
+      handleReconnectBeforeConnectSend: vi.fn(),
+      handleReconnectHandshakeFailure: vi.fn(),
+      applyTransportOpenLiveFailureEffects: vi.fn(),
+      reconnectStore: createSessionReconnectStore(),
+      applyTransportOpenConnectedEffects: vi.fn(),
+      emitSessionStatus: vi.fn(),
+      updateSessionSync: vi.fn(),
+      onSessionTransportTeardown,
+    });
+
+    intent.onClosed?.('mux data channel closed', 'transport_closed');
+
+    expect(onSessionTransportTeardown).toHaveBeenCalledTimes(1);
+    expect(onSessionTransportTeardown).toHaveBeenCalledWith('session-1', 'mux data channel closed');
+  });
+
+  it('settles the owning session input when the initial open intent closes', () => {
+    const onSessionTransportTeardown = vi.fn();
+    const intent = buildConnectTransportOpenIntentOptionsRuntime({
+      sessionId: 'session-2',
+      host: makeHost(),
+      applyTransportOpenLiveFailureEffects: vi.fn(),
+      scheduleReconnect: vi.fn(),
+      applyTransportOpenConnectedEffects: vi.fn(),
+      emitSessionStatus: vi.fn(),
+      updateSessionSync: vi.fn(),
+      onSessionTransportTeardown,
+    });
+
+    intent.onClosed?.('transport closed', undefined);
+
+    expect(onSessionTransportTeardown).toHaveBeenCalledTimes(1);
+    expect(onSessionTransportTeardown).toHaveBeenCalledWith('session-2', 'transport closed');
+  });
 });

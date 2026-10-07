@@ -2456,6 +2456,7 @@
         "src/components/terminal/remote-window-overlay-helpers.ts",
         "src/components/terminal/remote-window-overlay-styles.ts",
         "src/components/terminal/useRemoteWindowLockedPortal.ts",
+        "src/components/terminal/useRemoteWindowBackNavigation.ts",
         "src/components/terminal/remote-window-icons.tsx",
         "src/components/terminal/RemoteWindowDeveloperDiagnostics.tsx",
         "src/components/terminal/RemoteWindowLockedToolbar.tsx",
@@ -3180,6 +3181,7 @@
       "pending_resources": [],
       "public_interfaces": [
         "scripts/prepare-global-daemon-release.sh",
+        "scripts/prepare-daemon-release-wrtc-input.mjs",
         "scripts/zterm-daemon.sh"
       ],
       "forbidden_resources": [
@@ -3196,7 +3198,9 @@
         "src/lib/resource-registry-truth.test.ts"
       ],
       "status": "active",
-      "owned_paths": []
+      "owned_paths": [
+        "scripts/prepare-daemon-release-wrtc-input.mjs"
+      ]
     },
     {
       "module_id": "observability.debug_channel",
