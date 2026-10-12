@@ -1408,6 +1408,33 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
   });
 
+  it('unsets window-size even when the baseline restore fails so a real client can reflow', async () => {
+    const { runtime, sessions, runTmux } = createRuntime();
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 70,
+      rows: 40,
+      widthMode: 'adaptive-phone',
+    });
+    runTmux.mockClear();
+    runTmux.mockImplementation((args?: string[]) => {
+      if (args?.[0] === 'resize-window') {
+        throw new Error('tmux window already gone');
+      }
+      return { ok: true as const, stdout: '' };
+    });
+
+    runtime.handleAdaptiveResize(session, {
+      cols: 60,
+      widthMode: 'mirror-fixed',
+    });
+
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
+  });
+
   it('uses the backend resize hook with explicit apply and release operations', async () => {
     const resizeBackendSession = vi.fn();
     const { runtime, sessions, mirrors } = createRuntime({

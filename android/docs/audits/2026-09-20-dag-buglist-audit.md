@@ -329,6 +329,17 @@ Source: `appsdk bug list --upstream --json` from `/Volumes/extension/code/zterm/
 
 This matrix is a live-buglist audit, not an upstream close action. No bug was closed in this pass. `FIXED_REVIEWED_MERGED` does not imply push, install, restart, deployment, or live acceptance.
 
+## 14. zterm Regression Addendum (2026-10-12)
+
+This row is a zterm-owned daemon regression, not an upstream AppSDK item. It is
+recorded here so the daemon width-ownership defect has a single tracked entry.
+
+| Bug | Priority | Disposition | Evidence boundary |
+|---|---:|---|---|
+| `BUG-20261012-ITERM2-TMUX-WIDTH-RELEASE` | P1 | `REGRESSION_LOCKED` | `terminal-mirror-runtime.test.ts` unit red/green; `tmux-window-size-semantics.test.ts` real tmux through the adaptive-width owner, including a forced baseline-restore failure; focused suite green. Installed-daemon restart replay tracked separately in `android/docs/debug/2026-10-12-iterm2-tmux-width-release-regression.md`. |
+
+Detail: `android/docs/debug/2026-10-12-iterm2-tmux-width-release-regression.md`.
+
 ### `b6b7007` - appserver intent can masquerade as terminal delivery receipt
 
 - Bug status at final verification: open; only `RouteCodex Bot` is a participant.
