@@ -332,6 +332,9 @@
 - `src/components/TerminalView.dynamic-refresh.test.tsx`
   - `mirror-fixed` 不触发 upstream resize
   - `mirror-fixed` 在当前未接入独立 horizontal pan 手势链时保持左右滑切 tab 可用
+- `src/server/tmux-window-size-semantics.test.ts`
+  - 真实 tmux + node-pty 驱动真实 adaptive width owner：`adaptive-phone` attach 收窄共享 window 并进入 `manual`，release 恢复 baseline 后 unset `window-size`，新 client 重新接管窗口并 reflow
+  - 强制 baseline restore 失败时仍必须 unset `window-size`，锁死 iTerm2 冻结的复发路径
 
 ### 还缺
 

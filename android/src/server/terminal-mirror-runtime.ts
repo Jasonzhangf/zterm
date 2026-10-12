@@ -948,29 +948,40 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror: Pick<SessionMirror, 'sessionName' | 'backend' | 'adaptiveWidthBaselineGeometry'>,
     reason: string,
   ) {
+    let baselineError: unknown = null;
     const baseline = mirror.adaptiveWidthBaselineGeometry;
     if (baseline) {
-      if (deps.resizeBackendSession) {
-        deps.resizeBackendSession(mirror.sessionName, {
-          cols: deps.normalizeTerminalCols(baseline.cols),
-          rows: deps.normalizeTerminalRows(baseline.rows),
-        }, mirror.backend, 'release');
-      } else {
-        deps.runTmuxForSession([
-          'resize-window',
-          '-t',
-          deps.buildExactTmuxSessionTarget(mirror.sessionName),
-          '-x',
-          String(deps.normalizeTerminalCols(baseline.cols)),
-          '-y',
-          String(deps.normalizeTerminalRows(baseline.rows)),
-        ], mirror.sessionName);
+      try {
+        if (deps.resizeBackendSession) {
+          deps.resizeBackendSession(mirror.sessionName, {
+            cols: deps.normalizeTerminalCols(baseline.cols),
+            rows: deps.normalizeTerminalRows(baseline.rows),
+          }, mirror.backend, 'release');
+        } else {
+          deps.runTmuxForSession([
+            'resize-window',
+            '-t',
+            deps.buildExactTmuxSessionTarget(mirror.sessionName),
+            '-x',
+            String(deps.normalizeTerminalCols(baseline.cols)),
+            '-y',
+            String(deps.normalizeTerminalRows(baseline.rows)),
+          ], mirror.sessionName);
+        }
+      } catch (error) {
+        baselineError = error;
       }
     }
     // resize-window itself switches the window to manual. Unset window-size
-    // last so tmux returns to its configured policy (normally latest).
+    // last so tmux returns to its configured policy (normally latest). The
+    // unset must also run when the baseline restore fails; otherwise tmux stays
+    // in manual and a real iTerm2 pane remains frozen at the daemon's last
+    // frame size with broken history/reflow.
     if (mirror.backend === 'tmux') {
       deps.runTmuxForSession(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size'], mirror.sessionName);
+    }
+    if (baselineError !== null) {
+      throw baselineError;
     }
     console.log(`[${deps.logTimePrefix()}] adaptive width released`, {
       sessionName: mirror.sessionName,
