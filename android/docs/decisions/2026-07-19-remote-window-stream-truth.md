@@ -185,6 +185,8 @@ idle
 
 Only `closed` releases capture, encoder, WebRTC sender, and target lease. Back from `fullscreenStream` must not close or recreate the stream.
 
+The user-visible session stage is a separate chain from the overlay phase: `idle -> resolving-route -> signaling -> negotiating-media -> awaiting-first-data -> awaiting-first-frame -> streaming`, with `reconnecting` and `error` as exits. The two post-connect stages exist because a connected transport is not a visible picture. `awaiting-first-data` means the receiver attached and the wire may carry data; `awaiting-first-frame` means the daemon confirmed its capture started; `streaming` means a decoded frame actually reached the client surface. Each transition is driven by its own real event — receiver attach, the daemon's `capture-started` status, and the first decoded frame — and a transition carrying another stream id is ignored. No UI timer may advance either post-connect stage, because a clock cannot tell "the Mac is sending" from "the phone is decoding".
+
 Floating preview geometry and fullscreen zoom state are Android projection-only. The floating preview uses the selected manifest crop/window aspect ratio instead of a fixed frame. Fullscreen local drawing/input stays aspect-fit; the fill action is an explicit daemon `window-resize` request only for ordinary app-window targets. iTerm2 app-window and pane targets must reject that request so streaming cannot resize the iTerm window or tmux shell; the behavior must not be faked by local cover/crop, tmux resize, capture restart, WebRTC renegotiation, or coordinate fallback. Pinch zoom may enlarge above fit and shrink back to 1x, but the client must not render a minimap/viewport overlay or allow shrinking below fit. Pointer/keyboard events emitted from the video surface are normalized against the selected manifest crop and sent as explicit input intents; the media `<video>` is pointer-transparent and daemon/native input policy is still the only injection truth. In the embedded half-sheet preview the video surface is non-interactive: it renders the received frame only, and the drawer grip owns the transition to embedded fullscreen.
 
 Remote-window media negotiation is a separate WebRTC peer connection, but its ICE configuration must be derived from the current session traversal route. When the active session resolved through `rtc-direct`, the video receiver/start request uses the same STUN-only direct ICE truth. When it resolved through `rtc-relay`, the video receiver/start request uses the Relay TURN ICE truth. Android must not leave the remote-window video peer connection as no-ICE on Relay/cellular paths, and must not invent a screenshot or terminal-buffer fallback if ICE/media negotiation fails.
@@ -212,7 +214,15 @@ The daemon must fail explicitly for:
 - WebRTC sender failure
 - input return rejected by focus policy
 
-No fallback may silently downgrade this feature to screenshot, terminal buffer render, stale cached image, another TCC subject, or a runtime-generated capture process. Install-time permission probing and ScreenCaptureKit startup both use the one installed `zterm-daemon` binary: `--permission-probe` before service bootstrap, and the `remote-window-capture` subcommand as the runtime child. Permission probing is read-only: it may call `CGPreflightScreenCaptureAccess()` once, but must not call `CGRequestScreenCaptureAccess()`, wait, poll, retry, or switch executables. Missing permission exits immediately and leaves the caller with an explicit failure.
+No fallback may silently downgrade this feature to screenshot, terminal buffer render, stale cached image, another TCC subject, or a runtime-generated capture process. Install-time permission probing and ScreenCaptureKit startup both use the one installed `zterm-daemon` binary: `--permission-probe` before service bootstrap, and the `remote-window-capture` subcommand as the runtime child.
+
+The install-time probe must REQUEST Screen Recording permission instead of only asking whether it is already granted. When `CGPreflightScreenCaptureAccess()` reports no permission, the probe calls `CGRequestScreenCaptureAccess()` exactly once, then waits for the human answer by polling `CGPreflightScreenCaptureAccess()` under one bounded deadline, and exits 0 on grant or 5 when the deadline passes. The request is never repeated, no TCC state is reset, and no second executable is used.
+
+macOS 26 may refuse to show that dialog. Measured on the Air (macOS 26.6.2, 2026-10-16): `tccd` answered every request within 2 ms with `Service kTCCServiceScreenCapture does not allow prompting; returning denied.` This happened for an ad-hoc bare binary launched by launchd, for an ad-hoc bundle launched through LaunchServices, and for a bundle signed with a stable local certificate; the screen was unlocked for the last two. The subject was attributed correctly in all three cases (`responsiblePath` was the installed `zterm-daemon`), so this is the platform prompting policy, not an attribution error. The install step therefore must not treat the request as its only recovery path. When the probe exits 5, the install output must name the exact installed binary path and the exact System Settings pane and add button, and must not claim that a dialog was shown. A notarized Developer ID build may restore the prompt; that is unverified here.
+
+The runtime capture child stays preflight-only. It calls `CGPreflightScreenCaptureAccess()` once and exits 5 before capture allocation when permission is missing, because the grant decision belongs to the install step and a running stream must not block on a dialog. The daemon never initiates a grant from a stream request, and a missing permission is an explicit typed failure, not a retryable condition.
+
+Two silent states must stay distinguishable. A capture child that exits 5 states a permission denial. A capture child that built its SCStream but delivered no frame within the startup timeout is different: macOS shows no dialog and the child prints no stderr, so the failure looks like a generic timeout. The startup timeout error must therefore carry the child's collected stderr even while the child is still alive, and it must name the missing-permission case separately from a generic timeout. The focus capture lane reports that zero-frame case as `failureStage: focus-capture-first-frame`; any other capture-start rejection keeps `focus-capture-start`.
 
 ## Implementation Status
 
@@ -280,3 +290,54 @@ Validation evidence for the current remote-stream candidate (2026-09-10):
 Live quality control is an acknowledged stream-group profile transaction. A request carries `streamGroupId` and monotonic `revision`; success returns the requested and actually applied focus/overview configuration plus the one total group budget. Bitrate-only updates mutate sender parameters only; cadence/dimensions update the existing capture configuration in place; exact matches are no-op. Any lane failure rolls every touched lane back, does not advance the applied revision, and returns an explicit rejection. The client displays desired/in-flight/applied/rejected separately, queues only the latest desired profile, never projects requested quality as applied before the matching ACK, and ignores the next two transient stats samples. Cause-specific ABR uses a bounded one-level ladder and restores only one level after a stable window.
 
 Gesture recognition has one client owner. Direct Touch one-finger movement commits to realtime remote scroll at 1x unless the 250 ms hold has committed reliable drag; zoomed floating keeps local canvas pan and zoomed fullscreen one finger is a complete no-op. A stationary 500 ms hold emits one right click at 1x. Two-finger coherent motion commits to remote scroll at both 1x and zoomed scale, and anti-parallel distance change commits to local pinch. Modes latch until the sequence ends; duration never invalidates release and cancel releases any remote down. Mouse Emulation drag emits pointer down, realtime move, and pointer up. The first direct-touch scroll event sets `moveCursor=false`. Runtime dispatch consumes the recognized business action; sequence/retry/ACK remains in the separate delivery control owner and no second long-press recognizer exists. Primary controls expose mode, screenshot, keyboard, and More with 48-by-48 minimum hit targets; low-frequency display and quality controls live under More, and developer diagnostics remain collapsed separately from user status.
+
+## 2026-10-17 Latency and clarity tuning points
+
+This is the §3.2 inventory for the remote-window perf task. Each row is a point where a measured segment can actually be changed, with its current owner. No row is a claim of a measured gain; measurement remains the released-gate evidence.
+
+| point | current value and owner | segment it moves |
+| --- | --- | --- |
+| capture pixel format | `src/server/remote-window-screen-capture-script.ts:105` fixes `kCVPixelFormatType_32BGRA` and converts through `rgbaToI420` (4:2:0) | chroma clarity (B-1), VBR size |
+| capture frame rate | same file `:107` sets `minimumFrameInterval = 1/frameRate`; the value originates from the client profile `frameRate` (`src/lib/remote-window-video-quality.ts:904`) and reaches the daemon at `src/server/remote-window-stream-daemon.ts:1454` | capture fps, encode load |
+| capture output size | same file `:112-115` uses `outputWidth`/`outputHeight` from the layout planner, else the crop rect | clarity under zoom (B-2), encode cost |
+| bitrate bounds | `src/lib/remote-window-video-quality.ts:169-175`: `smooth` 750k-4M, `quality` 3M-10M | text legibility, send pressure |
+| quality multiplier | `src/lib/remote-window-video-quality.ts:14` persists a multiplier under `zterm:remote-window:quality-bitrate-multiplier-v1` | applied budget (client policy only) |
+| ABR ladder | `src/lib/remote-window-video-quality.ts` bounded one-level ladder, restore one level after a stable window | recovery shape after pressure |
+| codec | VP8 only; no 4:4:4 profile exists in the current sender, so B-1 must change the conversion path before any chroma claim | chroma clarity (B-1) |
+| input injection | daemon `daemonInputInjectMs` telemetry (p50 2 ms when the host is idle, 28 ms under load) | input-to-frame latency |
+| client presentation | `requestVideoFrameCallback` plus 2D canvas `drawImage`; `clientPresentedFrameIntervalMs` is the observed interval | perceived smoothness |
+| route and RTT | `TraversalDiagnostics` (resolved path, ICE round trip) is produced in `src/lib/traversal/socket.ts:765` and has no client projection yet | A-2 status line and verdicts |
+
+Two rules follow from this table. First, no point may be changed without a baseline run recorded under the harness comparability conditions, because host load alone moved `daemonEncodeMsPerFrame` from 1.13 ms to 58 ms across runs. Second, network delay and frame delay stay separate in every report; they are different segments and must never be added into one number.
+
+### Cursor capture state (§3.3)
+
+The two screenshot paths explicitly exclude the pointer: `scripts/native/zterm-daemon.swift:76` and `:105` both set `configuration.showsCursor = false` before `SCScreenshotManager.captureImage`. The streaming path does not. `src/server/remote-window-screen-capture-script.ts:102-116` builds its own `SCStreamConfiguration`, sets pixel format, frame interval, and output size, and never assigns `showsCursor`, so it keeps the platform default of true. That stream uses a window-scoped filter, `SCContentFilter(display:including:[window])` at `:367` and `:423`.
+
+The honest conclusion is therefore conditional, not absolute: the streaming lane has no explicit cursor opt-out, and the screenshot lane does. Before C-4 draws a client-side cursor, a device run must confirm whether a window-scoped filter already renders the pointer; if it does, an explicit `showsCursor = false` belongs in the stream configuration, not in the client.
+
+### §3.1 Baseline table
+
+Reproduce with `node scripts/remote-window-perf-baseline.mjs --serial <serial> --cdp-port <port> --seconds 30 --out <dir>`. It drives the installed app through the real remote-window entry, takes daemon telemetry from the authenticated channel, and writes one table plus a `baseline.json`. Every value is a labelled proxy segment; none of them is glass-to-glass latency. `host: load` is the machine that runs the harness; the daemon segments come from whichever daemon served the run, so the daemon uptime and target window identify the run.
+
+Three runs against the Air daemon with the same build and a 580x385 window, all inside one hour:
+
+| run (UTC) | host load | capture to encode p50 | encode p50 | packet send p50 | network RTT p50 | captured fps | input inject p50 | decoded growth |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-16T02-03-44Z | 42.72 / 43.02 / 43.86 | 1 ms | 1.13 ms | 2.92 ms | 341 ms | 28.5 | 2 ms | 15 -> 510 |
+| 2026-10-16T02-11-02Z | 49.31 / 45.49 / 44.79 | 1 ms | 1.09 ms | 1.53 ms | 339 ms | 28.55 | 3 ms | 3 -> 987 |
+| 2026-10-16T02-16-13Z | 48.69 / 48.14 / 46.43 | 1 ms | 1.14 ms | 2.89 ms | 338 ms | 28.49 | 2 ms | 6 -> 1117 |
+
+Two runs on a saturated host, same app and same harness, for the negative envelope:
+
+| run (UTC) | host load | capture to encode p50 | encode p50 | packet send p50 | network RTT p50 | captured fps | input inject p50 | decoded growth |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-15T05-14-45Z | 65.49 / 64.45 / 62.78 | 18 ms | 65.75 ms | 265.86 ms | 15 ms | 2.9 | 37 ms | 1 -> 39 |
+| 2026-10-16T02-54-17Z | 56.06 / 53.5 / 50.26 | 32 ms | 58.15 ms | 68.86 ms | 22 ms | 3.58 | 28 ms | 3 -> 88 |
+
+Reading rules for every later comparison:
+
+- The `daemonNetworkRttMs` near 340 ms in the Air rows is a tunnel-topology artefact, not a LAN round trip. Compare it only against runs with the same topology.
+- `droppedVideoFrames` exceeded decoded frames in the Air rows because the receiver draws into a hidden `opacity: 0` video surface on a software rasterizer. It is not a stream defect and must not be quoted as one.
+- A run is comparable only when the host load is low and the target window, resolution, and topology match. A saturated host changed encode p50 by more than 50x, so no timing claim may be made from the negative rows.
+- The baseline shows the three-track priorities in order: capture-to-encode and encode are already 1 ms on an idle host, while packet send delay and the client-side ack round trip are the segments with room, and clarity is limited by the 4:2:0 conversion rather than by the encoder.
