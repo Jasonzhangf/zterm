@@ -1,4 +1,5 @@
 import type { BridgeSettings } from '../lib/bridge-settings';
+import type { TraversalDiagnostics } from '../lib/traversal/types';
 import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { MutableRefObject } from 'react';
 import type {
@@ -224,6 +225,11 @@ export interface SessionContextValue {
   state: SessionManagerState;
   scheduleStates: Record<string, SessionScheduleState>;
   getSessionDebugMetrics: (sessionId: string) => SessionDebugOverlayMetrics | null;
+  /**
+   * A-2 route and round-trip facts for a session. Read-only projection of the
+   * physical transport owner; null means the transport is not resolved yet.
+   */
+  getSessionTraversalDiagnostics: (sessionId: string) => TraversalDiagnostics | null;
   createSession: (host: Host, options?: CreateSessionOptions) => string;
   closeSession: (id: string, options?: SessionCloseOptions) => void;
   switchSession: (id: string, options?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => void;

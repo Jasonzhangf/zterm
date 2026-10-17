@@ -232,6 +232,7 @@ export function AppContent({
     state,
     scheduleStates = {},
     getSessionDebugMetrics,
+    getSessionTraversalDiagnostics,
     createSession,
     closeSession,
     switchSession,
@@ -1176,6 +1177,7 @@ export function AppContent({
             sessionGroups={sessionGroups}
             activeSession={terminalActiveSession}
             getSessionDebugMetrics={getSessionDebugMetrics}
+            getSessionTraversalDiagnostics={getSessionTraversalDiagnostics}
             sessionBufferStore={sessionRenderBufferStore}
             onSwitchSession={handleSwitchSessionWithHistory}
             onMoveSession={handleMoveSession}

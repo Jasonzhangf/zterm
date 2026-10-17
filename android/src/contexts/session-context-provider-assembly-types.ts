@@ -21,7 +21,7 @@ import type {
   SessionTransportRuntimeStore,
   TargetTransportRuntime,
 } from '../lib/session-transport-runtime';
-import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { BridgeTransportSocket, TraversalDiagnostics } from '../lib/traversal/types';
 import type {
   Host,
   Session,
@@ -196,6 +196,7 @@ export interface SessionProviderCoreAssembliesResult {
   readTargetTransportRuntimes: () => TargetTransportRuntime[];
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTraversalDiagnostics: (sessionId: string) => TraversalDiagnostics | null;
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTransportRuntime: (sessionId: string) => SessionTransportRuntime | null;
   readSessionTargetRuntime: (sessionId: string) => TargetTransportRuntime | null;

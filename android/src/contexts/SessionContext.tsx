@@ -144,6 +144,7 @@ export function SessionProvider({
     getActiveSession,
     getSession,
     getSessionDebugMetrics,
+    getSessionTraversalDiagnostics,
     sendMessageRaw,
     sendTargetHeartbeat,
   } = useSessionProviderAssemblies({
@@ -201,6 +202,7 @@ export function SessionProvider({
 
   const contextRuntimeRef = useRef({
     getSessionDebugMetrics,
+    getSessionTraversalDiagnostics,
     createSession,
     closeSession,
     switchSession,
@@ -264,6 +266,7 @@ export function SessionProvider({
 
   contextRuntimeRef.current = {
     getSessionDebugMetrics,
+    getSessionTraversalDiagnostics,
     createSession,
     closeSession,
     switchSession,
@@ -327,6 +330,7 @@ export function SessionProvider({
 
   const stableFacade = useMemo(() => ({
     getSessionDebugMetrics: (sessionId: string) => contextRuntimeRef.current.getSessionDebugMetrics(sessionId),
+    getSessionTraversalDiagnostics: (sessionId: string) => contextRuntimeRef.current.getSessionTraversalDiagnostics(sessionId),
     createSession: (...args: Parameters<typeof createSession>) => contextRuntimeRef.current.createSession(...args),
     closeSession: (id: string, options?: SessionCloseOptions) => contextRuntimeRef.current.closeSession(id, options),
     switchSession: (id: string, options?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => (

@@ -47,6 +47,8 @@ import {
   applyRemoteWindowInputResultTarget,
   attachSameAppCompositeWindows,
   attachRemoteWindowStreamReceiver,
+  applyRemoteWindowCaptureStarted,
+  applyRemoteWindowFirstDecodedFrame,
   beginRemoteWindowStreamHandoff,
   beginRemoteWindowStreamSetup,
   closeRemoteWindowOverlay,
@@ -149,6 +151,9 @@ import {
   setPointerCaptureSafely,
   resolveRemoteWindowCloseResult,
   resolveRemoteWindowCloseDialogProjection,
+  formatRemoteWindowStageLabel,
+  formatRemoteWindowRouteLatency,
+  type RemoteWindowRouteLatencyFacts,
   type RemoteWindowOrientationPolicy,
   type RemoteWindowClosePhase,
 } from './remote-window-overlay-helpers';
@@ -196,6 +201,12 @@ export interface RemoteWindowOverlayProps {
   browserOnly?: boolean; browserEntryEnabled?: boolean;
   activeSessionId?: string | null;
   appForegroundActive?: boolean;
+  /**
+   * A-2 route and latency facts. The producer is the session transport owner;
+   * this component only renders them. Null or absent means unknown, and the
+   * status line then keeps its stage wording instead of inventing numbers.
+   */
+  routeLatencyFacts?: RemoteWindowRouteLatencyFacts | null;
   streamInvalidation?: {
     streamId: string;
     message: string;
@@ -273,6 +284,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   activeSessionId,
   appForegroundActive = true,
   streamInvalidation = null,
+  routeLatencyFacts = null,
   requestTargets,
   startStream,
   updateStreamQuality,
@@ -424,6 +436,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
   const handleCanvasProjectionErrorRef = useRef<(message: string) => void>(() => {});
   const handlePlaybackProjectionError = useCallback(
     (message: string) => handleCanvasProjectionErrorRef.current(message), []);
+  // Stable identity: useRemoteWindowPlayback lists this in a useCallback dep
+  // list, so an inline lambda would re-create the playback request each render.
+  const handleFirstDecodedFrame = useCallback(({ streamId }: { streamId: string }) => {
+    if (!streamId) {
+      return;
+    }
+    setState((current) => applyRemoteWindowFirstDecodedFrame(current, streamId));
+  }, []);
   const activeSessionIdRef = useRef(activeSessionId); const stopStreamRef = useRef(stopStream);
   activeSessionIdRef.current = activeSessionId; stopStreamRef.current = stopStream;
   useEffect(() => () => {
@@ -456,6 +476,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     overviewVideoElementRef,
     onVideoDebug,
     onDecodedFrameSize: setReceiverFrameSize,
+    onFirstDecodedFrame: handleFirstDecodedFrame,
     onProjectionError: handlePlaybackProjectionError,
     receiverPlaybackBinding: playbackBindingsByLane.get('focus') ?? null,
     overviewPlaybackBinding: playbackBindingsByLane.get('overview') ?? null,
@@ -586,6 +607,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     videoPreference: qualitySettings.preference,
     maxBitrateCapBps,
     maxFrameRateFps: qualitySettings.maxFrameRateFps,
+    zoomScale: state.phase === 'targetLocked' ? fullscreenViewportRef.current.scale : 1,
     target: state.phase === 'targetLocked' ? state.target : null,
     updateStreamQuality,
     collectStatsRef: collectStreamStatsRef,
@@ -1462,6 +1484,14 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
         }
         if (msg.payload.stage === 'capability-verified' && msg.payload.capability) {
           setStreamCapability(msg.payload.capability);
+        }
+        // The daemon's capture-started event is the only truth for "data is
+        // flowing on the wire". A UI timer must not infer this stage.
+        if (msg.payload.stage === 'capture-started') {
+          setState((current) => applyRemoteWindowCaptureStarted(
+            current,
+            msg.payload.streamId,
+          ));
         }
         if (msg.payload.canvasLayout) {
           setCanvasLayout((current) => (
@@ -2999,7 +3029,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onQualityApply={(settings) => {
         commitQualitySettings(settings);
       }}
-      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${qualityStatus}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
+      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : formatRemoteWindowStageLabel(state.streamStatus)} · ${qualityStatus}${formatRemoteWindowRouteLatency(routeLatencyFacts) ? ` · ${formatRemoteWindowRouteLatency(routeLatencyFacts)}` : ''}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       onDismiss={() => setStreamStatusOpen(false)}
       onRemoteClose={openRemoteCloseConfirm}
@@ -3066,7 +3096,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           moreOpen={streamStatusOpen}
           screenshotBusy={screenshotBusy}
           screenshotButtonStyle={screenshotButtonStyle}
-          streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : state.streamStatus} · ${qualityStatus}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
+          streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : formatRemoteWindowStageLabel(state.streamStatus)} · ${qualityStatus}${formatRemoteWindowRouteLatency(routeLatencyFacts) ? ` · ${formatRemoteWindowRouteLatency(routeLatencyFacts)}` : ''}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
           targetKindLabel={formatTargetKind(state.target)}
            passivePreview={embedded && state.mode === 'floating'}
           onClose={handleExplicitClose}

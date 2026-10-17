@@ -63,7 +63,7 @@ import {
   updateSessionViewportRuntime,
   upsertScheduleJobRuntime,
 } from './session-context-public-runtime';
-import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { BridgeTransportSocket, TraversalDiagnostics } from '../lib/traversal/types';
 import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type {
@@ -79,6 +79,8 @@ export function createSessionPublicFacadeRuntime(options: {
   sessionHeadStoreRef: { current: { getLiveHead: (sessionId: string) => SessionBufferHeadState | null } };
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  /** Route and round-trip facts for a session, read from the transport owner (A-2). */
+  readSessionTraversalDiagnostics: (sessionId: string) => TraversalDiagnostics | null;
   readTargetTransportRuntimes: () => TargetTransportRuntime[];
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   daemonConnection: ClientDaemonConnection;
@@ -352,6 +354,7 @@ export function createSessionPublicFacadeRuntime(options: {
     getSession,
     getSessionScheduleState,
     getSessionDebugMetrics,
+    getSessionTraversalDiagnostics: options.readSessionTraversalDiagnostics,
     manageTmuxSessionsOnOpenTransport,
     queryTerminalSessionCatalogOnOpenTransport,
     sendMessageRaw,
@@ -363,6 +366,7 @@ export function buildSessionContextValueRuntime(options: {
   state: SessionManagerState;
   scheduleStates: Record<string, SessionScheduleState>;
   getSessionDebugMetrics: (sessionId: string) => SessionDebugOverlayMetrics | null;
+  getSessionTraversalDiagnostics: (sessionId: string) => TraversalDiagnostics | null;
   createSession: (host: Session['hostId'] extends string ? any : never, options?: CreateSessionOptions) => string;
   closeSession: (id: string, options?: SessionCloseOptions) => void;
   switchSession: (id: string) => void;
@@ -462,6 +466,7 @@ export function buildSessionContextValueRuntime(options: {
     state: options.state,
     scheduleStates: options.scheduleStates,
     getSessionDebugMetrics: options.getSessionDebugMetrics,
+    getSessionTraversalDiagnostics: options.getSessionTraversalDiagnostics,
     createSession: options.createSession,
     closeSession: options.closeSession,
     switchSession: options.switchSession,

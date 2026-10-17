@@ -25,6 +25,7 @@ import {
   getSessionTransportRuntime,
   getSessionTransportSocket,
   getSessionTransportTargetKey,
+  getTargetTransportTraversalDiagnostics,
   moveSessionTransportSocketToSuperseded,
   removeSessionTransportRuntime,
   setSessionTargetTerminalMuxReady,
@@ -37,7 +38,7 @@ import {
   upsertSessionTransportRuntime,
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
-import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { BridgeTransportSocket, TraversalDiagnostics } from '../lib/traversal/types';
 import {
   buildTerminalMuxChannelMessage,
   buildTerminalMuxChannelOpen,
@@ -63,6 +64,8 @@ export interface SessionContextTransportAccessors {
   readTargetTerminalSocket: (targetKey: string) => BridgeTransportSocket | null;
   readSessionTransportResource: (sessionId: string) => ReturnType<typeof getSessionTransportResource>;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  /** Route and round-trip facts for the session's physical transport (A-2). */
+  readSessionTraversalDiagnostics: (sessionId: string) => TraversalDiagnostics | null;
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTransportRuntime: (sessionId: string) => ReturnType<typeof getSessionTransportRuntime>;
   readSessionTargetRuntime: (sessionId: string) => ReturnType<typeof getSessionTargetTransportRuntime>;
@@ -163,6 +166,10 @@ export function createSessionContextTransportAccessors(
     readTargetTerminalSocket: (targetKey) => getTargetTerminalTransport(storeRef.current, targetKey),
     readSessionTransportResource: (sessionId) => getSessionTransportResource(storeRef.current, sessionId),
     readSessionTransportSocket: (sessionId) => getSessionTransportSocket(storeRef.current, sessionId),
+    readSessionTraversalDiagnostics: (sessionId) => {
+      const targetKey = getSessionTransportTargetKey(storeRef.current, sessionId);
+      return targetKey ? getTargetTransportTraversalDiagnostics(storeRef.current, targetKey) : null;
+    },
     readSessionTransportHost: (sessionId) => getSessionTransportHost(storeRef.current, sessionId),
     readSessionTransportRuntime: (sessionId) => getSessionTransportRuntime(storeRef.current, sessionId),
     readSessionTargetRuntime: (sessionId) => getSessionTargetTransportRuntime(storeRef.current, sessionId),
