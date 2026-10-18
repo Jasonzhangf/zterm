@@ -341,3 +341,24 @@ Reading rules for every later comparison:
 - `droppedVideoFrames` exceeded decoded frames in the Air rows because the receiver draws into a hidden `opacity: 0` video surface on a software rasterizer. It is not a stream defect and must not be quoted as one.
 - A run is comparable only when the host load is low and the target window, resolution, and topology match. A saturated host changed encode p50 by more than 50x, so no timing claim may be made from the negative rows.
 - The baseline shows the three-track priorities in order: capture-to-encode and encode are already 1 ms on an idle host, while packet send delay and the client-side ack round trip are the segments with room, and clarity is limited by the 4:2:0 conversion rather than by the encoder.
+
+### 3.4 Capture resolution must follow content dynamism, not window size
+
+Measured on the Air daemon through the node stream probe (`android/scripts/remote-window-node-stream-probe.mjs`), one variable changed per row (`videoProfile.maxCaptureWidth/Height`):
+
+| target content | maxCapture | actual output | client fps | bitrate | encode ms/frame | send ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| static window (723x853 native) | 640x400 | 339x400 | 28.2 | 20.0 kbps | 0.89 | 0.62 |
+| static window | 1280x800 | 678x800 | 28.0 | 63.3 kbps | 1.25 | 1.12 |
+| static window | 1920x1200 | 723x853 | 27.7 | 70.2 kbps | 1.22 | 1.01 |
+| scrolling terminal | 640x400 | 640x314 | 27.1 | 52.7 kbps | 1.34 | 1.11 |
+| scrolling terminal | 1280x800 | 1280x628 | 20.5 | 142.8 kbps | 1.39 | 24.1 (startup) |
+| scrolling terminal | 1920x1200 | 1920x942 | 21.9 | 176.5 kbps | 3.45 | 16.4 (startup) |
+
+Rules that follow from the table:
+
+- The capture ladder itself works. Output follows `maxCapture*` and saturates at the native window size, so a zoom-aware raise is not silently clamped.
+- On static content, raising the cap is almost free: encode moves 0.89 to 1.25 ms and frame rate does not change.
+- On moving content, raising the cap costs frame rate: 27.1 fps at 640 wide falls to 20.5 at 1280 wide, and encode cost triples at 1920 wide. The cap must therefore be chosen from content dynamism, not from window size alone.
+- Bitrate is not the limiting factor for clarity here. Scrolling text stays under 180 kbps, so the clarity ceiling lives in chroma subsampling and scaling, not in the bitrate budget.
+- The 16 to 24 ms packet send values are connection-startup transients. Steady state is 1.5 to 2.6 ms and does not respond to `maxBitrateBps` (measured 500 kbps versus 2 Mbps at the same 1280x800 target, both around 67 kbps actual). Do not read a startup sample as a steady-state bottleneck.
