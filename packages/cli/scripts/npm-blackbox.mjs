@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { createRequire } from 'node:module';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   chmodSync,
   copyFileSync,
@@ -37,6 +38,10 @@ import {
 } from './platform-smoke-helper.mjs';
 import { resolveRemoteNodePty } from './remote-cli-blackbox-helper.mjs';
 import { resolveNpmInvocation } from './process-entry.mjs';
+import {
+  InteractivePtyShell,
+  cliCommand,
+} from './remote-cli-blackbox.mjs';
 
 const CLI_PACKAGE = '@jsonstudio/zterm-cli';
 const CLI_V1 = '1.0.0-blackbox.1';
@@ -298,11 +303,13 @@ function installedCliJsEntry() {
 }
 
 function windowsCancelPtyInvocation(args) {
-  const entry = installedCliJsEntry();
-  return formalCliInvocation(process.execPath, [entry, ...args], 'win32');
+  return {
+    command: installedCliJsEntry(),
+    args: [...args],
+  };
 }
 
-function startWindowsCancelPty(command, args, options = {}) {
+async function startWindowsCancelPty(command, args, options = {}) {
   assert(platform === 'win32', 'ConPTY cancellation is only valid on Windows');
   assert(nodePtyPackageRoot, '--pty-package-root is required for Windows cancellation');
   const installation = resolveRemoteNodePty(nodePtyPackageRoot);
@@ -310,102 +317,103 @@ function startWindowsCancelPty(command, args, options = {}) {
   const pty = packageRequire(installation.packageRoot);
   assert(pty && typeof pty.spawn === 'function', 'node-pty does not expose spawn()');
 
-  const state = {
-    output: '',
-    timedOut: false,
-    actualExitObserved: false,
-    cleanupTerminationRequested: false,
-  };
-  let exited = false;
-  let timeout;
-  let exitGrace;
-  let settled = false;
-  let resolveResult;
-  let dataSubscription;
-  let exitSubscription;
-  const terminal = pty.spawn(command, options.windowsVerbatimArguments ? args.join(' ') : args, {
-    name: 'xterm-256color',
-    cols: 120,
-    rows: 36,
+  const shell = await InteractivePtyShell.start({
+    pty,
     cwd: options.cwd ?? repoRoot,
-    env: options.env ?? isolatedEnvironment(),
-    useConpty: true,
+    env: {
+      ...(options.env ?? isolatedEnvironment()),
+      ZTERM_REMOTE_NODE: process.execPath,
+      ZTERM_REMOTE_CLI: command,
+    },
+    platform: 'win32',
   });
-  dataSubscription = terminal.onData((chunk) => {
-    state.output += chunk;
-    appendEvidence(`cancel PTY output ${now()} ${JSON.stringify(chunk)}`);
-    if (state.output.length > 2_000_000) {
-      state.output = state.output.slice(-1_000_000);
-    }
-  });
-  const done = new Promise((resolveExit) => { resolveResult = resolveExit; });
-  const finish = (exitCode, signal, error) => {
-    if (settled) return;
-    settled = true;
-    clearTimeout(timeout);
-    clearTimeout(exitGrace);
-    resolveResult({
-      command,
-      args: [...args],
-      exitCode,
-      signal,
-      stdout: state.output,
-      stderr: '',
-      error,
-      timedOut: state.timedOut,
-      actualExitObserved: state.actualExitObserved,
-      cleanupTerminationRequested: state.cleanupTerminationRequested,
-    });
-  };
-  exitSubscription = terminal.onExit(({ exitCode, signal }) => {
-    exited = true;
-    state.actualExitObserved = true;
-    appendEvidence(`cancel PTY exit ${now()} code=${exitCode} signal=${signal}`);
-    finish(exitCode, signal);
-  });
-  if (options.timeoutMs && options.timeoutMs > 0) {
-    timeout = setTimeout(() => {
-      state.timedOut = true;
-      state.cleanupTerminationRequested = true;
-      appendEvidence(`cancel PTY timeout ${now()}`);
-      try {
-        terminal.kill();
-      } catch {
-        // The owned PTY may have exited at the timeout boundary.
-      }
-      if (!settled) exitGrace = setTimeout(() => finish(null, null,
-        new Error('owned ConPTY did not exit after timeout cleanup')), 5_000);
-    }, options.timeoutMs);
-    timeout.unref();
-  }
 
-  return {
-    terminal,
-    done,
-    isRunning: () => !exited,
-    async close() {
-      state.cleanupTerminationRequested ||= !exited;
-      if (!exited) {
-        try {
-          terminal.kill();
-        } catch {
-          // The owned PTY may have exited before cleanup.
-        }
-      }
-      await Promise.race([
-        done,
-        new Promise((resolveWait) => setTimeout(resolveWait, 5_000)),
-      ]);
-      dataSubscription?.dispose();
-      exitSubscription?.dispose();
-      clearTimeout(timeout);
-      clearTimeout(exitGrace);
-      if (!exited) {
-        const error = new Error('owned ConPTY did not exit during cleanup');
-        finish(null, null, error);
+  const marker = 'ZTERM_REMOTE_CLI_FINISH';
+  const started = await shell.startCommand(
+    cliCommand(command, args, 'win32'),
+    marker,
+    options.timeoutMs ?? 60_000,
+  );
+
+  let commandFinished = false;
+  let closePromise;
+  let resolveDone;
+  const done = new Promise((resolve) => { resolveDone = resolve; });
+
+  const closeShell = () => closePromise ??= (async () => {
+    const pid = shell.terminal.pid;
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        if (error.code === 'ESRCH') return false;
         throw error;
       }
-    },
+    };
+    if (alive() && !shell.closed) shell.sendLine('exit');
+    const deadline = Date.now() + 3000;
+    while (alive() && Date.now() < deadline) await delay(25);
+    const forced = alive();
+    if (forced) {
+      process.kill(pid, 'SIGKILL');
+      const cleanupDeadline = Date.now() + 3000;
+      while (alive() && Date.now() < cleanupDeadline) await delay(25);
+    }
+    const result = { closed: !alive(), forced, pid };
+    appendEvidence(`cancel shell cleanup ${JSON.stringify(result)}`);
+    return result;
+  })();
+
+  const finishCommand = async () => {
+    try {
+      return await started.finish();
+    } catch (error) {
+      return {
+        exitCode: null,
+        signal: null,
+        output: shell.visibleSince(started.from),
+        error,
+        timedOut: error?.code === 'pty_wait_timeout',
+      };
+    }
+  };
+
+  (async () => {
+    const commandResult = await finishCommand();
+    commandFinished = true;
+    let cleanupError;
+    try {
+      const cleanupResult = await closeShell();
+      if (!cleanupResult.closed) {
+        cleanupError = new Error(
+          cleanupResult.pid !== undefined
+            ? `isolated shell cleanup failed; owned shell pid=${cleanupResult.pid} still alive`
+            : 'isolated shell cleanup failed before shell exit',
+        );
+      }
+    } catch (error) {
+      cleanupError = error;
+    }
+    resolveDone({
+      command,
+      args: [...args],
+      exitCode: commandResult.exitCode,
+      signal: commandResult.signal ?? null,
+      stdout: commandResult.output,
+      stderr: '',
+      error: commandResult.error ?? cleanupError,
+      cleanupError,
+      timedOut: commandResult.timedOut ?? false,
+      actualExitObserved: !commandResult.error,
+    });
+  })();
+
+  return {
+    terminal: shell.terminal,
+    done,
+    isRunning: () => !commandFinished,
+    close: closeShell,
   };
 }
 
@@ -1262,11 +1270,10 @@ async function main() {
       ? windowsCancelPtyInvocation(args)
       : { command: bin, args };
     const running = platform === 'win32'
-      ? startWindowsCancelPty(cliInvocation.command, cliInvocation.args, {
+      ? await startWindowsCancelPty(cliInvocation.command, cliInvocation.args, {
         cwd: testRoot,
         env,
         timeoutMs: 60_000,
-        windowsVerbatimArguments: cliInvocation.windowsVerbatimArguments,
       })
       : startChild(cliInvocation.command, cliInvocation.args, {
         cwd: testRoot,
@@ -1319,7 +1326,7 @@ async function main() {
       assert(!result.timedOut, 'cancellation timed out; forced termination is not acceptance');
       assert(!result.error, `cancellation process error: ${messageOf(result.error)}`);
       if (platform === 'win32') assert(result.actualExitObserved,
-        'cancellation did not observe an actual ConPTY exit');
+        'cancellation did not observe the actual CLI command completion');
       const observed = await observeInstalledVersion();
       const output = `${result.stdout}\n${result.stderr}`;
       assert(result.exitCode !== 0 || result.signal, 'cancelled upgrade returned success');
