@@ -389,7 +389,9 @@ async function executeHarness({
 
   const ptyRoot = realpathSync(options.ptyPackageRoot);
   requireDirectory(ptyRoot, 'pty package root');
-  const { pty, installation } = loadNodePty(ptyRoot, state.tempRoot);
+  const { pty, installation } = loadNodePty(
+    ptyRoot, process.platform === 'win32' ? undefined : state.tempRoot,
+  );
   const isolated = createIsolatedEnvironment(state.tempRoot);
   isolated.env.ZTERM_REMOTE_NODE = process.execPath;
   isolated.env.ZTERM_REMOTE_CLI = cliBin;
@@ -866,7 +868,6 @@ async function main() {
         tempRemoved = true;
       }
     } catch {
-      shellClosed = false;
       tempRemoved = false;
     }
     const cleanup = {
@@ -929,6 +930,7 @@ const invokedPath = process.argv[1] ? realpathSync(process.argv[1]) : '';
 const scriptPath = realpathSync(fileURLToPath(import.meta.url));
 if (invokedPath === scriptPath) {
   await main();
+  process.exit(process.exitCode ?? 0);
 }
 
 export {

@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -9,6 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildNpmInstallArgs,
@@ -16,6 +18,7 @@ import {
   globalBinPath,
   npmGlobalPackageRoot,
   resolveInstalledEntryInvocation,
+  spawnProcess,
   upgradeCli,
   type ProcessResult,
   type ProcessRunner,
@@ -64,6 +67,51 @@ function updateRunner(overrides: {
 }
 
 describe('CLI npm upgrade adapter', () => {
+  it.skipIf(process.platform === 'win32')('closes an aborted npm process with its interrupt handler', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'zterm-npm-cancel-'));
+    const script = join(root, 'npm-cli.cjs');
+    const ready = join(root, 'ready');
+    const interrupted = join(root, 'interrupted');
+    writeFileSync(script, `
+const fs = require('node:fs');
+process.on('SIGTERM', () => {});
+process.on('SIGINT', () => {
+  fs.writeFileSync(process.argv[3], 'SIGINT');
+  process.exit(130);
+});
+fs.writeFileSync(process.argv[2], String(process.pid));
+setInterval(() => {}, 1000);
+`);
+    const controller = new AbortController();
+    let closed = false;
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    const running = spawnProcess(process.execPath, [script, ready, interrupted], {
+      signal: controller.signal,
+    }).finally(() => { closed = true; });
+    try {
+      const readyDeadline = Date.now() + 2000;
+      while (!existsSync(ready) && Date.now() < readyDeadline) await delay(10);
+      expect(existsSync(ready)).toBe(true);
+      controller.abort();
+      const result = await Promise.race([
+        running,
+        new Promise<never>((_, reject) => {
+          deadline = setTimeout(() => reject(new Error('npm process did not close after abort')), 1000);
+        }),
+      ]);
+      expect(result.error?.code).toBe('ABORT_ERR');
+      expect(result.exitCode).toBe(130);
+      expect(readFileSync(interrupted, 'utf8')).toBe('SIGINT');
+    } finally {
+      clearTimeout(deadline);
+      if (!closed && existsSync(ready)) {
+        process.kill(Number(readFileSync(ready, 'utf8')), 'SIGKILL');
+      }
+      await running;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('uses fixed package, global prefix, and argument arrays for an update', async () => {
     const { runner, calls } = updateRunner();
     const result = await upgradeCli({

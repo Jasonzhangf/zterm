@@ -250,9 +250,11 @@ function startChild(command, args, options = {}) {
   child.stderr?.setEncoding('utf8');
   child.stdout?.on('data', (chunk) => {
     state.stdout += chunk;
+    options.onOutput?.('stdout', chunk);
   });
   child.stderr?.on('data', (chunk) => {
     state.stderr += chunk;
+    options.onOutput?.('stderr', chunk);
   });
   child.once('error', (error) => {
     state.error = error;
@@ -331,6 +333,7 @@ function startWindowsCancelPty(command, args, options = {}) {
   });
   dataSubscription = terminal.onData((chunk) => {
     state.output += chunk;
+    appendEvidence(`cancel PTY output ${now()} ${JSON.stringify(chunk)}`);
     if (state.output.length > 2_000_000) {
       state.output = state.output.slice(-1_000_000);
     }
@@ -1268,6 +1271,9 @@ async function main() {
         cwd: testRoot,
         env,
         timeoutMs: 60_000,
+        onOutput: (stream, chunk) => appendEvidence(
+          `cancel ${stream} ${now()} ${JSON.stringify(chunk)}`,
+        ),
       });
     try {
       try {

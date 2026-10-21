@@ -824,12 +824,11 @@ async function main() {
     ],
     nodePtyStarted: true,
     wrtcPeerCreated: true,
-  }));
+  }), () => process.exit(0));
 }
 
 main().catch((error) => {
-  process.stderr.write((error && error.stack) || String(error));
-  process.exitCode = 1;
+  process.stderr.write((error && error.stack) || String(error), () => process.exit(1));
 });
 `;
   writeFileSync(path, source, { mode: 0o600 });
@@ -849,6 +848,10 @@ async function runNativeProbe(scenario) {
       timeoutMs: 60_000,
     },
   );
+  evidenceLog(`native probe result ${JSON.stringify({
+    exitCode: result.exitCode, signal: result.signal, timedOut: result.timedOut,
+    stdout: result.stdout, stderr: result.stderr, error: result.error?.message,
+  })}`);
   requireSuccess(result, 'installed payload native probe');
   return JSON.parse(result.stdout);
 }
