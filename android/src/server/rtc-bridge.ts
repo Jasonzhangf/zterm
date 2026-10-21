@@ -72,6 +72,8 @@ class RtcPeerTransport implements RtcServerTransport {
 
   private closed = false;
 
+  private releaseGeneration: (() => void) | null = null;
+
   public constructor(
     id: string,
     public readonly requestOrigin: string,
@@ -96,10 +98,18 @@ class RtcPeerTransport implements RtcServerTransport {
     return Math.max(0, Math.floor(this.channel?.bufferedAmount || 0));
   }
 
-  public attach(peerConnection: RTCPeerConnection, channel: RTCDataChannel, handlers: TransportHandlers) {
+  public adopt(peerConnection: RTCPeerConnection, releaseGeneration: () => void) {
     this.closed = false;
     this.peerConnection = peerConnection;
+    this.releaseGeneration = releaseGeneration;
+  }
+
+  public prepareChannel(channel: RTCDataChannel) {
     this.channel = channel;
+  }
+
+  public attach(peerConnection: RTCPeerConnection, channel: RTCDataChannel, handlers: TransportHandlers) {
+    if (this.closed || this.peerConnection !== peerConnection || this.channel !== channel) return;
     this.handlers = handlers;
     channel.binaryType = 'arraybuffer';
     channel.onmessage = (event) => {
@@ -138,14 +148,23 @@ class RtcPeerTransport implements RtcServerTransport {
     const channel = this.channel;
     const peerConnection = this.peerConnection;
     const handlers = this.handlers;
+    const releaseGeneration = this.releaseGeneration;
     this.channel = null;
     this.peerConnection = null;
     this.handlers = null;
+    this.releaseGeneration = null;
+    if (peerConnection) {
+      peerConnection.onicecandidate = null;
+      peerConnection.ondatachannel = null;
+      peerConnection.oniceconnectionstatechange = null;
+    }
     if (channel) {
+      channel.onopen = null;
       channel.onmessage = null;
       channel.onclose = null;
       channel.onerror = null;
     }
+    releaseGeneration?.();
     try {
       channel?.close();
     } catch (error) {
@@ -226,11 +245,6 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     clearPeerStale(peer);
     peer.transport.close(reason);
     try {
-      peer.peerConnection?.close();
-    } catch (error) {
-      console.warn(`[rtc-bridge] Failed to close peer connection for ${peerId}:`, error);
-    }
-    try {
       peer.closeSignal(reason);
     } catch (error) {
       console.warn(`[rtc-bridge] Failed to close signal socket for ${peerId}:`, error);
@@ -248,8 +262,16 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     peer.pendingIceCandidates = [];
     const peerConnection = new RTCPeerConnection(buildRtcPeerConnectionConfig(payload));
     peer.peerConnection = peerConnection;
+    let connectionTimeout: ReturnType<typeof setTimeout> | undefined;
+    peer.transport.adopt(peerConnection, () => {
+      if (connectionTimeout !== undefined) globalThis.clearTimeout(connectionTimeout);
+      if (peer.peerConnection === peerConnection) {
+        peer.peerConnection = null;
+        peer.ready = false;
+      }
+    });
     peerConnection.onicecandidate = (event) => {
-      if (!event.candidate) {
+      if (peer.peerConnection !== peerConnection || !event.candidate) {
         return;
       }
       peer.emitSignal({
@@ -259,27 +281,33 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     };
     peerConnection.ondatachannel = (event) => {
       const channel = event.channel;
+      if (peer.peerConnection !== peerConnection) {
+        channel.close();
+        return;
+      }
+      peer.transport.prepareChannel(channel);
       channel.onopen = () => {
-        if (peer.ready || !peer.peerConnection) {
+        if (peer.ready || peer.peerConnection !== peerConnection) {
           return;
         }
         peer.ready = true;
         const handlers = options.onTransportOpen(peer.transport);
-        peer.transport.attach(peer.peerConnection, channel, handlers);
+        peer.transport.attach(peerConnection, channel, handlers);
       };
     };
     // Direct UDP hole punching can need more than one STUN cycle on cross-NAT paths.
     const connectionTimeoutMs = 30000;
-    const connectionTimeout = globalThis.setTimeout(() => {
+    connectionTimeout = globalThis.setTimeout(() => {
       if (!peer.ready && peer.peerConnection === peerConnection) {
         peer.emitSignal({
           type: 'rtc-error',
           payload: { message: 'rtc ice connection timeout' },
         });
-        peer.transport.close('rtc ice connection timeout');
+        if (peer.peerConnection === peerConnection) peer.transport.close('rtc ice connection timeout');
       }
     }, connectionTimeoutMs);
     peerConnection.oniceconnectionstatechange = () => {
+      if (peer.peerConnection !== peerConnection) return;
       const state = peerConnection.iceConnectionState;
       // Clear timeout once we have any state (connected, failed, closed, etc.)
       if (state !== 'new' && state !== 'checking') {
@@ -291,19 +319,20 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
             type: 'rtc-error',
             payload: { message: `rtc ice connection ${state}` },
           });
-          peer.transport.close(`rtc ice connection ${state}`);
+          if (peer.peerConnection === peerConnection) peer.transport.close(`rtc ice connection ${state}`);
         }
       }
     };
   }
 
-  async function flushPendingIceCandidates(peer: PeerState) {
-    if (!peer.peerConnection || peer.pendingIceCandidates.length === 0) {
+  async function flushPendingIceCandidates(peer: PeerState, peerConnection: RTCPeerConnection) {
+    if (peer.peerConnection !== peerConnection || peer.pendingIceCandidates.length === 0) {
       return;
     }
     const pending = peer.pendingIceCandidates.splice(0);
     for (const candidate of pending) {
-      await peer.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      if (peer.peerConnection !== peerConnection) return;
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }
   }
 
@@ -334,6 +363,8 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       });
       return;
     }
+    const peerConnection = peer.peerConnection;
+    const current = () => peers.get(input.peerId) === peer && peer.peerConnection === peerConnection;
 
     if (message.type === 'rtc-offer') {
       if (peer.offerAccepted) {
@@ -341,10 +372,14 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       }
       peer.offerAccepted = true;
       const sdp = typeof message.payload?.sdp === 'string' ? message.payload.sdp : '';
-      await peer.peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
-      const answer = await peer.peerConnection.createAnswer();
-      await peer.peerConnection.setLocalDescription(answer);
-      await flushPendingIceCandidates(peer);
+      await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
+      if (!current()) return;
+      const answer = await peerConnection.createAnswer();
+      if (!current()) return;
+      await peerConnection.setLocalDescription(answer);
+      if (!current()) return;
+      await flushPendingIceCandidates(peer, peerConnection);
+      if (!current()) return;
       peer.emitSignal({
         type: 'rtc-answer',
         payload: { sdp: answer.sdp, type: answer.type },
@@ -354,11 +389,11 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
 
     if (message.type === 'rtc-candidate' && message.payload?.candidate) {
       const candidate = message.payload as RTCIceCandidateInit;
-      if (!peer.offerAccepted || !peer.peerConnection.remoteDescription) {
+      if (!peer.offerAccepted || !peerConnection.remoteDescription) {
         peer.pendingIceCandidates.push(candidate);
         return;
       }
-      await peer.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }
   }
 
@@ -373,9 +408,12 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     const next = peer.signalChain
       .catch(() => undefined)
       .then(async () => {
+        const peerConnection = peer.peerConnection;
         try {
           await processSignalMessage(input);
         } catch (error) {
+          if (peers.get(input.peerId) !== peer
+            || (input.message.type !== 'rtc-init' && peer.peerConnection !== peerConnection)) return;
           peer.emitSignal({
             type: 'rtc-error',
             payload: { message: error instanceof Error ? error.message : 'rtc signaling error' },

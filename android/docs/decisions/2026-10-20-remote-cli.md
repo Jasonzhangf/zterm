@@ -1,14 +1,14 @@
 # 2026-10-20 Remote daemon CLI design
-状态：`DESIGN_PASS`；macOS arm64 真实全用户链已 PASS；Windows/Linux 平台 gate 和公开
-npm 发布仍待完成。两轮独立设计审查均已通过。本文是已审设计与当前实现边界的项目入口；
-单平台真实黑盒不能替代三平台交付。
+状态：`DESIGN_PASS`；三平台 CLI、原生包及 daemon 安装 gate 已 PASS。当前 Windows
+外部 RTC 连接仍超时，整体独立 Review、main 集成及资源收口待完成。本文是已审设计与
+当前实现边界的项目入口；平台安装通过不能替代远程连接验收。
 
 | 当前项 | 事实 |
 |---|---|
 | 正式入口 | `packages/cli/src/main.ts` 已落地并接通 argv、登录、槽位、终端、升级和 daemon 管理。 |
 | 构建产物 | `packages/cli/dist/main.mjs` 由正式入口构建；本地 tarball 可隔离安装。 |
 | npm 发布 | `@jsonstudio/zterm-cli` 尚未发布到公开 npm；隔离 tarball 不是公开渠道证据。 |
-| 平台验证 | macOS arm64 全用户链 PASS；Windows/Linux 真实 native、安装和运行仍为 UNVERIFIED。 |
+| 平台验证 | Windows x64、macOS arm64、Linux x64 的构建、安装、升级和适用用户链通过；Windows 外部 RTC 当前仍为 UNVERIFIED。 |
 
 ## 1. 范围与命令
 交付全局命令 `zterm`。它使用持久账号登录态、账号设备目录和 1～20 槽位，连接现有
@@ -434,10 +434,19 @@ width 抽离保留必要消费者回归；本次验收使用 Windows、macOS、L
 | T0 设计 | 已 PASS。DAG 与详细设计通过独立审查；本文仍是设计与状态入口。 |
 | T1 图/gate | 11 图及受影响 owner gate 已完成静态校验；拓扑不再由本次集成修改。 |
 | T2/T3/T4/T5 | 受影响的 config、transport、session/snapshot、buffer/input 基础与共享消费者回归已通过。 |
-| T6/T7 | 正式 `main.ts` 已接线；CLI 123 个 Vitest、11 个 Node 测试及 stale-error 17/17 通过，构建和本地 pack 可用。 |
-| T8 | macOS arm64 全用户链 PASS；npm 隔离升级 8/8。Windows/Linux 真实 native、安装、PTY 和运行待 `cli-platform.yml` 或目标主机验证。 |
-| T9 | 进行中。尚待三平台 CI、公开 npm 发布、最终集成和资源收口；本集成不执行 commit/push/publish。 |
+| T6/T7 | 正式 `main.ts` 已接线；CLI 169 个 Vitest、11 个 Node 测试通过，1 个需 live fixture 的测试在常规套件中跳过；构建和本地 pack 可用。 |
+| T8 | 三平台真实 native、CLI 安装、升级和 daemon 安装通过；Windows 外部 RTC 尚待当前候选真实连接验收。 |
+| T9 | 进行中。尚待 Windows 远程连接、整体独立 Review、main 集成和资源收口。公开 npm 尚未发布，本轮不执行公开发布。 |
 
 静态图存在或校验通过只证明拓扑和语法。没有真实入口行为、安装态和适用设备证据时，结论
 保持 `UNVERIFIED` 或 `INCOMPLETE`。不得用 health、socket open、component test 或配置
 读取代替端到端交付。
+
+## 失败连接的原生资源释放补充
+
+连接建立阶段创建的 daemon 原生 RTC peer 仍属于 transport owner，不能等 DataChannel
+打开后才纳入关闭路径。替换或超时必须先失效旧 peer、清除其计时器和回调，再关闭一次；
+新 peer 继续使用原 signaling，已连接的其他 peer 不受影响。await 后的旧操作不得发布
+旧 answer 或打开替代 peer。此修复闭合现有 launch/close 清理语义，不改变 DAG 拓扑、
+路由、连接期限、mirror/session 或 tmux 生命周期。独立计划及失败复现另有记录；
+它不证明原始 Windows 连接超时的根因。关闭后排队信号重新创建 peer 的问题仍待独立证据。

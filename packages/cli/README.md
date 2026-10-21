@@ -14,12 +14,13 @@ identity, logout, and cleanup. The npm isolation upgrade suite passed 8/8.
 The CLI test suite also covers stale session identity and request-driven initial
 mirror delivery.
 
-`@jsonstudio/zterm-cli` is not published to the public npm registry. The
-Linux x64 native build and installed CLI user path have passed platform CI.
-Windows native build has passed; its installed CLI and external remote gates
-remain under validation. The three-platform daemon installation matrix is
-also required before claiming complete platform delivery. See the PR checks
-for current acceptance results.
+`@jsonstudio/zterm-cli` is not published to the public npm registry. Windows
+x64, Linux x64 and macOS arm64 have passed native builds, installed CLI checks,
+isolated npm upgrade checks and the native daemon installation matrix.
+The Windows external RTC user path remains under validation: the current
+candidate reaches TURN candidate exchange but times out before the DataChannel
+opens. Complete remote acceptance, independent review and main integration
+are still pending. See the PR checks for current acceptance results.
 
 ## Platforms and requirements
 
