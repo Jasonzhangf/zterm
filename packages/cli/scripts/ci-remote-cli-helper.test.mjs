@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  collectBridgeTimingEvidence,
   collectTimingEvidence,
   compactTimingEvidenceLine,
   externalRtcConsumerPassed,
@@ -12,6 +13,15 @@ import {
 
 const ROUTE_EVIDENCE =
   'rtc-route-evidence: {"stage":"open","path":"rtc-relay","relayTransport":"turn","localCandidateType":"relay","remoteCandidateType":"relay"}';
+
+test('keeps only bounded anonymous bridge timings before private cleanup', () => {
+  const safe = { ms: 14, event: 'native.first-bytes', connection: 2, bytes: 64 };
+  const lines = [safe, { ...safe, token: 'secret' }, { ...safe, event: 'wss://secret' },
+    { ...safe, connection: -1 }, { ...safe, bytes: 'payload' }]
+    .map(value => `rtc-bridge-timing: ${JSON.stringify(value)}`).join('\n');
+  assert.deepEqual(collectBridgeTimingEvidence(lines), [safe]);
+  assert.equal(collectBridgeTimingEvidence(`${lines}\n`.repeat(600)).length, 512);
+});
 
 const SAFE_TIMING_LINES = [
   'rtc-timing-evidence: {"event":"ws.construct","ms":3,"ws":1}',

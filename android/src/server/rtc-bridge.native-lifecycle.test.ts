@@ -644,6 +644,7 @@ describe('rtc-bridge native lifecycle', () => {
       await resources.dispose();
       await harness.close();
     }
+    expect(nativeObservation.serverRecords().map(record => record.closeCount)).toEqual([1, 1, 1]);
   });
 
   it('closes a native peer on the unchanged 30 second timeout and reuses signaling', { timeout: 45_000 }, async () => {
@@ -694,5 +695,6 @@ describe('rtc-bridge native lifecycle', () => {
       await resources.dispose();
       await harness.close();
     }
+    expect(nativeObservation.serverRecords().map(record => record.closeCount)).toEqual([1, 1, 1]);
   });
 });

@@ -371,3 +371,150 @@ test('child IPC disconnect triggers owned cleanup', async (t) => {
   await waitFor(() => !readFileSync(join(dir, 'frontend.log'), 'utf8').includes('RUNNING'));
   await new Promise((resolve) => upstream.close(resolve));
 });
+
+const TIMING_EVENTS = new Set(['tcp.accept', 'wss.construct', 'wss.open', 'native.first-bytes',
+  'wss.first-bytes', 'tcp.close', 'wss.close', 'health']);
+const TIMING_KEYS = new Set(['ms', 'event', 'connection', 'bytes', 'sequence']);
+
+function assertTimingShape(events) {
+  let previous = -1;
+  for (const event of events) {
+    assert.equal(typeof event.event, 'string');
+    assert.ok(TIMING_EVENTS.has(event.event), `unexpected timing event ${event.event}`);
+    for (const [key, value] of Object.entries(event)) {
+      assert.ok(TIMING_KEYS.has(key), `unexpected timing field ${key}`);
+      if (key !== 'event') {
+        assert.equal(typeof value, 'number', `timing field ${key} must stay numeric`);
+        assert.ok(Number.isInteger(value), `timing field ${key} must be an integer`);
+        assert.ok(value >= 0, `timing field ${key} must be non-negative`);
+      }
+    }
+    assert.ok(Number.isInteger(event.connection) && event.connection >= 0);
+    if ('bytes' in event) assert.ok(event.bytes >= 0);
+    if ('sequence' in event) assert.ok(event.sequence > 0);
+    assert.ok(event.ms >= previous, 'timing ms must stay monotonic');
+    previous = event.ms;
+  }
+}
+
+test('passive bridge timing keeps binary echo intact and reports sanitized per-connection events', async () => {
+  const upstream = echoTcpServer();
+  const { port: upstreamPort } = await listenOnce(upstream);
+  const frontend = await startFixtureFrontend({
+    listenHost: '127.0.0.1',
+    listenPort: 0,
+    relayOrigin: `http://127.0.0.1:${upstreamPort}`,
+    turnTarget: { host: '127.0.0.1', port: upstreamPort },
+    token: 'fresh-token',
+  });
+  const events = [];
+  const client = await startFixtureTurnClient({
+    listenHost: '127.0.0.1',
+    listenPort: 0,
+    bridgeUrl: `${frontend.origin.replace(/^http/, 'ws')}/fixture/turn`,
+    token: 'fresh-token',
+    onTiming: event => events.push(event),
+  });
+  try {
+    assert.deepEqual(events.filter(event => event.connection === 0).map(event => event.event),
+      ['wss.construct', 'wss.open', 'wss.close']);
+    assert.ok(!events.some(event => event.event === 'tcp.accept' || event.event === 'native.first-bytes'));
+    client.recordHealth(3);
+    const health = events.filter(event => event.event === 'health');
+    assert.equal(health.length, 1);
+    assert.equal(health[0].connection, 0);
+    assert.equal(health[0].sequence, 3);
+
+    const socket = createConnection({ host: '127.0.0.1', port: client.listeningPort });
+    const received = collectBytes(socket, 9);
+    const payload = Buffer.from([0, 1, 2, 0xfe, 0xff, 65, 66, 67, 0]);
+    socket.write(payload.slice(0, 2));
+    socket.write(payload.slice(2));
+    assert.deepEqual(await received, payload);
+
+    const first = events.filter(event => event.connection === 1);
+    for (const name of ['tcp.accept', 'wss.construct', 'wss.open', 'native.first-bytes']) {
+      assert.equal(first.filter(event => event.event === name).length, 1);
+    }
+    assert.equal(first.filter(event => event.event === 'wss.first-bytes').length, 1);
+    assert.ok(first.find(event => event.event === 'native.first-bytes').bytes > 0);
+    assert.ok(first.find(event => event.event === 'wss.first-bytes').bytes > 0);
+
+    const second = createConnection({ host: '127.0.0.1', port: client.listeningPort });
+    await waitFor(() => events.some(event => event.connection === 2 && event.event === 'tcp.accept'));
+    assert.equal(events.filter(event => event.event === 'wss.construct').length, 3);
+
+    socket.destroy();
+    second.destroy();
+    await waitFor(() => [1, 2].every(connection => events.some(
+      event => event.connection === connection && event.event === 'tcp.close'
+        && events.some(paired => paired.connection === connection && paired.event === 'wss.close'))));
+    assert.equal(events.filter(event => event.event === 'wss.open').length, 3);
+    assertTimingShape(events);
+  } finally {
+    await client.close();
+    await frontend.close();
+    await new Promise((resolve) => upstream.close(resolve));
+  }
+});
+
+test('spawned client child emits sanitized timing lines with health boundaries', async (t) => {
+  const upstream = echoTcpServer();
+  const { port: upstreamPort } = await listenOnce(upstream);
+  const dir = mkdtempSync(join(tmpdir(), 'fixture-turn-bridge-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const frontendControl = join(dir, 'frontend.json');
+  writeFileSync(frontendControl, JSON.stringify({
+    role: 'frontend',
+    options: {
+      listenHost: '127.0.0.1',
+      listenPort: 0,
+      relayOrigin: `http://127.0.0.1:${upstreamPort}`,
+      turnTarget: { host: '127.0.0.1', port: upstreamPort },
+      token: 'fresh-token',
+    },
+  }));
+  const frontend = await spawnOwnedFixtureBridge({ role: 'frontend', controlPath: frontendControl,
+    logPath: join(dir, 'frontend.log') });
+  await frontend.ready;
+  await frontend.assertHealthy();
+  const clientControl = join(dir, 'client.json');
+  const clientLog = join(dir, 'client.log');
+  writeFileSync(clientControl, JSON.stringify({
+    role: 'client',
+    options: {
+      listenHost: '127.0.0.1',
+      listenPort: 0,
+      bridgeUrl: `${frontend.origin.replace(/^http/, 'ws')}/fixture/turn`,
+      token: 'fresh-token',
+    },
+  }));
+  const client = await spawnOwnedFixtureBridge({ role: 'client', controlPath: clientControl,
+    logPath: clientLog });
+  await client.ready;
+  await client.assertHealthy();
+  const socket = createConnection({ host: '127.0.0.1', port: client.listeningPort });
+  const received = collectBytes(socket, 3);
+  socket.write(Buffer.from([0xaa, 0x00, 0xbb]));
+  assert.deepEqual(await received, Buffer.from([0xaa, 0x00, 0xbb]));
+  socket.destroy();
+  await client.assertHealthy();
+  await client.close();
+  await frontend.close();
+  await new Promise((resolve) => upstream.close(resolve));
+  const lines = readFileSync(clientLog, 'utf8').split('\n')
+    .filter(line => line.startsWith('rtc-bridge-timing: '));
+  const events = lines.map(line => JSON.parse(line.slice('rtc-bridge-timing: '.length)));
+  assert.ok(events.length > 0);
+  assertTimingShape(events);
+  const health = events.filter(event => event.event === 'health');
+  assert.deepEqual(health.map(event => event.sequence), [1, 2]);
+  assert.ok(health.every(event => event.connection === 0));
+  const accepted = events.filter(event => event.event === 'tcp.accept');
+  assert.equal(accepted.length, 1);
+  assert.equal(accepted[0].connection, 1);
+  const raw = lines.join('\n');
+  for (const forbidden of ['ws://', 'http://', '127.0.0.1', 'fresh-token', 'Bearer']) {
+    assert.ok(!raw.includes(forbidden), `timing log must not contain ${forbidden}`);
+  }
+});

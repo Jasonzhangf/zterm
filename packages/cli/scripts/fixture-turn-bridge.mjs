@@ -4,6 +4,7 @@ import { readFileSync, openSync, closeSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fork } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { performance } from 'node:perf_hooks';
 import { WebSocketServer, WebSocket, createWebSocketStream } from 'ws';
 
 const route = '/fixture/turn';
@@ -111,13 +112,21 @@ export async function startFixtureFrontend({ listenHost, listenPort, relayOrigin
   }) };
 }
 
-export async function startFixtureTurnClient({ listenHost, listenPort, bridgeUrl, token, resolvedBridgeAddress }) {
+export async function startFixtureTurnClient({ listenHost, listenPort, bridgeUrl, token, resolvedBridgeAddress, onTiming = () => {} }) {
   loopback(listenHost);
+  const startMs = performance.now();
   const bridgeHost = new URL(bridgeUrl).hostname;
   if (resolvedBridgeAddress && isIP(resolvedBridgeAddress) !== 4) throw new Error('fixture bridge resolution requires IPv4');
   const sockets = ownedSockets();
   const webSockets = new Set();
-  function open() {
+  let nextConnection = 0;
+  const emit = (event, connection, extra) => {
+    const timing = { ms: Math.floor(performance.now() - startMs), event, connection };
+    if (extra) Object.assign(timing, extra);
+    onTiming(timing);
+  };
+  function open(connection) {
+    emit('wss.construct', connection);
     const ws = new WebSocket(bridgeUrl, { headers: { Authorization: `Bearer ${token}` },
       perMessageDeflate: false, handshakeTimeout: 10000,
       ...(resolvedBridgeAddress ? { lookup(host, options, callback) {
@@ -126,14 +135,21 @@ export async function startFixtureTurnClient({ listenHost, listenPort, bridgeUrl
         else callback(null, resolvedBridgeAddress, 4);
       } } : {}) });
     webSockets.add(ws);
-    ws.once('close', () => webSockets.delete(ws));
+    ws.once('open', () => emit('wss.open', connection));
+    ws.once('close', () => { webSockets.delete(ws); emit('wss.close', connection); });
     return ws;
   }
   const server = tcpServer(socket => {
     socket.setNoDelay(true);
     sockets.add(socket);
-    const ws = open();
-    pair(socket, createWebSocketStream(ws));
+    const connection = ++nextConnection;
+    emit('tcp.accept', connection);
+    socket.once('data', chunk => emit('native.first-bytes', connection, { bytes: Buffer.byteLength(chunk) }));
+    socket.once('close', () => emit('tcp.close', connection));
+    const ws = open(connection);
+    const stream = createWebSocketStream(ws);
+    stream.once('data', chunk => emit('wss.first-bytes', connection, { bytes: Buffer.byteLength(chunk) }));
+    pair(socket, stream);
   });
   const listeningPort = await listen(server, listenHost, listenPort);
   const close = closeOwner(server, sockets, () => {
@@ -141,13 +157,13 @@ export async function startFixtureTurnClient({ listenHost, listenPort, bridgeUrl
   });
   try {
     await new Promise((resolve, rejectReady) => {
-      const probe = open();
+      const probe = open(0);
       probe.once('error', rejectReady);
       probe.once('open', () => probe.close());
       probe.once('close', code => code === 1005 || code === 1000 ? resolve() : rejectReady(new Error('bridge probe closed abnormally')));
     });
   } catch (error) { await close(); throw error; }
-  return { listeningPort, close };
+  return { listeningPort, close, recordHealth: sequence => emit('health', 0, { sequence }) };
 }
 
 export function spawnOwnedFixtureBridge({ role, controlPath, logPath }) {
@@ -215,12 +231,18 @@ async function childMain() {
   })();
   process.on('message', message => {
     if (message.type === 'close') void close();
-    if (message.type === 'health' && owner && !closing) process.send({ type: 'health', id: message.id });
+    if (message.type === 'health' && owner && !closing) {
+      if (owner.recordHealth) owner.recordHealth(message.id);
+      process.send({ type: 'health', id: message.id });
+    }
   });
   process.on('disconnect', () => { void close(); });
   try {
     if (control.role === 'frontend') owner = await startFixtureFrontend(control.options);
-    else if (control.role === 'client') owner = await startFixtureTurnClient(control.options);
+    else if (control.role === 'client') owner = await startFixtureTurnClient({
+      ...control.options,
+      onTiming: event => process.stdout.write('rtc-bridge-timing: ' + JSON.stringify(event) + '\n'),
+    });
     else throw new Error('unknown fixture bridge role');
     if (!process.connected) { await owner.close(); return; }
     process.send({ type: 'ready', value: control.role === 'frontend'

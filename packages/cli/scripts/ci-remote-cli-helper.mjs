@@ -826,6 +826,27 @@ export function collectTimingEvidence(value, output = []) {
   return output;
 }
 
+export function collectBridgeTimingEvidence(text) {
+  const events = new Set(['tcp.accept', 'wss.construct', 'wss.open',
+    'native.first-bytes', 'wss.first-bytes', 'tcp.close', 'wss.close', 'health']);
+  const keys = new Set(['ms', 'event', 'connection', 'bytes', 'sequence']);
+  const output = [];
+  for (const line of text.split(/\r?\n/u)) {
+    if (!line.startsWith('rtc-bridge-timing: ')) continue;
+    let value;
+    try { value = JSON.parse(line.slice('rtc-bridge-timing: '.length)); }
+    catch { continue; }
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).some(key => !keys.has(key)) || !events.has(value.event)
+      || !timingFieldNumber(value.ms, true) || !timingFieldNumber(value.connection, true)
+      || ('bytes' in value && !timingFieldNumber(value.bytes, true))
+      || ('sequence' in value && !timingFieldNumber(value.sequence, true))) continue;
+    output.push(value);
+    if (output.length === 512) break;
+  }
+  return output;
+}
+
 export function rtcConsumerLog(result, routeEvidence, timingEvidence) {
   const merged = [
     ...collectRouteEvidence(result.stdout),
@@ -1108,6 +1129,7 @@ export async function runCiRemoteCli({
   let privateReceiptRemoved = false;
   let tempPrefixRemoved = false;
   let bridge;
+  let bridgeLogPath;
   let bridgeResult = { required: false, ready: false, closed: true };
 
   try {
@@ -1198,8 +1220,8 @@ export async function runCiRemoteCli({
             listenHost: '127.0.0.1', listenPort: transport.listeningPort,
             bridgeUrl: transport.bridgeUrl, token: transport.token,
           } }), { mode: 0o600 });
-          bridge = bridgeSpawner({ role: 'client', controlPath,
-            logPath: join(privateRunDir, 'turn-client.log') });
+          bridgeLogPath = join(privateRunDir, 'turn-client.log');
+          bridge = bridgeSpawner({ role: 'client', controlPath, logPath: bridgeLogPath });
           bridgeResult.pid = bridge.pid;
           await bridge.ready;
           await bridge.assertHealthy();
@@ -1243,6 +1265,9 @@ export async function runCiRemoteCli({
         bridgeResult.closed = false;
         bridgeResult.errors = [safeOutput(errorMessage(error), secrets)];
       }
+    }
+    if (bridgeLogPath && existsSync(bridgeLogPath)) {
+      bridgeResult.timingEvidence = collectBridgeTimingEvidence(readFileSync(bridgeLogPath, 'utf8'));
     }
     try {
       if (!bridgeResult.closed) {
