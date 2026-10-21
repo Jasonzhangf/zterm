@@ -11,13 +11,15 @@ isolated tarball installation work on the current development host.
 On macOS arm64, the real user path passed from an isolated npm tarball through
 login, slot selection, snapshot, mirror, input, resize, `Ctrl+] q`, stale
 identity, logout, and cleanup. The npm isolation upgrade suite passed 8/8.
-CLI tests passed 123/123 before the stale-identity follow-up added a focused
-17/17 test set.
+The CLI test suite also covers stale session identity and request-driven initial
+mirror delivery.
 
 `@jsonstudio/zterm-cli` is not published to the public npm registry. The
-Windows and Linux real native and installed-CLI gates remain pending in the
-platform CI workflow. Do not treat the macOS result as evidence for all three
-operating systems.
+Linux x64 native build and installed CLI user path have passed platform CI.
+Windows native build has passed; its installed CLI and external remote gates
+remain under validation. The three-platform daemon installation matrix is
+also required before claiming complete platform delivery. See the PR checks
+for current acceptance results.
 
 ## Platforms and requirements
 
