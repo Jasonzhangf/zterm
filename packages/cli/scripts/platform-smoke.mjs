@@ -242,7 +242,7 @@ async function runDataChannelRoundTrip(wrtc, timeoutMs) {
   }
 }
 
-async function runWrtcSmoke(installedPackageJson, timeoutMs) {
+export async function runWrtcSmoke(installedPackageJson, timeoutMs) {
   const installation = resolveWrtcInstallation(installedPackageJson);
   const packageRequire = createRequire(installedPackageJson);
   const wrtc = packageRequire('@roamhq/wrtc');
@@ -292,7 +292,7 @@ process.stdin.once('data', (chunk) => {
   writeFileSync(path, source, { mode: 0o600 });
 }
 
-async function runPtySmoke(sandboxRoot, timeoutMs, daemonPackageRoot) {
+export async function runPtySmoke(sandboxRoot, timeoutMs, daemonPackageRoot) {
   const installation = resolveNodePtyInstallation(
     daemonPackageRoot
       ? join(daemonPackageRoot, 'runtime', 'server.cjs')
@@ -456,6 +456,7 @@ async function runPtySmoke(sandboxRoot, timeoutMs, daemonPackageRoot) {
       }
       await Promise.race([exitPromise, delay(2_000)]);
     }
+    if (!exited) throw new Error('owned PTY did not exit during cleanup');
   }
 }
 
@@ -561,7 +562,7 @@ async function runDaemonPayloadReadOnly(daemonPackageRoot, sandboxRoot, env, tim
   };
 }
 
-function loadDaemonNative(path) {
+export function loadDaemonNative(path) {
   const nativeRequire = createRequire(import.meta.url);
   const native = nativeRequire(path);
   if (typeof native.compilePhase0 !== 'function') {
@@ -573,6 +574,20 @@ function loadDaemonNative(path) {
     exports: Object.keys(native).sort(),
     compilePhase0Ok: true,
   };
+}
+
+function runNativeSmoke(name, args) {
+  const source = `
+import { ${name} } from ${JSON.stringify(import.meta.url)};
+try {
+  const detail = await ${name}(...${JSON.stringify(args)});
+  process.stdout.write(JSON.stringify(detail), () => process.exit(0));
+} catch (error) {
+  process.stderr.write(String(error.stack || error), () => process.exit(1));
+}
+`;
+  const result = runProcess(process.execPath, ['--input-type=module', '--eval', source]);
+  return JSON.parse(result.stdout);
 }
 
 async function main() {
@@ -776,18 +791,18 @@ async function main() {
 
     const installedPackageJson = join(packageRoot, 'package.json');
     await runCheck('wrtc-native-datachannel', async () => (
-      runWrtcSmoke(
+      runNativeSmoke('runWrtcSmoke', [
         installedPackageJson,
         Math.max(options.timeoutMs, 15_000),
-      )
+      ])
     ));
 
     await runCheck('node-pty-conpty-roundtrip', async () => (
-      runPtySmoke(
+      runNativeSmoke('runPtySmoke', [
         sandboxRoot,
         Math.max(options.timeoutMs, 15_000),
         daemonPackageRoot,
-      )
+      ])
     ));
 
     if (daemonPackageRoot) {
@@ -816,7 +831,7 @@ async function main() {
       || join(androidDir, 'native', 'dagpipe', 'index.node');
     if (existsSync(daemonNativePath)) {
       await runCheck('dagpipe-native-load', async () => (
-        loadDaemonNative(daemonNativePath)
+        runNativeSmoke('loadDaemonNative', [daemonNativePath])
       ));
     } else {
       checks.push({
@@ -837,19 +852,21 @@ async function main() {
     };
   } finally {
     let cleanupOk = !sandboxRoot || !existsSync(sandboxRoot);
+    let cleanupError;
     if (sandboxRoot && existsSync(sandboxRoot)) {
       try {
         rmSync(sandboxRoot, { recursive: true, force: true });
         cleanupOk = !existsSync(sandboxRoot);
-      } catch {
+      } catch (error) {
         cleanupOk = false;
+        cleanupError = errorMessage(error);
       }
     }
     checks.push({
       name: 'owned-sandbox-cleanup',
       status: cleanupOk ? 'passed' : 'failed',
       durationMs: 0,
-      detail: cleanupOk ? { removed: true } : { removed: false },
+      detail: cleanupOk ? { removed: true } : { removed: false, error: cleanupError },
     });
 
     const failed = checks.filter((check) => check.status === 'failed');

@@ -256,6 +256,7 @@ jobs:
   windows-remote:
     name: windows remote CLI
     needs: platform
+    if: ${{ !cancelled() }}
     runs-on: windows-2022
     timeout-minutes: 60
 
@@ -346,6 +347,7 @@ jobs:
   aggregate-pack:
     name: aggregate daemon packages
     needs: platform
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-22.04
     timeout-minutes: 20
 
@@ -409,6 +411,7 @@ jobs:
   install:
     name: install ${{ matrix.tuple }}
     needs: aggregate-pack
+    if: ${{ !cancelled() && needs.aggregate-pack.result == 'success' }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
