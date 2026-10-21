@@ -323,6 +323,25 @@ describe('createApplicationConnection public contract', () => {
     )).rejects.toMatchObject({ name: 'AbortError' });
   });
 
+  it('connects through the real public API with an explicit relay policy', async () => {
+    const fixture = await startFixture();
+    try {
+      const connection = await createApplicationConnection(
+        accountFor(fixture.url),
+        {
+          deviceId: 'device-1',
+          daemonHostId: 'daemon-1',
+        },
+        undefined,
+        { rtcIceTransportPolicy: 'relay' },
+      );
+      expect(connection.state).toBe('ready');
+      connection.close('test-complete');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it.each([401, 403] as const)(
     'terminates on a real HTTP %i response without opening the next route',
     async (statusCode) => {

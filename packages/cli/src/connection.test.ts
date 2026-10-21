@@ -23,6 +23,8 @@ import type {
   InitialAttemptEvent,
   InitialAttemptPort,
   TraversalDiagnostics,
+  TraversalRtcIceTransportPolicy,
+  TraversalSettingsSource,
 } from '../../shared/src/connection/traversal/types.js';
 
 interface FixtureSocket {
@@ -242,6 +244,86 @@ describe('SessionConnection route identity', () => {
       message: 'clientInstanceId is required',
     });
   });
+
+  it('projects an explicit relay policy without changing target identity or transport modes', () => {
+    const account = accountFor('ws://127.0.0.1:1');
+    account.turn = {
+      url: 'turn:turn.example.test:3478?transport=tcp',
+      username: 'turn-user',
+      credential: 'turn-secret',
+    };
+    const context = buildSessionConnectionRouteContext(
+      account,
+      {
+        deviceId: 'device-1',
+        daemonHostId: 'daemon-1',
+      },
+      {
+        accountId: 'account-1',
+        daemonHostId: 'daemon-1',
+        networkGeneration: 3,
+      },
+      'client-instance-3',
+      { rtcIceTransportPolicy: 'relay' },
+    );
+
+    expect(context.settings.rtcIceTransportPolicy).toBe('relay');
+    expect(context.settings.transportMode).toBe('auto');
+    expect(context.target.transportMode).toBe('auto');
+    expect(context.target).toMatchObject({
+      daemonHostId: 'daemon-1',
+      relayHostId: 'daemon-1',
+    });
+    expect(context.settings).toMatchObject({
+      turnServerUrl: 'turn:turn.example.test:3478?transport=tcp',
+      turnUsername: 'turn-user',
+      turnCredential: 'turn-secret',
+      traversalRelay: {
+        turnUrl: 'turn:turn.example.test:3478?transport=tcp',
+        turnUsername: 'turn-user',
+        turnCredential: 'turn-secret',
+      },
+    });
+  });
+
+  it('keeps the exact prior traversal settings shape when the policy is omitted', () => {
+    const account = accountFor('ws://127.0.0.1:1');
+    const server = {
+      deviceId: 'device-1',
+      daemonHostId: 'daemon-1',
+    };
+    const scope = {
+      accountId: 'account-1',
+      daemonHostId: 'daemon-1',
+      networkGeneration: 3,
+    };
+    const baseline = buildSessionConnectionRouteContext(
+      account,
+      server,
+      scope,
+      'client-instance-4',
+    );
+    const omitted = buildSessionConnectionRouteContext(
+      account,
+      server,
+      scope,
+      'client-instance-4',
+      {},
+    );
+
+    expect('rtcIceTransportPolicy' in baseline.settings).toBe(false);
+    expect(Object.keys(baseline.settings)).toEqual([
+      'signalUrl',
+      'turnServerUrl',
+      'turnUsername',
+      'turnCredential',
+      'transportMode',
+      'traversalRelay',
+    ]);
+    expect(omitted.settings).toEqual(baseline.settings);
+    expect(baseline.target.transportMode).toBe('auto');
+    expect(baseline.settings.transportMode).toBe('auto');
+  });
 });
 
 function readyFrame(daemonHostId = 'daemon-1'): TerminalMuxServerFrame {
@@ -427,11 +509,16 @@ class BoundInitialFixtureSocket implements SessionConnectionTraversalSocket {
 function createBoundInitialConnection(
   socket: BoundInitialFixtureSocket,
   timers: ManualTimers,
-  options: { handshakeTimeoutMs?: number } = {},
+  options: {
+    handshakeTimeoutMs?: number;
+    rtcIceTransportPolicy?: TraversalRtcIceTransportPolicy;
+  } = {},
 ) {
   let socketOptions: Parameters<SessionConnectionTraversalFactory['createSocket']>[2] | undefined;
+  let socketSettings: TraversalSettingsSource | undefined;
   const factory: SessionConnectionTraversalFactory = {
-    createSocket(_target, _settings, nextOptions) {
+    createSocket(_target, settings, nextOptions) {
+      socketSettings = settings;
       socketOptions = nextOptions;
       socket.attach(nextOptions.initialAttemptPort);
       return socket;
@@ -452,10 +539,14 @@ function createBoundInitialConnection(
     clientInstanceId: 'bound-initial-test',
     handshakeTimeoutMs: options.handshakeTimeoutMs ?? 250,
     timers,
+    ...(options.rtcIceTransportPolicy === undefined
+      ? {}
+      : { rtcIceTransportPolicy: options.rtcIceTransportPolicy }),
   });
   return {
     connection,
     getSocketOptions: () => socketOptions,
+    getSettings: () => socketSettings,
   };
 }
 
@@ -1077,6 +1168,20 @@ describe('SessionConnection public consumer', () => {
 });
 
 describe('SessionConnection bound-initial attempt handoff', () => {
+  it('forwards the optional RTC policy from connection options into traversal settings', () => {
+    const timers = new ManualTimers();
+    const socket = new BoundInitialFixtureSocket();
+    const { connection, getSettings } = createBoundInitialConnection(socket, timers, {
+      rtcIceTransportPolicy: 'relay',
+    });
+
+    expect(getSettings()).toMatchObject({
+      transportMode: 'auto',
+      rtcIceTransportPolicy: 'relay',
+    });
+    connection.close('test-complete');
+  });
+
   it('reads the traversal socket diagnostics without rebuilding route state', () => {
     const timers = new ManualTimers();
     const socket = new BoundInitialFixtureSocket();

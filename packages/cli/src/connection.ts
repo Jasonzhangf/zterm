@@ -13,6 +13,7 @@ import type {
   InitialAttemptControl,
   InitialAttemptEvent,
   InitialAttemptPort,
+  TraversalRtcIceTransportPolicy,
   TraversalSettingsSource,
   TraversalTargetSource,
   TraversalTimerHandle,
@@ -154,9 +155,14 @@ export interface SessionConnectionOptions {
   routeHealthScope: TraversalRouteHealthScope;
   traversalFactory: SessionConnectionTraversalFactory;
   clientInstanceId: string;
+  rtcIceTransportPolicy?: TraversalRtcIceTransportPolicy;
   requestTimeoutMs?: number;
   handshakeTimeoutMs?: number;
   timers?: SessionConnectionTimerPort;
+}
+
+export interface SessionConnectionRouteOptions {
+  rtcIceTransportPolicy?: TraversalRtcIceTransportPolicy;
 }
 
 export interface SessionListResult {
@@ -305,6 +311,7 @@ export function buildSessionConnectionRouteContext(
   server: SessionConnectionServer,
   routeHealthScope: TraversalRouteHealthScope,
   clientInstanceId: string,
+  options: SessionConnectionRouteOptions = {},
 ): SessionConnectionRouteContext {
   const clientId = asNonEmptyString(clientInstanceId);
   if (!clientId) {
@@ -349,6 +356,9 @@ export function buildSessionConnectionRouteContext(
     turnUsername: account.turn?.username || '',
     turnCredential: account.turn?.credential || '',
     transportMode: 'auto',
+    ...(options.rtcIceTransportPolicy === undefined
+      ? {}
+      : { rtcIceTransportPolicy: options.rtcIceTransportPolicy }),
     traversalRelay: {
       relayBaseUrl: account.relayBaseUrl,
       accessToken: account.accessToken,
@@ -448,6 +458,9 @@ export class SessionConnection {
       options.server,
       options.routeHealthScope,
       this.clientInstanceId,
+      {
+        rtcIceTransportPolicy: options.rtcIceTransportPolicy,
+      },
     );
     this.traversalFactory = options.traversalFactory;
     this.requestTimeoutMs = requirePositiveTimeout(options.requestTimeoutMs, 10_000);

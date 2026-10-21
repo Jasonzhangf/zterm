@@ -369,7 +369,8 @@ export function buildTraversalPlan(
       throw new Error('WebRTC relay mode requires selecting an online relay daemon device');
     }
     if (
-      (mode !== 'auto' || candidateScope === 'bound-initial')
+      settings.rtcIceTransportPolicy !== 'relay'
+      && (mode !== 'auto' || candidateScope === 'bound-initial')
       && signalUrl
       && (!relaySignalUrl || relayHostId)
     ) {

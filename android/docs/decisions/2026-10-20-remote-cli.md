@@ -47,6 +47,16 @@ zterm daemon install | zterm daemon status | zterm daemon config
 
 ## 2. 架构映射与十一图
 CLI 新增终端消费者，不复制 runtime 源码，不改变 daemon 的 tmux/mirror/transport 真源。
+
+连接算子可接收可选的 `rtcIceTransportPolicy` 控制输入。应用 API 的第四参数传递该输入，
+经 `SessionConnection` 进入共享 traversal settings；目标身份仍只有 device/daemon ID。
+省略输入时保留原有 auto 行为。显式 `relay` 时，共享 planner 不生成 `rtc-direct`，
+保留原有 WebSocket 候选和使用原始 TURN 账号数据的 `rtc-relay` 候选。此输入不写入
+共享配置或槽位，不增加 UI 配置项，也不改变连接期限、输入协议或 graph 拓扑。
+
+外部 TURN 验收通过真实 `createApplicationConnection` 指定该策略，并继续核对实际
+`open`、`rtc-relay`、`turn` 和双端 `relay` 统计。请求策略或连接成功均不替代实际统计。
+本地 direct 验收省略策略。目录候选过滤不能约束共享 planner 生成的 RTC direct 路径。
 账号、槽位、terminal 和 daemon 命令分别处理；成功、失败、取消、未确认和清理结果在各自
 对象流唯一出口汇总。
 

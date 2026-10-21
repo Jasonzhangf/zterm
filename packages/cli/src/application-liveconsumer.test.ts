@@ -6,6 +6,7 @@ import {
   type AuthenticatedAccount,
 } from './account-client.js';
 import { createApplicationConnection } from './application-connection.js';
+import { SessionConnectionError } from './connection.js';
 import { assertExternalRtcRelayEvidence } from './external-rtc-evidence.js';
 import type {
   RelayAccountDirectory,
@@ -31,6 +32,37 @@ interface RtcFixture {
     };
   };
   close(): Promise<unknown>;
+}
+
+function safeFailureScalar(value: unknown): string | number | undefined {
+  if (typeof value === 'string' && value.length > 0) {
+    return value;
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  return undefined;
+}
+
+function describeSessionConnectionFailure(error: SessionConnectionError) {
+  const cause = typeof error.cause === 'object' && error.cause !== null
+    ? error.cause as { kind?: unknown; stage?: unknown; code?: unknown }
+    : undefined;
+  const causeKind = safeFailureScalar(cause?.kind);
+  const causeStage = safeFailureScalar(cause?.stage);
+  const causeCode = safeFailureScalar(cause?.code);
+  const detail = [
+    `stage=${error.stage}`,
+    `code=${error.code}`,
+    error.serverCode === undefined ? undefined : `serverCode=${error.serverCode}`,
+    causeKind === undefined ? undefined : `cause.kind=${causeKind}`,
+    causeStage === undefined ? undefined : `cause.stage=${causeStage}`,
+    causeCode === undefined ? undefined : `cause.code=${causeCode}`,
+  ].filter((part): part is string => part !== undefined);
+  return new Error(
+    `${error.message}; ${detail.join(', ')}`,
+    { cause: error },
+  );
 }
 
 async function loadRtcFixture() {
@@ -109,7 +141,6 @@ function requirePublicRelayBaseUrl(value: string) {
 
 function useUnreachableFirstWs(
   device: RelayAccountDirectory['devices'][number],
-  relayOnly = false,
 ) {
   if (!device?.daemon) {
     throw new Error('RTC fixture directory omitted the daemon');
@@ -123,7 +154,7 @@ function useUnreachableFirstWs(
     lastSeenAt: new Date().toISOString(),
   };
   const rtcRoutes = device.daemon.endpoints.filter((endpoint) =>
-    (!relayOnly && endpoint.kind === 'rtc-direct')
+    endpoint.kind === 'rtc-direct'
     || endpoint.kind === 'relay-rtc'
   );
   device.daemon.endpoints.splice(
@@ -327,7 +358,7 @@ describe('createApplicationConnection bound-initial live consumer', () => {
           clearTimeout(timeout);
         }
 
-        useUnreachableFirstWs(device, input.kind === 'external');
+        useUnreachableFirstWs(device);
         const connectionController = new AbortController();
         const connectionTimeout = setTimeout(
           () => connectionController.abort(new Error('RTC consumer timed out')),
@@ -341,6 +372,9 @@ describe('createApplicationConnection bound-initial live consumer', () => {
               daemonHostId: receipt.daemonHostId,
             },
             connectionController.signal,
+            input.kind === 'external'
+              ? { rtcIceTransportPolicy: 'relay' }
+              : undefined,
           );
           expect(connection.state).toBe('ready');
           if (input.kind === 'external') {
@@ -353,6 +387,11 @@ describe('createApplicationConnection bound-initial live consumer', () => {
           } else {
             compactRouteDiagnostics(connection.getDiagnostics());
           }
+        } catch (error) {
+          if (error instanceof SessionConnectionError) {
+            throw describeSessionConnectionFailure(error);
+          }
+          throw error;
         } finally {
           clearTimeout(connectionTimeout);
         }

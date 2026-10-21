@@ -110,6 +110,7 @@ export interface TraversalSettingsSource {
   transportMode?: BridgeSettings['transportMode'];
   traversalRelay?: BridgeSettings['traversalRelay'];
   traversalPathPriority?: TraversalResolvedPath[];
+  rtcIceTransportPolicy?: TraversalRtcIceTransportPolicy;
 }
 
 export interface TraversalTargetSource {

@@ -5,7 +5,11 @@ import {
   buildTraversalPlanCached,
   clearTraversalPlanCache,
 } from './config';
-import type { TraversalCandidateScope } from './types';
+import type {
+  RtcTraversalCandidate,
+  TraversalCandidateScope,
+  TraversalSettingsSource,
+} from './types';
 
 const BOUND_INITIAL = 'bound-initial' as TraversalCandidateScope;
 
@@ -70,6 +74,25 @@ const settingsWithRtc = {
   },
 };
 
+const settingsWithRelay: TraversalSettingsSource = {
+  ...settingsWithRtc,
+  rtcIceTransportPolicy: 'relay',
+};
+
+const targetWithRelayOnlyDirectory = {
+  ...targetWithRtcDirectory,
+  relayEndpointCandidates: [
+    targetWithRtcDirectory.relayEndpointCandidates[0],
+    targetWithRtcDirectory.relayEndpointCandidates[2],
+  ],
+};
+
+const targetWithSignalOnlyDirectory = {
+  ...targetWithRtcDirectory,
+  relayEndpointCandidates: undefined,
+  signalUrl: 'wss://relay.example.test/relay/ws/client',
+};
+
 afterEach(() => {
   clearTraversalPlanCache();
 });
@@ -120,6 +143,110 @@ describe('buildTraversalPlan candidate scope', () => {
     }));
   });
 
+  it('synthesizes rtc-direct from signaling and bound identity when the directory only advertises relay-rtc', () => {
+    const plan = buildTraversalPlan(
+      targetWithRelayOnlyDirectory,
+      settingsWithRtc,
+      undefined,
+      BOUND_INITIAL,
+    );
+
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'ipv4',
+      'rtc-relay',
+      'rtc-direct',
+    ]);
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
+      id: 'rtc-direct:daemon-a',
+      kind: 'rtc',
+      path: 'rtc-direct',
+      iceTransportPolicy: 'all',
+    }));
+    const allPolicyPlan = buildTraversalPlan(
+      targetWithRelayOnlyDirectory,
+      {
+        ...settingsWithRtc,
+        rtcIceTransportPolicy: 'all',
+      },
+      undefined,
+      BOUND_INITIAL,
+    );
+    expect(allPolicyPlan.candidates).toEqual(plan.candidates);
+  });
+
+  it('omits advertised rtc-direct under explicit relay and keeps the first WS plus relay TURN candidate', () => {
+    const plan = buildTraversalPlan(
+      targetWithRtcDirectory,
+      settingsWithRelay,
+      undefined,
+      BOUND_INITIAL,
+    );
+
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'ipv4',
+      'rtc-relay',
+    ]);
+    expect(plan.candidates[0]).toMatchObject({
+      kind: 'ws',
+      path: 'ipv4',
+      url: 'ws://203.0.113.10:3333/?token=daemon-token',
+    });
+    expect(plan.candidates.some((candidate) => candidate.path === 'rtc-direct')).toBe(false);
+
+    const relay = plan.candidates.find(
+      (candidate): candidate is RtcTraversalCandidate =>
+        candidate.kind === 'rtc' && candidate.path === 'rtc-relay',
+    );
+    expect(relay).toMatchObject({
+      id: 'relay-rtc-daemon-a',
+      kind: 'rtc',
+      path: 'rtc-relay',
+      endpoint: 'relay:daemon-a',
+      iceTransportPolicy: 'relay',
+    });
+    expect(relay?.signalUrl).toContain('token=account-access-token');
+    expect(relay?.signalUrl).toContain('hostId=daemon-a');
+    expect(relay?.signalUrl).toContain('deviceId=cli-device-a');
+    expect(relay?.signalUrl).not.toContain('daemon-token');
+    expect(relay?.iceServers).toEqual([{
+      urls: 'turn:relay.example.test:3478?transport=udp',
+      username: 'turn-user',
+      credential: 'turn-secret',
+    }]);
+  });
+
+  it('omits synthesized rtc-direct from a relay-only directory under explicit relay', () => {
+    const plan = buildTraversalPlan(
+      targetWithRelayOnlyDirectory,
+      settingsWithRelay,
+      undefined,
+      BOUND_INITIAL,
+    );
+
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'ipv4',
+      'rtc-relay',
+    ]);
+    expect(plan.candidates.some((candidate) => candidate.kind === 'rtc' && candidate.path === 'rtc-direct')).toBe(false);
+  });
+
+  it('does not manufacture rtc-direct under explicit relay when no TURN inputs exist', () => {
+    const plan = buildTraversalPlan(
+      targetWithSignalOnlyDirectory,
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        signalUrl: 'wss://relay.example.test/relay/ws/client',
+        traversalRelay: undefined,
+        rtcIceTransportPolicy: 'relay',
+      } satisfies TraversalSettingsSource,
+      undefined,
+      BOUND_INITIAL,
+    );
+
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['ipv4']);
+    expect(plan.candidates.every((candidate) => candidate.kind === 'ws')).toBe(true);
+  });
+
   it('keeps cached mode-default and bound-initial plans separate', () => {
     const defaultPlan = buildTraversalPlanCached(targetWithRtcDirectory, settingsWithRtc);
     const boundPlan = buildTraversalPlanCached(
@@ -142,6 +269,31 @@ describe('buildTraversalPlan candidate scope', () => {
       undefined,
       BOUND_INITIAL,
     )).toBe(boundPlan);
+  });
+
+  it('keeps cached bound-initial plans separated by rtcIceTransportPolicy', () => {
+    const autoPlan = buildTraversalPlanCached(
+      targetWithRtcDirectory,
+      settingsWithRtc,
+      undefined,
+      BOUND_INITIAL,
+    );
+    const relayPlan = buildTraversalPlanCached(
+      targetWithRtcDirectory,
+      settingsWithRelay,
+      undefined,
+      BOUND_INITIAL,
+    );
+
+    expect(autoPlan.candidates.map((candidate) => candidate.path)).toContain('rtc-direct');
+    expect(relayPlan.candidates.map((candidate) => candidate.path)).not.toContain('rtc-direct');
+    expect(relayPlan).not.toBe(autoPlan);
+    expect(buildTraversalPlanCached(
+      targetWithRtcDirectory,
+      settingsWithRelay,
+      undefined,
+      BOUND_INITIAL,
+    )).toBe(relayPlan);
   });
 
   it('does not invent RTC inputs or reuse another daemon directory endpoint', () => {

@@ -645,7 +645,7 @@ async function executeHarness({
 
   await stages.run('adaptive-resize', async () => {
     shell.resize(RESIZED_COLS, RESIZED_ROWS);
-    const marker = commandMarker(receipt.runId, 'resize');
+    const marker = commandMarker(`${receipt.runId}_${randomBytes(8).toString('hex')}`, 'resize');
     const from = shell.mark();
     shell.sendLine(`( zterm_resize_attempt=0; while [ "$zterm_resize_attempt" -lt 200 ]; do zterm_resize_size=$(stty size); [ "\${zterm_resize_size##* }" = "${RESIZED_COLS}" ] && break; zterm_resize_attempt=$((zterm_resize_attempt + 1)); sleep 0.05; done; printf '${marker}:%s\\n' "$zterm_resize_size" )`);
     const matched = await shell.waitForVisibleText(

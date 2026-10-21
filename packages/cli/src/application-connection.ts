@@ -5,6 +5,7 @@ import type { AuthenticatedAccount } from './account-client.js';
 import {
   SessionConnection,
   type SessionConnectionServer,
+  type SessionConnectionRouteOptions,
 } from './connection.js';
 import { createNodeTraversalFactory } from './node-platform.js';
 
@@ -21,6 +22,7 @@ export async function createApplicationConnection(
   account: AuthenticatedAccount,
   server: SessionConnectionServer,
   signal?: AbortSignal,
+  options: SessionConnectionRouteOptions = {},
 ): Promise<SessionConnection> {
   if (signal?.aborted) {
     throw abortError();
@@ -42,6 +44,7 @@ export async function createApplicationConnection(
     },
     traversalFactory,
     clientInstanceId,
+    rtcIceTransportPolicy: options.rtcIceTransportPolicy,
   });
 
   try {
