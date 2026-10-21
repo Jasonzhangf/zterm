@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readFileSync, realpathSync } from 'node:fs';
-import { join, normalize, resolve, win32 } from 'node:path';
+import { posix, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   resolveNpmInvocation,
@@ -82,19 +82,20 @@ function isSuccessful(result: ProcessResult): boolean {
   return result.exitCode === 0 && !result.signal && !result.error;
 }
 
+function pathsForPlatform(platform: NodeJS.Platform): typeof posix {
+  return platform === 'win32' ? win32 : posix;
+}
+
 function normalizedPath(path: string, platform: NodeJS.Platform): string {
-  const lexical =
-    platform === 'win32' ? win32.normalize(win32.resolve(path)) : normalize(resolve(path));
+  const paths = pathsForPlatform(platform);
+  const lexical = paths.normalize(paths.resolve(path));
   let canonical = lexical;
   try {
     canonical = realpathSync.native(lexical);
   } catch {
     // Keep lexical identity when the path is not installed yet.
   }
-  const normalized =
-    platform === 'win32'
-      ? win32.normalize(win32.resolve(canonical))
-      : normalize(resolve(canonical));
+  const normalized = paths.normalize(paths.resolve(canonical));
   return platform === 'win32' ? normalized.toLowerCase() : normalized;
 }
 
@@ -153,16 +154,20 @@ export const spawnProcess: ProcessRunner = (command, args, options = {}) =>
   });
 
 export function globalBinPath(prefix: string, platform: NodeJS.Platform = process.platform): string {
-  return platform === 'win32' ? win32.join(prefix, 'zterm.cmd') : join(prefix, 'bin/zterm');
+  return pathsForPlatform(platform).join(
+    prefix,
+    platform === 'win32' ? 'zterm.cmd' : 'bin/zterm',
+  );
 }
 
 export function npmGlobalPackageRoot(
   prefix: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
+  const paths = pathsForPlatform(platform);
   return platform === 'win32'
-    ? win32.join(prefix, 'node_modules', '@jsonstudio', 'zterm-cli')
-    : join(prefix, 'lib', 'node_modules', '@jsonstudio', 'zterm-cli');
+    ? paths.join(prefix, 'node_modules', '@jsonstudio', 'zterm-cli')
+    : paths.join(prefix, 'lib', 'node_modules', '@jsonstudio', 'zterm-cli');
 }
 
 function cliBinFromManifest(manifest: unknown): string {
@@ -300,16 +305,17 @@ function readOwnedVersion(): string {
 async function verifyInstalledEntry(
   context: GlobalInstallContext,
   runner: ProcessRunner,
+  platform: NodeJS.Platform,
 ): Promise<{ available: boolean; version?: string; error?: PublicError }> {
   let invocation: ProcessInvocation;
   try {
-    const manifestPath = join(context.packageRoot, 'package.json');
+    const manifestPath = pathsForPlatform(platform).join(context.packageRoot, 'package.json');
     const manifest =
-      process.platform === 'win32'
+      platform === 'win32'
         ? JSON.parse(readFileSync(manifestPath, 'utf8'))
         : undefined;
     invocation = resolveInstalledEntryInvocation(['--version'], {
-      platform: process.platform,
+      platform,
       entryPath: context.entryPath,
       packageRoot: context.packageRoot,
       manifest,
@@ -366,11 +372,13 @@ export async function upgradeCli(options: UpgradeCliOptions = {}): Promise<Upgra
   const runner = options.runner ?? spawnProcess;
   const npmCommand = options.npmCommand ?? 'npm';
   const registry = options.registry ?? DEFAULT_NPM_REGISTRY;
+  const platform = options.platform ?? process.platform;
   let context: GlobalInstallContext;
 
   try {
     context = await resolveGlobalInstallContext({
       ...options,
+      platform,
       runner,
       npmCommand,
       registry,
@@ -430,7 +438,7 @@ export async function upgradeCli(options: UpgradeCliOptions = {}): Promise<Upgra
     buildNpmInstallArgs(context.prefix, requestedVersion, registry),
     { signal: options.signal },
   );
-  const verification = await verifyInstalledEntry(context, runner);
+  const verification = await verifyInstalledEntry(context, runner, platform);
   const baseResult: UpgradeResult = {
     beforeVersion,
     requestedVersion,

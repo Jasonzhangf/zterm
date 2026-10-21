@@ -390,12 +390,16 @@ export async function runTerminalSession(
         return false;
       }
     },
+    onMetadata(event) {
+      const demand = renderer.setHead(event.effectiveBounds);
+      return openedChannelId && channel ? demand : undefined;
+    },
     onCommit(event: MirrorCommitEvent) {
       hasBodyCommitted = true;
       const rendererSnapshot = renderer.commit(event.snapshot);
       const projectionResult = projection.commit(rendererSnapshot);
       void resumeProjectionAfterBackpressure(projectionResult);
-      if (openedChannelId) {
+      if (openedChannelId && channel) {
         mirror.setVisibleDemand(openedChannelId, rendererSnapshot.visibleDemand);
       }
     },
@@ -481,7 +485,7 @@ export async function runTerminalSession(
       const projectionResult = projection.commit(snapshot);
       void resumeProjectionAfterBackpressure(projectionResult);
     }
-    if (openedChannelId) {
+    if (openedChannelId && channel) {
       mirror.setVisibleDemand(openedChannelId, snapshot.visibleDemand);
     }
   }

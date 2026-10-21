@@ -20,6 +20,7 @@ import {
   fixtureRunPaths,
   parseRtcFixtureArgs,
   readPrivateReceipt,
+  rtcFixtureTmuxStartCommand,
   waitForRtcFixtureHold,
   writePrivateReceipt,
 } from './rtc-fixture-helper.mjs';
@@ -102,9 +103,14 @@ test('parses the bounded fixture CLI and rejects ambiguous cleanup', () => {
   ]);
   assert.equal(parsed.evidenceDir, resolve('./evidence'));
   assert.equal(parsed.hold, true);
+  assert.equal(parsed.interactiveSession, false);
   assert.equal(parsed.exposeRelay, true);
   assert.equal(parsed.turnRequired, true);
   assert.equal(parsed.nativePath, resolve('./dagpipe.node'));
+  assert.equal(
+    parseRtcFixtureArgs(['--interactive-session']).interactiveSession,
+    true,
+  );
   assert.throws(
     () => parseRtcFixtureArgs(['--unknown']),
     /unknown rtc fixture argument/u,
@@ -116,6 +122,26 @@ test('parses the bounded fixture CLI and rejects ambiguous cleanup', () => {
       '--hold',
     ]),
     /cannot be combined/u,
+  );
+  assert.throws(
+    () => parseRtcFixtureArgs([
+      '--cleanup-private-receipt',
+      './receipt.json',
+      '--interactive-session',
+    ]),
+    /cannot be combined/u,
+  );
+});
+
+test('tmux startup keeps transport cat mode unless interactive session is explicit', () => {
+  const marker = 'RTC_FIXTURE_fixture-run-1';
+  assert.equal(
+    rtcFixtureTmuxStartCommand(marker),
+    `sh -lc 'printf '%s\\n' '${marker}'; exec cat'`,
+  );
+  assert.equal(
+    rtcFixtureTmuxStartCommand(marker, { interactiveSession: true }),
+    `/bin/sh -c 'printf "%s\\n" "${marker}"; export PS1="${marker} $"; export ENV= BASH_ENV=; exec /bin/sh -i'`,
   );
 });
 
@@ -165,6 +191,59 @@ test('public receipt redacts all fixture credentials and tokens', () => {
     }
     assert.equal(publicReceipt.receipt.privatePath, receipt.receiptPath);
     assert.equal(publicReceipt.selfcheck.direct.relayTransport, 'direct');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('public receipt preserves a bounded safe selfcheck trace', () => {
+  const root = mkdtempSync(join(tmpdir(), 'rtc-fixture-trace-'));
+  const receipt = receiptFixture(root);
+  try {
+    receipt.selfcheck = {
+      direct: {
+        attempted: true,
+        ok: true,
+        path: 'rtc-direct',
+        relayTransport: 'direct',
+        selectedIcePair: {
+          local: { candidateType: 'host', protocol: 'udp' },
+          remote: { candidateType: 'host', protocol: 'udp' },
+          roundTripTimeMs: 1,
+        },
+        muxReady: true,
+        ownedSessionVisible: true,
+        trace: {
+          stage: 'open',
+          reason: 'https://relay.example/ws?token=fixture-private-access-token',
+          resolvedPath: 'rtc-direct',
+          resolvedRelayTransport: 'direct',
+          attempts: [
+            {
+              kind: 'rtc',
+              path: 'rtc-direct',
+              stage: 'open',
+              ok: true,
+              reason: 'ok',
+              rttMs: 1,
+            },
+          ],
+          events: [
+            { event: 'ws-open', deltaMs: 12 },
+            { event: 'ws-close', deltaMs: 25, detail: { code: 1006 } },
+          ],
+        },
+      },
+    };
+    const publicReceipt = buildPublicReceipt(receipt);
+    const serialized = JSON.stringify(publicReceipt);
+    assert.equal(publicReceipt.selfcheck.direct.trace.stage, 'open');
+    assert.equal(publicReceipt.selfcheck.direct.trace.attempts[0].kind, 'rtc');
+    assert.equal(publicReceipt.selfcheck.direct.trace.events[1].event, 'ws-close');
+    assert.equal(publicReceipt.selfcheck.direct.trace.events[1].detail.code, 1006);
+    assert.equal(serialized.includes(receipt.accessToken), false);
+    assert.equal(serialized.includes('https://relay.example/ws'), false);
+    assert.match(serialized, /\[url\]/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -186,6 +186,61 @@ mux event -> wire normalize -> required frame assembly -> one sparse apply
 同 revision 最多一次。renderer 独占 follow、reading、`renderBottomIndex` 和 visible
 range；buffer manager 只消费 demand。远端 cell 中的 OSC、标题和任意 escape 不能作为
 本地控制指令执行。
+
+### 镜像 head/body 需求契约
+
+`mirror-consumer` 是 accepted head、有效 bounds、sparse body、完整帧组装、请求规划和
+cache 发布的唯一 owner；`renderer-window` 是 visible window 与 demand 的唯一 owner；
+`terminal-session` 只负责把二者接线并按 channel readiness 激活 demand。现有
+`cli-terminal-mirror-event.graph.json` 已显式接收 `visible_range_demand` 输入，本契约
+只描述该输入上游的 session 组合，不改图拓扑、不建第二图或回边，也不新增状态 owner。
+
+renderer 增加单一 metadata 入口 `setHead(effectiveBounds)`，返回 normalized demand。
+它只更新 renderer 自有 bounds 并产生 demand，不产生 ANSI commit、不推进显示 body
+revision、不把 head cursor 状态导入显示 body。follow 模式从 accepted authoritative tail
+约束到 available bounds 后推导 visible range；reading 模式在 anchor 仍可用时保留绝对
+底部下标，head 增长不强制跳回 follow。非零 `availableStartIndex` 是绝对界，
+`[100,124)` 不能退化成 `[0,24)`；authoritative empty range 保持 empty，不发明行。
+viewport 行数与 daemon content geometry 分离。
+
+head/body 有效界选取以 `session.epoch` 为唯一 epoch owner；`bodyEpoch` 只记录已应用
+sparse body 的 provenance，不是新 epoch、wire 字段或 renderer 协议。优先序固定为：
+head 存在且 body 无当前 epoch provenance 时选 head；仅当前 epoch body 存在时选 body；
+两者均存在且 `head.revision >= body.revision` 时选 head；否则选 body；均不存在为
+`null`。每次选择整个 bounds tuple，不用 `min()/max()` 合并。head 选择使用 normalized
+`latestEndIndex/availableStartIndex/availableEndIndex`；body 选择使用
+`bufferTailEndIndex` 作为 latest/available end，`bufferHeadStartIndex` 作为 available
+start。`MirrorBodySnapshot` 在保留现有 revision、`startIndex/endIndex/lines/gaps` 与
+几何的同时携带这三个有效界字段；有效 availability 不声明也不扩大本地 coverage。
+
+原始 body 管线保持唯一：既有 epoch rejection、frame assembly、one sparse apply、gap
+truth 和 repair 规则不变，accepted older body 仍贡献实际数据。每个完整 payload 在既有
+验收检查后选择 sparse 应用输入：`bodyEpoch === session.epoch` 时使用已安装 sparse
+body，否则通过既有 empty-body 初始化路径使用 fresh empty sparse base，不携带 retained
+rows、revision 或 coverage，且独立于 `epochResetPending`。成功应用以
+`nextBody !== applyInputBody` 判定，位于 `sessionBuffersEqual()` 优化之前；随后一次
+安装结果并 stamp `bodyEpoch = session.epoch`。应用失败不改变已安装 body 与 provenance；
+缺失行保持 gap/missing，有效 availability 不能把缺失行变成已覆盖行。
+
+head metadata 不得直接 repaint；changed demand 只能经既有 body commit 路径暴露已组装并
+应用的 body truth。cache 满足 changed demand 仅当 `bodyEpoch === session.epoch`、
+revision 至少为所选来源 revision、窗口位于有效 availability 内且实际 sparse coverage
+完整无 gap。否则保留真实 gaps 并走既有 request planner。相同 demand 重复不重发布；
+body callback 返回的 demand 正常终止，不递归发布；窗口已完整 cache 时不二次取 body。
+不完整 frame chunk 不进该路径，既有 assembly 与拒绝规则继续权威。head-first、body-first
+和 cache 顺序结果固定：head 先到只改 demand，完整 body 后产生输出；完整 body 先到、head
+后来改 demand 时可从既有完整 cache 发布；empty/partial body 后到 head 时创建缺失 demand，
+coverage 保持 truthful 直到 repair；head 先于 channel readiness 到达时只更新 renderer
+metadata，不在 consumer 中记为已激活 demand，post-open `setViewport() ->
+setVisibleDemand()` 用最新 renderer demand 发送所需请求，同一 readiness 条件也约束本地
+viewport/navigation demand 提交路径。
+
+reset 复用既有 `startsNewEpoch` 与 epoch 递增；retained body 因 provenance 不同无法提供
+有效界或满足 cache。accepted reset head 立即生效，包括更短或 empty range，不用无条件
+lifetime `max()` 阻止 reset；后续成功 sparse 应用才重建当前 provenance。本契约是 reviewed
+design 更新；实现、红测、正式 CLI 黑盒和平台验收仍按本文阶段边界待完成，不标记为已实现
+或已交付。
+
 ACK 只表示 daemon/backend 接受写入，不表示远端应用执行完成。CLI 使用共享
 reliable-input core，`maxInFlight=1`，并显式采用 `cliNoReplayPolicy`：
 

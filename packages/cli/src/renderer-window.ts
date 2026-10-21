@@ -5,7 +5,13 @@ import type {
 
 export type RendererMode = 'follow' | 'reading';
 
-export interface AbsoluteBufferSnapshot {
+export interface RendererHeadMetadata {
+  latestEndIndex: number;
+  availableStartIndex: number;
+  availableEndIndex: number;
+}
+
+export interface AbsoluteBufferSnapshot extends RendererHeadMetadata {
   revision: number;
   startIndex: number;
   endIndex: number;
@@ -64,6 +70,7 @@ export interface RendererWindowOptions {
 }
 
 export interface RendererWindow {
+  setHead(head: RendererHeadMetadata): RendererVisibleRangeDemand;
   commit(buffer: AbsoluteBufferSnapshot): RendererCommit;
   setViewport(viewport: { visibleRows?: number; visibleCols?: number }): RendererCommit;
   scrollLines(delta: number): RendererCommit;
@@ -89,6 +96,9 @@ function nonNegativeInteger(value: number | undefined) {
 function normalizeBuffer(buffer: AbsoluteBufferSnapshot): AbsoluteBufferSnapshot {
   return {
     revision: nonNegativeInteger(buffer.revision),
+    latestEndIndex: nonNegativeInteger(buffer.latestEndIndex),
+    availableStartIndex: nonNegativeInteger(buffer.availableStartIndex),
+    availableEndIndex: nonNegativeInteger(buffer.availableEndIndex),
     startIndex: nonNegativeInteger(buffer.startIndex),
     endIndex: nonNegativeInteger(buffer.endIndex),
     cols: positiveInteger(buffer.cols, 1),
@@ -148,6 +158,7 @@ export function createRendererWindow(options: RendererWindowOptions = {}): Rende
     revision: 0,
   };
   let currentBuffer: AbsoluteBufferSnapshot | null = null;
+  let availableStartIndex = 0;
 
   function clampHorizontalOffset(buffer: AbsoluteBufferSnapshot | null) {
     const maxOffset = Math.max(0, (buffer?.cols || state.visibleCols) - state.visibleCols);
@@ -157,7 +168,7 @@ export function createRendererWindow(options: RendererWindowOptions = {}): Rende
   function clampReadingBottom() {
     state.renderBottomIndex = Math.min(
       state.tailEndIndex,
-      Math.max(0, state.renderBottomIndex),
+      Math.max(Math.min(state.tailEndIndex, availableStartIndex + state.visibleRows), state.renderBottomIndex),
     );
     if (state.renderBottomIndex >= state.tailEndIndex) {
       state.mode = 'follow';
@@ -172,7 +183,7 @@ export function createRendererWindow(options: RendererWindowOptions = {}): Rende
       clampReadingBottom();
     }
 
-    const startIndex = Math.max(0, state.renderBottomIndex - state.visibleRows);
+    const startIndex = Math.max(availableStartIndex, state.renderBottomIndex - state.visibleRows);
     const rows: RendererVisibleRow[] = [];
     let cursor: RendererCursorProjection | null = null;
     const sourceCursor = currentBuffer?.cursor;
@@ -180,7 +191,9 @@ export function createRendererWindow(options: RendererWindowOptions = {}): Rende
     for (let screenRow = 0; screenRow < state.visibleRows; screenRow += 1) {
       const absoluteIndex = startIndex + screenRow;
       const sourceCells = currentBuffer?.lines.get(absoluteIndex);
-      const gap = !sourceCells || absoluteIndex >= state.tailEndIndex;
+      const gap = !sourceCells || absoluteIndex >= state.tailEndIndex
+        || absoluteIndex < (currentBuffer?.startIndex ?? 0)
+        || absoluteIndex >= (currentBuffer?.endIndex ?? 0);
       const cropped = gap
         ? { cells: [], sourceStartOffset: state.horizontalOffset, usedColumns: 0 }
         : cropVisibleCells(sourceCells, state.horizontalOffset, state.visibleCols);
@@ -232,11 +245,18 @@ export function createRendererWindow(options: RendererWindowOptions = {}): Rende
     };
   }
 
+  function setHead(head: RendererHeadMetadata): RendererVisibleRangeDemand {
+    availableStartIndex = nonNegativeInteger(head.availableStartIndex);
+    const availableEndIndex = Math.max(availableStartIndex, nonNegativeInteger(head.availableEndIndex));
+    state.tailEndIndex = Math.max(availableStartIndex, Math.min(availableEndIndex, nonNegativeInteger(head.latestEndIndex)));
+    return buildSnapshot().visibleDemand;
+  }
+
   function commit(input: AbsoluteBufferSnapshot) {
     const buffer = normalizeBuffer(input);
     currentBuffer = buffer;
     state.revision = buffer.revision;
-    state.tailEndIndex = buffer.endIndex;
+    setHead(buffer);
     if (state.mode === 'follow') {
       state.renderBottomIndex = state.tailEndIndex;
     }
@@ -254,7 +274,7 @@ export function createRendererWindow(options: RendererWindowOptions = {}): Rende
   }
 
   function moveToBottomOrReading(nextBottomIndex: number) {
-    const next = Math.min(state.tailEndIndex, Math.max(0, nextBottomIndex));
+    const next = Math.min(state.tailEndIndex, Math.max(Math.min(state.tailEndIndex, availableStartIndex + state.visibleRows), nextBottomIndex));
     state.renderBottomIndex = next;
     state.mode = next >= state.tailEndIndex ? 'follow' : 'reading';
     return buildSnapshot();
@@ -290,6 +310,7 @@ export function createRendererWindow(options: RendererWindowOptions = {}): Rende
   }
 
   return {
+    setHead,
     commit,
     setViewport,
     scrollLines,

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createRendererWindow } from './renderer-window.js';
 import type {
   BufferHeadPayload,
   CompactIndexedLine,
@@ -109,6 +110,58 @@ afterEach(() => {
 });
 
 describe('mirror-consumer public contract', () => {
+  it('keeps newer head bounds when an older accepted body arrives', () => {
+    const renderer = createRendererWindow({ visibleRows: 24 });
+    const commits: MirrorCommitEvent[] = [];
+    const requests: MirrorRequestMessage[] = [];
+    const consumer = createMirrorConsumer({
+      sendRequest: (message) => { requests.push(message); return true; },
+      onMetadata: (event) => renderer.setHead(event.effectiveBounds),
+      onCommit: (event) => { commits.push(event); renderer.commit(event.snapshot); },
+    });
+    consumer.registerSession('s1');
+    consumer.handleMessage('s1', { type: 'buffer-sync', payload: payload({
+      revision: 1, startIndex: 100, endIndex: 124, availableStartIndex: 100,
+      lines: Array.from({ length: 24 }, (_, index) => line(100 + index, 'old')),
+    }) });
+    consumer.handleMessage('s1', { type: 'buffer-head', payload: head(3, 148, 100) });
+    consumer.handleMessage('s1', { type: 'buffer-sync', payload: payload({
+      revision: 2, startIndex: 100, endIndex: 124, availableStartIndex: 100,
+      lines: Array.from({ length: 24 }, (_, index) => line(100 + index, 'changed')),
+    }) });
+    const body = consumer.snapshot('s1')!.body;
+    expect(body.revision).toBe(2);
+    expect(bodyText(body, 100)).toBe('changed');
+    expect(body.endIndex).toBe(124);
+    expect(body.lines.has(124)).toBe(false);
+    expect(commits.at(-1)!.snapshot.availableEndIndex).toBe(148);
+    expect(renderer.snapshot().tailEndIndex).toBe(148);
+    expect(renderer.setViewport({}).visibleDemand).toMatchObject({ startIndex: 124, endIndex: 148 });
+    expect(requests.filter((request) => request.type === 'buffer-sync-request')
+      .every((request) => request.type !== 'buffer-sync-request'
+        || (request.payload.requestEndIndex === 148 && request.payload.targetHeadRevision === 3))).toBe(true);
+    consumer.dispose();
+  });
+
+  it('does not promote retained pre-reset rows when a new partial body exceeds the old revision ceiling', () => {
+    const consumer = createMirrorConsumer({ sendRequest: () => true });
+    consumer.registerSession('s1');
+    consumer.handleMessage('s1', { type: 'buffer-sync', payload: payload({
+      revision: 10, startIndex: 0, endIndex: 24,
+      lines: Array.from({ length: 24 }, (_, index) => line(index, 'old')),
+    }) });
+    consumer.handleMessage('s1', { type: 'buffer-head', payload: head(1, 24) });
+    consumer.handleMessage('s1', { type: 'buffer-sync', payload: payload({
+      revision: 11, startIndex: 12, endIndex: 24, availableEndIndex: 24,
+      lines: Array.from({ length: 12 }, (_, index) => line(12 + index, 'new')),
+    }) });
+    const body = consumer.snapshot('s1')!.body;
+    expect(body.revision).toBe(11);
+    expect(body.lines.has(0)).toBe(false);
+    expect(bodyText(body, 12)).toBe('new');
+    consumer.dispose();
+  });
+
   it('assembles out-of-order chunks and applies one complete frame once', () => {
     const commits: MirrorCommitEvent[] = [];
     const consumer = createMirrorConsumer({
@@ -301,7 +354,7 @@ describe('mirror-consumer public contract', () => {
     const consumer = createMirrorConsumer({
       sendRequest: () => false,
       onCommit: (event) => commits.push(event),
-      onMetadata: (event) => metadata.push(event),
+      onMetadata: (event) => { metadata.push(event); },
     });
     consumer.registerSession('s1');
 
@@ -524,5 +577,96 @@ describe('mirror-consumer public contract', () => {
     vi.advanceTimersByTime(TERMINAL_BUFFER_SYNC_FRAME_MAX_AGE_MS + 10);
     expect(sendRequest).not.toHaveBeenCalled();
     expect(consumer.snapshot('s2')?.head?.revision).toBe(20);
+  });
+
+  it('head-only metadata projects head without body commit or injected output', () => {
+    const renderer = createRendererWindow({ visibleRows: 24 });
+    const commits: MirrorCommitEvent[] = [];
+    const requests: MirrorRequestMessage[] = [];
+    const consumer = createMirrorConsumer({
+      sendRequest: (message) => {
+        requests.push(message);
+        return true;
+      },
+      onMetadata: (event) => renderer.setHead(event.effectiveBounds),
+      onCommit: (event) => {
+        commits.push(event);
+        renderer.commit(event.snapshot);
+      },
+    });
+    consumer.registerSession('s1');
+
+    consumer.handleMessage('s1', { type: 'buffer-head', payload: head(1, 24) });
+
+    expect(commits).toHaveLength(0);
+    expect(consumer.snapshot('s1')!.body.revision).toBe(0);
+    expect(consumer.snapshot('s1')!.body.lines.size).toBe(0);
+    expect(renderer.snapshot().tailEndIndex).toBe(24);
+    expect(renderer.setViewport({}).visibleDemand).toMatchObject({ endIndex: 24 });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      type: 'buffer-sync-request',
+      payload: { requestEndIndex: 24, targetHeadRevision: 1 },
+    });
+    consumer.dispose();
+  });
+
+  it('reuses complete body from cache after a later head lands', () => {
+    const renderer = createRendererWindow({ visibleRows: 12 });
+    const commits: MirrorCommitEvent[] = [];
+    const requests: MirrorRequestMessage[] = [];
+    const consumer = createMirrorConsumer({
+      sendRequest: (message) => {
+        requests.push(message);
+        return true;
+      },
+      onMetadata: (event) => renderer.setHead(event.effectiveBounds),
+      onCommit: (event) => {
+        commits.push(event);
+        consumer.setVisibleDemand('s1', renderer.commit(event.snapshot).visibleDemand);
+      },
+    });
+    consumer.registerSession('s1');
+
+    consumer.handleMessage('s1', {
+      type: 'buffer-sync',
+      payload: payload({
+        revision: 1,
+        startIndex: 0,
+        endIndex: 24,
+        lines: Array.from({ length: 24 }, (_, index) => line(index, `row-${index}`)),
+      }),
+    });
+    expect(commits).toHaveLength(1);
+    requests.length = 0;
+
+    const headPayload: BufferHeadPayload = {
+      sessionId: 's1',
+      revision: 1,
+      latestEndIndex: 12,
+      availableStartIndex: 0,
+      availableEndIndex: 24,
+    };
+    consumer.handleMessage('s1', { type: 'buffer-head', payload: headPayload });
+
+    expect(commits).toHaveLength(2);
+    expect(requests).toHaveLength(0);
+    expect(renderer.snapshot().tailEndIndex).toBe(12);
+    expect(renderer.snapshot().revision).toBe(1);
+    expect(renderer.setViewport({}).visibleDemand).toMatchObject({
+      startIndex: 0,
+      endIndex: 12,
+    });
+    const body = consumer.snapshot('s1')!.body;
+    expect(body.endIndex).toBe(24);
+    expect(body.lines.size).toBe(24);
+    expect(bodyText(body, 23)).toBe('row-23');
+
+    const demand = renderer.setViewport({}).visibleDemand;
+    consumer.handleMessage('s1', { type: 'buffer-head', payload: headPayload });
+    consumer.setVisibleDemand('s1', demand);
+    expect(commits).toHaveLength(2);
+    expect(requests).toHaveLength(0);
+    consumer.dispose();
   });
 });

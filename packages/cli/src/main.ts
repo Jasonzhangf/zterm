@@ -360,6 +360,9 @@ async function renderSnapshotPreview(
   });
   const renderSnapshot = renderer.commit({
     revision: body.revision,
+    latestEndIndex: snapshot.head.latestEndIndex,
+    availableStartIndex: snapshot.head.availableStartIndex ?? 0,
+    availableEndIndex: snapshot.head.availableEndIndex ?? snapshot.head.latestEndIndex,
     startIndex: body.startIndex,
     endIndex: body.endIndex,
     cols: body.cols,

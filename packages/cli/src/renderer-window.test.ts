@@ -32,6 +32,9 @@ function buffer(options: {
     revision: options.revision ?? 1,
     startIndex: 0,
     endIndex: options.endIndex,
+    latestEndIndex: options.endIndex,
+    availableStartIndex: 0,
+    availableEndIndex: options.endIndex,
     cols: options.cols ?? 80,
     rows: options.rows ?? 24,
     lines: new Map(options.lines ?? []),
@@ -44,6 +47,29 @@ function rowText(snapshot: RendererSnapshot, screenRow: number) {
 }
 
 describe('renderer-window public contract', () => {
+  it('uses metadata for absolute demand without committing body and preserves reading anchors', () => {
+    const renderer = createRendererWindow({ visibleRows: 24 });
+    expect(renderer.setHead({ latestEndIndex: 124, availableStartIndex: 100, availableEndIndex: 124 }))
+      .toMatchObject({ startIndex: 100, endIndex: 124 });
+    expect(renderer.snapshot().revision).toBe(0);
+    renderer.setHead({ latestEndIndex: 148, availableStartIndex: 100, availableEndIndex: 148 });
+    renderer.scrollLines(-12);
+    expect(renderer.setHead({ latestEndIndex: 172, availableStartIndex: 100, availableEndIndex: 172 }))
+      .toMatchObject({ startIndex: 112, endIndex: 136, mode: 'reading' });
+    expect(renderer.setHead({ latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 }))
+      .toMatchObject({ startIndex: 0, endIndex: 0, mode: 'follow' });
+  });
+
+  it('retains effective availability when body coverage is partial', () => {
+    const renderer = createRendererWindow({ visibleRows: 24 });
+    const snapshot = renderer.commit({
+      ...buffer({ endIndex: 124 }), startIndex: 100,
+      latestEndIndex: 148, availableStartIndex: 100, availableEndIndex: 148,
+    });
+    expect(snapshot.visibleDemand).toMatchObject({ startIndex: 124, endIndex: 148 });
+    expect(snapshot.rows.every((value) => value.gap)).toBe(true);
+  });
+
   it('follows live absolute tails and emits visible demand without pulling transport', () => {
     const renderer = createRendererWindow({ visibleRows: 3, visibleCols: 10 });
     const first = renderer.commit(buffer({

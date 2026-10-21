@@ -209,6 +209,10 @@ describe('CLI npm upgrade adapter', () => {
       'zterm-cli',
     );
     mkdirSync(packageRoot, { recursive: true });
+    writeFileSync(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({ bin: { zterm: './bin/zterm.mjs' } }),
+    );
     symlinkSync(
       physicalRoot,
       aliasPrefix,

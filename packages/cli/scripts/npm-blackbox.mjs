@@ -18,9 +18,25 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build as esbuild } from 'esbuild';
+
+import {
+  formalCliInvocation,
+  installedCliBin,
+  installedCliPackageRoot,
+} from './platform-smoke-helper.mjs';
+import { resolveRemoteNodePty } from './remote-cli-blackbox-helper.mjs';
+import { resolveNpmInvocation } from './process-entry.mjs';
 
 const CLI_PACKAGE = '@jsonstudio/zterm-cli';
 const CLI_V1 = '1.0.0-blackbox.1';
@@ -47,6 +63,10 @@ function argumentValue(name) {
 const evidenceDir = resolve(
   argumentValue('--evidence-dir') ?? DEFAULT_EVIDENCE_DIR,
 );
+const nodePtyPackageRootArg = argumentValue('--pty-package-root');
+const nodePtyPackageRoot = nodePtyPackageRootArg
+  ? resolve(nodePtyPackageRootArg)
+  : undefined;
 const testRoot = realpathSync(mkdtempSync(join(tmpdir(), 'zterm-cli-npm-blackbox-')));
 const testHome = join(testRoot, 'home');
 const npmPrefix = join(testRoot, 'npm-global');
@@ -56,6 +76,7 @@ const packageRoot = join(testRoot, 'packages');
 const dependencyRoot = join(testRoot, 'dependencies');
 const configPath = join(testHome, '.zterm', 'config.json');
 const activeEvidence = join(evidenceDir, 'npm-blackbox-run.log');
+const platform = process.platform;
 
 const stages = [];
 const activeChildren = new Set();
@@ -122,7 +143,15 @@ function isolatedEnvironment(extra = {}) {
     }
     env[key] = value;
   }
-  const path = env.PATH ?? '/usr/local/bin:/usr/bin:/bin';
+  const path = env.PATH ?? env.Path ?? (
+    platform === 'win32'
+      ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32;${process.env.SystemRoot || 'C:\\Windows'}`
+      : '/usr/local/bin:/usr/bin:/bin'
+  );
+  const pathSeparator = delimiter;
+  const binPath = platform === 'win32'
+    ? npmPrefix
+    : join(npmPrefix, 'bin');
   return {
     ...env,
     HOME: testHome,
@@ -143,19 +172,44 @@ function isolatedEnvironment(extra = {}) {
     NPM_CONFIG_UPDATE_NOTIFIER: 'false',
     npm_config_fetch_retries: '0',
     NPM_CONFIG_FETCH_RETRIES: '0',
-    PATH: `${join(npmPrefix, 'bin')}:${path}`,
+    PATH: `${binPath}${pathSeparator}${path}`,
+    ...(platform === 'win32' ? { Path: `${binPath}${pathSeparator}${path}` } : {}),
     ...extra,
   };
 }
 
 function signalChildTree(child, signal) {
   if (!child.pid) return;
-  if (process.platform !== 'win32') {
+  if (platform !== 'win32') {
     try {
       process.kill(-child.pid, signal);
       return;
     } catch {
       // Fall back to the direct child if the process group is already gone.
+    }
+  }
+  if (platform === 'win32') {
+    try {
+      const killer = spawn(
+        'taskkill',
+        ['/pid', String(child.pid), '/T', '/F'],
+        {
+          stdio: 'ignore',
+          windowsHide: true,
+          shell: false,
+        },
+      );
+      killer.once('error', () => {
+        try {
+          child.kill(signal);
+        } catch {
+          // The child may have exited before fallback cleanup.
+        }
+      });
+      killer.unref();
+      return;
+    } catch {
+      // Fall back to the direct child if taskkill is unavailable.
     }
   }
   try {
@@ -181,7 +235,8 @@ function startChild(command, args, options = {}) {
     env: options.env ?? isolatedEnvironment(),
     stdio: ['ignore', 'pipe', 'pipe'],
     shell: false,
-    detached: process.platform !== 'win32',
+    detached: platform !== 'win32',
+    windowsHide: platform === 'win32',
   });
   const finish = (code, signal) => {
     if (settled) return;
@@ -227,6 +282,106 @@ function startChild(command, args, options = {}) {
     timeout.unref();
   }
   return { child, state, done };
+}
+
+function installedCliJsEntry() {
+  const packageRoot = installedCliPackageRoot(npmPrefix);
+  const manifest = readJson(join(packageRoot, 'package.json'));
+  const bin = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.zterm;
+  assert(typeof bin === 'string' && bin.length > 0, 'installed CLI manifest has no zterm bin');
+  const entry = resolve(packageRoot, bin);
+  assert(existsSync(entry), `installed CLI JS entry is missing: ${entry}`);
+  return entry;
+}
+
+function windowsCancelPtyInvocation(args, env) {
+  const entry = installedCliJsEntry();
+  return formalCliInvocation(
+    process.execPath,
+    [entry, ...args],
+    'win32',
+    env,
+  );
+}
+
+function startWindowsCancelPty(command, args, options = {}) {
+  assert(platform === 'win32', 'ConPTY cancellation is only valid on Windows');
+  assert(nodePtyPackageRoot, '--pty-package-root is required for Windows cancellation');
+  const installation = resolveRemoteNodePty(nodePtyPackageRoot);
+  const packageRequire = createRequire(installation.entry);
+  const pty = packageRequire(installation.packageRoot);
+  assert(pty && typeof pty.spawn === 'function', 'node-pty does not expose spawn()');
+
+  const state = {
+    output: '',
+    timedOut: false,
+  };
+  let exited = false;
+  let timeout;
+  let dataSubscription;
+  let exitSubscription;
+  const terminal = pty.spawn(command, args, {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 36,
+    cwd: options.cwd ?? repoRoot,
+    env: options.env ?? isolatedEnvironment(),
+    useConpty: true,
+  });
+  dataSubscription = terminal.onData((chunk) => {
+    state.output += chunk;
+    if (state.output.length > 2_000_000) {
+      state.output = state.output.slice(-1_000_000);
+    }
+  });
+  const done = new Promise((resolveExit) => {
+    exitSubscription = terminal.onExit(({ exitCode, signal }) => {
+      exited = true;
+      if (timeout) clearTimeout(timeout);
+      resolveExit({
+        command,
+        args: [...args],
+        exitCode,
+        signal,
+        stdout: state.output,
+        stderr: '',
+        error: undefined,
+        timedOut: state.timedOut,
+      });
+    });
+  });
+  if (options.timeoutMs && options.timeoutMs > 0) {
+    timeout = setTimeout(() => {
+      state.timedOut = true;
+      try {
+        terminal.kill();
+      } catch {
+        // The owned PTY may have exited at the timeout boundary.
+      }
+    }, options.timeoutMs);
+    timeout.unref();
+  }
+
+  return {
+    terminal,
+    done,
+    isRunning: () => !exited,
+    async close() {
+      if (!exited) {
+        try {
+          terminal.kill();
+        } catch {
+          // The owned PTY may have exited before cleanup.
+        }
+      }
+      await Promise.race([
+        done,
+        new Promise((resolveWait) => setTimeout(resolveWait, 5_000)),
+      ]);
+      dataSubscription?.dispose();
+      exitSubscription?.dispose();
+    },
+  };
 }
 
 async function runChild(command, args, options = {}) {
@@ -284,9 +439,13 @@ function parseNpmPackOutput(result) {
 async function packDirectory(directory, label) {
   const destination = join(testRoot, 'tarballs', label);
   makeDirectory(destination);
-  const result = await runChild(
-    process.env.NPM_COMMAND || 'npm',
+  const invocation = resolveNpmInvocation(
     ['pack', '--ignore-scripts', '--json', '--pack-destination', destination, directory],
+    { npmCommand: npmCommand(), env: isolatedEnvironment() },
+  );
+  const result = await runChild(
+    invocation.command,
+    invocation.args,
     {
       cwd: repoRoot,
       env: isolatedEnvironment(),
@@ -815,8 +974,7 @@ function npmCommand() {
 
 async function installVersion(version) {
   const mark = registry.mark();
-  const result = await runChild(
-    npmCommand(),
+  const invocation = resolveNpmInvocation(
     [
       'install',
       '--global',
@@ -826,6 +984,11 @@ async function installVersion(version) {
       '--registry',
       registry.url,
     ],
+    { npmCommand: npmCommand(), env: isolatedEnvironment() },
+  );
+  const result = await runChild(
+    invocation.command,
+    invocation.args,
     {
       cwd: testRoot,
       env: isolatedEnvironment(),
@@ -839,8 +1002,9 @@ async function installVersion(version) {
 }
 
 function resetIsolatedNpmPrefix() {
+  const relation = relative(resolve(testRoot), resolve(npmPrefix));
   assert(
-    resolve(npmPrefix).startsWith(`${resolve(testRoot)}/`),
+    relation && !relation.startsWith('..') && !isAbsolute(relation),
     'refusing to reset npm prefix outside the test root',
   );
   rmSync(npmPrefix, { recursive: true, force: true });
@@ -848,11 +1012,11 @@ function resetIsolatedNpmPrefix() {
 }
 
 function installedPackageTreePresent() {
-  return existsSync(join(npmPrefix, 'lib', 'node_modules', ...CLI_PACKAGE.split('/')));
+  return existsSync(installedCliPackageRoot(npmPrefix));
 }
 
 async function observeInstalledVersion() {
-  const bin = join(npmPrefix, 'bin', 'zterm');
+  const bin = installedCliBin(npmPrefix);
   const entryPresent = existsSync(bin);
   if (!entryPresent) {
     return {
@@ -863,7 +1027,10 @@ async function observeInstalledVersion() {
       result: undefined,
     };
   }
-  const result = await runChild(bin, ['--version'], {
+  const cliInvocation = platform === 'win32'
+    ? formalCliInvocation(bin, ['--version'])
+    : { command: bin, args: ['--version'] };
+  const result = await runChild(cliInvocation.command, cliInvocation.args, {
     cwd: testRoot,
     env: isolatedEnvironment(),
     timeoutMs: 30_000,
@@ -884,7 +1051,7 @@ async function observeInstalledVersion() {
 async function installedVersion() {
   const observed = await observeInstalledVersion();
   if (!observed.result) {
-    throw new Error(`installed zterm --version missing ${join(npmPrefix, 'bin', 'zterm')}`);
+    throw new Error(`installed zterm --version missing ${installedCliBin(npmPrefix)}`);
   }
   await requireSuccess(
     observed.result,
@@ -895,11 +1062,14 @@ async function installedVersion() {
 }
 
 async function runUpgrade() {
-  const bin = join(npmPrefix, 'bin', 'zterm');
+  const bin = installedCliBin(npmPrefix);
+  const cliInvocation = platform === 'win32'
+    ? formalCliInvocation(bin, ['upgrade', '--registry', registry.url])
+    : { command: bin, args: ['upgrade', '--registry', registry.url] };
   const mark = registry.mark();
   const result = await runChild(
-    bin,
-    ['upgrade', '--registry', registry.url],
+    cliInvocation.command,
+    cliInvocation.args,
     {
       cwd: testRoot,
       env: isolatedEnvironment(),
@@ -1048,7 +1218,7 @@ async function main() {
     assert(configUnchanged('initial-install-v1', fixtureConfig), 'config check failed');
     return {
       version: observed.version,
-      actualBin: join(npmPrefix, 'bin', 'zterm'),
+      actualBin: installedCliBin(npmPrefix),
       configPreserved: true,
       registryRequests: install.requests.map((entry) => `${entry.kind}:${entry.name}:${entry.version ?? ''}`),
     };
@@ -1058,65 +1228,84 @@ async function main() {
     const beforeConfig = readFileSync(configPath, 'utf8');
     registry.setMode('cancel');
     const mark = registry.mark();
-    const running = startChild(
-      join(npmPrefix, 'bin', 'zterm'),
-      ['upgrade', '--registry', registry.url],
-      {
+    const bin = installedCliBin(npmPrefix);
+    const env = isolatedEnvironment();
+    const args = ['upgrade', '--registry', registry.url];
+    const cliInvocation = platform === 'win32'
+      ? windowsCancelPtyInvocation(args, env)
+      : { command: bin, args };
+    const running = platform === 'win32'
+      ? startWindowsCancelPty(cliInvocation.command, cliInvocation.args, {
         cwd: testRoot,
-        env: isolatedEnvironment(),
+        env,
         timeoutMs: 60_000,
-      },
-    );
+      })
+      : startChild(cliInvocation.command, cliInvocation.args, {
+        cwd: testRoot,
+        env,
+        timeoutMs: 60_000,
+      });
     try {
-      await registry.waitFor(
-        (request) => request.kind === 'tarball'
-          && request.name === CLI_PACKAGE
-          && request.version === CLI_V2,
-        15_000,
-        'CLI v2 tarball request for cancellation',
+      try {
+        await registry.waitFor(
+          (request) => request.kind === 'tarball'
+            && request.name === CLI_PACKAGE
+            && request.version === CLI_V2,
+          15_000,
+          'CLI v2 tarball request for cancellation',
+        );
+      } catch (error) {
+        if (platform === 'win32') {
+          await running.close();
+        } else if (running.child.exitCode === null && running.child.signalCode === null) {
+          signalChildTree(running.child, 'SIGINT');
+        }
+        registry.releaseCancelledTarball();
+        const result = await running.done;
+        throw new Error(
+          `${messageOf(error)}; child exit=${String(result.exitCode)} signal=${String(result.signal)}; `
+            + `stdout=${result.stdout.trim() || '<empty>'}; stderr=${result.stderr.trim() || '<empty>'}`,
+        );
+      }
+      assert(
+        platform === 'win32'
+          ? running.isRunning()
+          : running.child.exitCode === null,
+        'cancel process exited before the tarball request',
       );
-    } catch (error) {
-      if (running.child.exitCode === null && running.child.signalCode === null) {
+      if (platform === 'win32') {
+        running.terminal.write('\x03');
+      } else {
         signalChildTree(running.child, 'SIGINT');
       }
       registry.releaseCancelledTarball();
       const result = await running.done;
-      throw new Error(
-        `${messageOf(error)}; child exit=${String(result.exitCode)} signal=${String(result.signal)}; `
-          + `stdout=${result.stdout.trim() || '<empty>'}; stderr=${result.stderr.trim() || '<empty>'}`,
+      const observed = await observeInstalledVersion();
+      const output = `${result.stdout}\n${result.stderr}`;
+      assert(result.exitCode !== 0 || result.signal, 'cancelled upgrade returned success');
+      assert(!output.includes('CLI 已升级'), 'cancelled upgrade falsely reported success');
+      assert(
+        output.includes('取消') || output.includes('cancelled') || output.includes('未自动回滚'),
+        'cancelled upgrade did not expose cancellation or installation state',
       );
-    }
-    assert(running.child.exitCode === null, 'cancel process exited before the tarball request');
-    signalChildTree(running.child, 'SIGINT');
-    registry.releaseCancelledTarball();
-    let result;
-    try {
-      result = await running.done;
+      configUnchanged('cancel-upgrade', beforeConfig);
+      return {
+        installationState: 'unverified',
+        exitCode: result.exitCode,
+        signal: result.signal,
+        observedVersion: observed.version,
+        entryPresent: observed.entryPresent,
+        packageTreePresent: installedPackageTreePresent(),
+        tarballRequestObserved: true,
+        configPreserved: true,
+        registryRequests: registry.requestsSince(mark).map(
+          (entry) => `${entry.kind}:${entry.name}:${entry.version ?? ''}`,
+        ),
+      };
     } finally {
+      if (platform === 'win32') await running.close();
       registry.setMode('normal');
     }
-    const observed = await observeInstalledVersion();
-    const output = `${result.stdout}\n${result.stderr}`;
-    assert(result.exitCode !== 0 || result.signal, 'cancelled upgrade returned success');
-    assert(!output.includes('CLI 已升级'), 'cancelled upgrade falsely reported success');
-    assert(
-      output.includes('取消') || output.includes('cancelled') || output.includes('未自动回滚'),
-      'cancelled upgrade did not expose cancellation or installation state',
-    );
-    configUnchanged('cancel-upgrade', beforeConfig);
-    return {
-      installationState: 'unverified',
-      exitCode: result.exitCode,
-      signal: result.signal,
-      observedVersion: observed.version,
-      entryPresent: observed.entryPresent,
-      packageTreePresent: installedPackageTreePresent(),
-      tarballRequestObserved: true,
-      configPreserved: true,
-      registryRequests: registry.requestsSince(mark).map(
-        (entry) => `${entry.kind}:${entry.name}:${entry.version ?? ''}`,
-      ),
-    };
   });
 
   await runStage('restore-v1-before-install-error', async () => {
@@ -1244,8 +1433,16 @@ try {
       signalChildTree(child, 'SIGTERM');
     }
   }
-  await new Promise((resolveWait) => setTimeout(resolveWait, 100));
-  rmSync(testRoot, { recursive: true, force: true });
+  const cleanupDeadline = Date.now() + 5_000;
+  while (activeChildren.size > 0 && Date.now() < cleanupDeadline) {
+    await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+  }
+  rmSync(testRoot, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 200,
+  });
   tempRootRemoved = !existsSync(testRoot);
   await writeRunNote();
 }

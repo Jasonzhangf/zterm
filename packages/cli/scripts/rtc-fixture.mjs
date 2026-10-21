@@ -39,6 +39,7 @@ import {
   readTextTail,
   redactText,
   removeFileIfPresent,
+  rtcFixtureTmuxStartCommand,
   waitForRtcFixtureHold,
   writePrivateReceipt,
   writePublicReceipt,
@@ -542,14 +543,108 @@ function normalizeData(data) {
   return String(data);
 }
 
+function compactMessageType(data) {
+  try {
+    const frame = JSON.parse(normalizeData(data));
+    if (frame && typeof frame === 'object' && typeof frame.type === 'string') {
+      return frame.type.length <= 40 ? frame.type : null;
+    }
+  } catch {
+    // Non-JSON transport frames are not part of the bounded signal trace.
+  }
+  return null;
+}
+
+function numericCode(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function safeTraceText(value, secrets) {
+  const text = redactText(String(value ?? ''), secrets)
+    .replace(/https?:\/\/[^\s"'`]+/giu, '[url]')
+    .trim();
+  return text.length > 160 ? `${text.slice(0, 160)}...` : text || null;
+}
+
+function createRtcTrace(secrets) {
+  const startedAt = Date.now();
+  const events = [];
+  const record = (event, detail) => {
+    events.push({
+      event,
+      deltaMs: Date.now() - startedAt,
+      ...(detail === undefined ? {} : { detail }),
+    });
+    if (events.length > 128) events.shift();
+  };
+  const summary = (diagnostics) => ({
+    stage: safeTraceText(diagnostics?.stage, secrets),
+    reason: safeTraceText(diagnostics?.reason, secrets),
+    resolvedPath: safeTraceText(diagnostics?.resolvedPath, secrets),
+    resolvedRelayTransport: safeTraceText(diagnostics?.resolvedRelayTransport, secrets),
+    attempts: Array.isArray(diagnostics?.attempts)
+      ? diagnostics.attempts.slice(0, 32).map((attempt) => ({
+          kind: safeTraceText(attempt?.kind, secrets),
+          path: safeTraceText(attempt?.path, secrets),
+          stage: safeTraceText(attempt?.stage, secrets),
+          ok: attempt?.ok === true,
+          reason: safeTraceText(attempt?.reason, secrets),
+          rttMs: numericCode(attempt?.rttMs),
+        }))
+      : [],
+    events: events.map((entry) => ({ ...entry })),
+  });
+  return { record, summary };
+}
+
 async function runForcedRtcRoute(options) {
   const { createNodeTraversalFactory, wrtc } = await loadRtcRuntime();
+  const secrets = Array.isArray(options.secrets) ? options.secrets : [];
+  const trace = createRtcTrace(secrets);
+  class ObservedFixtureWebSocket extends WebSocket {
+    constructor(url) {
+      super(url);
+      this.addEventListener('open', () => trace.record('ws-open'));
+      this.addEventListener('close', (event) => {
+        trace.record('ws-close', { code: numericCode(event?.code) });
+      });
+      this.addEventListener('error', (event) => {
+        trace.record('ws-error', { code: numericCode(event?.error?.code) });
+      });
+      this.addEventListener('message', (event) => {
+        trace.record('ws-message-in', { type: compactMessageType(event?.data) });
+      });
+    }
+
+    send(data) {
+      trace.record('ws-message-out', { type: compactMessageType(data) });
+      return super.send(data);
+    }
+  }
+  class ObservedRtcPeerConnection extends wrtc.RTCPeerConnection {
+    constructor(config) {
+      super(config);
+      const observe = () => trace.record('rtc-state', {
+        signaling: String(this.signalingState || ''),
+        iceGathering: String(this.iceGatheringState || ''),
+        iceConnection: String(this.iceConnectionState || ''),
+        connection: String(this.connectionState || ''),
+      });
+      this.addEventListener('signalingstatechange', observe);
+      this.addEventListener('icegatheringstatechange', observe);
+      this.addEventListener('iceconnectionstatechange', observe);
+      this.addEventListener('connectionstatechange', observe);
+      observe();
+    }
+  }
   const factory = createNodeTraversalFactory({
-    WebSocket,
+    WebSocket: ObservedFixtureWebSocket,
     RTCPeerConnection: options.relayOnlyRtc
-      ? class RelayOnlyRtcPeerConnection extends wrtc.RTCPeerConnection {
+      ? class RelayOnlyRtcPeerConnection extends ObservedRtcPeerConnection {
           constructor(config) {
             if (config?.iceTransportPolicy !== 'relay') {
+              trace.record('rtc-policy-guard', { rejected: 'non-relay-ice-policy' });
               super(config);
               this.close();
               throw new Error(`${options.label} rejected non-relay ICE policy`);
@@ -557,7 +652,7 @@ async function runForcedRtcRoute(options) {
             super(config);
           }
         }
-      : wrtc.RTCPeerConnection,
+      : ObservedRtcPeerConnection,
     RTCSessionDescription: wrtc.RTCSessionDescription,
     RTCIceCandidate: wrtc.RTCIceCandidate,
   });
@@ -594,8 +689,17 @@ async function runForcedRtcRoute(options) {
     clearTimeout(timer);
     rejectResult(error);
   };
+  const failObserved = (error) => {
+    const observed = error instanceof Error ? error : new Error(String(error));
+    try {
+      observed.observeTrace = trace.summary(socket.getDiagnostics());
+    } catch {
+      // The original failure remains authoritative even if trace capture fails.
+    }
+    fail(observed);
+  };
   const timer = setTimeout(() => {
-    fail(new Error(`${options.label} timeout`));
+    failObserved(new Error(`${options.label} timeout`));
   }, options.timeoutMs || defaultTimeoutMs);
 
   let helloSequence = 0;
@@ -611,15 +715,15 @@ async function runForcedRtcRoute(options) {
         },
       }));
     } catch (error) {
-      fail(error);
+      failObserved(error);
     }
   };
   socket.onerror = () => {
-    fail(new Error(`${options.label} traversal socket error`));
+    failObserved(new Error(`${options.label} traversal socket error`));
   };
   socket.onclose = (event) => {
     if (!settled) {
-      fail(new Error(
+      failObserved(new Error(
         `${options.label} socket closed${event?.reason ? `: ${event.reason}` : ''}`,
       ));
     }
@@ -630,18 +734,18 @@ async function runForcedRtcRoute(options) {
     try {
       frame = JSON.parse(normalizeData(event.data));
     } catch (error) {
-      fail(new Error(`${options.label} invalid mux frame: ${errorMessage(error)}`));
+      failObserved(new Error(`${options.label} invalid mux frame: ${errorMessage(error)}`));
       return;
     }
     try {
       if (frame.type === 'mux-error' || frame.type === 'mux-channel-closed') {
-        fail(new Error(`${options.label} mux error: ${JSON.stringify(frame)}`));
+        failObserved(new Error(`${options.label} mux error: ${JSON.stringify(frame)}`));
         return;
       }
       if (frame.type === 'mux-ready') {
         const reportedHostId = frame.payload?.daemonHostId;
         if (reportedHostId && reportedHostId !== options.daemonHostId) {
-          fail(new Error(
+          failObserved(new Error(
             `${options.label} daemonHostId mismatch: expected ${options.daemonHostId} received ${reportedHostId}`,
           ));
           return;
@@ -669,14 +773,14 @@ async function runForcedRtcRoute(options) {
           : [];
         const catalogEntry = catalog.find((entry) => entry?.name === options.sessionName);
         if (!sessions.includes(options.sessionName)) {
-          fail(new Error(
+          failObserved(new Error(
             `${options.label} mux catalog omitted owned session ${options.sessionName}`,
           ));
           return;
         }
         const stableId = String(catalogEntry?.stableId || '').trim();
         if (!stableId) {
-          fail(new Error(`${options.label} mux catalog omitted owned stableId`));
+          failObserved(new Error(`${options.label} mux catalog omitted owned stableId`));
           return;
         }
         const diagnostics = socket.getDiagnostics();
@@ -691,11 +795,12 @@ async function runForcedRtcRoute(options) {
           stableId,
           durationMs: Date.now() - startedAt,
           diagnostics,
+          trace: trace.summary(diagnostics),
           helloSequence,
         });
       }
     } catch (error) {
-      fail(error);
+      failObserved(error);
     }
   };
 
@@ -771,6 +876,7 @@ async function selfcheckRoute(options) {
       ownedSessionVisible: false,
       durationMs: Date.now() - startedAt,
       error: redactText(errorMessage(error), options.secrets),
+      trace: error?.observeTrace || null,
     };
   }
 }
@@ -1281,6 +1387,7 @@ function makeInitialReceipt(options) {
       socketPath: paths.tmuxSocketPath,
       sessionName: `rtc-fixture-${runId}`,
       marker: `RTC_FIXTURE_${runId}`,
+      interactiveSession: options.interactiveSession === true,
     },
     turn: {
       required: options.turnRequired,
@@ -1308,6 +1415,7 @@ export async function startRtcFixture(options = {}) {
   const normalized = {
     evidenceDir: resolve(options.evidenceDir || 'rtc-fixture-evidence'),
     hold: options.hold === true,
+    interactiveSession: options.interactiveSession === true,
     exposeRelay: options.exposeRelay === true,
     turnRequired: options.turnRequired === true,
     nativePath: resolve(options.nativePath || installedDagpipeNative),
@@ -1353,9 +1461,9 @@ export async function startRtcFixture(options = {}) {
       '80',
       '-y',
       '24',
-      'sh',
-      '-lc',
-      `printf '%s\\n' '${receipt.tmux.marker}'; exec cat`,
+      rtcFixtureTmuxStartCommand(receipt.tmux.marker, {
+        interactiveSession: normalized.interactiveSession,
+      }),
     ], tmuxEnv);
     const serverPid = Number.parseInt(String(runTmux(
       tmuxBinary,
@@ -1603,6 +1711,7 @@ function printHelp() {
     'Options:',
     '  --evidence-dir DIR           Store private/public fixture receipts under DIR',
     '  --hold                       Keep the ready fixture running for a consumer',
+    '  --interactive-session        Run an isolated interactive shell instead of exec cat',
     '  --expose-relay               Add an authenticated cloudflared HTTP/WSS relay',
     '  --turn-required              Fail unless the real TURN relay route passes',
     '  --native-path FILE           Use an explicit DAGpipe native module',

@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { buildRequestedRangeBufferPayload } from '../../../android/src/server/buffer-sync-contract.js';
 import type {
   TerminalInputAckPayload,
   TerminalMuxChannelClientMessage,
@@ -357,6 +358,61 @@ describe('terminal-session public consumer contract', () => {
     session.stdin.emit('data', Buffer.from([0x1d, 0x71]));
     await expect(session.result).resolves.toEqual({ exitCode: 0 });
     expect(connection.closeReason).not.toBeNull();
+  });
+
+  it('sends the initial viewport repair after readiness when early metadata commits an empty body', async () => {
+    const connection = new FakeConnection({
+      beforeOpenReturns: [{
+        type: 'buffer-sync',
+        payload: {
+          revision: 1,
+          startIndex: 0,
+          endIndex: 0,
+          availableStartIndex: 0,
+          availableEndIndex: 24,
+          cols: 80,
+          rows: 24,
+          cursorKeysApp: false,
+          cursor: null,
+          lines: [],
+        },
+      }],
+    });
+    const originalSend = connection.channel.send;
+    connection.channel.send = (message) => {
+      originalSend(message);
+      queueMicrotask(() => {
+        if (message.type === 'buffer-head-request') {
+          connection.emit({ type: 'channel-message', channelId: connection.channelId, message: {
+            type: 'buffer-head', payload: {
+              sessionId: connection.channelId, revision: 2,
+              latestEndIndex: 24, availableStartIndex: 0, availableEndIndex: 24,
+            },
+          } });
+        } else if (message.type === 'buffer-sync-request') {
+          const bufferLines = Array.from({ length: 24 }, (_, index) => index === 0
+            ? [...'initial-marker'].map((char) => ({ char: char.codePointAt(0)!, fg: 256, bg: 256, flags: 0, width: 1 }))
+            : []);
+          connection.emit({ type: 'channel-message', channelId: connection.channelId, message: {
+            type: 'buffer-sync', payload: buildRequestedRangeBufferPayload({
+              revision: 2, bufferStartIndex: 0, bufferLines, cols: 80, rows: 24,
+              cursorKeysApp: false, cursor: null,
+            }, message.payload),
+          } });
+        }
+      });
+    };
+    const session = await startSession({ connection });
+    try {
+      await vi.waitFor(() => {
+        expect(connection.sent.some((message) => message.type === 'buffer-sync-request'
+          && message.payload.requestEndIndex === 24)).toBe(true);
+        expect(visibleText(session.stdout.text())).toContain('initial-marker');
+      });
+    } finally {
+      session.stdin.emit('data', Buffer.from([0x1d, 0x71]));
+      await expect(session.result).resolves.toEqual({ exitCode: 0 });
+    }
   });
 
   it('sends only paste content and treats prefix close as local', async () => {

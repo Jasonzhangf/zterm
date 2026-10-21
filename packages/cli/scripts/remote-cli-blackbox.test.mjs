@@ -31,6 +31,7 @@ import {
   deriveRemoteCliOutcome,
   inspectCliConfig,
   parseRemoteCliArgs,
+  readTerminalModeObservation,
   projectVisibleTerminalText,
   resolveRemoteNodePty,
   sanitizeForEvidence,
@@ -43,6 +44,14 @@ import { buildResult } from './remote-cli-blackbox.mjs';
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const runnerPath = join(scriptDir, 'remote-cli-blackbox.mjs');
 const repoRoot = resolve(scriptDir, '..', '..', '..');
+
+test('terminal mode observation ignores command echo and completion status', () => {
+  for (const mode of ['gfmt1:cflag=4b00:iflag=6b02', '500:5:bf:8a3b:3:1c']) {
+    const output = `prompt printf 'MODE:%s\\n' "$(stty -g)"\r\nMODE:${mode}\r\nMODE:0\r\n`;
+    assert.equal(readTerminalModeObservation(output, 'MODE'), mode);
+  }
+  assert.equal(readTerminalModeObservation("prompt printf 'MODE:%s\\n'\r\nMODE:0\r\n", 'MODE'), '');
+});
 
 function receipt(overrides = {}) {
   return {

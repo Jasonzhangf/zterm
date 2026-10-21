@@ -16,7 +16,7 @@ describe('zterm CLI package contract', () => {
     expect(manifest.files).toEqual(expect.arrayContaining(['bin', 'dist', 'README.md']));
     expect(manifest.dependencies ?? {}).not.toHaveProperty('@zterm/shared');
     expect(manifest.dependencies ?? {}).not.toHaveProperty('@jsonstudio/wtermmod-core');
-    expect(binSource.startsWith('#!/usr/bin/env node\n')).toBe(true);
+    expect(binSource).toMatch(/^#!\/usr\/bin\/env node\r?\n/);
     expect(binSource).toContain("new URL('../dist/main.mjs', import.meta.url)");
     expect(packageRoot).not.toMatch(/[\\/]android[\\/]src[\\/]/);
   });

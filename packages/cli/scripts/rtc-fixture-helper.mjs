@@ -40,6 +40,7 @@ export function parseRtcFixtureArgs(argv) {
   const options = {
     evidenceDir: resolve('rtc-fixture-evidence'),
     hold: false,
+    interactiveSession: false,
     exposeRelay: false,
     turnRequired: false,
     nativePath: undefined,
@@ -71,6 +72,10 @@ export function parseRtcFixtureArgs(argv) {
       options.hold = true;
       continue;
     }
+    if (arg === '--interactive-session') {
+      options.interactiveSession = true;
+      continue;
+    }
     if (arg === '--expose-relay') {
       options.exposeRelay = true;
       continue;
@@ -86,10 +91,26 @@ export function parseRtcFixtureArgs(argv) {
     throw new Error(`unknown rtc fixture argument: ${arg}`);
   }
 
-  if (options.cleanupPrivateReceipt && (options.hold || options.exposeRelay || options.turnRequired || options.nativePath)) {
+  if (
+    options.cleanupPrivateReceipt
+    && (
+      options.hold
+      || options.interactiveSession
+      || options.exposeRelay
+      || options.turnRequired
+      || options.nativePath
+    )
+  ) {
     throw new Error('--cleanup-private-receipt cannot be combined with fixture startup arguments');
   }
   return options;
+}
+
+export function rtcFixtureTmuxStartCommand(marker, options = {}) {
+  if (options.interactiveSession === true) {
+    return `/bin/sh -c 'printf "%s\\n" "${marker}"; export PS1="${marker} $"; export ENV= BASH_ENV=; exec /bin/sh -i'`;
+  }
+  return `sh -lc 'printf '%s\\n' '${marker}'; exec cat'`;
 }
 
 export function ensurePrivateDirectory(path) {
@@ -232,6 +253,14 @@ export function assertPrivateReceipt(receipt) {
 
 export function buildPublicReceipt(receipt) {
   assertPrivateReceipt(receipt);
+  const secrets = [
+    receipt.username,
+    receipt.password,
+    receipt.accessToken,
+    receipt.daemon?.authToken,
+    receipt.turn?.username,
+    receipt.turn?.credential,
+  ];
   return {
     schemaVersion: receipt.schemaVersion,
     kind: receipt.kind,
@@ -281,9 +310,9 @@ export function buildPublicReceipt(receipt) {
     },
     selfcheck: {
       forcedWebrtcMode: true,
-      direct: publicRouteResult(receipt.selfcheck?.direct),
-      relay: publicRouteResult(receipt.selfcheck?.relay),
-      tunnelRelay: publicRouteResult(receipt.selfcheck?.tunnelRelay),
+      direct: publicRouteResult(receipt.selfcheck?.direct, secrets),
+      relay: publicRouteResult(receipt.selfcheck?.relay, secrets),
+      tunnelRelay: publicRouteResult(receipt.selfcheck?.tunnelRelay, secrets),
     },
     tunnel: receipt.tunnel
       ? {
@@ -312,7 +341,7 @@ export function buildPublicReceipt(receipt) {
   };
 }
 
-function publicRouteResult(route) {
+function publicRouteResult(route, secrets) {
   if (!route) return null;
   return {
     attempted: route.attempted === true,
@@ -331,7 +360,30 @@ function publicRouteResult(route) {
     muxReady: route.muxReady === true,
     ownedSessionVisible: route.ownedSessionVisible === true,
     error: route.error || null,
+    trace: route.trace ? publicRouteTrace(route.trace, secrets) : null,
   };
+}
+
+function publicRouteTrace(trace, secrets) {
+  if (!trace || typeof trace !== 'object' || Array.isArray(trace)) {
+    return null;
+  }
+  return stripUrlText(sanitizeValue(trace, secrets));
+}
+
+function stripUrlText(value) {
+  if (typeof value === 'string') {
+    return value.replace(/https?:\/\/[^\s"'`]+/giu, '[url]');
+  }
+  if (Array.isArray(value)) {
+    return value.map(stripUrlText);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, entry]) => [key, stripUrlText(entry)]),
+    );
+  }
+  return value;
 }
 
 function positivePid(value) {

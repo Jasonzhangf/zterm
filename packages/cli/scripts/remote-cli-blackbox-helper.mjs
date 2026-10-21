@@ -807,6 +807,16 @@ export function ensureNodeVersion(minimumMajor = 22) {
   }
 }
 
+export function readTerminalModeObservation(output, marker) {
+  const prefix = `${marker}:`;
+  for (const line of output.replace(/\r/gu, '').split('\n')) {
+    if (!line.startsWith(prefix)) continue;
+    const value = line.slice(prefix.length);
+    if (/^(?:gfmt1:|[0-9a-f]+:)/u.test(value)) return value;
+  }
+  return '';
+}
+
 export function ensureCliBin(cliBin) {
   requireReadableFile(cliBin, 'installed CLI JavaScript file');
   if (!statSync(cliBin).isFile()) {

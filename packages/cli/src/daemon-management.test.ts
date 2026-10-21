@@ -14,6 +14,8 @@ import {
   DAEMON_PACKAGE_NAME,
   daemonGlobalEntryPath,
   daemonPackageRoot,
+  daemonPayloadComponents,
+  daemonPayloadPackageName,
   getDaemonConfig,
   getDaemonStatus,
   installDaemon,
@@ -21,8 +23,6 @@ import {
   type DaemonPackageManifest,
 } from './daemon-management.js';
 import type { ProcessResult, ProcessRunner } from './release.js';
-
-const payloadName = '@jsonstudio/zterm-daemon-darwin-arm64';
 
 function result(command: string, args: string[]): ProcessResult {
   return {
@@ -35,6 +35,25 @@ function result(command: string, args: string[]): ProcessResult {
   };
 }
 
+function expectedDaemonInvocation(
+  prefix: string,
+  subcommand: 'status' | 'config',
+): { command: string; args: string[] } {
+  if (process.platform !== 'win32') {
+    return {
+      command: daemonGlobalEntryPath(prefix, process.platform),
+      args: [subcommand],
+    };
+  }
+  return {
+    command: process.execPath,
+    args: [
+      join(daemonPackageRoot(prefix, process.platform), 'bin', 'zterm-daemon.cjs'),
+      subcommand,
+    ],
+  };
+}
+
 function writeFixtureFile(root: string, relativePath: string, content = ''): void {
   const path = join(root, relativePath);
   mkdirSync(dirname(path), { recursive: true });
@@ -43,31 +62,29 @@ function writeFixtureFile(root: string, relativePath: string, content = ''): voi
 
 function payloadManifest(
   overrides: Partial<DaemonPackageManifest> = {},
+  target: { platform?: NodeJS.Platform; arch?: string } = {},
 ): DaemonPackageManifest {
+  const platform = target.platform ?? 'darwin';
+  const arch = target.arch ?? 'arm64';
+  const name = daemonPayloadPackageName(platform, arch);
+  if (!name) {
+    throw new Error(`unsupported daemon fixture platform ${platform}-${arch}`);
+  }
   return {
     schemaVersion: 1,
     package: {
-      name: payloadName,
+      name,
       version: '0.1.2',
     },
     platform: {
-      os: 'darwin',
-      arch: 'arm64',
+      os: platform,
+      arch,
       node: {
         minimum: '22.0.0',
         abi: '127',
       },
     },
-    runtimeComponents: [
-      'runtime/server.cjs',
-      'runtime/dagpipe.node',
-      'runtime/node_modules/node-pty',
-      'runtime/node_modules/@roamhq/wrtc',
-      'runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node',
-      'support/terminal-config-command.cjs',
-      'support/zterm-daemon.sh',
-      'support/zterm-daemon',
-    ],
+    runtimeComponents: daemonPayloadComponents(platform, arch),
     ...overrides,
   };
 }
@@ -100,15 +117,16 @@ function writePayloadPackage(
   root: string,
   packageManifest: DaemonPackageManifest = payloadManifest(),
 ): void {
+  const { os: platform, arch } = packageManifest.platform;
   mkdirSync(root, { recursive: true });
   writeFixtureFile(
     root,
     'package.json',
     JSON.stringify({
-      name: payloadName,
+      name: packageManifest.package.name,
       version: packageManifest.package.version,
-      os: ['darwin'],
-      cpu: ['arm64'],
+      os: [platform],
+      cpu: [arch],
     }),
   );
   writeFixtureFile(root, 'zterm-package.json', JSON.stringify(packageManifest));
@@ -116,10 +134,16 @@ function writePayloadPackage(
   writeFixtureFile(root, 'runtime/dagpipe.node', '');
   writeFixtureFile(root, 'runtime/node_modules/node-pty/package.json', '{}');
   writeFixtureFile(root, 'runtime/node_modules/@roamhq/wrtc/package.json', '{}');
-  writeFixtureFile(root, 'runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node', '');
+  writeFixtureFile(root, `runtime/node_modules/@roamhq/wrtc-${platform}-${arch}/wrtc.node`, '');
   writeFixtureFile(root, 'support/terminal-config-command.cjs', '');
-  writeFixtureFile(root, 'support/zterm-daemon.sh', '');
-  writeFixtureFile(root, 'support/zterm-daemon', '');
+  if (platform === 'win32') {
+    writeFixtureFile(root, 'support/windows/zterm-daemon.ps1', '');
+  } else {
+    writeFixtureFile(root, 'support/zterm-daemon.sh', '');
+    if (platform === 'darwin') {
+      writeFixtureFile(root, 'support/zterm-daemon', '');
+    }
+  }
 }
 
 function writeStagedPackages(
@@ -131,10 +155,14 @@ function writeStagedPackages(
 ): void {
   writePublicPackage(stagedDaemonPackageRoot(stagingDir));
   if (options.includePayload !== false) {
-    writePayloadPackage(
-      join(stagingDir, 'node_modules', '@jsonstudio', payloadName.replace('@jsonstudio/', '')),
-      options.payloadManifest,
+    const payloadManifestValue = options.payloadManifest ?? payloadManifest();
+    const payloadPath = join(
+      stagingDir,
+      'node_modules',
+      '@jsonstudio',
+      payloadManifestValue.package.name.replace('@jsonstudio/', ''),
     );
+    writePayloadPackage(payloadPath, payloadManifestValue);
   }
 }
 
@@ -143,17 +171,27 @@ function writeGlobalPackages(
   options: {
     includePayload?: boolean;
     payloadManifest?: DaemonPackageManifest;
+    platform?: NodeJS.Platform;
+    arch?: string;
   } = {},
 ): void {
-  writePublicPackage(daemonPackageRoot(prefix, 'darwin'));
+  const platform = options.platform ?? 'darwin';
+  const arch = options.arch ?? (platform === 'darwin' ? 'arm64' : 'x64');
+  const packageRoot = daemonPackageRoot(prefix, platform);
+  writePublicPackage(packageRoot);
   if (options.includePayload !== false) {
+    const name = daemonPayloadPackageName(platform, arch);
+    if (!name) {
+      throw new Error(`unsupported daemon fixture platform ${platform}-${arch}`);
+    }
     writePayloadPackage(
-      join(prefix, 'lib', 'node_modules', '@jsonstudio', payloadName.replace('@jsonstudio/', '')),
-      options.payloadManifest,
+      join(dirname(packageRoot), name.replace('@jsonstudio/', '')),
+      options.payloadManifest ?? payloadManifest(undefined, { platform, arch }),
     );
   }
-  const entryPath = daemonGlobalEntryPath(prefix, 'darwin');
-  writeFixtureFile(prefix, 'bin/zterm-daemon', '#!/usr/bin/env node\n');
+  const entryPath = daemonGlobalEntryPath(prefix, platform);
+  mkdirSync(dirname(entryPath), { recursive: true });
+  writeFileSync(entryPath, '#!/usr/bin/env node\n');
   chmodSync(entryPath, 0o755);
 }
 
@@ -204,7 +242,7 @@ describe('daemon management package adapter', () => {
     expect(installResult).toMatchObject({
       phase: 'verify',
       installedVersion: '0.1.2',
-      payloadPackage: payloadName,
+      payloadPackage: daemonPayloadPackageName('darwin', 'arm64'),
       commandAvailable: true,
     });
     expect(installResult.filesWritten).toContain(
@@ -401,14 +439,15 @@ describe('daemon management package adapter', () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'zterm-daemon-home-'));
     const prefix = mkdtempSync(join(tmpdir(), 'zterm-daemon-prefix-'));
     mkdirSync(join(homeDir, '.zterm'), { recursive: true });
-    writeGlobalPackages(prefix);
+    writeGlobalPackages(prefix, { platform: process.platform });
     const calls: string[][] = [];
     const runner: ProcessRunner = async (command, args) => {
       calls.push([command, ...args]);
+      const subcommand = process.platform === 'win32' ? args[1] : args[0];
       return {
         ...result(command, args),
-        exitCode: args[0] === 'status' ? 1 : 0,
-        stdout: args[0] === 'status' ? 'zterm daemon not running (3333)\n' : 'configPath=x\n',
+        exitCode: subcommand === 'status' ? 1 : 0,
+        stdout: subcommand === 'status' ? 'zterm daemon not running (3333)\n' : 'configPath=x\n',
       };
     };
 
@@ -418,9 +457,11 @@ describe('daemon management package adapter', () => {
     expect(statusResult.exitCode).toBe(1);
     expect(statusResult.stdout).toContain('not running');
     expect(configResult.exitCode).toBe(0);
+    const statusInvocation = expectedDaemonInvocation(prefix, 'status');
+    const configInvocation = expectedDaemonInvocation(prefix, 'config');
     expect(calls).toEqual([
-      [daemonGlobalEntryPath(prefix, 'darwin'), 'status'],
-      [daemonGlobalEntryPath(prefix, 'darwin'), 'config'],
+      [statusInvocation.command, ...statusInvocation.args],
+      [configInvocation.command, ...configInvocation.args],
     ]);
   });
 
@@ -434,8 +475,8 @@ describe('daemon management package adapter', () => {
 
     expect(resultValue.state).toBe('entry_unavailable');
     expect(resultValue.error?.code).toBe('daemon_entry_missing');
-    expect(resultValue.command).toBe(daemonGlobalEntryPath(prefix, 'darwin'));
+    expect(resultValue.command).toBe(daemonGlobalEntryPath(prefix, process.platform));
     expect(runnerSpy).not.toHaveBeenCalled();
-    expect(existsSync(daemonGlobalEntryPath(prefix, 'darwin'))).toBe(false);
+    expect(existsSync(daemonGlobalEntryPath(prefix, process.platform))).toBe(false);
   });
 });

@@ -36,6 +36,7 @@ import {
   publicClientInfo,
   publicTargetInfo,
   readManagedReceiptFile,
+  readTerminalModeObservation,
   requireDirectory,
   requireReadableFile,
   resolveRemoteNodePty,
@@ -436,9 +437,7 @@ async function executeHarness({
         'failed to record baseline local terminal mode',
       );
     }
-    const match = new RegExp(`${escapeRegExp(marker)}:([^\\r\\n]+)`, 'u')
-      .exec(result.output);
-    beforeStty = match?.[1] || '';
+    beforeStty = readTerminalModeObservation(result.output, marker);
     if (!beforeStty) {
       throw new RemoteCliContractError(
         'stty_before_missing',
@@ -640,7 +639,7 @@ async function executeHarness({
     shell.resize(RESIZED_COLS, RESIZED_ROWS);
     const marker = commandMarker(receipt.runId, 'resize');
     const from = shell.mark();
-    shell.sendLine(`printf '${marker}:%s\\n' "$(stty size)"`);
+    shell.sendLine(`( zterm_resize_attempt=0; while [ "$zterm_resize_attempt" -lt 200 ]; do zterm_resize_size=$(stty size); [ "\${zterm_resize_size##* }" = "${RESIZED_COLS}" ] && break; zterm_resize_attempt=$((zterm_resize_attempt + 1)); sleep 0.05; done; printf '${marker}:%s\\n' "$zterm_resize_size" )`);
     const matched = await shell.waitForVisibleText(
       new RegExp(`${escapeRegExp(marker)}:(\\d+)\\s+${RESIZED_COLS}`, 'u'),
       `remote PTY width ${RESIZED_COLS}`,
@@ -690,9 +689,7 @@ async function executeHarness({
           'failed to record local terminal mode after CLI exit',
         );
       }
-      const match = new RegExp(`${escapeRegExp(marker)}:([^\\r\\n]+)`, 'u')
-        .exec(sttyResult.output);
-      const afterStty = match?.[1] || '';
+      const afterStty = readTerminalModeObservation(sttyResult.output, marker);
       terminalModeRestored = Boolean(afterStty) && afterStty === beforeStty;
       if (!terminalModeRestored) {
         throw new RemoteCliContractError(
@@ -885,6 +882,12 @@ async function main() {
       cleanup,
       secrets,
     });
+    if (fatalError && state.shell) {
+      result.failureTerminalTail = sanitizeForEvidence(
+        state.shell.visibleSince(0).slice(-12_000),
+        secrets,
+      );
+    }
     if (options?.evidenceDir) {
       try {
         writeEvidenceJson(

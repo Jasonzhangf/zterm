@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { AuthenticatedAccount } from './account-client.js';
 import {
   SessionConnection,
+  buildSessionConnectionRouteContext,
   type SessionConnectionEvent,
   type SessionConnectionFrame,
   type SessionConnectionTimerPort,
@@ -180,6 +181,68 @@ function createConnection(url: string, options: {
     handshakeTimeoutMs: options.handshakeTimeoutMs ?? 1000,
   });
 }
+
+describe('SessionConnection route identity', () => {
+  it('keeps target and auth binding while using the client identity for relay', () => {
+    const context = buildSessionConnectionRouteContext(
+      accountFor('ws://127.0.0.1:1'),
+      {
+        deviceId: 'device-1',
+        daemonHostId: 'daemon-1',
+      },
+      {
+        accountId: 'account-1',
+        daemonHostId: 'daemon-1',
+        networkGeneration: 3,
+      },
+      'client-instance-2',
+    );
+
+    expect(context.device.deviceId).toBe('device-1');
+    expect(context.daemon.hostId).toBe('daemon-1');
+    expect(context.target).toMatchObject({
+      daemonHostId: 'daemon-1',
+      relayHostId: 'daemon-1',
+    });
+    const { traversalRelay } = context.settings;
+    expect(traversalRelay).toMatchObject({
+      relayBaseUrl: 'https://relay.example.test/',
+      accessToken: 'account-access-token',
+      userId: 'account-1',
+      username: 'jason',
+      deviceId: 'client-instance-2',
+    });
+    expect(traversalRelay?.deviceId).not.toBe(context.device.deviceId);
+  });
+
+  it('rejects an empty client identity before building the route context', () => {
+    let rejection: unknown;
+    try {
+      buildSessionConnectionRouteContext(
+        accountFor('ws://127.0.0.1:1'),
+        {
+          deviceId: 'device-1',
+          daemonHostId: 'daemon-1',
+        },
+        {
+          accountId: 'account-1',
+          daemonHostId: 'daemon-1',
+          networkGeneration: 3,
+        },
+        ' ',
+      );
+    } catch (error) {
+      rejection = error;
+    }
+
+    expect(rejection).toMatchObject({
+      name: 'SessionConnectionError',
+      stage: 'resolution',
+      code: 'invalid_context',
+      message: 'clientInstanceId is required',
+    });
+  });
+});
 
 function readyFrame(daemonHostId = 'daemon-1'): TerminalMuxServerFrame {
   return {

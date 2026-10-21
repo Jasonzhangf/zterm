@@ -8,7 +8,6 @@ import {
 } from './connection.js';
 import { createNodeTraversalFactory } from './node-platform.js';
 
-const clientInstanceId = randomUUID();
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws') as {
   WebSocket: new (url: string) => unknown;
@@ -27,6 +26,7 @@ export async function createApplicationConnection(
     throw abortError();
   }
 
+  const clientInstanceId = randomUUID();
   const traversalFactory = createNodeTraversalFactory({
     WebSocket,
     RTCPeerConnection: wrtc.RTCPeerConnection,

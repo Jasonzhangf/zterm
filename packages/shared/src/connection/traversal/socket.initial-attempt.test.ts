@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { TraversalSocket, classifyInitialFailure } from './socket';
-import { clearTraversalPlanCache } from './config';
+import { buildTraversalPlanCached, clearTraversalPlanCache } from './config';
 import { TraversalRouteHealthCache } from './route-health-cache';
 import type {
   AttemptFailure,
@@ -284,8 +284,54 @@ const wsSettings: TraversalSettingsSource = {
   transportMode: 'websocket',
 };
 
+function rtcSettings(clientInstanceId: string): TraversalSettingsSource {
+  return {
+    signalUrl: 'ws://signal.example.test/client',
+    transportMode: 'webrtc',
+    traversalRelay: {
+      relayBaseUrl: 'https://relay.example.test/',
+      accessToken: 'relay-account-token',
+      userId: 'user-a',
+      username: 'tester',
+      deviceId: clientInstanceId,
+      deviceName: 'CLI',
+      platform: 'node',
+      wsDevicesUrl: 'wss://relay.example.test/devices',
+      wsHostUrl: 'wss://relay.example.test/host',
+      wsClientUrl: 'wss://signal.example.test/client?region=us-west',
+      turnUrl: 'turn:turn.example.test:3478?transport=udp',
+      turnUsername: 'turn-user',
+      turnCredential: 'turn-secret',
+      updatedAt: 1,
+    },
+  };
+}
+
+const rtcTarget: TraversalTargetSource = {
+  bridgeHost: '',
+  bridgePort: 3333,
+  signalUrl: 'ws://signal.example.test/client',
+  relayHostId: 'daemon-a',
+  transportMode: 'webrtc',
+};
+
 function boundInitialSocket(port: InitialAttemptPort, timers: ManualTimers) {
   return new TraversalSocket(wsTarget, wsSettings, {
+    platform: createPlatform(timers),
+    candidateScope: 'bound-initial',
+    initialAttemptPort: port,
+    routeHealthCache: new TraversalRouteHealthCache(),
+    autoReconnect: false,
+    requireOpenConfirmation: true,
+  });
+}
+
+function boundInitialRtcSocket(
+  settings: TraversalSettingsSource,
+  port: InitialAttemptPort,
+  timers: ManualTimers,
+) {
+  return new TraversalSocket(rtcTarget, settings, {
     platform: createPlatform(timers),
     candidateScope: 'bound-initial',
     initialAttemptPort: port,
@@ -299,6 +345,12 @@ function beginIds(events: InitialAttemptEvent[]) {
   return events
     .filter((event): event is Extract<InitialAttemptEvent, { type: 'begin' }> => event.type === 'begin')
     .map((event) => event.attemptId);
+}
+
+function withoutSignalDeviceId(url: string) {
+  const parsed = new URL(url);
+  parsed.searchParams.delete('deviceId');
+  return parsed.toString();
 }
 
 describe('classifyInitialFailure', () => {
@@ -337,6 +389,61 @@ describe('classifyInitialFailure', () => {
 });
 
 describe('bound-initial attempt executor', () => {
+  it('isolates RTC signaling identities per client instance and monotonic attempt', async () => {
+    clearTraversalPlanCache();
+    ControlledWebSocket.reset();
+    const firstSettings = rtcSettings('client-instance-a');
+    const secondSettings = rtcSettings('client-instance-b');
+    const first = boundInitialRtcSocket(firstSettings, createPort().port, new ManualTimers());
+    const second = boundInitialRtcSocket(secondSettings, createPort().port, new ManualTimers());
+    await flushMicrotasks();
+
+    const originalPlan = buildTraversalPlanCached(
+      rtcTarget,
+      firstSettings,
+      undefined,
+      'bound-initial',
+    );
+    const originalCandidate = originalPlan.candidates.find((candidate) => candidate.kind === 'rtc');
+    if (!originalCandidate || originalCandidate.kind !== 'rtc') {
+      throw new Error('expected the bound-initial plan to contain an RTC candidate');
+    }
+    const originalUrl = originalCandidate.signalUrl;
+
+    const [firstSignal, secondSignal] = ControlledWebSocket.instances;
+    const firstAttemptUrl = new URL(firstSignal.url);
+    const secondAttemptUrl = new URL(secondSignal.url);
+    expect(firstAttemptUrl.searchParams.get('deviceId')).toBe('cli:client-instance-a:attempt:1');
+    expect(secondAttemptUrl.searchParams.get('deviceId')).toBe('cli:client-instance-b:attempt:1');
+    expect(firstAttemptUrl.searchParams.get('deviceId')).not.toBe(
+      secondAttemptUrl.searchParams.get('deviceId'),
+    );
+
+    expect(withoutSignalDeviceId(firstSignal.url)).toBe(withoutSignalDeviceId(originalUrl));
+    expect(firstAttemptUrl.searchParams.get('token')).toBe('relay-account-token');
+    expect(firstAttemptUrl.searchParams.get('hostId')).toBe('daemon-a');
+    expect(buildTraversalPlanCached(
+      rtcTarget,
+      firstSettings,
+      undefined,
+      'bound-initial',
+    ).candidates.find((candidate) => candidate.kind === 'rtc')?.signalUrl).toBe(originalUrl);
+
+    firstSignal.triggerFailure({
+      stage: 'connect',
+      kind: 'system',
+      code: 'ECONNREFUSED',
+    });
+    await flushMicrotasks();
+
+    const laterAttemptUrl = new URL(ControlledWebSocket.instances[2].url);
+    expect(laterAttemptUrl.searchParams.get('deviceId')).toBe('cli:client-instance-a:attempt:2');
+    expect(withoutSignalDeviceId(laterAttemptUrl.toString())).toBe(withoutSignalDeviceId(originalUrl));
+
+    second.close();
+    first.close();
+  });
+
   it('retains the selected ICE pair emitted before RTC attempt promotion', async () => {
     clearTraversalPlanCache();
     ControlledWebSocket.reset();
@@ -345,11 +452,11 @@ describe('bound-initial attempt executor', () => {
     const socket = new TraversalSocket({
       bridgeHost: '',
       bridgePort: 3333,
-      signalUrl: 'ws://signal.example.test',
+      signalUrl: 'ws://signal.example.test?deviceId=rtc-test-client',
       relayHostId: 'daemon-a',
       transportMode: 'webrtc',
     }, {
-      signalUrl: 'ws://signal.example.test',
+      signalUrl: 'ws://signal.example.test?deviceId=rtc-test-client',
       transportMode: 'webrtc',
     }, {
       platform: createPlatform(timers),
@@ -681,11 +788,11 @@ describe('bound-initial attempt executor', () => {
     const socket = new TraversalSocket({
       bridgeHost: '',
       bridgePort: 3333,
-      signalUrl: 'ws://signal.example.test',
+      signalUrl: 'ws://signal.example.test?deviceId=rtc-test-client',
       relayHostId: 'daemon-a',
       transportMode: 'webrtc',
     }, {
-      signalUrl: 'ws://signal.example.test',
+      signalUrl: 'ws://signal.example.test?deviceId=rtc-test-client',
       transportMode: 'webrtc',
     }, {
       platform: createPlatform(timers),
@@ -766,11 +873,11 @@ describe('bound-initial attempt executor', () => {
     const socket = new TraversalSocket({
       bridgeHost: '',
       bridgePort: 3333,
-      signalUrl: 'ws://signal.example.test',
+      signalUrl: 'ws://signal.example.test?deviceId=rtc-test-client',
       relayHostId: 'daemon-a',
       transportMode: 'webrtc',
     }, {
-      signalUrl: 'ws://signal.example.test',
+      signalUrl: 'ws://signal.example.test?deviceId=rtc-test-client',
       transportMode: 'webrtc',
     }, {
       platform: createPlatform(timers),

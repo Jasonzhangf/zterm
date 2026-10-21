@@ -1,4 +1,5 @@
 import type {
+  AttemptId,
   AttemptFailure,
   BridgeSocketCloseLike,
   BridgeSocketMessageLike,
@@ -176,6 +177,22 @@ type Backend = {
     ) => void;
   }): void;
 };
+
+function buildInitialRtcAttemptCandidate(
+  candidate: Extract<TraversalPlanCandidate, { kind: 'rtc' }>,
+  attemptId: AttemptId,
+) {
+  const signalUrl = new URL(candidate.signalUrl);
+  const baseClientIdentity = signalUrl.searchParams.get('deviceId')?.trim() || '';
+  if (!baseClientIdentity) {
+    throw new Error('bound-initial RTC signaling URL requires a nonempty deviceId client identity');
+  }
+  signalUrl.searchParams.set('deviceId', `cli:${baseClientIdentity}:attempt:${attemptId}`);
+  return {
+    ...candidate,
+    signalUrl: signalUrl.toString(),
+  };
+}
 
 function resolveCandidateTimeoutMs(candidate: TraversalPlanCandidate, health: TraversalRouteHealthRecord | null) {
   if (candidate.kind === 'ws') {
@@ -1543,6 +1560,8 @@ export class TraversalSocket implements BridgeTransportSocket, InitialAttemptCon
     this.diagnostics.selectedIcePair = undefined;
 
     const attempts: InitialAttempt[] = batch.map((candidate) => {
+      const attemptId: AttemptId = this.initialAttemptSequence + 1;
+      this.initialAttemptSequence = attemptId;
       const diagnostic = selection.diagnostics.find((item) =>
         item.path === candidate.path
         && item.endpoint === candidate.endpoint
@@ -1558,14 +1577,16 @@ export class TraversalSocket implements BridgeTransportSocket, InitialAttemptCon
       };
       this.diagnostics.attempts.push(record);
       this.activeAttempt = record;
-      this.initialAttemptSequence += 1;
       return {
-        id: this.initialAttemptSequence,
+        id: attemptId,
         candidate,
         record,
         backend: candidate.kind === 'ws'
           ? new WebSocketBackend(candidate, this.platform)
-          : new WebRtcBackend(candidate, this.platform),
+          : new WebRtcBackend(
+            buildInitialRtcAttemptCandidate(candidate, attemptId),
+            this.platform,
+          ),
         opened: false,
         settled: false,
         advanced: false,

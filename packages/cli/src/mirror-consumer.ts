@@ -49,6 +49,7 @@ import {
   resolveTerminalRequestWindowLines,
 } from '../../shared/src/terminal/viewport-utils.js';
 import type {
+  RendererHeadMetadata,
   RendererVisibleRangeDemand,
 } from './renderer-window.js';
 
@@ -68,6 +69,7 @@ export type MirrorRequestMessage =
 export interface MirrorMetadataEvent {
   sessionId: string;
   head: BufferHeadPayload;
+  effectiveBounds: RendererHeadMetadata;
   cursor: TerminalCursorState | null;
 }
 
@@ -82,7 +84,7 @@ export interface MirrorCommitEvent {
   };
 }
 
-export interface MirrorBodySnapshot {
+export interface MirrorBodySnapshot extends RendererHeadMetadata {
   revision: number;
   startIndex: number;
   endIndex: number;
@@ -136,7 +138,7 @@ export interface MirrorConsumerOptions {
   headRequestDebounceMs?: number;
   sendRequest: (message: MirrorRequestMessage) => boolean;
   onCommit?: (event: MirrorCommitEvent) => void;
-  onMetadata?: (event: MirrorMetadataEvent) => void;
+  onMetadata?: (event: MirrorMetadataEvent) => RendererVisibleRangeDemand | void;
 }
 
 interface SessionRuntime {
@@ -151,6 +153,8 @@ interface SessionRuntime {
   } | null;
   cursor: TerminalCursorState | null;
   body: SessionBufferState;
+  bodyEpoch: number | null;
+  publishingBody: boolean;
   visibleDemand: RendererVisibleRangeDemand | null;
   frameAssembly: BufferFrameAssemblyResourceState;
   rejectedEpochRevisionCeiling: number | null;
@@ -218,7 +222,7 @@ function isGapIndex(gapRanges: readonly TerminalGapRange[], absoluteIndex: numbe
   return false;
 }
 
-function bufferToBodySnapshot(buffer: SessionBufferState): MirrorBodySnapshot {
+function bufferToBodySnapshot(buffer: SessionBufferState, bounds: RendererHeadMetadata | null): MirrorBodySnapshot {
   const lines = new Map<number, readonly TerminalCell[]>();
   for (let absoluteIndex = buffer.startIndex; absoluteIndex < buffer.endIndex; absoluteIndex += 1) {
     const offset = absoluteIndex - buffer.startIndex;
@@ -228,6 +232,9 @@ function bufferToBodySnapshot(buffer: SessionBufferState): MirrorBodySnapshot {
   }
   return {
     revision: buffer.revision,
+    latestEndIndex: bounds?.latestEndIndex ?? 0,
+    availableStartIndex: bounds?.availableStartIndex ?? 0,
+    availableEndIndex: bounds?.availableEndIndex ?? 0,
     startIndex: buffer.startIndex,
     endIndex: buffer.endIndex,
     lines,
@@ -239,12 +246,27 @@ function bufferToBodySnapshot(buffer: SessionBufferState): MirrorBodySnapshot {
   };
 }
 
-function headBounds(session: SessionRuntime) {
+function resolveEffectiveMirrorBounds(session: SessionRuntime) {
+  const currentBody = session.bodyEpoch === session.epoch;
+  if (session.head && (!currentBody || session.head.revision >= session.body.revision)) {
+    return session.head;
+  }
+  if (!currentBody) return null;
   return {
-    daemonHeadRevision: session.head?.revision ?? 0,
-    daemonHeadEndIndex: session.head?.latestEndIndex ?? 0,
-    availableStartIndex: session.head?.availableStartIndex ?? 0,
-    availableEndIndex: session.head?.availableEndIndex ?? 0,
+    revision: session.body.revision,
+    latestEndIndex: session.body.bufferTailEndIndex,
+    availableStartIndex: session.body.bufferHeadStartIndex,
+    availableEndIndex: session.body.bufferTailEndIndex,
+  };
+}
+
+function headBounds(session: SessionRuntime) {
+  const bounds = resolveEffectiveMirrorBounds(session);
+  return {
+    daemonHeadRevision: bounds?.revision ?? 0,
+    daemonHeadEndIndex: bounds?.latestEndIndex ?? 0,
+    availableStartIndex: bounds?.availableStartIndex ?? 0,
+    availableEndIndex: bounds?.availableEndIndex ?? 0,
   };
 }
 
@@ -271,7 +293,7 @@ function visibleGapRanges(session: SessionRuntime): TerminalGapRange[] {
 }
 
 function resolveRequestEndIndex(session: SessionRuntime, demand: RendererVisibleRangeDemand) {
-  const availableEndIndex = session.head?.availableEndIndex;
+  const availableEndIndex = resolveEffectiveMirrorBounds(session)?.availableEndIndex;
   if (typeof availableEndIndex === 'number' && Number.isFinite(availableEndIndex)) {
     return Math.min(demand.endIndex, Math.max(0, Math.floor(availableEndIndex)));
   }
@@ -286,7 +308,8 @@ function buildTailRefreshRequest(session: SessionRuntime): MirrorBufferSyncReque
   const head = headBounds(session);
   const viewportEndIndex = resolveRequestEndIndex(session, visibleDemand);
   const requestWindowLines = resolveTerminalRequestWindowLines(visibleDemand.visibleRows);
-  const localHasWindow = hasLocalWindow(session.body.startIndex, session.body.endIndex, session.body.revision);
+  const localHasWindow = session.bodyEpoch === session.epoch
+    && hasLocalWindow(session.body.startIndex, session.body.endIndex, session.body.revision);
   const distanceToHead = Math.max(0, viewportEndIndex - session.body.endIndex);
   const sameEndRevisionAdvanced = (
     localHasWindow
@@ -428,7 +451,7 @@ function requestVisibleBuffer(
   if (!session.head) {
     return requestHead(session, options);
   }
-  if (shouldRequestTail(session)) {
+  if (session.bodyEpoch !== session.epoch || shouldRequestTail(session)) {
     return dispatchRequest(session, buildTailRefreshRequest(session), options);
   }
   return dispatchRequest(session, buildReadingRepairRequest(session), options);
@@ -686,13 +709,51 @@ function normalizeHead(payload: BufferHeadPayload) {
   };
 }
 
+function installDemand(session: SessionRuntime, demand: RendererVisibleRangeDemand) {
+  const next = normalizeVisibleDemand(demand);
+  if (visibleDemandEqual(session.visibleDemand, next)) return false;
+  session.visibleDemand = next;
+  return true;
+}
+
+function cacheCoversDemand(session: SessionRuntime) {
+  const bounds = resolveEffectiveMirrorBounds(session);
+  const demand = session.visibleDemand;
+  return Boolean(bounds && demand && session.bodyEpoch === session.epoch
+    && session.body.revision >= bounds.revision
+    && demand.startIndex >= bounds.availableStartIndex
+    && demand.endIndex <= bounds.availableEndIndex
+    && demand.startIndex >= session.body.startIndex
+    && demand.endIndex <= session.body.endIndex
+    && visibleGapRanges(session).length === 0);
+}
+
+function publishBody(session: SessionRuntime, onCommit: MirrorConsumerOptions['onCommit']) {
+  session.publishingBody = true;
+  try {
+    onCommit?.({
+      sessionId: session.sessionId,
+      snapshot: bufferToBodySnapshot(session.body, resolveEffectiveMirrorBounds(session)),
+      metadata: {
+        revision: session.body.revision,
+        cursorKeysApp: session.body.cursorKeysApp,
+        cursor: cloneCursor(session.body.cursor),
+        headCursor: cloneCursor(session.cursor),
+      },
+    });
+  } finally {
+    session.publishingBody = false;
+  }
+}
+
 function handleHead(
   session: SessionRuntime,
   payload: BufferHeadPayload,
   options: {
     headRequestDebounceMs: number;
     sendRequest: (message: MirrorRequestMessage) => boolean;
-    onMetadata?: (event: MirrorMetadataEvent) => void;
+    onMetadata?: MirrorConsumerOptions['onMetadata'];
+    onCommit?: MirrorConsumerOptions['onCommit'];
     now: number;
   },
 ) {
@@ -744,15 +805,21 @@ function handleHead(
       : { cursorKeysApp: payload.cursorKeysApp }),
     cursor: cloneCursor(session.cursor),
   };
-  options.onMetadata?.({
+  const demand = options.onMetadata?.({
     sessionId: session.sessionId,
     head: metadataHead,
+    effectiveBounds: resolveEffectiveMirrorBounds(session)!,
     cursor: cloneCursor(session.cursor),
   });
+  const demandChanged = demand ? installDemand(session, demand) : false;
   dispatchPendingFrameRepair(session, {
     sendRequest: options.sendRequest,
     now: options.now,
   });
+  if (demandChanged && cacheCoversDemand(session)) {
+    publishBody(session, options.onCommit);
+    return;
+  }
   requestVisibleBuffer(session, {
     headRequestDebounceMs: options.headRequestDebounceMs,
     sendRequest: options.sendRequest,
@@ -814,45 +881,33 @@ function handleBufferSync(
     ?? createFrameAssemblyResource();
   const resolvedPayload: BufferSyncIn03SparseApplyInput = result.payload;
   const payloadRevision = nonNegativeInteger(resolvedPayload.revision);
-  if (
-    session.epochResetPending
-    && session.head
-    && payloadRevision > 0
-    && payloadRevision <= session.head.revision
-  ) {
-    session.body = createEmptyBody({
+  const applyInputBody = session.bodyEpoch === session.epoch
+    ? session.body
+    : createEmptyBody({
       cacheLines: session.cacheLines,
       cols: session.body.cols,
       rows: session.body.rows,
     });
-    session.epochResetPending = false;
-    session.rejectedEpochRevisionCeiling = null;
-  }
   const nextBody = applyBufferSyncToSessionBuffer(
-    session.body,
+    applyInputBody,
     resolvedPayload,
     session.cacheLines,
   );
-  const bodyChanged = !sessionBuffersEqual(session.body, nextBody);
-  if (bodyChanged) {
-    session.body = nextBody;
+  if (nextBody === applyInputBody) return;
+  if (session.epochResetPending && session.head && payloadRevision > 0 && payloadRevision <= session.head.revision) {
+    session.epochResetPending = false;
+    session.rejectedEpochRevisionCeiling = null;
   }
+  const provenanceChanged = session.bodyEpoch !== session.epoch;
+  session.bodyEpoch = session.epoch;
+  const bodyChanged = !sessionBuffersEqual(session.body, nextBody);
+  session.body = nextBody;
   reconcileFrameRepair(session, nextBody);
-  if (!bodyChanged) {
+  if (!bodyChanged && !provenanceChanged) {
     return;
   }
 
-  const snapshot = bufferToBodySnapshot(nextBody);
-  options.onCommit?.({
-    sessionId: session.sessionId,
-    snapshot,
-    metadata: {
-      revision: nextBody.revision,
-      cursorKeysApp: nextBody.cursorKeysApp,
-      cursor: cloneCursor(nextBody.cursor),
-      headCursor: cloneCursor(session.cursor),
-    },
-  });
+  publishBody(session, options.onCommit);
   options.onVisibleDemandChange();
 }
 
@@ -951,6 +1006,8 @@ export function createMirrorConsumer(options: MirrorConsumerOptions): MirrorCons
       head: null,
       cursor: null,
       body: createEmptyBody({ cacheLines, cols, rows }),
+      bodyEpoch: null,
+      publishingBody: false,
       visibleDemand: null,
       frameAssembly: createFrameAssemblyResource(),
       rejectedEpochRevisionCeiling: null,
@@ -990,6 +1047,7 @@ export function createMirrorConsumer(options: MirrorConsumerOptions): MirrorCons
           headRequestDebounceMs,
           sendRequest,
           onMetadata,
+          onCommit,
           now,
         });
         scheduleExpiry(session);
@@ -1010,11 +1068,11 @@ export function createMirrorConsumer(options: MirrorConsumerOptions): MirrorCons
       if (!session) {
         return;
       }
-      const nextDemand = normalizeVisibleDemand(demand);
-      if (visibleDemandEqual(session.visibleDemand, nextDemand)) {
+      if (!installDemand(session, demand) || session.publishingBody) return;
+      if (cacheCoversDemand(session)) {
+        publishBody(session, onCommit);
         return;
       }
-      session.visibleDemand = nextDemand;
       requestVisibleForSession(session);
     },
     snapshot(sessionId) {
@@ -1028,7 +1086,7 @@ export function createMirrorConsumer(options: MirrorConsumerOptions): MirrorCons
         cacheLines: session.cacheLines,
         head: session.head ? { ...session.head } : null,
         cursor: cloneCursor(session.cursor),
-        body: bufferToBodySnapshot(session.body),
+        body: bufferToBodySnapshot(session.body, resolveEffectiveMirrorBounds(session)),
         visibleDemand: session.visibleDemand ? { ...session.visibleDemand } : null,
         requestState: {
           lastRequestedAt: session.lastRequestAt,

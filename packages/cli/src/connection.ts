@@ -304,7 +304,15 @@ export function buildSessionConnectionRouteContext(
   account: AuthenticatedAccount,
   server: SessionConnectionServer,
   routeHealthScope: TraversalRouteHealthScope,
+  clientInstanceId: string,
 ): SessionConnectionRouteContext {
+  const clientId = asNonEmptyString(clientInstanceId);
+  if (!clientId) {
+    throw new SessionConnectionError('clientInstanceId is required', {
+      stage: 'resolution',
+      code: 'invalid_context',
+    });
+  }
   const { device, daemon } = resolveExactDirectoryServer(account, server);
   if (
     routeHealthScope.accountId !== account.user.id
@@ -346,7 +354,7 @@ export function buildSessionConnectionRouteContext(
       accessToken: account.accessToken,
       userId: account.user.id,
       username: account.user.username,
-      deviceId: device.deviceId,
+      deviceId: clientId,
       deviceName: device.deviceName,
       platform: device.platform,
       wsDevicesUrl: account.ws?.devices || '',
@@ -428,22 +436,23 @@ export class SessionConnection {
   private _state: SessionConnectionState = 'idle';
 
   constructor(private readonly options: SessionConnectionOptions) {
-    this.context = buildSessionConnectionRouteContext(
-      options.account,
-      options.server,
-      options.routeHealthScope,
-    );
-    this.traversalFactory = options.traversalFactory;
     this.clientInstanceId = asNonEmptyString(options.clientInstanceId);
-    this.requestTimeoutMs = requirePositiveTimeout(options.requestTimeoutMs, 10_000);
-    this.handshakeTimeoutMs = requirePositiveTimeout(options.handshakeTimeoutMs, 5_000);
-    this.timers = options.timers || defaultTimers;
     if (!this.clientInstanceId) {
       throw new SessionConnectionError('clientInstanceId is required', {
         stage: 'socket-connect',
         code: 'invalid_context',
       });
     }
+    this.context = buildSessionConnectionRouteContext(
+      options.account,
+      options.server,
+      options.routeHealthScope,
+      this.clientInstanceId,
+    );
+    this.traversalFactory = options.traversalFactory;
+    this.requestTimeoutMs = requirePositiveTimeout(options.requestTimeoutMs, 10_000);
+    this.handshakeTimeoutMs = requirePositiveTimeout(options.handshakeTimeoutMs, 5_000);
+    this.timers = options.timers || defaultTimers;
 
     this.readyPromise = new Promise<void>((resolve, reject) => {
       this.resolveReady = resolve;

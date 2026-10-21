@@ -184,6 +184,30 @@ async function startSignalingProbe() {
 }
 
 describe('createApplicationConnection public contract', () => {
+  it('creates a distinct client identity for each application connection', async () => {
+    const fixture = await startFixture();
+    try {
+      const account = accountFor(fixture.url);
+      const server = {
+        deviceId: 'device-1',
+        daemonHostId: 'daemon-1',
+      };
+      const first = await createApplicationConnection(account, server);
+      const second = await createApplicationConnection(account, server);
+      const clientInstanceIds = fixture.frames.flatMap((frame) =>
+        frame.type === 'mux-hello' ? [frame.payload.clientInstanceId] : []);
+
+      expect(clientInstanceIds).toHaveLength(2);
+      expect(clientInstanceIds[0]).toBeTruthy();
+      expect(clientInstanceIds[1]).toBeTruthy();
+      expect(clientInstanceIds[0]).not.toBe(clientInstanceIds[1]);
+      first.close('test-complete');
+      second.close('test-complete');
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it('uses the real Node dependencies and the exact account/server route scope', async () => {
     const fixture = await startFixture();
     try {
