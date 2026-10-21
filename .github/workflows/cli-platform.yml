@@ -33,7 +33,6 @@ on:
   push:
     branches:
       - main
-      - feat/daemon-cli-20261020
     paths:
       - '.github/workflows/cli-platform.yml'
       - 'pnpm-lock.yaml'

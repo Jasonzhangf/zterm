@@ -14,6 +14,7 @@ import {
   buildNpmInstallArgs,
   buildNpmViewVersionArgs,
   globalBinPath,
+  npmGlobalPackageRoot,
   resolveInstalledEntryInvocation,
   upgradeCli,
   type ProcessResult,
@@ -201,13 +202,7 @@ describe('CLI npm upgrade adapter', () => {
     const physicalRoot = realpathSync(mkdtempSync(join(tmpdir(), 'zterm-cli-prefix-')));
     const aliasRoot = realpathSync(mkdtempSync(join(tmpdir(), 'zterm-cli-alias-')));
     const aliasPrefix = join(aliasRoot, 'prefix');
-    const packageRoot = join(
-      physicalRoot,
-      'lib',
-      'node_modules',
-      '@jsonstudio',
-      'zterm-cli',
-    );
+    const packageRoot = npmGlobalPackageRoot(physicalRoot, process.platform);
     mkdirSync(packageRoot, { recursive: true });
     writeFileSync(
       join(packageRoot, 'package.json'),

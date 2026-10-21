@@ -128,9 +128,8 @@ function resolveEsbuildBin() {
 function bundle(sourcePath, outputPath) {
   mkdirSync(dirname(outputPath), { recursive: true });
   run(
-    process.execPath,
+    resolveEsbuildBin(),
     [
-      resolveEsbuildBin(),
       sourcePath,
       '--bundle',
       '--platform=node',
