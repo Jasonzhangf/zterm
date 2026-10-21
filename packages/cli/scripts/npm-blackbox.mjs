@@ -311,9 +311,14 @@ function startWindowsCancelPty(command, args, options = {}) {
   const state = {
     output: '',
     timedOut: false,
+    actualExitObserved: false,
+    cleanupTerminationRequested: false,
   };
   let exited = false;
   let timeout;
+  let exitGrace;
+  let settled = false;
+  let resolveResult;
   let dataSubscription;
   let exitSubscription;
   const terminal = pty.spawn(command, args, {
@@ -330,30 +335,43 @@ function startWindowsCancelPty(command, args, options = {}) {
       state.output = state.output.slice(-1_000_000);
     }
   });
-  const done = new Promise((resolveExit) => {
-    exitSubscription = terminal.onExit(({ exitCode, signal }) => {
-      exited = true;
-      if (timeout) clearTimeout(timeout);
-      resolveExit({
-        command,
-        args: [...args],
-        exitCode,
-        signal,
-        stdout: state.output,
-        stderr: '',
-        error: undefined,
-        timedOut: state.timedOut,
-      });
+  const done = new Promise((resolveExit) => { resolveResult = resolveExit; });
+  const finish = (exitCode, signal, error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timeout);
+    clearTimeout(exitGrace);
+    resolveResult({
+      command,
+      args: [...args],
+      exitCode,
+      signal,
+      stdout: state.output,
+      stderr: '',
+      error,
+      timedOut: state.timedOut,
+      actualExitObserved: state.actualExitObserved,
+      cleanupTerminationRequested: state.cleanupTerminationRequested,
     });
+  };
+  exitSubscription = terminal.onExit(({ exitCode, signal }) => {
+    exited = true;
+    state.actualExitObserved = true;
+    appendEvidence(`cancel PTY exit ${now()} code=${exitCode} signal=${signal}`);
+    finish(exitCode, signal);
   });
   if (options.timeoutMs && options.timeoutMs > 0) {
     timeout = setTimeout(() => {
       state.timedOut = true;
+      state.cleanupTerminationRequested = true;
+      appendEvidence(`cancel PTY timeout ${now()}`);
       try {
         terminal.kill();
       } catch {
         // The owned PTY may have exited at the timeout boundary.
       }
+      if (!settled) exitGrace = setTimeout(() => finish(null, null,
+        new Error('owned ConPTY did not exit after timeout cleanup')), 5_000);
     }, options.timeoutMs);
     timeout.unref();
   }
@@ -363,6 +381,7 @@ function startWindowsCancelPty(command, args, options = {}) {
     done,
     isRunning: () => !exited,
     async close() {
+      state.cleanupTerminationRequested ||= !exited;
       if (!exited) {
         try {
           terminal.kill();
@@ -376,6 +395,13 @@ function startWindowsCancelPty(command, args, options = {}) {
       ]);
       dataSubscription?.dispose();
       exitSubscription?.dispose();
+      clearTimeout(timeout);
+      clearTimeout(exitGrace);
+      if (!exited) {
+        const error = new Error('owned ConPTY did not exit during cleanup');
+        finish(null, null, error);
+        throw error;
+      }
     },
   };
 }
@@ -1254,12 +1280,15 @@ async function main() {
         );
       } catch (error) {
         if (platform === 'win32') {
-          await running.close();
+          try { await running.close(); } catch (cleanupError) {
+            appendEvidence(`cancel wait cleanup error ${messageOf(cleanupError)}`);
+          }
         } else if (running.child.exitCode === null && running.child.signalCode === null) {
           signalChildTree(running.child, 'SIGINT');
         }
         registry.releaseCancelledTarball();
         const result = await running.done;
+        appendEvidence(`cancel wait failure result ${JSON.stringify(result)}`);
         throw new Error(
           `${messageOf(error)}; child exit=${String(result.exitCode)} signal=${String(result.signal)}; `
             + `stdout=${result.stdout.trim() || '<empty>'}; stderr=${result.stderr.trim() || '<empty>'}`,
@@ -1271,13 +1300,19 @@ async function main() {
           : running.child.exitCode === null,
         'cancel process exited before the tarball request',
       );
+      appendEvidence(`cancel held tarball observed ${now()}`);
+      appendEvidence(`cancel stimulus ${now()} platform=${platform}`);
       if (platform === 'win32') {
         running.terminal.write('\x03');
       } else {
         signalChildTree(running.child, 'SIGINT');
       }
-      registry.releaseCancelledTarball();
       const result = await running.done;
+      appendEvidence(`cancel held-tarball result ${JSON.stringify(result)}`);
+      assert(!result.timedOut, 'cancellation timed out; forced termination is not acceptance');
+      assert(!result.error, `cancellation process error: ${messageOf(result.error)}`);
+      if (platform === 'win32') assert(result.actualExitObserved,
+        'cancellation did not observe an actual ConPTY exit');
       const observed = await observeInstalledVersion();
       const output = `${result.stdout}\n${result.stderr}`;
       assert(result.exitCode !== 0 || result.signal, 'cancelled upgrade returned success');
@@ -1301,8 +1336,15 @@ async function main() {
         ),
       };
     } finally {
-      if (platform === 'win32') await running.close();
-      registry.setMode('normal');
+      log('cancel cleanup started');
+      appendEvidence(`cancel tarball release ${now()}`);
+      registry.releaseCancelledTarball();
+      try {
+        if (platform === 'win32') await running.close();
+      } finally {
+        registry.setMode('normal');
+        log('cancel cleanup finished');
+      }
     }
   });
 
@@ -1423,9 +1465,20 @@ try {
   log(`FAIL ${failure}`);
   process.exitCode = 1;
 } finally {
+  log('cleanup registry started');
   if (registry) {
-    await registry.close().catch(() => undefined);
+    try {
+      await registry.close();
+    } catch (error) {
+      const detail = `registry cleanup failed: ${messageOf(error)}`;
+      appendEvidence(detail);
+      log(detail);
+      failure = [failure, detail].filter(Boolean).join('; ');
+      process.exitCode = 1;
+    }
   }
+  log('cleanup registry finished');
+  log(`cleanup child processes started count=${activeChildren.size}`);
   for (const child of [...activeChildren]) {
     if (child.exitCode === null && child.signalCode === null) {
       signalChildTree(child, 'SIGTERM');
@@ -1435,6 +1488,12 @@ try {
   while (activeChildren.size > 0 && Date.now() < cleanupDeadline) {
     await new Promise((resolveWait) => setTimeout(resolveWait, 50));
   }
+  log(`cleanup child processes finished remaining=${activeChildren.size}`);
+  if (activeChildren.size > 0) {
+    failure = [failure, 'owned child cleanup did not finish'].filter(Boolean).join('; ');
+    process.exitCode = 1;
+  }
+  log('cleanup temporary root started');
   rmSync(testRoot, {
     recursive: true,
     force: true,
@@ -1442,5 +1501,8 @@ try {
     retryDelay: 200,
   });
   tempRootRemoved = !existsSync(testRoot);
+  log(`cleanup temporary root finished removed=${tempRootRemoved}`);
+  log('cleanup run note started');
   await writeRunNote();
+  log('cleanup run note finished');
 }
