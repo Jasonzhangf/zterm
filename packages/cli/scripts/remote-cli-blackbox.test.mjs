@@ -46,7 +46,7 @@ const runnerPath = join(scriptDir, 'remote-cli-blackbox.mjs');
 const repoRoot = resolve(scriptDir, '..', '..', '..');
 
 test('terminal mode observation ignores command echo and completion status', () => {
-  for (const mode of ['gfmt1:cflag=4b00:iflag=6b02', '500:5:bf:8a3b:3:1c']) {
+  for (const mode of ['gfmt1:cflag=4b00:iflag=6b02', '6d02:5:4bf:8a3b:3:1c:7f:15:4:0:1:0:11:13:1a:ff:12:f:17:16:ff:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0']) {
     const output = `prompt printf 'MODE:%s\\n' "$(stty -g)"\r\nMODE:${mode}\r\nMODE:0\r\n`;
     assert.equal(readTerminalModeObservation(output, 'MODE'), mode);
   }

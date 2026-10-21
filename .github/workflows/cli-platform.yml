@@ -168,9 +168,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/zterm-daemon-release"
-          tar -czf "$RUNNER_TEMP/zterm-daemon-release/payload.tgz" \
-            -C "$ZTERM_PLATFORM_EVIDENCE/daemon-platform" .
+          ARCHIVE_DIR="$RUNNER_TEMP/zterm-daemon-release"
+          PAYLOAD_DIR="$ZTERM_PLATFORM_EVIDENCE/daemon-platform"
+          if [ "${{ matrix.platform }}" = "win32" ]; then
+            ARCHIVE_DIR="$(cygpath -u "$ARCHIVE_DIR")"
+            PAYLOAD_DIR="$(cygpath -u "$PAYLOAD_DIR")"
+          fi
+          mkdir -p "$ARCHIVE_DIR"
+          tar -czf "$ARCHIVE_DIR/payload.tgz" \
+            -C "$PAYLOAD_DIR" .
 
       - name: Upload daemon platform release
         uses: actions/upload-artifact@v4
@@ -295,10 +301,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f "$RUNNER_TEMP/zterm-daemon-release/payload.tgz"
-          mkdir -p "$RUNNER_TEMP/daemon-platform"
-          tar -xzf "$RUNNER_TEMP/zterm-daemon-release/payload.tgz" \
-            -C "$RUNNER_TEMP/daemon-platform"
+          ARCHIVE_FILE="$RUNNER_TEMP/zterm-daemon-release/payload.tgz"
+          DEST_DIR="$RUNNER_TEMP/daemon-platform"
+          ARCHIVE_FILE="$(cygpath -u "$ARCHIVE_FILE")"
+          DEST_DIR="$(cygpath -u "$DEST_DIR")"
+          test -f "$ARCHIVE_FILE"
+          mkdir -p "$DEST_DIR"
+          tar -xzf "$ARCHIVE_FILE" -C "$DEST_DIR"
 
       - name: Run Windows remote CLI acceptance
         shell: bash

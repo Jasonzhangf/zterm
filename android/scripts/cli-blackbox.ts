@@ -1698,6 +1698,9 @@ export async function runCliBlackboxHarness(
 
     if (formalEntryExists) {
       const nodeCommand = shellQuote(process.execPath);
+      const { readTerminalModeObservation } = await import(pathToFileURL(
+        join(repoRoot, 'packages', 'cli', 'scripts', 'remote-cli-blackbox-helper.mjs'),
+      ).href);
       const cliCommand = shellQuote(installedCliBin);
       const commandFor = (args: string) => `${nodeCommand} ${cliCommand} ${args}`;
       let beforeStty = '';
@@ -1725,7 +1728,7 @@ export async function runCliBlackboxHarness(
         if (sttyResult.exitCode !== 0) {
           throw new Error(`failed to record baseline terminal mode (${sttyResult.exitCode})`);
         }
-        beforeStty = /ZTERM_STTY_BEFORE:([^\r\n]+)/u.exec(sttyResult.output)?.[1] || '';
+        beforeStty = readTerminalModeObservation(sttyResult.output, 'ZTERM_STTY_BEFORE');
         if (!beforeStty) throw new Error('baseline stty value is missing');
 
         const exitMarker = `ZTERM_EXIT_LOGIN_${runToken}`;
@@ -1958,7 +1961,7 @@ export async function runCliBlackboxHarness(
         if (sttyResult.exitCode !== 0) {
           throw new Error(`failed to record terminal mode after local exit (${sttyResult.exitCode})`);
         }
-        const afterStty = /ZTERM_STTY_AFTER:([^\r\n]+)/u.exec(sttyResult.output)?.[1] || '';
+        const afterStty = readTerminalModeObservation(sttyResult.output, 'ZTERM_STTY_AFTER');
         if (!afterStty || afterStty !== beforeStty) {
           throw new Error('local terminal mode was not restored after CLI exit');
         }
