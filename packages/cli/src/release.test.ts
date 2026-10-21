@@ -224,6 +224,21 @@ describe('CLI npm upgrade adapter', () => {
           if (args[0] === 'prefix') {
             return processResult({ command, args }, { stdout: `${aliasPrefix}\n` });
           }
+          if (process.platform === 'win32' && command === process.execPath) {
+            const expectedArgs = [
+              join(
+                aliasPrefix,
+                'node_modules',
+                '@jsonstudio',
+                'zterm-cli',
+                'bin',
+                'zterm.mjs',
+              ),
+              '--version',
+            ];
+            expect(args).toEqual(expectedArgs);
+            return processResult({ command, args }, { stdout: 'zterm 1.2.0\n' });
+          }
           return runner(command, args);
         },
       });

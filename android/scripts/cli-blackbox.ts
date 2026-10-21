@@ -42,7 +42,6 @@ const tsxPackagePath = join(androidDir, 'node_modules', 'tsx', 'package.json');
 const ephemeralHost = '127.0.0.1';
 const installedDagpipeNative = join(homedir(), '.zterm', 'daemon-runtime', 'dagpipe.node');
 const moduleRequire = createRequire(import.meta.url);
-const nodePtyPackageDir = dirname(moduleRequire.resolve('node-pty/package.json'));
 
 type NodePtyModule = typeof import('node-pty');
 
@@ -515,30 +514,36 @@ function childEnv(
   };
 }
 
-function prepareIsolatedNodePty(testPrefix: string): {
+async function prepareIsolatedNodePty(testPrefix: string): Promise<{
+  source: string;
   module: NodePtyModule;
   entry: string;
   helper: string;
   helperMode: string;
-} {
+}> {
+  const { resolveNodePtyInstallation } = await import(pathToFileURL(
+    join(repoRoot, 'packages', 'cli', 'scripts', 'platform-smoke-helper.mjs'),
+  ).href);
+  const installation = resolveNodePtyInstallation(join(androidDir, 'package.json'));
+  const nodePtyPackageDir = installation.packageRoot as string;
   const isolatedDir = join(testPrefix, 'node-pty');
-  const platformDir = `${process.platform}-${process.arch}`;
   cpSync(
     join(nodePtyPackageDir, 'lib'),
     join(isolatedDir, 'lib'),
     { recursive: true },
   );
   cpSync(
-    join(nodePtyPackageDir, 'prebuilds', platformDir),
-    join(isolatedDir, 'prebuilds', platformDir),
+    join(nodePtyPackageDir, dirname(installation.ptyNativeRelativePath)),
+    join(isolatedDir, dirname(installation.ptyNativeRelativePath)),
     { recursive: true },
   );
-  const helper = join(isolatedDir, 'prebuilds', platformDir, 'spawn-helper');
+  const helper = join(isolatedDir, installation.spawnHelperRelativePath);
   if (process.platform !== 'win32') {
     chmodSync(helper, 0o755);
   }
   const entry = join(isolatedDir, 'lib', 'index.js');
   return {
+    source: nodePtyPackageDir,
     module: moduleRequire(entry) as NodePtyModule,
     entry,
     helper,
@@ -1203,7 +1208,7 @@ export async function runCliBlackboxHarness(
     await runStage('preflight', async () => {
       const tmux = resolveTmuxBinary();
       tmuxBinary = tmux.binary;
-      const isolatedPty = prepareIsolatedNodePty(testPrefix);
+      const isolatedPty = await prepareIsolatedNodePty(testPrefix);
       ptyRuntime = isolatedPty.module;
       if (!existsSync(tsxPackagePath)) throw new Error(`tsx package missing: ${tsxPackagePath}`);
       if (!existsSync(tmuxWrapperPath)) throw new Error(`tmux wrapper missing: ${tmuxWrapperPath}`);
@@ -1224,7 +1229,7 @@ export async function runCliBlackboxHarness(
         npmGlobalPrefix,
         dagpipeNative,
         nodePty: {
-          source: nodePtyPackageDir,
+          source: isolatedPty.source,
           entry: isolatedPty.entry,
           helper: isolatedPty.helper,
           helperMode: isolatedPty.helperMode,

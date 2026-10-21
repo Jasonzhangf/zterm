@@ -159,7 +159,7 @@ jobs:
         run: |
           set -euo pipefail
           ESBUILD_PACKAGE="$(node -p "require.resolve('@esbuild/win32-x64/package.json', { paths: ['packages/cli'] })")"
-          ESBUILD_BIN="$(dirname "$ESBUILD_PACKAGE")/bin/esbuild.exe"
+          ESBUILD_BIN="$(dirname "$ESBUILD_PACKAGE")/esbuild.exe"
           test -f "$ESBUILD_BIN"
           echo "ZTERM_STAGE_ESBUILD_BIN=$ESBUILD_BIN" >> "$GITHUB_ENV"
 
