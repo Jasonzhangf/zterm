@@ -41,6 +41,7 @@ import {
   redactText,
   removeFileIfPresent,
   rtcFixtureTmuxStartCommand,
+  selectFixturePublishedIpv4,
   waitForRtcFixtureHold,
   writePrivateReceipt,
   writePublicReceipt,
@@ -1671,8 +1672,10 @@ export async function startRtcFixture(options = {}) {
           const lookup = spawnSync('curl', ['--fail', '--silent', '--show-error', '--max-time', '15',
             `https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`], { encoding: 'utf8' });
           if (lookup.status !== 0) throw new Error('public fixture DNS lookup failed');
-          const address = JSON.parse(lookup.stdout).Answer?.find(answer => answer.type === 1)?.data;
-          if (!address) throw new Error('public fixture DNS lookup returned no IPv4 address');
+          const address = selectFixturePublishedIpv4(
+            JSON.parse(lookup.stdout),
+            process.env.ZTERM_FIXTURE_DNS_ADDRESS,
+          );
           fixtureDns = { hostname, address, source: 'https://dns.google/resolve' };
           receipt.fixtureDns = fixtureDns;
           await writeReceipts(receipt);

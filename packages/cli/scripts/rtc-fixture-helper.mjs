@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { createServer as createTcpServer } from 'node:net';
+import { createServer as createTcpServer, isIP } from 'node:net';
 import { createSocket as createUdpSocket } from 'node:dgram';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
@@ -19,6 +19,27 @@ import { tmpdir } from 'node:os';
 
 export const RTC_FIXTURE_KIND = 'zterm-rtc-fixture';
 export const RTC_FIXTURE_SCHEMA_VERSION = 1;
+
+export function selectFixturePublishedIpv4(response, requestedAddress) {
+  const answers = response?.Answer;
+  const addresses = Array.isArray(answers)
+    ? answers
+      .filter(answer => answer?.type === 1 && typeof answer?.data === 'string')
+      .map(answer => answer.data)
+    : [];
+  if (addresses.length === 0) {
+    throw new Error('public fixture DNS lookup returned no IPv4 address');
+  }
+  if (requestedAddress === undefined) return addresses[0];
+  const requested = typeof requestedAddress === 'string' ? requestedAddress.trim() : '';
+  if (isIP(requested) !== 4) {
+    throw new Error('ZTERM_FIXTURE_DNS_ADDRESS must be a valid IPv4 address');
+  }
+  if (!addresses.includes(requested)) {
+    throw new Error('public fixture DNS lookup did not publish the requested IPv4 address');
+  }
+  return requested;
+}
 
 export function fixtureRunPaths(evidenceDir, runId) {
   const normalizedEvidenceDir = resolve(evidenceDir);

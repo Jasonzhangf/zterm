@@ -21,6 +21,7 @@ import {
   parseRtcFixtureArgs,
   readPrivateReceipt,
   rtcFixtureTmuxStartCommand,
+  selectFixturePublishedIpv4,
   waitForRtcFixtureHold,
   writePrivateReceipt,
 } from './rtc-fixture-helper.mjs';
@@ -39,6 +40,47 @@ test('public TURN bridge mode is explicit and public receipt excludes its token'
   assert.equal(published.fixtureTransport.nativePublicUdpProved, false);
   assert.doesNotMatch(JSON.stringify(published), /private-bridge-token/);
 });
+
+test('fixture DNS selection defaults to the first published A answer', () => {
+  const response = fixtureDnsResponse();
+  assert.equal(selectFixturePublishedIpv4(response), '104.16.231.132');
+  assert.equal(selectFixturePublishedIpv4(response, undefined), '104.16.231.132');
+});
+
+test('fixture DNS selection accepts an explicit second published IPv4 answer', () => {
+  assert.equal(
+    selectFixturePublishedIpv4(fixtureDnsResponse(), '104.16.230.132'),
+    '104.16.230.132',
+  );
+});
+
+test('fixture DNS selection rejects invalid, unpublished, or missing A answers', () => {
+  const response = fixtureDnsResponse();
+  for (const requested of ['', '   ', 'not-an-ip', '2606:4700::6810:e684']) {
+    assert.throws(
+      () => selectFixturePublishedIpv4(response, requested),
+      /ZTERM_FIXTURE_DNS_ADDRESS must be a valid IPv4 address/u,
+    );
+  }
+  assert.throws(
+    () => selectFixturePublishedIpv4(response, '104.16.229.132'),
+    /did not publish the requested IPv4 address/u,
+  );
+  assert.throws(
+    () => selectFixturePublishedIpv4({ Answer: [] }, undefined),
+    /returned no IPv4 address/u,
+  );
+});
+
+function fixtureDnsResponse() {
+  return {
+    Answer: [
+      { name: 'fixture.example', type: 1, data: '104.16.231.132' },
+      { name: 'fixture.example', type: 5, data: 'alias.example' },
+      { name: 'fixture.example', type: 1, data: '104.16.230.132' },
+    ],
+  };
+}
 
 function receiptFixture(evidenceDir) {
   const runId = 'fixture-run-1';
