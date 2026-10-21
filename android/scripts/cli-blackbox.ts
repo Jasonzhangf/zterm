@@ -518,8 +518,8 @@ async function prepareIsolatedNodePty(testPrefix: string): Promise<{
   source: string;
   module: NodePtyModule;
   entry: string;
-  helper: string;
-  helperMode: string;
+  helper: string | null;
+  helperMode: string | null;
 }> {
   const { resolveNodePtyInstallation } = await import(pathToFileURL(
     join(repoRoot, 'packages', 'cli', 'scripts', 'platform-smoke-helper.mjs'),
@@ -537,8 +537,10 @@ async function prepareIsolatedNodePty(testPrefix: string): Promise<{
     join(isolatedDir, dirname(installation.ptyNativeRelativePath)),
     { recursive: true },
   );
-  const helper = join(isolatedDir, installation.spawnHelperRelativePath);
-  if (process.platform !== 'win32') {
+  const helper = process.platform === 'darwin'
+    ? join(isolatedDir, installation.spawnHelperRelativePath)
+    : null;
+  if (helper) {
     chmodSync(helper, 0o755);
   }
   const entry = join(isolatedDir, 'lib', 'index.js');
@@ -547,7 +549,7 @@ async function prepareIsolatedNodePty(testPrefix: string): Promise<{
     module: moduleRequire(entry) as NodePtyModule,
     entry,
     helper,
-    helperMode: statSync(helper).mode.toString(8).slice(-3),
+    helperMode: helper ? statSync(helper).mode.toString(8).slice(-3) : null,
   };
 }
 

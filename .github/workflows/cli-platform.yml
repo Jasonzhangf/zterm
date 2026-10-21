@@ -153,16 +153,6 @@ jobs:
             --output-dir "$ZTERM_PLATFORM_EVIDENCE/wrtc-input")"
           echo "ZTERM_DAEMON_WRTC_INPUT_MANIFEST=$MANIFEST" >> "$GITHUB_ENV"
 
-      - name: Configure Windows esbuild binary
-        if: matrix.platform == 'win32'
-        shell: bash
-        run: |
-          set -euo pipefail
-          ESBUILD_PACKAGE="$(node -p "require.resolve('@esbuild/win32-x64/package.json', { paths: ['packages/cli'] })")"
-          ESBUILD_BIN="$(dirname "$ESBUILD_PACKAGE")/esbuild.exe"
-          test -f "$ESBUILD_BIN"
-          echo "ZTERM_STAGE_ESBUILD_BIN=$ESBUILD_BIN" >> "$GITHUB_ENV"
-
       - name: Stage daemon platform payload
         shell: bash
         run: |

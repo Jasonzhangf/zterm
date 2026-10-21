@@ -107,39 +107,24 @@ function resolvePackageDirectory(packageName) {
   fail(`unable to resolve ${packageName}`);
 }
 
-function resolveEsbuildBin() {
-  if (process.env.ZTERM_STAGE_ESBUILD_BIN) {
-    return requireFile(process.env.ZTERM_STAGE_ESBUILD_BIN, 'esbuild binary');
-  }
-  const storeRoot = join(workspaceRoot, 'node_modules', '.pnpm');
-  const candidates = existsSync(storeRoot)
-    ? readdirSync(storeRoot, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory() && /^esbuild@\d/.test(entry.name))
-        .map((entry) => join(storeRoot, entry.name, 'node_modules', 'esbuild', 'bin', 'esbuild'))
-        .filter(existsSync)
-        .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }))
-    : [];
-  if (candidates.length === 0) {
-    fail(`missing esbuild under ${storeRoot}`);
-  }
-  return candidates.at(-1);
-}
-
 function bundle(sourcePath, outputPath) {
   mkdirSync(dirname(outputPath), { recursive: true });
-  run(
-    resolveEsbuildBin(),
-    [
-      sourcePath,
-      '--bundle',
-      '--platform=node',
-      '--format=cjs',
-      '--target=node22',
-      '--outfile=' + outputPath,
-      '--external:node-pty',
-    ],
-    { label: `esbuild ${basename(sourcePath)}` },
-  );
+  const requireFromCli = createRequire(join(workspaceRoot, 'packages', 'cli', 'package.json'));
+  const esbuild = requireFromCli('esbuild');
+  try {
+    esbuild.buildSync({
+      absWorkingDir: projectRoot,
+      entryPoints: [sourcePath],
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      target: 'node22',
+      outfile: outputPath,
+      external: ['node-pty'],
+    });
+  } catch (error) {
+    fail(`esbuild ${basename(sourcePath)} failed: ${error.message}`);
+  }
   chmodSync(outputPath, 0o755);
 }
 

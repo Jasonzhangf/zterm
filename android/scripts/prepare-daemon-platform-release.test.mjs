@@ -48,19 +48,7 @@ function runStage(fixture, args) {
   return spawnSync(process.execPath, [stageScript, ...args], {
     cwd: fixture,
     encoding: 'utf8',
-    env: { ...process.env, ZTERM_STAGE_ESBUILD_BIN: findEsbuild() },
   });
-}
-
-function findEsbuild() {
-  const root = resolve(projectRoot, '..');
-  const matches = [
-    join(root, 'node_modules', '.pnpm', 'esbuild@0.27.7', 'node_modules', 'esbuild', 'bin', 'esbuild'),
-    join(root, 'node_modules', '.pnpm', 'esbuild@0.21.5', 'node_modules', 'esbuild', 'bin', 'esbuild'),
-  ];
-  const found = matches.find(existsSync);
-  assert.ok(found, 'fixture requires the workspace esbuild binary');
-  return found;
 }
 
 async function loadStageModule() {

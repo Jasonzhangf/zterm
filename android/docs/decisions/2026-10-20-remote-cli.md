@@ -237,9 +237,8 @@ viewport/navigation demand 提交路径。
 
 reset 复用既有 `startsNewEpoch` 与 epoch 递增；retained body 因 provenance 不同无法提供
 有效界或满足 cache。accepted reset head 立即生效，包括更短或 empty range，不用无条件
-lifetime `max()` 阻止 reset；后续成功 sparse 应用才重建当前 provenance。本契约是 reviewed
-design 更新；实现、红测、正式 CLI 黑盒和平台验收仍按本文阶段边界待完成，不标记为已实现
-或已交付。
+lifetime `max()` 阻止 reset；后续成功 sparse 应用才重建当前 provenance。实际验收须覆盖
+红测、正式 CLI 黑盒和三个原生平台；设计审查不代替运行与交付证据。
 
 ACK 只表示 daemon/backend 接受写入，不表示远端应用执行完成。CLI 使用共享
 reliable-input core，`maxInFlight=1`，并显式采用 `cliNoReplayPolicy`：
