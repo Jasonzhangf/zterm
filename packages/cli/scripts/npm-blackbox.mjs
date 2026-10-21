@@ -360,6 +360,8 @@ async function startWindowsCancelPty(command, args, options = {}) {
       const cleanupDeadline = Date.now() + 3000;
       while (alive() && Date.now() < cleanupDeadline) await delay(25);
     }
+    // node-pty owns pipe/control handles beyond the already-observed command and shell.
+    if (!shell.closed) shell.terminal.kill();
     const result = { closed: !alive(), forced, pid };
     appendEvidence(`cancel shell cleanup ${JSON.stringify(result)}`);
     return result;

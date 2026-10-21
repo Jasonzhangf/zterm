@@ -15,6 +15,7 @@ import { delimiter, dirname, join, resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { WebSocket } from 'ws';
+import { spawnOwnedFixtureBridge } from './fixture-turn-bridge.mjs';
 
 import {
   RTC_FIXTURE_KIND,
@@ -331,7 +332,7 @@ function dockerInspect(dockerBinary, containerId, format) {
   return String(result.stdout || '').trim();
 }
 
-async function startCoturn(options, receipt) {
+export async function startCoturn(options, receipt) {
   if (!options.turnRequested) {
     return {
       configured: false,
@@ -352,7 +353,9 @@ async function startCoturn(options, receipt) {
     return { configured: false, error: `Docker image unavailable: ${image}` };
   }
 
-  const listeningPort = await findAvailableUdpPort();
+  const transport = options.turnTransport ?? 'udp';
+  if (transport !== 'udp' && transport !== 'tcp') throw new Error('unsupported fixture TURN transport');
+  const listeningPort = await (transport === 'tcp' ? findAvailableTcpPort() : findAvailableUdpPort());
   const relayPortRange = await findAvailableUdpRange();
   const turnUsername = `turn-user-${receipt.runId}`;
   const turnCredential = randomUUID();
@@ -374,7 +377,7 @@ async function startCoturn(options, receipt) {
       'allowed-peer-ip=127.0.0.1',
       'relay-threads=1',
       `user=${turnUsername}:${turnCredential}`,
-      'no-tcp',
+      transport === 'tcp' ? 'no-udp' : 'no-tcp',
       'no-tcp-relay',
       'no-tls',
       'simple-log',
@@ -397,7 +400,7 @@ async function startCoturn(options, receipt) {
     '--entrypoint',
     '/bin/sh',
     '-p',
-    `127.0.0.1:${listeningPort}:${listeningPort}/udp`,
+    `127.0.0.1:${listeningPort}:${listeningPort}/${transport}`,
     '-p',
     `127.0.0.1:${relayPortRange.min}-${relayPortRange.max}:${relayPortRange.min}-${relayPortRange.max}/udp`,
     '-v',
@@ -457,7 +460,7 @@ async function startCoturn(options, receipt) {
     listeningPort,
     relayPortRange,
     authConfigPath,
-    url: `turn:127.0.0.1:${listeningPort}?transport=udp`,
+    url: `turn:127.0.0.1:${listeningPort}?transport=${transport}`,
     username: turnUsername,
     credential: turnCredential,
   };
@@ -604,7 +607,14 @@ async function runForcedRtcRoute(options) {
   const trace = createRtcTrace(secrets);
   class ObservedFixtureWebSocket extends WebSocket {
     constructor(url) {
-      super(url);
+      const dns = options.fixtureDns;
+      super(url, dns && new URL(url).hostname === dns.hostname ? {
+        lookup(host, lookupOptions, callback) {
+          if (host !== dns.hostname) { callback(new Error('unexpected fixture hostname')); return; }
+          if (lookupOptions.all) callback(null, [{ address: dns.address, family: 4 }]);
+          else callback(null, dns.address, 4);
+        },
+      } : undefined);
       this.addEventListener('open', () => trace.record('ws-open'));
       this.addEventListener('close', (event) => {
         trace.record('ws-close', { code: numericCode(event?.code) });
@@ -904,7 +914,7 @@ function validateRelayRoute(result) {
   }
   const localType = result.selectedIcePair?.local?.candidateType;
   const remoteType = result.selectedIcePair?.remote?.candidateType;
-  if (localType !== 'relay' && remoteType !== 'relay') {
+  if (localType !== 'relay' || remoteType !== 'relay') {
     throw new Error(`relay RTC selfcheck did not select a TURN relay candidate: local=${String(localType)} remote=${String(remoteType)}`);
   }
   if (result.relayTransport !== 'turn') {
@@ -928,6 +938,7 @@ function resourceSummary(receipt) {
     relayPid: receipt.relay?.pid || null,
     daemonPid: receipt.daemon?.pid || null,
     cloudflaredPid: receipt.tunnel?.pid || null,
+    fixtureFrontendPid: receipt.fixtureFrontend?.pid || null,
     coturnContainerId: receipt.turn?.containerId || null,
     tmuxSocketPath: receipt.tmux?.socketPath || null,
     tmuxSessionName: receipt.sessionName,
@@ -963,13 +974,17 @@ async function cleanupOwnedResources(receipt, processHandles = new Map()) {
       return;
     }
     const live = processHandles.get(label);
-    const result = live
+    const result = live?.close
+      ? { label, pid: live.pid, stopped: (await live.close()).closed }
+      : live
       ? await stopLiveProcess(live)
       : await stopRecordedProcess(processRecordValue);
     cleanup.processes.push(result);
     if (!result.stopped) cleanup.gaps.push(`${label} process cleanup failed`);
   };
 
+  await stop('cloudflared');
+  await stop('fixtureFrontend');
   await stop('daemon');
 
   if (receipt.tmux?.binary && receipt.tmux?.socketPath && receipt.sessionName) {
@@ -1029,8 +1044,6 @@ async function cleanupOwnedResources(receipt, processHandles = new Map()) {
   } else {
     cleanup.tmux = { stopped: true, absent: true };
   }
-
-  await stop('cloudflared');
 
   if (receipt.turn?.containerId) {
     try {
@@ -1202,6 +1215,7 @@ async function startCloudflared(receipt, relayPort, timeoutMs) {
   try {
     const url = await waitFor(() => {
       const found = extractCloudflaredQuickTunnelUrl(readTextTail(logPath));
+      if (!found && processRecordValue.child.exitCode !== null) throw new Error('cloudflared exited before creating a quick tunnel');
       return found || null;
     }, 'cloudflared quick tunnel URL', timeoutMs, 250);
     await waitFor(async () => {
@@ -1417,6 +1431,7 @@ export async function startRtcFixture(options = {}) {
     hold: options.hold === true,
     interactiveSession: options.interactiveSession === true,
     exposeRelay: options.exposeRelay === true,
+    publicTurnBridge: options.publicTurnBridge === true,
     turnRequired: options.turnRequired === true,
     nativePath: resolve(options.nativePath || installedDagpipeNative),
     timeoutMs: positiveInteger(options.timeoutMs) || defaultTimeoutMs,
@@ -1494,6 +1509,7 @@ export async function startRtcFixture(options = {}) {
       turn = await startCoturn({
         turnRequested: true,
         turnRequired: normalized.turnRequired,
+        turnTransport: normalized.publicTurnBridge ? 'tcp' : 'udp',
       }, receipt);
     } catch (error) {
       turn = { configured: false, error: redactText(errorMessage(error), [receipt.turn.credential]) };
@@ -1625,9 +1641,42 @@ export async function startRtcFixture(options = {}) {
     }
 
     if (normalized.exposeRelay) {
-      const tunnel = await startCloudflared(receipt, relayPort, normalized.timeoutMs);
+      let tunnelPort = relayPort;
+      if (normalized.publicTurnBridge) {
+        const controlPath = join(receipt.runtimeRoot, 'frontend.json');
+        const bridgeToken = randomBytes(24).toString('hex');
+        writeFileSync(controlPath, JSON.stringify({ role: 'frontend', options: {
+          listenHost: '127.0.0.1', listenPort: 0, relayOrigin: receipt.relayBaseUrl,
+          turnTarget: { host: '127.0.0.1', port: receipt.turn.listeningPort }, token: bridgeToken,
+        } }), { mode: 0o600 });
+        const frontend = spawnOwnedFixtureBridge({ role: 'frontend', controlPath,
+          logPath: join(receipt.runtimeRoot, 'logs', 'frontend.log') });
+        processHandles.set('fixtureFrontend', frontend);
+        receipt.fixtureFrontend = { pid: frontend.pid, command: nodeExecutable,
+          identityNeedle: join(scriptDir, 'fixture-turn-bridge.mjs'), ready: false };
+        receipt.fixtureTransport = { kind: 'turn-tcp-over-authenticated-wss', token: bridgeToken,
+          listeningPort: receipt.turn.listeningPort, bridgeUrl: '' };
+        await writeReceipts(receipt);
+        await frontend.ready;
+        receipt.fixtureFrontend.ready = true;
+        tunnelPort = Number(new URL(frontend.origin).port);
+      }
+      const tunnel = await startCloudflared(receipt, tunnelPort, normalized.timeoutMs);
       if (tunnel.process) processHandles.set('cloudflared', tunnel.process);
       if (tunnel.ready && receipt.selfcheck.relay?.ok) {
+        let fixtureDns;
+        if (normalized.publicTurnBridge) {
+          receipt.fixtureTransport.bridgeUrl = new URL('/fixture/turn', tunnel.url).href.replace(/^https:/u, 'wss:');
+          const hostname = new URL(tunnel.url).hostname;
+          const lookup = spawnSync('curl', ['--fail', '--silent', '--show-error', '--max-time', '15',
+            `https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`], { encoding: 'utf8' });
+          if (lookup.status !== 0) throw new Error('public fixture DNS lookup failed');
+          const address = JSON.parse(lookup.stdout).Answer?.find(answer => answer.type === 1)?.data;
+          if (!address) throw new Error('public fixture DNS lookup returned no IPv4 address');
+          fixtureDns = { hostname, address, source: 'https://dns.google/resolve' };
+          receipt.fixtureDns = fixtureDns;
+          await writeReceipts(receipt);
+        }
         const tunnelClientDeviceId = `${receipt.clientDeviceId}-tunnel`;
         const tunnelSettings = routeSettings({
           ...loginForClient,
@@ -1637,6 +1686,7 @@ export async function startRtcFixture(options = {}) {
         receipt.selfcheck.tunnelRelay = await selfcheckRoute({
           ...common,
           label: 'tunnel-relay selfcheck',
+          fixtureDns,
           expectedPath: 'rtc-relay',
           relayOnlyRtc: true,
           target: targetBase,
@@ -1713,6 +1763,7 @@ function printHelp() {
     '  --hold                       Keep the ready fixture running for a consumer',
     '  --interactive-session        Run an isolated interactive shell instead of exec cat',
     '  --expose-relay               Add an authenticated cloudflared HTTP/WSS relay',
+    '  --public-turn-bridge         Expose authenticated WSS carrying real TURN/TCP',
     '  --turn-required              Fail unless the real TURN relay route passes',
     '  --native-path FILE           Use an explicit DAGpipe native module',
     '  --cleanup-private-receipt P  Clean the exact resources in receipt P',

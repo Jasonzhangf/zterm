@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -284,7 +285,8 @@ test('keeps the fixed runner arguments and external RTC environment separate', (
   });
 });
 
-test('actual CI orchestration passes the materialized receipt path explicitly', async () => {
+for (const bridgeMode of ['plain', 'bridge', 'bridge-close-failure']) {
+test(`actual CI orchestration owns receipt and sidecar lifecycle: ${bridgeMode}`, async () => {
   await withTempDirectoryAsync(async (root) => {
     const evidenceDir = join(root, 'evidence');
     const privateReceiptDir = join(root, 'private');
@@ -297,6 +299,12 @@ test('actual CI orchestration passes the materialized receipt path explicitly', 
     let userPathReceipt = '';
     let rtcReceipt = '';
     let rtcEvidenceDir = '';
+    const lifecycle = [];
+    const inputReceipt = receipt();
+    if (bridgeMode !== 'plain') inputReceipt.fixtureTransport = {
+      kind: 'turn-tcp-over-authenticated-wss', bridgeUrl: 'wss://fixture.example.test/fixture/turn',
+      token: 'private-sidecar-token', listeningPort: 49153,
+    };
 
     const resultFor = (command, args) => ({
       command,
@@ -310,6 +318,7 @@ test('actual CI orchestration passes the materialized receipt path explicitly', 
       durationMs: 1,
     });
 
+    const previousExitCode = process.exitCode;
     const exitCode = await runCiRemoteCli({
       argv: [
         '--cli-tarball',
@@ -323,11 +332,28 @@ test('actual CI orchestration passes the materialized receipt path explicitly', 
       ],
       env: {
         PATH: process.env.PATH,
-        [CI_REMOTE_RECEIPT_ENV]: JSON.stringify(receipt()),
+        [CI_REMOTE_RECEIPT_ENV]: JSON.stringify(inputReceipt),
       },
       platform: 'win32',
       arch: 'x64',
       nodeVersion: 'v22.0.0',
+      bridgeSpawner: ({ controlPath, logPath }) => {
+        lifecycle.push('spawn');
+        const control = JSON.parse(readFileSync(controlPath, 'utf8'));
+        assert.equal(control.options.listenPort, 49153);
+        assert.equal(control.options.listenHost, '127.0.0.1');
+        assert.equal(control.options.token, 'private-sidecar-token');
+        assert(!logPath.startsWith(evidenceDir));
+        return { pid: 123, ready: Promise.resolve(),
+          assertHealthy: async () => lifecycle.push('healthy'),
+          close: async () => {
+            assert(existsSync(controlPath), 'control must remain until bridge closes');
+            assert(existsSync(materializedReceiptPath));
+            lifecycle.push('close');
+            return { closed: bridgeMode !== 'bridge-close-failure', errors: [] };
+          },
+        };
+      },
       receiptWriter: ({ secret, privateReceiptDir: parentDir }) => {
         const runDir = join(parentDir, 'receipt-test');
         mkdirSync(runDir, { recursive: true, mode: 0o700 });
@@ -356,6 +382,8 @@ test('actual CI orchestration passes the materialized receipt path explicitly', 
           return resultFor(command, args);
         }
         if (args.some((arg) => arg.endsWith('remote-cli-blackbox.mjs'))) {
+          if (bridgeMode !== 'plain') assert.equal(lifecycle.at(-1), 'healthy');
+          lifecycle.push('user');
           userPathReceipt = args[args.indexOf('--receipt-file') + 1];
           assert.equal(options.env[CI_REMOTE_RECEIPT_ENV], undefined);
           assert.equal(options.env.ZTERM_RTC_FIXTURE_RECEIPT, undefined);
@@ -371,6 +399,8 @@ test('actual CI orchestration passes the materialized receipt path explicitly', 
           return resultFor(command, args);
         }
         if (args.some((arg) => arg.endsWith('application-liveconsumer.test.ts'))) {
+          if (bridgeMode !== 'plain') assert.equal(lifecycle.at(-1), 'healthy');
+          lifecycle.push('rtc');
           rtcReceipt = options.env.ZTERM_RTC_FIXTURE_RECEIPT;
           rtcEvidenceDir = options.env.ZTERM_RTC_FIXTURE_EVIDENCE_DIR;
           const reportPath = args[args.indexOf('--outputFile') + 1];
@@ -390,7 +420,7 @@ test('actual CI orchestration passes the materialized receipt path explicitly', 
                   status: 'passed',
                 }],
                 console: {
-                  stdout: 'rtc-route-evidence: {"stage":"open","path":"rtc-relay","relayTransport":"turn","localCandidateType":"relay","remoteCandidateType":"host"}\n',
+                  stdout: 'rtc-route-evidence: {"stage":"open","path":"rtc-relay","relayTransport":"turn","localCandidateType":"relay","remoteCandidateType":"relay"}\n',
                 },
               }],
             }),
@@ -401,7 +431,8 @@ test('actual CI orchestration passes the materialized receipt path explicitly', 
       },
     });
 
-    assert.equal(exitCode, 0);
+    process.exitCode = previousExitCode;
+    assert.equal(exitCode, bridgeMode === 'bridge-close-failure' ? 1 : 0);
     assert.equal(userPathReceipt, materializedReceiptPath);
     assert.equal(rtcReceipt, materializedReceiptPath);
     assert.equal(
@@ -411,11 +442,15 @@ test('actual CI orchestration passes the materialized receipt path explicitly', 
     const result = JSON.parse(
       readFileSync(join(evidenceDir, CI_REMOTE_RESULT_FILE), 'utf8'),
     );
-    assert.equal(result.outcome.state, 'PASSED');
+    assert.equal(result.outcome.state, bridgeMode === 'bridge-close-failure' ? 'FAILED' : 'PASSED');
+    assert.doesNotMatch(JSON.stringify(result), /private-sidecar-token/);
+    if (bridgeMode !== 'plain') assert.deepEqual(lifecycle, ['spawn', 'healthy', 'user', 'healthy', 'rtc', 'healthy', 'close']);
+    assert.equal(existsSync(materializedReceiptPath), bridgeMode === 'bridge-close-failure');
     assert.equal(result.stages[0].status, 'passed');
     assert.equal(result.stages[1].status, 'passed');
   });
 });
+}
 
 test('a skipped Vitest assertion cannot become a remote consumer pass', () => {
   const base = {
@@ -447,5 +482,7 @@ test('a skipped Vitest assertion cannot become a remote consumer pass', () => {
     '',
   );
   base.testResults[0].assertionResults[0].status = 'passed';
+  assert.equal(externalRtcConsumerPassed(summarizeVitestReport(base)), false);
+  base.testResults[0].console.stdout = 'rtc-route-evidence: {"stage":"open","path":"rtc-relay","relayTransport":"turn","localCandidateType":"relay","remoteCandidateType":"relay"}\n';
   assert.equal(externalRtcConsumerPassed(summarizeVitestReport(base)), true);
 });

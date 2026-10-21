@@ -42,6 +42,7 @@ export function parseRtcFixtureArgs(argv) {
     hold: false,
     interactiveSession: false,
     exposeRelay: false,
+    publicTurnBridge: false,
     turnRequired: false,
     nativePath: undefined,
     cleanupPrivateReceipt: undefined,
@@ -78,6 +79,12 @@ export function parseRtcFixtureArgs(argv) {
     }
     if (arg === '--expose-relay') {
       options.exposeRelay = true;
+      continue;
+    }
+    if (arg === '--public-turn-bridge') {
+      options.publicTurnBridge = true;
+      options.exposeRelay = true;
+      options.turnRequired = true;
       continue;
     }
     if (arg === '--turn-required') {
@@ -260,6 +267,7 @@ export function buildPublicReceipt(receipt) {
     receipt.daemon?.authToken,
     receipt.turn?.username,
     receipt.turn?.credential,
+    receipt.fixtureTransport?.token,
   ];
   return {
     schemaVersion: receipt.schemaVersion,
@@ -299,6 +307,17 @@ export function buildPublicReceipt(receipt) {
       backend: 'tmux',
       socketPath: receipt.tmux?.socketPath || null,
     },
+    fixtureTransport: receipt.fixtureTransport ? {
+      kind: receipt.fixtureTransport.kind,
+      nativePublicUdpProved: false,
+      frontendPid: positivePid(receipt.fixtureFrontend?.pid),
+      ready: receipt.fixtureFrontend?.ready === true,
+    } : null,
+    fixtureDns: receipt.fixtureDns ? {
+      hostname: receipt.fixtureDns.hostname,
+      address: receipt.fixtureDns.address,
+      source: receipt.fixtureDns.source,
+    } : null,
     turn: {
       required: receipt.turn?.required === true,
       configured: receipt.turn?.configured === true,
@@ -513,7 +532,8 @@ export function readTextTail(path, limit = 12_000) {
 }
 
 export function extractCloudflaredQuickTunnelUrl(text) {
-  const matches = String(text).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/giu) || [];
+  const matches = (String(text).match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/giu) || [])
+    .filter(url => new URL(url).hostname !== 'api.trycloudflare.com');
   return matches.length > 0 ? matches[matches.length - 1].replace(/\/$/u, '') : '';
 }
 

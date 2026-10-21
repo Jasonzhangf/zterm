@@ -25,6 +25,21 @@ import {
   writePrivateReceipt,
 } from './rtc-fixture-helper.mjs';
 
+test('public TURN bridge mode is explicit and public receipt excludes its token', () => {
+  const options = parseRtcFixtureArgs(['--public-turn-bridge']);
+  assert.equal(options.publicTurnBridge, true);
+  assert.equal(options.exposeRelay, true);
+  assert.equal(options.turnRequired, true);
+  const receipt = receiptFixture('/tmp/rtc-public-projection');
+  receipt.fixtureTransport = { kind: 'turn-tcp-over-authenticated-wss', token: 'private-bridge-token',
+    bridgeUrl: 'wss://fixture.trycloudflare.com/fixture/turn', listeningPort: 49153 };
+  receipt.fixtureFrontend = { pid: 123, ready: true };
+  const published = buildPublicReceipt(receipt);
+  assert.equal(published.fixtureTransport.kind, receipt.fixtureTransport.kind);
+  assert.equal(published.fixtureTransport.nativePublicUdpProved, false);
+  assert.doesNotMatch(JSON.stringify(published), /private-bridge-token/);
+});
+
 function receiptFixture(evidenceDir) {
   const runId = 'fixture-run-1';
   const paths = fixtureRunPaths(evidenceDir, runId);
@@ -292,6 +307,7 @@ test('extracts only a real quick tunnel URL from cloudflared output', () => {
     'https://example-test.trycloudflare.com',
   );
   assert.equal(extractCloudflaredQuickTunnelUrl('no tunnel url'), '');
+  assert.equal(extractCloudflaredQuickTunnelUrl('Post "https://api.trycloudflare.com/tunnel": timeout'), '');
 });
 
 test('cleanup command targets only the private receipt', () => {

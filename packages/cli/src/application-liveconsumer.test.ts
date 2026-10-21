@@ -6,6 +6,7 @@ import {
   type AuthenticatedAccount,
 } from './account-client.js';
 import { createApplicationConnection } from './application-connection.js';
+import { assertExternalRtcRelayEvidence } from './external-rtc-evidence.js';
 import type {
   RelayAccountDirectory,
   RelayEndpointCandidate,
@@ -341,7 +342,16 @@ describe('createApplicationConnection bound-initial live consumer', () => {
             connectionController.signal,
           );
           expect(connection.state).toBe('ready');
-          compactRouteDiagnostics(connection.getDiagnostics());
+          if (input.kind === 'external') {
+            const evidence = assertExternalRtcRelayEvidence(
+              connection.getDiagnostics(),
+            );
+            process.stdout.write(
+              `rtc-route-evidence: ${JSON.stringify(evidence)}\n`,
+            );
+          } else {
+            compactRouteDiagnostics(connection.getDiagnostics());
+          }
         } finally {
           clearTimeout(connectionTimeout);
         }

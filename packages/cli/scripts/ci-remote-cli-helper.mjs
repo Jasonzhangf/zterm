@@ -25,6 +25,7 @@ import {
 import { fileURLToPath } from 'node:url';
 
 import { resolveNpmInvocation } from './process-entry.mjs';
+import { spawnOwnedFixtureBridge } from './fixture-turn-bridge.mjs';
 import {
   environmentSecrets,
   installedCliPackageRoot,
@@ -571,7 +572,13 @@ export function externalRtcConsumerPassed(summary) {
     && summary.numFailedTests === 0
     && summary.passedAssertions >= 1
     && summary.failedAssertions === 0
-    && summary.skippedAssertions === 0,
+    && summary.skippedAssertions === 0
+    && summary.routeEvidence?.some(line => {
+      const evidence = JSON.parse(line.slice('rtc-route-evidence: '.length));
+      return evidence.stage === 'open' && evidence.path === 'rtc-relay'
+        && evidence.relayTransport === 'turn' && evidence.localCandidateType === 'relay'
+        && evidence.remoteCandidateType === 'relay';
+    }),
   );
 }
 
@@ -906,6 +913,7 @@ export async function runCiRemoteCli({
   nodeVersion = process.version,
   commandRunner = runOwnedCommand,
   receiptWriter = writePrivateReceipt,
+  bridgeSpawner = spawnOwnedFixtureBridge,
 } = {}) {
   const options = parseCiRemoteArgs(argv);
   const required = parseRequiredFlag(env[CI_REMOTE_REQUIRED_ENV]);
@@ -931,6 +939,8 @@ export async function runCiRemoteCli({
   let cleanupPassed = true;
   let privateReceiptRemoved = false;
   let tempPrefixRemoved = false;
+  let bridge;
+  let bridgeResult = { required: false, ready: false, closed: true };
 
   try {
     if (!receiptPresent) {
@@ -1004,6 +1014,29 @@ export async function runCiRemoteCli({
           );
         }
         const installed = resolveInstalledJsBin(prefix);
+        const receipt = JSON.parse(readFileSync(privateReceiptPath, 'utf8'));
+        if (receipt.fixtureTransport) {
+          const transport = receipt.fixtureTransport;
+          if (transport.kind !== 'turn-tcp-over-authenticated-wss'
+            || new URL(transport.bridgeUrl).protocol !== 'wss:'
+            || typeof transport.token !== 'string' || !transport.token
+            || !Number.isInteger(transport.listeningPort) || transport.listeningPort < 1 || transport.listeningPort > 65535) {
+            throw new CiRemoteContractError('invalid_fixture_transport', 'invalid private fixture TURN bridge control');
+          }
+          bridgeResult = { required: true, kind: transport.kind, nativePublicUdpProved: false,
+            ready: false, closed: false };
+          const controlPath = join(privateRunDir, 'turn-client.json');
+          writeFileSync(controlPath, JSON.stringify({ role: 'client', options: {
+            listenHost: '127.0.0.1', listenPort: transport.listeningPort,
+            bridgeUrl: transport.bridgeUrl, token: transport.token,
+          } }), { mode: 0o600 });
+          bridge = bridgeSpawner({ role: 'client', controlPath,
+            logPath: join(privateRunDir, 'turn-client.log') });
+          bridgeResult.pid = bridge.pid;
+          await bridge.ready;
+          await bridge.assertHealthy();
+          bridgeResult.ready = true;
+        }
         setupPassed = true;
 
         stages[0] = runUserPathStage({
@@ -1016,6 +1049,7 @@ export async function runCiRemoteCli({
           secrets,
           commandRunner,
         });
+        if (bridge) await bridge.assertHealthy();
         stages[1] = runRtcConsumerStage({
           privateReceiptPath,
           evidenceDir: options.evidenceDir,
@@ -1025,14 +1059,27 @@ export async function runCiRemoteCli({
           secrets,
           commandRunner,
         });
+        if (bridge) await bridge.assertHealthy();
       } catch (error) {
         preflightError = safeOutput(errorMessage(error), secrets);
         preflightErrorCode = errorCode(error);
       }
     }
   } finally {
+    if (bridge) {
+      try {
+        const closed = await bridge.close();
+        bridgeResult.closed = closed.closed;
+        if (closed.errors.length) bridgeResult.errors = closed.errors.map(error => safeOutput(error, secrets));
+      } catch (error) {
+        bridgeResult.closed = false;
+        bridgeResult.errors = [safeOutput(errorMessage(error), secrets)];
+      }
+    }
     try {
-      if (privateRunDir) {
+      if (!bridgeResult.closed) {
+        privateReceiptRemoved = false;
+      } else if (privateRunDir) {
         rmSync(privateRunDir, { recursive: true, force: true });
         privateReceiptRemoved = !existsSync(privateRunDir);
       } else {
@@ -1042,7 +1089,9 @@ export async function runCiRemoteCli({
       privateReceiptRemoved = false;
     }
     try {
-      if (tempRoot) {
+      if (!bridgeResult.closed) {
+        tempPrefixRemoved = false;
+      } else if (tempRoot) {
         rmSync(tempRoot, { recursive: true, force: true });
         tempPrefixRemoved = !existsSync(tempRoot);
       } else {
@@ -1051,7 +1100,7 @@ export async function runCiRemoteCli({
     } catch {
       tempPrefixRemoved = false;
     }
-    cleanupPassed = privateReceiptRemoved && tempPrefixRemoved;
+    cleanupPassed = privateReceiptRemoved && tempPrefixRemoved && bridgeResult.closed;
     delete env[CI_REMOTE_RECEIPT_ENV];
   }
 
@@ -1068,6 +1117,7 @@ export async function runCiRemoteCli({
     preflightErrorCode,
   });
   result.receipt.materialized = privateReceiptWritten;
+  result.fixtureTransport = bridgeResult;
   result.cleanup.privateReceiptRemoved = privateReceiptRemoved;
   result.cleanup.tempPrefixRemoved = tempPrefixRemoved;
   if (preflightError && receiptPresent) {
