@@ -1,6 +1,6 @@
 import wrtc from '@roamhq/wrtc';
 import { createRequire } from 'node:module';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AuthenticatedAccount } from './account-client.js';
 import {
   SessionConnection,
@@ -287,42 +287,47 @@ describe('SessionConnection route identity', () => {
   });
 
   it('keeps the exact prior traversal settings shape when the policy is omitted', () => {
-    const account = accountFor('ws://127.0.0.1:1');
-    const server = {
-      deviceId: 'device-1',
-      daemonHostId: 'daemon-1',
-    };
-    const scope = {
-      accountId: 'account-1',
-      daemonHostId: 'daemon-1',
-      networkGeneration: 3,
-    };
-    const baseline = buildSessionConnectionRouteContext(
-      account,
-      server,
-      scope,
-      'client-instance-4',
-    );
-    const omitted = buildSessionConnectionRouteContext(
-      account,
-      server,
-      scope,
-      'client-instance-4',
-      {},
-    );
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    try {
+      const account = accountFor('ws://127.0.0.1:1');
+      const server = {
+        deviceId: 'device-1',
+        daemonHostId: 'daemon-1',
+      };
+      const scope = {
+        accountId: 'account-1',
+        daemonHostId: 'daemon-1',
+        networkGeneration: 3,
+      };
+      const baseline = buildSessionConnectionRouteContext(
+        account,
+        server,
+        scope,
+        'client-instance-4',
+      );
+      const omitted = buildSessionConnectionRouteContext(
+        account,
+        server,
+        scope,
+        'client-instance-4',
+        {},
+      );
 
-    expect('rtcIceTransportPolicy' in baseline.settings).toBe(false);
-    expect(Object.keys(baseline.settings)).toEqual([
-      'signalUrl',
-      'turnServerUrl',
-      'turnUsername',
-      'turnCredential',
-      'transportMode',
-      'traversalRelay',
-    ]);
-    expect(omitted.settings).toEqual(baseline.settings);
-    expect(baseline.target.transportMode).toBe('auto');
-    expect(baseline.settings.transportMode).toBe('auto');
+      expect('rtcIceTransportPolicy' in baseline.settings).toBe(false);
+      expect(Object.keys(baseline.settings)).toEqual([
+        'signalUrl',
+        'turnServerUrl',
+        'turnUsername',
+        'turnCredential',
+        'transportMode',
+        'traversalRelay',
+      ]);
+      expect(omitted.settings).toEqual(baseline.settings);
+      expect(baseline.target.transportMode).toBe('auto');
+      expect(baseline.settings.transportMode).toBe('auto');
+    } finally {
+      clock.mockRestore();
+    }
   });
 });
 
