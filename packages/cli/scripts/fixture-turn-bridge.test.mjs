@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { createServer } from 'node:http';
+import { createServer, request } from 'node:http';
 import { createConnection, createServer as createTcpServer } from 'node:net';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -34,7 +34,7 @@ function httpEchoServer() {
     req.on('data', (chunk) => chunks.push(chunk));
     req.on('end', () => {
       const body = Buffer.concat(chunks);
-      res.writeHead(207, { 'x-origin-echo': 'yes' });
+      res.writeHead(207, { 'x-origin-echo': 'yes', 'x-seen-host': req.headers.host });
       res.end(Buffer.concat([Buffer.from('http:'), body]));
     });
   });
@@ -50,7 +50,7 @@ function relayWsEchoServer() {
     const chunks = [];
     req.on('data', chunk => chunks.push(chunk));
     req.on('end', () => {
-      res.writeHead(207, { 'x-origin-echo': 'yes' });
+      res.writeHead(207, { 'x-origin-echo': 'yes', 'x-seen-host': req.headers.host });
       res.end(Buffer.concat([Buffer.from('http:'), ...chunks]));
     });
   });
@@ -256,14 +256,22 @@ test('frontend proxies HTTP status/body and relay WS bytes transparently', async
     token: 'fresh-token',
   });
   try {
-    const httpRes = await fetch(`${frontend.origin}/echo-path`, {
-      method: 'POST',
-      body: Buffer.from('request-body'),
-      headers: { 'content-type': 'application/octet-stream' },
+    const httpRes = await new Promise((resolveResponse, rejectResponse) => {
+      const outgoing = request(`${frontend.origin}/echo-path`, {
+        method: 'POST', headers: { host: 'public-fixture.example.test' },
+      }, response => {
+        const chunks = [];
+        response.on('data', chunk => chunks.push(chunk));
+        response.on('end', () => resolveResponse({ status: response.statusCode, headers: response.headers,
+          body: Buffer.concat(chunks) }));
+      });
+      outgoing.once('error', rejectResponse);
+      outgoing.end(Buffer.from('request-body'));
     });
     assert.equal(httpRes.status, 207);
-    assert.equal(httpRes.headers.get('x-origin-echo'), 'yes');
-    assert.deepEqual(Buffer.from(await httpRes.arrayBuffer()), Buffer.from('http:request-body'));
+    assert.equal(httpRes.headers['x-origin-echo'], 'yes');
+    assert.equal(httpRes.headers['x-seen-host'], 'public-fixture.example.test');
+    assert.deepEqual(httpRes.body, Buffer.from('http:request-body'));
 
     const ws = new WebSocket(`${frontend.origin}/relay-ws`);
     const reply = new Promise((resolve) => ws.once('message', (data, isBinary) => resolve({ data, isBinary })));

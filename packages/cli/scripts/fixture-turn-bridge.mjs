@@ -59,7 +59,7 @@ export async function startFixtureFrontend({ listenHost, listenPort, relayOrigin
   const sockets = ownedSockets();
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: 1024 * 1024 });
   const proxyRequest = req => request({ hostname: relay.hostname, port: relay.port,
-    method: req.method, path: req.url, headers: { ...req.headers, host: relay.host }, agent: false });
+    method: req.method, path: req.url, headers: req.headers, agent: false });
   const server = createServer((req, res) => {
     const upstream = proxyRequest(req);
     upstream.once('socket', socket => sockets.add(socket));
