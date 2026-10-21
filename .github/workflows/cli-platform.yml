@@ -195,6 +195,14 @@ jobs:
             --daemon-native "$ZTERM_PLATFORM_EVIDENCE/daemon-platform/runtime/dagpipe.node" \
             --daemon-package-root "$ZTERM_PLATFORM_EVIDENCE/daemon-platform"
 
+      - name: Observe Windows console interrupt delivery
+        if: matrix.platform == 'win32'
+        shell: bash
+        run: |
+          node packages/cli/scripts/windows-interrupt-probe.mjs \
+            --pty-package-root "$ZTERM_PLATFORM_EVIDENCE/daemon-platform/runtime/node_modules/node-pty" \
+            --evidence-dir "$ZTERM_PLATFORM_EVIDENCE/console-observation"
+
       - name: Run isolated npm install/upgrade blackbox
         shell: bash
         run: |
@@ -250,6 +258,7 @@ jobs:
             ${{ runner.temp }}/zterm-platform-evidence/platform-smoke
             ${{ runner.temp }}/zterm-platform-evidence/npm-blackbox
             ${{ runner.temp }}/zterm-platform-evidence/full-user-path
+            ${{ runner.temp }}/zterm-platform-evidence/console-observation
           if-no-files-found: warn
           retention-days: 14
 
