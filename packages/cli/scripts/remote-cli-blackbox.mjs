@@ -510,6 +510,9 @@ async function executeHarness({
       from: command.from,
       timeoutMs: CONNECTION_TIMEOUT_MS,
     });
+    await shell.waitForVisibleText(receipt.deviceId, 'complete managed server row', {
+      from: command.from, timeoutMs: CONNECTION_TIMEOUT_MS,
+    });
     const serverIndex = chooseExactServer(
       shell.visibleSince(command.from),
       receipt.deviceId,
@@ -519,6 +522,9 @@ async function executeHarness({
     await shell.waitForVisibleText(/选择 session/u, 'session prompt', {
       from: command.from,
       timeoutMs: CONNECTION_TIMEOUT_MS,
+    });
+    await shell.waitForVisibleText(receipt.stableId, 'complete managed session row', {
+      from: command.from, timeoutMs: CONNECTION_TIMEOUT_MS,
     });
     const sessionIndex = chooseExactSession(
       shell.visibleSince(command.from),

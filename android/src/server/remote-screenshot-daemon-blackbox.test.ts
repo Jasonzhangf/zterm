@@ -65,12 +65,23 @@ describe('remote screenshot daemon black-box contract', () => {
 
   it('installs the canonical daemon native binary through the global installer', () => {
     const releaseScript = readProjectFile('scripts/prepare-global-daemon-release.sh');
-    const installerBody = extractBlock(releaseScript, 'write_installer() {', 1600);
+    const marker = 'write_installer() {';
+    const start = releaseScript.indexOf(marker);
+    const end = releaseScript.indexOf('\nEOF\n', start);
+    expect(start, `${marker} should exist`).toBeGreaterThanOrEqual(0);
+    expect(end, 'write_installer heredoc should end with newline EOF newline').toBeGreaterThanOrEqual(0);
+    const installerBody = releaseScript.slice(start, end + '\nEOF\n'.length);
+
+    const copyIndex = installerBody.indexOf('cp "${INSTALL_ROOT}/support/zterm-daemon" "${NATIVE_TMP}"');
+    const chmodIndex = installerBody.indexOf('chmod +x "${NATIVE_TMP}"');
+    const moveIndex = installerBody.indexOf('mv "${NATIVE_TMP}" "${HOME}/.zterm/bin/zterm-daemon"');
 
     expect(releaseScript).not.toContain('install_user_shims');
     expect(installerBody).toContain('mkdir -p "${INSTALL_ROOT}" "${LOCAL_BIN}" "${HOME}/.zterm/bin"');
-    expect(installerBody).toContain('cp "${INSTALL_ROOT}/support/zterm-daemon" "${HOME}/.zterm/bin/zterm-daemon"');
-    expect(installerBody).toContain('chmod +x "${HOME}/.zterm/bin/zterm-daemon"');
+    expect(installerBody).toContain('NATIVE_TMP="${HOME}/.zterm/bin/.zterm-daemon.$$"');
+    expect(copyIndex).toBeGreaterThanOrEqual(0);
+    expect(chmodIndex).toBeGreaterThan(copyIndex);
+    expect(moveIndex).toBeGreaterThan(chmodIndex);
   });
 
   it('captures screenshots with ScreenCaptureKit inside one daemon identity', () => {

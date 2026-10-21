@@ -542,6 +542,9 @@ export function summarizeVitestReport(value) {
               status: typeof assertion?.status === 'string'
                 ? assertion.status
                 : '',
+              ...(assertion?.status === 'failed' && Array.isArray(assertion.failureMessages)
+                ? { failureMessages: assertion.failureMessages.filter(message => typeof message === 'string') }
+                : {}),
             }))
           : [],
       }))

@@ -2115,8 +2115,6 @@ export async function runCliBlackboxHarness(
       });
 
       await runStage('cli-post-logout-connection-rejected', async () => {
-        await delay(300);
-        const auditOffset = linesInFile(wrapperAuditLog).length;
         const result = await cliShell!.runCommand(
           commandFor('1'),
           `ZTERM_EXIT_POST_LOGOUT_${runToken}`,
@@ -2128,17 +2126,47 @@ export async function runCliBlackboxHarness(
         if (!/auth|login|登录|失效/iu.test(result.output)) {
           throw new Error('post-logout failure did not require login');
         }
-        const daemonCommands = auditEntriesSince(wrapperAuditLog, auditOffset);
-        if (daemonCommands.length > 0) {
-          throw new Error(
-            `post-logout launch attempted daemon work: ${JSON.stringify(daemonCommands)}`,
+        // The other mirror consumer keeps capturing. Observe this unauthenticated
+        // process at its network boundary instead of attributing all tmux reads to it.
+        let networkConnections = 0;
+        const observer = createServer(socket => { networkConnections += 1; socket.destroy(); }) as
+          ReturnType<typeof createServer> & { once(event: 'error', listener: (error: Error) => void): unknown };
+        await new Promise<void>((resolveListen, rejectListen) => {
+          observer.once('error', rejectListen);
+          observer.listen(0, '127.0.0.1', resolveListen);
+        });
+        try {
+          const address = observer.address();
+          if (!address || typeof address === 'string') throw new Error('post-logout observer has no TCP address');
+          const probeHome = join(testPrefix, 'post-logout-home');
+          const probeConfigPath = join(probeHome, '.zterm', 'config.json');
+          mkdirSync(dirname(probeConfigPath), { recursive: true });
+          const probeConfig = readJsonObject(cliConfigPath);
+          const { zterm, cli } = cliConfigSections(probeConfig);
+          cli.server = { relayBaseUrl: `http://127.0.0.1:${address.port}/` };
+          const daemon = objectAt(objectAt(zterm.android, 'zterm.android').daemon, 'daemon');
+          daemon.host = '127.0.0.1';
+          daemon.port = address.port;
+          const beforeProbe = JSON.stringify(probeConfig);
+          writeFileSync(probeConfigPath, beforeProbe, { mode: 0o600 });
+          const probe = await cliShell!.runCommand(
+            `HOME=${shellQuote(probeHome)} USERPROFILE=${shellQuote(probeHome)} ${commandFor('1')}`,
+            `ZTERM_EXIT_POST_LOGOUT_NETWORK_${runToken}`,
+            { timeoutMs: Math.max(timeoutMs, 60_000) },
           );
+          if (probe.exitCode === 0 || !/auth|login|登录|失效/iu.test(probe.output)) {
+            throw new Error('isolated post-logout launch did not require login');
+          }
+          if (networkConnections !== 0) throw new Error(`post-logout launch opened ${networkConnections} network connections`);
+          if (readFileSync(probeConfigPath, 'utf8') !== beforeProbe) throw new Error('post-logout launch changed the isolated config');
+        } finally {
+          await new Promise<void>(resolveClose => observer.close(() => resolveClose()));
         }
         assertPreservedCliConfig(cliConfigPath, cliRelayBaseUrl, daemonPort);
         return {
           exitCode: result.exitCode,
           loginRequired: true,
-          daemonCommandCount: 0,
+          networkConnections,
           savedSlotPreserved: true,
         };
       });
