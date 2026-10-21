@@ -75,7 +75,7 @@ export async function startFixtureFrontend({ listenHost, listenPort, relayOrigin
   server.on('upgrade', (req, socket, head) => {
     if (req.url === route) {
       if (req.headers.authorization !== `Bearer ${token}`) { reject(socket, '401 Unauthorized'); return; }
-      const upstream = sockets.add(connect(turnTarget));
+      const upstream = sockets.add(connect({ ...turnTarget, noDelay: true }));
       socket.once('close', () => upstream.destroy());
       const unavailable = () => reject(socket, '502 Bad Gateway');
       upstream.once('error', unavailable);
@@ -130,6 +130,7 @@ export async function startFixtureTurnClient({ listenHost, listenPort, bridgeUrl
     return ws;
   }
   const server = tcpServer(socket => {
+    socket.setNoDelay(true);
     sockets.add(socket);
     const ws = open();
     pair(socket, createWebSocketStream(ws));

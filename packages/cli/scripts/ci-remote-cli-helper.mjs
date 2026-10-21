@@ -832,6 +832,13 @@ function runRtcConsumerStage({
     },
   );
   const summary = parseVitestReport(reportPath);
+  // Vitest's JSON file omits direct process.stdout writes from the consumer.
+  if (summary) {
+    summary.routeEvidence = [...new Set([
+      ...summary.routeEvidence,
+      ...collectRouteEvidence(result.stdout),
+    ])];
+  }
   writeSafeFile(
     join(stageDir, 'vitest-command.log'),
     rtcConsumerLog(result, summary?.routeEvidence || []),
@@ -854,7 +861,7 @@ function runRtcConsumerStage({
     stage.status = 'failed';
     stage.errorCode = 'rtc_consumer_not_executed';
     stage.error =
-      'Vitest did not report one executed external RTC consumer';
+      'Vitest did not prove an executed TURN relay/relay consumer';
   }
   return stage;
 }

@@ -419,13 +419,13 @@ test(`actual CI orchestration owns receipt and sidecar lifecycle: ${bridgeMode}`
                   title: 'RTC consumer',
                   status: 'passed',
                 }],
-                console: {
-                  stdout: 'rtc-route-evidence: {"stage":"open","path":"rtc-relay","relayTransport":"turn","localCandidateType":"relay","remoteCandidateType":"relay"}\n',
-                },
               }],
             }),
           );
-          return resultFor(command, args);
+          return {
+            ...resultFor(command, args),
+            stdout: 'rtc-route-evidence: {"stage":"open","path":"rtc-relay","relayTransport":"turn","localCandidateType":"relay","remoteCandidateType":"relay"}\n',
+          };
         }
         assert.fail(`unexpected orchestration command: ${command}`);
       },
