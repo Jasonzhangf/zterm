@@ -74,6 +74,7 @@ export function formalCliInvocation(
   return {
     command: env.ComSpec || 'cmd.exe',
     args: ['/d', '/s', '/c', `"${commandLine}"`],
+    windowsVerbatimArguments: true,
   };
 }
 
@@ -170,6 +171,7 @@ export function runProcess(
     timeout = 120_000,
     allowFailure = false,
     input,
+    windowsVerbatimArguments = false,
   } = {},
 ) {
   const result = spawnSync(command, args, {
@@ -180,6 +182,7 @@ export function runProcess(
     encoding: 'utf8',
     shell: false,
     windowsHide: true,
+    windowsVerbatimArguments,
     maxBuffer: 8 * 1024 * 1024,
   });
   const normalized = {

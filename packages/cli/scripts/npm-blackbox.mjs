@@ -237,6 +237,7 @@ function startChild(command, args, options = {}) {
     shell: false,
     detached: platform !== 'win32',
     windowsHide: platform === 'win32',
+    windowsVerbatimArguments: options.windowsVerbatimArguments ?? false,
   });
   const finish = (code, signal) => {
     if (settled) return;
@@ -294,14 +295,9 @@ function installedCliJsEntry() {
   return entry;
 }
 
-function windowsCancelPtyInvocation(args, env) {
+function windowsCancelPtyInvocation(args) {
   const entry = installedCliJsEntry();
-  return formalCliInvocation(
-    process.execPath,
-    [entry, ...args],
-    'win32',
-    env,
-  );
+  return { command: process.execPath, args: [entry, ...args] };
 }
 
 function startWindowsCancelPty(command, args, options = {}) {
@@ -1031,6 +1027,7 @@ async function observeInstalledVersion() {
     ? formalCliInvocation(bin, ['--version'])
     : { command: bin, args: ['--version'] };
   const result = await runChild(cliInvocation.command, cliInvocation.args, {
+    windowsVerbatimArguments: cliInvocation.windowsVerbatimArguments,
     cwd: testRoot,
     env: isolatedEnvironment(),
     timeoutMs: 30_000,
@@ -1071,6 +1068,7 @@ async function runUpgrade() {
     cliInvocation.command,
     cliInvocation.args,
     {
+      windowsVerbatimArguments: cliInvocation.windowsVerbatimArguments,
       cwd: testRoot,
       env: isolatedEnvironment(),
       timeoutMs: 180_000,
@@ -1232,7 +1230,7 @@ async function main() {
     const env = isolatedEnvironment();
     const args = ['upgrade', '--registry', registry.url];
     const cliInvocation = platform === 'win32'
-      ? windowsCancelPtyInvocation(args, env)
+      ? windowsCancelPtyInvocation(args)
       : { command: bin, args };
     const running = platform === 'win32'
       ? startWindowsCancelPty(cliInvocation.command, cliInvocation.args, {

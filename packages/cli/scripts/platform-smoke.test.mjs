@@ -69,6 +69,7 @@ test('invokes the Windows npm shim through cmd.exe', () => {
   assert.deepEqual(invocation.args.slice(0, 3), ['/d', '/s', '/c']);
   assert.match(invocation.args[3], /zterm\.cmd/u);
   assert.match(invocation.args[3], /--version/u);
+  assert.equal(invocation.windowsVerbatimArguments, true);
 });
 
 test('parses bounded smoke arguments and rejects unknown input', () => {

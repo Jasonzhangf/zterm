@@ -193,6 +193,7 @@ describe('resource registry truth gate', () => {
     const devCli = read('../android/scripts/zterm-daemon.sh');
     const releaseBuilder = read('../android/scripts/prepare-global-daemon-release.sh');
     const npmPackager = read('../android/scripts/prepare-daemon-npm-package.mjs');
+    const platformComponents = read('../android/scripts/prepare-daemon-platform-release.mjs');
     const windowsRunner = read('../android/scripts/windows/zterm-daemon.ps1');
 
     // The dev CLI is a thin delegate: it never runs the daemon runtime itself, and only execs the fixed support
@@ -224,9 +225,11 @@ describe('resource registry truth gate', () => {
     expect(npmPackager).toContain("tuple: 'linux-x64', os: 'linux', arch: 'x64'");
     expect(npmPackager).toContain("tuple: 'win32-x64', os: 'win32', arch: 'x64'");
     expect(npmPackager).toContain('function tupleFiles(spec)');
-    expect(npmPackager).toContain("'runtime/server.cjs'");
-    expect(npmPackager).toContain("'runtime/dagpipe.node'");
-    expect(npmPackager).toContain('runtime/node_modules/@roamhq/wrtc-${spec.tuple}/wrtc.node');
+    expect(npmPackager).toContain('return platformRuntimeComponents(spec.os, spec.arch)');
+    expect(platformComponents).toContain('export function platformRuntimeComponents(targetOs, targetArch)');
+    expect(platformComponents).toContain("'runtime/server.cjs'");
+    expect(platformComponents).toContain("'runtime/dagpipe.node'");
+    expect(platformComponents).toContain('`runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`');
     expect(npmPackager).toContain("requirePath(join(releaseDir, component), `${spec.tuple} ${component}`)");
     expect(npmPackager).toContain(
       'if (input.platform.os !== spec.os || input.platform.arch !== spec.arch)',

@@ -97,6 +97,7 @@ function runFormalCli(binPath, args, sandbox, env) {
     cwd: sandbox,
     env,
     timeout: 30_000,
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
   });
 }
 

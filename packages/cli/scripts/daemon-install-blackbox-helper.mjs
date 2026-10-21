@@ -62,10 +62,14 @@ function assertPackageMetadata(metadata, path) {
   return metadata;
 }
 
+export function localTarArguments(args) {
+  return process.platform === 'win32' ? ['--force-local', ...args] : args;
+}
+
 export function readTarballPackageJson(path) {
   const result = spawnSync(
     'tar',
-    ['-xOf', path, 'package/package.json'],
+    localTarArguments(['-xOf', path, 'package/package.json']),
     {
       encoding: 'utf8',
       shell: false,
@@ -157,13 +161,13 @@ export function discoverDaemonPackages(
     }
     const metadata = assertPackageMetadata(metadataReader(path), path);
     return {
-      path,
+      tarballPath: path,
       name: metadata.name,
       version: metadata.version,
-      metadata,
+      manifest: metadata,
     };
   }).sort((left, right) => left.name.localeCompare(right.name));
-  const version = validateDaemonPackageSet(packages.map((record) => record.metadata));
+  const version = validateDaemonPackageSet(packages.map((record) => record.manifest));
   const publicPackage = packages.find(
     (record) => record.name === DAEMON_PACKAGE_NAMES[0],
   );

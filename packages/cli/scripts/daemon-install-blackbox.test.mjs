@@ -75,6 +75,8 @@ test('accepts exactly the four daemon tarballs at one metadata version', () => {
       [...DAEMON_PACKAGE_NAMES].sort(),
     );
     assert.equal(discovered.publicPackage.name, PUBLIC_PACKAGE);
+    assert.equal(discovered.publicPackage.tarballPath, records.find((record) => record.metadata.name === PUBLIC_PACKAGE).path);
+    assert.equal(discovered.publicPackage.manifest.name, PUBLIC_PACKAGE);
     assert.equal(
       discovered.targetPayload.name,
       PAYLOAD_PACKAGES.find((name) => name.endsWith(`${process.platform}-${process.arch}`))

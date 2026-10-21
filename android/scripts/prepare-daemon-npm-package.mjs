@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { platformRuntimeComponents } from './prepare-daemon-platform-release.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDir, '..');
@@ -363,23 +364,7 @@ function validateVersion(version) {
 }
 
 function tupleFiles(spec) {
-  const files = [
-    'runtime/server.cjs',
-    'runtime/dagpipe.node',
-    'runtime/node_modules/node-pty',
-    'runtime/node_modules/@roamhq/wrtc',
-    `runtime/node_modules/@roamhq/wrtc-${spec.tuple}/wrtc.node`,
-    'support/terminal-config-command.cjs',
-  ];
-  if (spec.os === 'win32') {
-    files.push('support/windows/zterm-daemon.ps1');
-  } else {
-    files.push('support/zterm-daemon.sh');
-  }
-  if (spec.os === 'darwin') {
-    files.push('support/zterm-daemon');
-  }
-  return files;
+  return platformRuntimeComponents(spec.os, spec.arch);
 }
 
 function validateRelease(spec, releaseDir, requestedVersion) {

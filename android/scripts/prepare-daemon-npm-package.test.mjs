@@ -46,6 +46,10 @@ function releaseFixture(root, tuple, os, arch, marker) {
     `runtime/node_modules/@roamhq/wrtc-${os}-${arch}/wrtc.node`,
     marker,
   );
+  writeFixtureFile(releaseRoot, `runtime/node_modules/@roamhq/wrtc-${os}-${arch}/package.json`,
+    JSON.stringify({ name: `@roamhq/wrtc-${os}-${arch}`, version: 'fixture', main: 'index.js' }));
+  writeFixtureFile(releaseRoot, `runtime/node_modules/@roamhq/wrtc-${os}-${arch}/index.js`,
+    'module.exports = require("./wrtc.node");\n');
   writeFixtureFile(releaseRoot, 'support/terminal-config-command.cjs', marker);
   if (os === 'win32') {
     writeFixtureFile(releaseRoot, 'support/windows/zterm-daemon.ps1', marker);
@@ -142,6 +146,9 @@ test('packs one public package and exactly three same-version platform payloads'
     assert.deepEqual(payloadManifest.os, [os]);
     assert.deepEqual(payloadManifest.cpu, [arch]);
     assert.equal(payloadManifest.bin, undefined);
+    const rtcModule = join(payloadPath, 'runtime', 'node_modules', '@roamhq', `wrtc-${os}-${arch}`);
+    assert.equal(existsSync(join(rtcModule, 'package.json')), true, `${tuple} RTC package manifest`);
+    assert.equal(existsSync(join(rtcModule, 'index.js')), true, `${tuple} RTC module entry`);
     assert.equal(distributionManifest.package.name, `@jsonstudio/zterm-daemon-${tuple}`);
     assert.equal(distributionManifest.package.version, '9.8.7');
     assert.equal(

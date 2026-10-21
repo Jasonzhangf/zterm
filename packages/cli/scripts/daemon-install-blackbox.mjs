@@ -22,6 +22,7 @@ import { fileURLToPath } from 'node:url';
 import {
   DAEMON_PACKAGE_NAMES,
   discoverDaemonPackages,
+  localTarArguments,
   parseDaemonInstallBlackboxArgs,
   readPackageManifest,
   readTarballPackageJson,
@@ -189,6 +190,7 @@ function runProcess(command, args, options = {}) {
       shell: false,
       detached: process.platform !== 'win32',
       windowsHide: true,
+      windowsVerbatimArguments: options.windowsVerbatimArguments ?? false,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     activeChildren.add(child);
@@ -304,7 +306,6 @@ class LocalRegistry {
     if (!this.packages.has(record.name)) this.packages.set(record.name, new Map());
     this.packages.get(record.name).set(record.version, {
       ...record,
-      manifest: record.manifest ?? record.metadata,
     });
   }
 
@@ -512,6 +513,7 @@ async function buildCliDependencyRecords(context) {
   const packedRoot = join(context.root, 'cli-dependencies');
   makeDirectory(packedRoot);
   for (const manifestPath of collectDependencyManifests(cliManifestPath)) {
+    if (manifestPath === cliManifestPath) continue;
     const manifest = readPackageManifest(manifestPath);
     const destination = join(packedRoot, `${records.length}`);
     makeDirectory(destination);
@@ -521,7 +523,9 @@ async function buildCliDependencyRecords(context) {
       '--json',
       '--pack-destination',
       destination,
-      dirname(manifestPath),
+      '--registry',
+      'https://registry.npmjs.org',
+      `${manifest.name}@${manifest.version}`,
     ], {
       cwd: context.root,
       env: npmProjectEnvironment(
@@ -649,6 +653,7 @@ async function runInstalledCli(scenario, registry, args) {
   );
   evidenceLog(`spawn ${commandSummary(invocation.command, invocation.args)}`);
   return runProcess(invocation.command, invocation.args, {
+    windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     cwd: scenario.outside,
     env: scenarioEnvironment(scenario, registry.url),
     timeoutMs: 180_000,
@@ -662,10 +667,14 @@ function daemonPrefixPackageRoot(prefix) {
 }
 
 function daemonPrefixPayloadRoot(prefix) {
-  const payloadName = targetDaemonPayloadName();
-  return process.platform === 'win32'
-    ? join(prefix, 'node_modules', ...payloadName.split('/'))
-    : join(prefix, 'lib', 'node_modules', ...payloadName.split('/'));
+  const publicRoot = daemonPrefixPackageRoot(prefix);
+  const resolver = createRequire(join(publicRoot, 'package.json'));
+  try {
+    return dirname(resolver.resolve(`${targetDaemonPayloadName()}/package.json`));
+  } catch (error) {
+    if (error.code === 'MODULE_NOT_FOUND') return undefined;
+    throw error;
+  }
 }
 
 function stageSnapshot(scenario) {
@@ -690,10 +699,11 @@ function stageSnapshot(scenario) {
 
 function installedSnapshot(scenario) {
   const packageRoot = daemonPrefixPackageRoot(scenario.prefix);
-  const payloadRoot = daemonPrefixPayloadRoot(scenario.prefix);
+  const publicPackagePresent = existsSync(join(packageRoot, 'package.json'));
+  const payloadRoot = publicPackagePresent ? daemonPrefixPayloadRoot(scenario.prefix) : undefined;
   return {
-    publicPackagePresent: existsSync(join(packageRoot, 'package.json')),
-    payloadPresent: existsSync(join(payloadRoot, 'zterm-package.json')),
+    publicPackagePresent,
+    payloadPresent: payloadRoot !== undefined && existsSync(join(payloadRoot, 'zterm-package.json')),
     entryPresent: existsSync(
       process.platform === 'win32'
         ? join(scenario.prefix, 'zterm-daemon.cmd')
@@ -827,6 +837,7 @@ main().catch((error) => {
 
 async function runNativeProbe(scenario) {
   const payloadRoot = daemonPrefixPayloadRoot(scenario.prefix);
+  assert(payloadRoot !== undefined, 'installed native payload cannot be resolved');
   const probePath = join(scenario.root, 'native-probe.cjs');
   createNativeProbe(probePath);
   const result = await runProcess(
@@ -850,7 +861,7 @@ async function createDamagedPayloadTarball(record, kind, context) {
   makeDirectory(packed);
   requireSuccess(await runProcess(
     'tar',
-    ['-xzf', record.tarballPath, '-C', extracted],
+    localTarArguments(['-xzf', record.tarballPath, '-C', extracted]),
     { cwd: directory, env: process.env, timeoutMs: 120_000 },
   ), `extract ${kind} payload`);
   const packageRoot = join(extracted, 'package');

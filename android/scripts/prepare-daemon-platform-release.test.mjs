@@ -186,6 +186,20 @@ test('declares the correct runner and native helper components for all three tar
     assert.ok(
       !manifests.get('win32-x64').runtimeComponents.includes('support/zterm-daemon.sh'),
     );
+    for (const [targetOs, targetArch] of [
+      ['darwin', 'arm64'],
+      ['linux', 'x64'],
+      ['win32', 'x64'],
+    ]) {
+      for (const file of ['package.json', 'index.js', 'wrtc.node']) assert.ok(
+        manifests
+          .get(`${targetOs}-${targetArch}`)
+          .runtimeComponents.includes(
+            `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/${file}`,
+          ),
+        `${targetOs}-${targetArch} must declare wrtc module ${file}`,
+      );
+    }
   })();
 });
 

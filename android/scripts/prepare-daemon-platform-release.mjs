@@ -379,22 +379,14 @@ export function stagePlatformSupport({
   fail(`unsupported runner target: ${targetOs}-${targetArch}`);
 }
 
-export function createPlatformManifest({
-  version,
-  targetOs,
-  targetArch,
-  nodeAbi,
-}) {
-  for (const [name, value] of Object.entries({ version, targetOs, targetArch })) {
-    if (typeof value !== 'string' || value.length === 0) {
-      fail(`platform manifest requires ${name}`);
-    }
-  }
+export function platformRuntimeComponents(targetOs, targetArch) {
   const runtimeComponents = [
     'runtime/server.cjs',
     'runtime/dagpipe.node',
     'runtime/node_modules/node-pty',
     'runtime/node_modules/@roamhq/wrtc',
+    `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/package.json`,
+    `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/index.js`,
     `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`,
     'support/terminal-config-command.cjs',
   ];
@@ -406,6 +398,15 @@ export function createPlatformManifest({
     runtimeComponents.push('support/windows/zterm-daemon.ps1');
   } else {
     fail(`unsupported manifest target: ${targetOs}-${targetArch}`);
+  }
+  return runtimeComponents;
+}
+
+export function createPlatformManifest({ version, targetOs, targetArch, nodeAbi }) {
+  for (const [name, value] of Object.entries({ version, targetOs, targetArch })) {
+    if (typeof value !== 'string' || value.length === 0) {
+      fail(`platform manifest requires ${name}`);
+    }
   }
   return {
     schemaVersion: 1,
@@ -421,7 +422,7 @@ export function createPlatformManifest({
         abi: String(nodeAbi ?? process.versions.modules),
       },
     },
-    runtimeComponents,
+    runtimeComponents: platformRuntimeComponents(targetOs, targetArch),
   };
 }
 
