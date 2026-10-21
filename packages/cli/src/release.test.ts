@@ -67,25 +67,21 @@ function updateRunner(overrides: {
 }
 
 describe('CLI npm upgrade adapter', () => {
-  it.skipIf(process.platform === 'win32')('closes an aborted npm process with its interrupt handler', async () => {
+  it.skipIf(process.platform === 'win32')('closes aborted npm even when graceful signals do not exit', async () => {
     const root = mkdtempSync(join(tmpdir(), 'zterm-npm-cancel-'));
     const script = join(root, 'npm-cli.cjs');
     const ready = join(root, 'ready');
-    const interrupted = join(root, 'interrupted');
     writeFileSync(script, `
 const fs = require('node:fs');
 process.on('SIGTERM', () => {});
-process.on('SIGINT', () => {
-  fs.writeFileSync(process.argv[3], 'SIGINT');
-  process.exit(130);
-});
+process.on('SIGINT', () => {});
 fs.writeFileSync(process.argv[2], String(process.pid));
 setInterval(() => {}, 1000);
 `);
     const controller = new AbortController();
     let closed = false;
     let deadline: ReturnType<typeof setTimeout> | undefined;
-    const running = spawnProcess(process.execPath, [script, ready, interrupted], {
+    const running = spawnProcess(process.execPath, [script, ready], {
       signal: controller.signal,
     }).finally(() => { closed = true; });
     try {
@@ -100,8 +96,8 @@ setInterval(() => {}, 1000);
         }),
       ]);
       expect(result.error?.code).toBe('ABORT_ERR');
-      expect(result.exitCode).toBe(130);
-      expect(readFileSync(interrupted, 'utf8')).toBe('SIGINT');
+      expect(result.signal).toBe('SIGKILL');
+      expect(result.exitCode).toBeNull();
     } finally {
       clearTimeout(deadline);
       if (!closed && existsSync(ready)) {

@@ -126,7 +126,7 @@ export const spawnProcess: ProcessRunner = (command, args, options = {}) =>
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
         signal: options.signal,
-        killSignal: 'SIGINT',
+        killSignal: 'SIGKILL',
       });
       child.stdout?.setEncoding('utf8');
       child.stderr?.setEncoding('utf8');

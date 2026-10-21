@@ -299,7 +299,7 @@ function installedCliJsEntry() {
 
 function windowsCancelPtyInvocation(args) {
   const entry = installedCliJsEntry();
-  return { command: process.execPath, args: [entry, ...args] };
+  return formalCliInvocation(process.execPath, [entry, ...args], 'win32');
 }
 
 function startWindowsCancelPty(command, args, options = {}) {
@@ -323,7 +323,7 @@ function startWindowsCancelPty(command, args, options = {}) {
   let resolveResult;
   let dataSubscription;
   let exitSubscription;
-  const terminal = pty.spawn(command, args, {
+  const terminal = pty.spawn(command, options.windowsVerbatimArguments ? args.join(' ') : args, {
     name: 'xterm-256color',
     cols: 120,
     rows: 36,
@@ -1266,6 +1266,7 @@ async function main() {
         cwd: testRoot,
         env,
         timeoutMs: 60_000,
+        windowsVerbatimArguments: cliInvocation.windowsVerbatimArguments,
       })
       : startChild(cliInvocation.command, cliInvocation.args, {
         cwd: testRoot,
