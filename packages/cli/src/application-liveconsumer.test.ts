@@ -109,6 +109,7 @@ function requirePublicRelayBaseUrl(value: string) {
 
 function useUnreachableFirstWs(
   device: RelayAccountDirectory['devices'][number],
+  relayOnly = false,
 ) {
   if (!device?.daemon) {
     throw new Error('RTC fixture directory omitted the daemon');
@@ -122,7 +123,7 @@ function useUnreachableFirstWs(
     lastSeenAt: new Date().toISOString(),
   };
   const rtcRoutes = device.daemon.endpoints.filter((endpoint) =>
-    endpoint.kind === 'rtc-direct'
+    (!relayOnly && endpoint.kind === 'rtc-direct')
     || endpoint.kind === 'relay-rtc'
   );
   device.daemon.endpoints.splice(
@@ -326,7 +327,7 @@ describe('createApplicationConnection bound-initial live consumer', () => {
           clearTimeout(timeout);
         }
 
-        useUnreachableFirstWs(device);
+        useUnreachableFirstWs(device, input.kind === 'external');
         const connectionController = new AbortController();
         const connectionTimeout = setTimeout(
           () => connectionController.abort(new Error('RTC consumer timed out')),
