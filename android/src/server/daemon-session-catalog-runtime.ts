@@ -187,10 +187,10 @@ export function createDaemonSessionCatalogRuntime(
           return;
         }
         const residentIdentities = new Set(
-          snapshot?.map((entry) => `${entry.backend}:${entry.name}`) ?? [],
+          snapshot?.map((entry) => `${entry.backend}:${entry.stableId || entry.name}`) ?? [],
         );
         const detectedIdentities = new Set(
-          entries.map((entry) => `${entry.backend}:${entry.name}`),
+          entries.map((entry) => `${entry.backend}:${entry.stableId || entry.name}`),
         );
         const hasCatalogMembershipChange = residentIdentities.size !== detectedIdentities.size
           || [...residentIdentities].some((identity) => !detectedIdentities.has(identity));

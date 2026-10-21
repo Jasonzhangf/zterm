@@ -1,0 +1,368 @@
+{
+  "id": "cli.slot_launch",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "read_slot_request",
+      "operator": "cli.slot_launch.read_request",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.slot_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "read_slot_bindings",
+      "operator": "cli.slot_launch.read_bindings",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.slot_request"
+      ],
+      "output": {
+        "id": "arc.slot_bindings",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "classify_launch_intent",
+      "operator": "cli.slot_launch.classify_intent",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.slot_request",
+        "arc.slot_bindings"
+      ],
+      "output": {
+        "id": "arc.launch_intent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_slot_list",
+      "operator": "cli.slot_launch.project_slot_list",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.launch_intent",
+        "arc.slot_bindings"
+      ],
+      "output": {
+        "id": "arc.slot_list",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "select_launch_slot",
+      "operator": "cli.slot_launch.select_slot",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.launch_intent",
+        "arc.slot_bindings"
+      ],
+      "output": {
+        "id": "arc.slot_selection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "validate_login_binding",
+      "operator": "cli.slot_launch.validate_binding",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.slot_selection"
+      ],
+      "output": {
+        "id": "arc.bound_launch",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "establish_target_transport",
+      "operator": "client.connection.establish_transport",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.bound_launch"
+      ],
+      "output": {
+        "id": "arc.target_transport",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "negotiate_mux_open_channel",
+      "operator": "client.mux.open_bound_channel",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.bound_launch",
+        "arc.target_transport"
+      ],
+      "output": {
+        "id": "arc.open_channel",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "attach_terminal_mirror",
+      "operator": "client.terminal.attach_mirror",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.open_channel"
+      ],
+      "output": {
+        "id": "arc.interactive_terminal",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "cleanup_launch_resources",
+      "operator": "cli.slot_launch.cleanup_resources",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.slot_selection",
+        "arc.target_transport",
+        "arc.open_channel"
+      ],
+      "output": {
+        "id": "arc.cleanup_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_launch_output",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.slot_list",
+        "arc.interactive_terminal",
+        "arc.cleanup_result"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "outputs": [
+    "arc.result"
+  ],
+  "edges": [
+    {
+      "from": "read_slot_request",
+      "to": "read_slot_bindings",
+      "arc_id": "arc.slot_request"
+    },
+    {
+      "from": "read_slot_request",
+      "to": "classify_launch_intent",
+      "arc_id": "arc.slot_request"
+    },
+    {
+      "from": "read_slot_bindings",
+      "to": "classify_launch_intent",
+      "arc_id": "arc.slot_bindings"
+    },
+    {
+      "from": "classify_launch_intent",
+      "to": "project_slot_list",
+      "arc_id": "arc.launch_intent"
+    },
+    {
+      "from": "classify_launch_intent",
+      "to": "select_launch_slot",
+      "arc_id": "arc.launch_intent"
+    },
+    {
+      "from": "read_slot_bindings",
+      "to": "project_slot_list",
+      "arc_id": "arc.slot_bindings"
+    },
+    {
+      "from": "read_slot_bindings",
+      "to": "select_launch_slot",
+      "arc_id": "arc.slot_bindings"
+    },
+    {
+      "from": "select_launch_slot",
+      "to": "validate_login_binding",
+      "arc_id": "arc.slot_selection"
+    },
+    {
+      "from": "validate_login_binding",
+      "to": "establish_target_transport",
+      "arc_id": "arc.bound_launch"
+    },
+    {
+      "from": "validate_login_binding",
+      "to": "negotiate_mux_open_channel",
+      "arc_id": "arc.bound_launch"
+    },
+    {
+      "from": "establish_target_transport",
+      "to": "negotiate_mux_open_channel",
+      "arc_id": "arc.target_transport"
+    },
+    {
+      "from": "negotiate_mux_open_channel",
+      "to": "attach_terminal_mirror",
+      "arc_id": "arc.open_channel"
+    },
+    {
+      "from": "select_launch_slot",
+      "to": "cleanup_launch_resources",
+      "arc_id": "arc.slot_selection"
+    },
+    {
+      "from": "establish_target_transport",
+      "to": "cleanup_launch_resources",
+      "arc_id": "arc.target_transport"
+    },
+    {
+      "from": "negotiate_mux_open_channel",
+      "to": "cleanup_launch_resources",
+      "arc_id": "arc.open_channel"
+    },
+    {
+      "from": "project_slot_list",
+      "to": "collect_launch_output",
+      "arc_id": "arc.slot_list"
+    },
+    {
+      "from": "attach_terminal_mirror",
+      "to": "collect_launch_output",
+      "arc_id": "arc.interactive_terminal"
+    },
+    {
+      "from": "cleanup_launch_resources",
+      "to": "collect_launch_output",
+      "arc_id": "arc.cleanup_result"
+    }
+  ]
+}

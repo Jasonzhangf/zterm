@@ -1,0 +1,124 @@
+{
+  "id": "cli.daemon_status",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "dagpipe.extract.arc.daemon_status_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.daemon_status_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_daemon_status_entry",
+      "operator": "cli.daemon_status.resolve_entry",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_status_request"
+      ],
+      "output": {
+        "id": "arc.daemon_status_entry",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "invoke_daemon_status_owner",
+      "operator": "daemon.status.invoke",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_status_entry"
+      ],
+      "output": {
+        "id": "arc.daemon_status_observation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_daemon_status",
+      "operator": "cli.daemon_status.settle",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_status_observation"
+      ],
+      "output": {
+        "id": "arc.daemon_status_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dagpipe.extract.arc.daemon_status_request",
+      "to": "resolve_daemon_status_entry",
+      "arc_id": "arc.daemon_status_request"
+    },
+    {
+      "from": "resolve_daemon_status_entry",
+      "to": "invoke_daemon_status_owner",
+      "arc_id": "arc.daemon_status_entry"
+    },
+    {
+      "from": "invoke_daemon_status_owner",
+      "to": "settle_daemon_status",
+      "arc_id": "arc.daemon_status_observation"
+    }
+  ],
+  "outputs": [
+    "arc.daemon_status_result"
+  ]
+}

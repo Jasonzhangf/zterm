@@ -134,6 +134,7 @@ describe('client.reliable_input queue runtime', () => {
 
     expect(options.sendSocketPayload).toHaveBeenCalledTimes(1);
     const first = parseReliablePayload(options.sendSocketPayload);
+    expect(first.attempt).toBe(1);
     vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS * 5);
     expect(options.sendSocketPayload).toHaveBeenCalledTimes(1);
 

@@ -10,6 +10,7 @@
     "test:prebuild-gates:unit": "node --test ./scripts/run-prebuild-gates.test.mjs",
     "test:ci-gates": "node ./scripts/run-prebuild-gates.mjs --profile ci",
     "test:build-version": "node --test ./scripts/bump-build-version.test.mjs ./scripts/verify-update-manifest-version.test.mjs",
+    "test:cli": "pnpm --dir ../packages/cli run test && pnpm --dir ../packages/cli run type-check",
     "test:android-network-identity": "pnpm exec vitest run src/lib/android-network-identity-truth.test.ts src/lib/client-daemon-connection.test.ts src/lib/network-identity.test.ts src/hooks/useOpenTabLifecycleEffects.test.tsx src/contexts/session-context-target-network-probe-runtime.test.ts src/contexts/session-context-transport-orchestration-runtime.test.ts src/App.dynamic-refresh.test.tsx",
     "test:traversal": "pnpm exec vitest run src/lib/traversal/socket.test.ts src/lib/traversal/route-health-cache.test.ts src/lib/traversal/route-selector.test.ts src/lib/traversal/config.test.ts --reporter dot",
     "test:terminal:regression:core": "pnpm exec vitest run src/server/terminal-message-runtime.test.ts && pnpm run test:terminal:contracts && pnpm run test:common-user-flows && pnpm run test:relay:smoke",

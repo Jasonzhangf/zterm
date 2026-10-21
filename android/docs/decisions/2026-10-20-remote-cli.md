@@ -1,0 +1,379 @@
+# 2026-10-20 Remote daemon CLI design
+状态：`DESIGN_PASS`；macOS arm64 真实全用户链已 PASS；Windows/Linux 平台 gate 和公开
+npm 发布仍待完成。两轮独立设计审查均已通过。本文是已审设计与当前实现边界的项目入口；
+单平台真实黑盒不能替代三平台交付。
+
+| 当前项 | 事实 |
+|---|---|
+| 正式入口 | `packages/cli/src/main.ts` 已落地并接通 argv、登录、槽位、终端、升级和 daemon 管理。 |
+| 构建产物 | `packages/cli/dist/main.mjs` 由正式入口构建；本地 tarball 可隔离安装。 |
+| npm 发布 | `@jsonstudio/zterm-cli` 尚未发布到公开 npm；隔离 tarball 不是公开渠道证据。 |
+| 平台验证 | macOS arm64 全用户链 PASS；Windows/Linux 真实 native、安装和运行仍为 UNVERIFIED。 |
+
+## 1. 范围与命令
+交付全局命令 `zterm`。它使用持久账号登录态、账号设备目录和 1～20 槽位，连接现有
+daemon session，并显示 canonical mirror。
+
+```text
+zterm login | zterm login --from-config | zterm logout
+zterm slot set <1..20> | zterm slot list | zterm <1..20> | zterm
+zterm upgrade [--registry <url>]
+zterm daemon install | zterm daemon status | zterm daemon config
+```
+无参数 `zterm` 只列出已配置槽位并让用户选择；编号入口不重新询问服务器和 session。
+槽位失效、未登录或登录失效必须显式失败，不得切换目标、按名称重绑或创建同名 session。
+首轮不包含 session 创建/重命名/删除、远程 daemon 安装、daemon 启停或开机服务、
+账号全部设备登出、配置格式迁移、跨重启输入 exactly-once。目标平台为 Windows、macOS、Linux。
+各平台分别提供产物与真实 CLI 验收；缺证据时明确未验证，不将目标缩为仅 macOS arm64。
+用户已明确 Android 设备、模拟器、APK 和 OTA 不在本任务范围，也不作为 CLI 交付前置。
+
+### 用户操作目标
+
+发布后的正常路径只需一份共享配置，不需要另建 CLI 配置文件，也不需要在每条命令上
+重复填写 Relay 或 daemon 地址。
+
+| 目标 | 命令 | 说明 |
+|---|---|---|
+| 安装 | `npm install --global @jsonstudio/zterm-cli` | Node.js 22 或更高版本；公开发布待完成。本地开发使用构建后的 tarball 隔离安装。 |
+| 登录 | `zterm login` | 交互输入账号和密码；已有 Relay 地址时不再询问地址。 |
+| 一次性配置登录 | `zterm login --from-config` | 只用于受控的一次性自动化，密码在请求前消费。 |
+| 配置槽位 | `zterm slot set 1` | 槽位为 1～20；交互选择服务器、稳定 session 和可选快照预览。 |
+| 查看槽位 | `zterm slot list` | 只读本地绑定，不刷新远端目录。 |
+| 选择或启动 | `zterm` 或 `zterm 1` | 无参数只选择已保存槽位；编号直接使用精确绑定。 |
+| 查看本地终端 | `Ctrl+]` 后按 `k/j/u/d/h/l/f` | 翻行、翻页、横向平移或回到 follow。 |
+| 本地退出 | `Ctrl+]` 后按 `q` | 只断开本地连接，不删除或停止远端 session。 |
+| 登出 | `zterm logout` | 只清本地 CLI 登录态；不宣称撤销远端已经签发的 token。 |
+| 升级与管理 | `zterm upgrade`、`zterm daemon install/status/config` | upgrade 只升级 CLI；daemon install 不启动或重启服务。 |
+
+## 2. 架构映射与十一图
+CLI 新增终端消费者，不复制 runtime 源码，不改变 daemon 的 tmux/mirror/transport 真源。
+账号、槽位、terminal 和 daemon 命令分别处理；成功、失败、取消、未确认和清理结果在各自
+对象流唯一出口汇总。
+
+| 图 | 职责 | 唯一 owner 边界 |
+|---|---|---|
+| `cli-account-login.graph.json` | 登录与持久化 | account-state；shared-config 提交 |
+| `cli-account-logout.graph.json` | 本地登录态失效 | account-state；连接按 loginId 收口 |
+| `cli-slot-configure.graph.json` | 选择、预览和保存槽位 | slot owner；shared-config 提交 |
+| `cli-slot-launch.graph.json` | 读取、选择或连接槽位 | CLI connection；route/mux owner |
+| `cli-terminal-mirror-event.graph.json` | 帧、sparse、renderer 投影 | frame assembly/sparse/renderer |
+| `cli-terminal-input-event.graph.json` | 本地意图与远端输入 | local-input；reliable-input core |
+| `cli-terminal-close.graph.json` | 退出与终端恢复 | terminal-lifecycle |
+| `cli-self-upgrade.graph.json` | npm CLI 升级 | CLI release adapter；npm |
+| `cli-daemon-install.graph.json` | 本机全局 daemon 安装 | 既有 installer/shim owner |
+| `cli-daemon-status.graph.json` | daemon 状态查询 | 既有 status owner |
+| `cli-daemon-config.graph.json` | daemon 配置脱敏投影 | shared reader；config projection |
+
+```mermaid
+flowchart TD
+  A0([登录请求]):::boundary --> A1[锁内登记认证代次和服务器基线]:::action
+  A1 --> A2[锁外输入并认证]:::action
+  A2 --> A3{代次和服务器仍匹配}:::decision
+  A3 -->|是| A4[提交新 auth 与 loginId]:::action
+  A3 -->|否| AF([保留最新配置并显式失败]):::failure
+  A4 --> AO([登录态可持久复用]):::success
+  B0([登出请求]):::boundary --> B1[锁内递增代次并删除 CLI auth]:::action
+  B1 --> B2{提交成功}:::decision
+  B2 -->|是| BO([本地登录态已清除]):::success
+  B2 -->|否| BF([保留真实文件状态和原错]):::failure
+  C0([槽位配置请求]):::boundary --> C1[校验编号并读取原绑定]:::action
+  C1 --> C2[选择服务器和稳定 session]:::action
+  C2 --> C3{预览}:::decision
+  C3 -->|是| C4[只读现存 mirror snapshot]:::action
+  C3 -->|否| C5{确认保存}:::decision
+  C4 --> C5
+  C5 -->|是| C6[锁内比较并原子提交]:::action
+  C5 -->|取消| CC([原槽位不变]):::failure
+  C6 -->|成功| CO([槽位已保存]):::success
+  C6 -->|冲突或失败| CF([保留最新槽位和草稿]):::failure
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
+  linkStyle default stroke:#475569
+```
+## 3. 共享配置与事务
+CLI 与 daemon 共用当前真实文件 `~/.zterm/config.json`。CLI 不提供独立配置路径，
+不引入 TOML，不推动迁移。所有合作 writer 通过
+`packages/shared/src/node/shared-config.ts` 执行字段级事务。
+
+```json
+{
+  "zterm": {
+    "android": { "daemon": {
+      "host": "0.0.0.0",
+      "port": 3333,
+      "authToken": "<daemon-token>",
+      "sessionName": "zterm-daemon-3333",
+      "terminalCacheLines": 3000
+    }},
+    "cli": {
+      "server": { "relayBaseUrl": "https://relay.example/zterm/" },
+      "loginInput": { "username": "<account>", "password": "<one-time-password>" }
+    }
+  }
+}
+```
+
+以上只列出用户可提供的最小配置。当前 typed owner 还使用以下 CLI 管理字段；正常操作时
+不要手工编辑：
+
+| 字段 | 当前 owner |
+|---|---|
+| `zterm.cli.authGeneration` | `AccountState` 维护本机登录代次。 |
+| `zterm.cli.auth` | 登录成功后保存当前本机 CLI auth；不用于 daemon 鉴权。 |
+| `zterm.cli.slots.<1..20>` | `SlotStore` 保存 account、server、session 和 `widthMode`。 |
+
+`zterm.android.daemon.authToken` 只用于 daemon 鉴权，不能替换 Relay 账号 token。示例中是
+占位符，不是可复制的秘密实值。用户不要把主机 OS、设备名或其他平台的地址推断成远端
+地址；服务器和 session 来自账号目录与已保存槽位。
+
+`zterm login --from-config` 只读取 `zterm.cli.loginInput.username` 和
+`zterm.cli.loginInput.password`。密码在发送认证请求之前随开始事务消费；认证失败后不恢复。
+优先使用交互登录。必须使用一次性配置输入时，先限制文件权限：macOS/Linux 可在文件创建后
+执行 `chmod 600 ~/.zterm/config.json`；Windows 使用系统文件安全工具把 ACL 限制到当前用户。
+
+`authGeneration` 缺失按 `0` 解释，必须是非负安全整数，不是 token。登录开始在短事务内
+递增并记录服务器基线；网络等待不持锁。成功后重新读取，只有代次和服务器字段都未改变才
+原子提交 auth，并生成新 `loginId`；否则返回 `login_superseded` 或
+`login_server_changed`。失败和取消不回退代次，不清除原 auth，也不恢复较早请求资格。
+`login --from-config` 在同一开始事务消费 `loginInput.password`；消费提交失败时不发送
+认证请求，认证失败后密码不恢复。普通命令不自动读取或使用该密码。`logout` 无论 auth
+是否存在都递增代次并删除 auth，提交成功后才报告本地登出。活动连接按 `auth.loginId`
+变化或消失关闭，不能按代次误关仍有效的旧连接。
+事务在锁内重读完整 JSON，修改目标字段，私有临时文件加 rename 提交。无效 JSON、非对象根
+或目标分区结构错误必须失败，不能当空对象覆盖；保留 daemon、其他及未知字段。`slot set`
+在提交时比较交互开始时的目标槽位，变化则返回 `slot_changed`，保留最新槽位。锁只约束
+合作 writer，不能承诺约束手工编辑和旧版直接覆盖程序。不同字段更新在锁内重读后合并。
+## 4. 目录、稳定身份与 snapshot
+账号目录只从有 daemon 的设备生成服务器候选，使用 `deviceId`、`daemon.hostId`、
+`presence` 和 endpoints。账号 token 只用于账号与 relay；daemon endpoint authToken
+只用于 daemon 鉴权，二者不得互换。路由沿用
+`lan -> tailscale -> ipv6/ipv4 -> rtc-relay -> rtc-direct`，失败不换绑定目标。
+CLI 的 catalog entry 必须含 `name`、`backend`、`stableId`，可选 `cwd`。tmux 身份由
+实际 socket、server 进程代次、`session_id` 和创建事实组成；Herdr 使用 `terminalId`
+与 pane identity。`stableId` 是不透明值，CLI 不解析内部结构；名称只用于显示，没有稳定
+身份时不得保存槽位。catalog、snapshot 和 open 使用同一 resolver。
+`mux-channel-open` 必须同时携带 `expectedSessionIdentity` 和 `existingOnly: true`。
+daemon 在创建 subscriber、mirror 或 lease 前解析精确 target；不符返回
+`session_identity_mismatch`，不存在返回 `session_not_found`。`mux-channel-opened`
+返回的 stableId 再由 CLI 核对。禁止按显示名称二次选择或进入创建路径。
+snapshot 使用 `mux-target-message`：
+```ts
+{ type: 'terminal-snapshot-request',
+  payload: { version: 1, backend, stableId, maxLines } }
+```
+成功时在同一 revision 返回 head 与 body；没有 ready mirror 返回
+`mirror_not_ready | mirror_not_present`，身份问题显式失败。快照 owner 只获得 resolver、
+只读 mirrors map 和 serializer，不获得 attach、capture、resize、input 或
+createSession。读取不改变 mirror revision、subscriber、adaptive holder、capture timer
+或 publisher pending。没有现存 mirror 时允许跳过预览并保存槽位，不得为预览创建 mirror
+或触发 capture。
+## 5. Transport、mux、镜像与输入
+物理连接完成 `mux-hello/mux-ready` 后只使用 mux envelope。target 控制使用
+`mux-target-message`，session 业务使用 `mux-channel-message/binary`。channel 打开失败
+必须删除 registry、关闭 subscriber、发送显式 closed error，再退出；不能保留 phantom
+channel。daemon 不持有客户端 active tab、foreground、viewport、恢复状态机或 logical
+client session。
+镜像顺序固定为：
+```text
+mux event -> wire normalize -> required frame assembly -> one sparse apply
+-> renderer window -> controlled ANSI -> local terminal
+```
+一个多 chunk frame 必须在 `[frameStartIndex, frameEndIndex)` 完整连续后一次 apply；
+缺片、旧帧和冲突帧不提升版本。gap 先显示空白，repair 实际写入 wire 后才算 dispatched，
+同 revision 最多一次。renderer 独占 follow、reading、`renderBottomIndex` 和 visible
+range；buffer manager 只消费 demand。远端 cell 中的 OSC、标题和任意 escape 不能作为
+本地控制指令执行。
+ACK 只表示 daemon/backend 接受写入，不表示远端应用执行完成。CLI 使用共享
+reliable-input core，`maxInFlight=1`，并显式采用 `cliNoReplayPolicy`：
+
+- 匹配 seq/channel/generation/bytes 的成功 ACK 才结算 accepted。
+- 现有 NACK、ACK 超时、send 已调用后的异常、generation 变化或断线均结算 uncertain；
+  不按错误名称推断零写入，不整段重发。
+- send 前本地失败为 rejected；收口时尚未发送的排队项为 cancelled。
+- sent 项不回到 queued，新 channel 和重连不重放未确认输入。
+- Android wrapper 继续使用原 policy；CLI 策略不得成为 Android 默认值。
+
+本地退出使用普通字节前缀：
+
+| 按键序列 | 本地行为 |
+|---|---|
+| `Ctrl+]` 然后 `q` | 断开本地连接并退出。只有小写 `q` 是退出键。 |
+| `Ctrl+]` 然后 `k` / `j` | 向上 / 向下滚动一行。 |
+| `Ctrl+]` 然后 `u` / `d` | 向上 / 向下滚动一页。 |
+| `Ctrl+]` 然后 `h` / `l` | 向左 / 向右横向平移，主要适用于 `mirror-fixed`。 |
+| `Ctrl+]` 然后 `f` | 回到当前 daemon tail 的 follow 模式。 |
+| `Ctrl+]` `Ctrl+]` | 向远端发送一个字面 `Ctrl+]`。 |
+| `Ctrl+]` 后其他字节 | 先发送暂存的 `Ctrl+]`，再按原序处理该字节。 |
+
+普通 `Ctrl+C/D/Z`、Esc、方向键和功能键不作为本地退出。前缀状态跨 stdin chunk 保留；
+退出意图后同 chunk 剩余字节不再接收。payload 先分流再进入增量 UTF-8 解码，非法编码
+显式返回 `input_encoding_invalid`，不替换为 U+FFFD。
+
+CLI 本地启用 bracketed-paste，仅用于识别标准 `ESC[200~` 与 `ESC[201~` 包装。包装由
+local-input 消费，远端只收到两者之间的内容，不生成或透传包装；paste 内的 `Ctrl+] q`
+是内容。6 字节候选缓冲跨 chunk 保留；单独 Esc 只有 30ms 边界解析窗口，超时按普通字节
+输出，不按时间或长度猜测 paste。无法取得有效包装的输入不作无损 paste 保证。EOF 不等于
+远端 Ctrl+D：终结解析和有限 drain 后分别报告已发送、未确认和未发送，未结束 paste 不补造
+结束包装。普通未知 escape 和未完成序列按原序透传。
+
+正常退出、初始化失败、输入失败、`SIGINT/SIGTERM/SIGHUP` 和输出 pipe 关闭进入同一 cleanup：
+恢复 raw mode、alternate screen、cursor、color 和 bracketed-paste。网络清理失败不阻止
+本地恢复。进程被强杀、机器崩溃或终端仿真器丢失进程时无法保证恢复；此时关闭受影响的
+终端页签或使用终端自己的 reset，不在未知 raw/alternate-screen 状态中继续启动 CLI。
+
+用户可见失败按原因处理，不切换绑定目标：
+
+| 失败 | 含义与安全动作 |
+|---|---|
+| `auth_required` / `auth_invalid` | 重新 `zterm login`；身份变化时再显式重配槽位。 |
+| `slot_not_found` / `no_slots` | 先 `zterm slot set <1..20>`；无参数入口不能猜测目标。 |
+| `session_not_found` / `session_identity_mismatch` | 稳定 session 已变化；显式重配槽位，不创建同名替代 session。 |
+| `mirror_not_ready` / `mirror_not_present` | 快照预览暂不可用；预览不创建 mirror，确认目标后可继续保存。 |
+| `config_busy` / `invalid_json` / `invalid_config` | 等待合作 writer 或修复真实配置；不删除未知锁、不覆盖坏 JSON。 |
+| `daemon_platform_mismatch` / `daemon_node_abi_mismatch` | 使用匹配当前 OS、arch、Node 和 ABI 的 daemon 产物。 |
+| `upgrade_install_context_unsupported` | 只从已识别的 npm 全局安装上下文运行 `zterm upgrade`。 |
+
+## 6. App 等价尺寸
+
+CLI 默认 `adaptive-phone`；槽位可保存模式。`zterm slot set <1..20>
+--width-mode adaptive-phone|mirror-fixed` 是正式覆盖入口；编号启动只使用槽位保存值，
+不接受额外 width 参数。local rows/cols 来自 stdout。`adaptive-phone` 只把当前 cols
+声明给 daemon 唯一 adaptive
+lease owner，后续宽度变化按现有 60ms 合并；rows 只改变本地 renderer demand，不持续
+改写 tmux 高度。`mirror-fixed` 不改远端几何，只裁切和平移本地视窗。
+
+只有 adaptive lease owner 可执行 `resize-window`、写 lease option 或恢复本轮尺寸所有权；
+CLI、snapshot、config 和 ANSI renderer 均无 resize 能力。重排后 mirror rows/cols 仍只
+来自 tmux capture/readback。退出释放本 subscriber lease，由 lease owner 恢复 baseline，
+不关闭远端 session 或其他 subscriber。
+
+## 7. 升级与 daemon 管理
+
+包为 `@jsonstudio/zterm-cli`，bin 为 `zterm`，运行时 Node >= 22。发布目标安装路径：
+
+```text
+npm install -g @jsonstudio/zterm-cli
+zterm --version
+```
+
+该包当前尚未发布到公开 npm。正式构建和本地隔离 tarball 安装已可用，但不能替代公开
+下载或三平台运行。开发安装使用：
+
+```text
+pnpm --dir packages/cli run pack:release
+npm install --global --prefix <isolated-prefix> <cli-tarball>
+<isolated-prefix>/bin/zterm --version
+```
+
+Windows 使用同一隔离 prefix，并从该 prefix 的 `zterm.cmd` 进入。
+
+`zterm upgrade` 只升级该包，不升级 daemon、不登出、不修改共享配置。它先确认当前来自
+可识别 npm 全局安装上下文并取得 prefix，再执行等价命令：
+
+```text
+npm install --global --prefix <current-prefix> \
+  @jsonstudio/zterm-cli@<resolved-version> --registry <selected-registry>
+```
+
+随后用同一 prefix 的正式 `zterm --version` 验证新进程。使用参数数组，不拼 shell、不自动
+sudo、不切换 prefix、不建 active-pointer 或第二版本目录、不自动回滚，也不增加自有安装
+锁。结果为 `unchanged | updated | unverified`；npm 失败或取消不预设零修改，保留真实错误
+和观察版本。测试 registry 只改变包来源，不改变 relay/daemon 配置。npm 隔离升级 8/8
+已通过，但公开 registry 发布和下载仍待完成；只有本地 tarball 证据时，不得宣称公开渠道
+已交付。
+
+daemon 分发是一个公共 launcher 包加三个固定平台 payload：
+`darwin-arm64`、`linux-x64`、`win32-x64`。公共包唯一持有 `zterm-daemon` 与 `wterm`
+bin；三个 payload 没有 bin。Node 22 和对应 ABI 由 payload manifest 校验。打包调用：
+
+```text
+node android/scripts/prepare-daemon-npm-package.mjs \
+  --version <daemon-version> \
+  --release darwin-arm64=<release-dir> \
+  --release linux-x64=<release-dir> \
+  --release win32-x64=<release-dir>
+```
+
+无参数旧单宿主 packer 流程已退休。`android/package.json` 保留 Node script 入口，
+由调用者或 CI 传入版本和三个 release 目录。
+
+```mermaid
+flowchart TD
+  D0([daemon 管理请求]):::boundary --> D1{命令}:::decision
+  D1 -->|install| D2[检查正式产物平台并委托既有 installer]:::action
+  D2 --> D3[核对 shim、版本和实际写入]:::action
+  D1 -->|status| D4[委托既有 status owner 观察服务/PID/监听]:::action
+  D4 --> D5[汇总状态和 stale PID 清理事实]:::action
+  D1 -->|config| D6[共享 reader 读取文件、环境和默认来源]:::action
+  D6 --> D7[唯一投影 owner 脱敏]:::action
+  D3 -->|完成| DO([返回实际结果与副作用]):::success
+  D3 -->|失败/取消| DF([保留实际安装状态和错误]):::failure
+  D5 --> DO
+  D7 --> DO
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
+  linkStyle default stroke:#475569
+```
+
+`daemon install` 只安装本机全局命令和运行产物，不安装开机服务，不启动、停止或重启
+daemon，不写 `config.json`。安装使用受管理 staging，检查产物平台清单后再原子发布 shim；
+失败或取消保留已写文件、版本、命令可用性和旧入口状态，不假报零写入。
+上游 `@jsonstudio/zterm-daemon` 正式发布状态、公开下载和真实三平台全局安装仍待 CI 或
+目标主机验收。
+
+`daemon status` 保留既有退出语义，并区分 running、stopped、stale managed PID、service
+failure、监听归属不明和观测失败。现有 stale PID 清理必须可见；CLI 不新增第二套 PID
+修复逻辑，health 200 不单独证明运行成功。
+
+`daemon config` 显示真实路径与存在状态，以及 host、port、sessionName、cacheLines 的
+file/env/default 来源。authToken 只显示是否配置及来源；密码、账号 token、CLI auth 和
+未知字段不输出。文件缺失不创建，格式错误显式失败，查询进程环境不冒充运行中 daemon 已
+加载值。status/config 不得触发 `.wterm` 迁移；旧目录冲突返回
+`legacy_migration_required`。
+
+## 8. 黑盒验收与阶段边界
+
+黑盒必须从安装后的真实 `zterm` bin 进入，使用实际 relay、daemon、PTY、自有具名 tmux
+session、必要字节代理和真实 npm tarball/registry。按顺序覆盖：
+
+```text
+login -> 新进程复用登录 -> slot set -> preview -> save -> zterm N
+-> mirror/input -> resize -> local exit -> stale identity -> logout
+-> upgrade -> daemon install/status/config
+```
+
+| 验收组 | 必须抓住的失败 |
+|---|---|
+| 配置/认证 | 无效 JSON 不覆盖；字段和未知值保留；并发 logout 使旧 login 失效 |
+| 登录输入 | 仅 `--from-config` 消费一次性密码；失败不复活；不泄漏 token |
+| 槽位/snapshot | 取消不变；冲突不覆盖；无现存 mirror 不创建；无 input/resize/capture |
+| 稳定身份 | 同名删除重建后旧绑定失败；跨 backend 同名不混淆；不创建替代 session |
+| 镜像 | 缺片/乱序/旧帧不提交；完整帧一次提交；gap repair 状态真实；控制字符不外泄 |
+| 输入 | 跨 group 部分写入后 NACK 不重发；超时 uncertain；新 channel 不重放 |
+| 本地终端 | 前缀只本地退出；其他键透传；paste 只发内容；EOF/信号后 raw 恢复 |
+| 尺寸 | fixed 不改 tmux；adaptive 走唯一 lease；多 subscriber 取最窄；退出恢复 baseline |
+| 管理/升级 | install 不启停服务；status 差异可见；config 脱敏不迁移；v1→v2 且配置保留 |
+
+每项保留命令、退出码、可观察结果、PTY 字节/画面、对应日志和隔离路径。真实终端验收区分
+PTY 与物理键盘证据；工具安全拒绝不得换通道绕过。共享 transport、assembly、input、
+width 抽离保留必要消费者回归；本次验收使用 Windows、macOS、Linux CLI，
+不启动 Android 设备或模拟器，不构建/安装 APK，不发布 OTA。
+
+| 阶段 | 产物与完成条件 |
+|---|---|
+| T0 设计 | 已 PASS。DAG 与详细设计通过独立审查；本文仍是设计与状态入口。 |
+| T1 图/gate | 11 图及受影响 owner gate 已完成静态校验；拓扑不再由本次集成修改。 |
+| T2/T3/T4/T5 | 受影响的 config、transport、session/snapshot、buffer/input 基础与共享消费者回归已通过。 |
+| T6/T7 | 正式 `main.ts` 已接线；CLI 123 个 Vitest、11 个 Node 测试及 stale-error 17/17 通过，构建和本地 pack 可用。 |
+| T8 | macOS arm64 全用户链 PASS；npm 隔离升级 8/8。Windows/Linux 真实 native、安装、PTY 和运行待 `cli-platform.yml` 或目标主机验证。 |
+| T9 | 进行中。尚待三平台 CI、公开 npm 发布、最终集成和资源收口；本集成不执行 commit/push/publish。 |
+
+静态图存在或校验通过只证明拓扑和语法。没有真实入口行为、安装态和适用设备证据时，结论
+保持 `UNVERIFIED` 或 `INCOMPLETE`。不得用 health、socket open、component test 或配置
+读取代替端到端交付。

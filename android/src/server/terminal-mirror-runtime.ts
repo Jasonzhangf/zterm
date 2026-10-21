@@ -60,7 +60,11 @@ export interface TerminalMirrorRuntimeDeps {
     backend: 'tmux' | 'herdr' | undefined,
     operation: 'apply' | 'release',
   ) => void;
-  assertTmuxSessionExists: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
+  assertTmuxSessionExists: (
+    sessionName: string,
+    backend?: 'tmux' | 'herdr',
+    stableId?: string,
+  ) => void;
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
   mirrorBufferChanged: (
@@ -1098,7 +1102,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.lifecycle = 'booting';
 
     try {
-      deps.assertTmuxSessionExists(mirror.sessionName, mirror.backend);
+      deps.assertTmuxSessionExists(
+        mirror.sessionName,
+        mirror.backend,
+        mirror.sessionIdentity,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       mirror.lifecycle = 'failed';
@@ -1203,8 +1211,20 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   }
 
   async function attachTmux(session: TerminalSession, payload: TerminalAttachPayload) {
-    const nextSessionName = deps.sanitizeSessionName(payload.sessionName);
-    const requestedBackend = payload.backend
+    const resolvedSession = payload.resolvedSession;
+    if (
+      resolvedSession
+      && payload.backend
+      && payload.backend !== resolvedSession.target.backend
+    ) {
+      throw new Error(
+        `resolved session backend ${resolvedSession.target.backend} does not match attach backend ${payload.backend}`,
+      );
+    }
+    const nextSessionName = resolvedSession?.identity.sessionName
+      || deps.sanitizeSessionName(payload.sessionName);
+    const requestedBackend = resolvedSession?.target.backend
+      || payload.backend
       || session.backend
       || deps.resolveTerminalSessionBackend?.(nextSessionName);
     if (!requestedBackend) {
@@ -1218,6 +1238,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       throw new Error(`adaptive width cleanup pending for ${nextSessionName}; refusing to attach until cleanup succeeds`);
     }
     session.backend = requestedBackend;
+    if (resolvedSession) {
+      session.sessionIdentity = resolvedSession.identity.stableId;
+      session.sessionTarget = resolvedSession.target;
+    }
     const existingMirror = mirrors.get(nextMirrorKey) || null;
     if (existingMirror && existingMirror.backend !== requestedBackend) {
       throw new Error(`session name ${nextSessionName} is already owned by ${existingMirror.backend}`);
@@ -1284,6 +1308,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     let mirror = existingMirror;
     if (!mirror) {
       mirror = createMirror(nextSessionName, session.backend);
+    }
+    if (resolvedSession) {
+      mirror.sessionIdentity = resolvedSession.identity.stableId;
+      mirror.sessionTarget = resolvedSession.target;
     }
     mirror.subscribers.add(session.id);
     if (payload.widthMode === 'adaptive-phone') {

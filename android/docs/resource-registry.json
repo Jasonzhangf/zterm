@@ -1650,7 +1650,7 @@
       "resource_type": "platform_client_truth",
       "identity": "Per-session reliable terminal input seq, bounded ordered in-flight window, ACK, and retry-generation queue",
       "owner_feature": "terminal.daemon_input",
-      "truth_store": "src/lib/reliable-input/reliable-input-queue.ts",
+      "truth_store": "packages/shared/src/terminal/reliable-input/reliable-input-queue.ts with src/lib/reliable-input/reliable-input-queue.ts as the App adapter",
       "allowed_operations": [
         "enqueue_input_seq",
         "publish_bounded_ordered_in_flight_seq",
@@ -2551,7 +2551,7 @@
       "resource_type": "client_buffer_render_truth",
       "identity": "Client bounded authoritative frame assembly, exact repair range, and explicit frame error truth",
       "owner_feature": "terminal.buffer_render",
-      "truth_store": "src/contexts/session-context-provider-runtime.ts#bufferFrameAssemblyRef",
+      "truth_store": "packages/shared/src/terminal/buffer-frame-assembly/session-buffer-frame-assembly.ts with src/contexts/session-context-provider-runtime.ts#bufferFrameAssemblyRef as the App resource slot",
       "allowed_operations": [
         "assemble_authoritative_frame",
         "enforce_shared_frame_resource_bounds",
@@ -3547,7 +3547,7 @@
       "resource_type": "shared_contract_truth",
       "identity": "Shared daemon target, route candidate, route health, and selected route metadata contract",
       "owner_feature": "relay.route_selection",
-      "truth_store": "packages/shared/src/connection/bridge-settings.ts and packages/shared/src/connection/relay-directory.ts",
+      "truth_store": "packages/shared/src/connection/traversal and packages/shared/src/connection/bridge-settings.ts and packages/shared/src/connection/relay-directory.ts",
       "allowed_operations": [
         "define_daemon_target_id",
         "define_route_candidate",
@@ -4134,6 +4134,84 @@
         "docs/resource-map.md",
         "docs/function-map.md",
         "docs/testing/android-notification-session-actions-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.cli_shared_config_transaction",
+      "status": "design",
+      "resource_type": "shared_runtime_config_truth",
+      "identity": "Shared ~/.zterm/config.json path, lock, atomic field-preserving commit, and daemon provenance/redaction projection for CLI and daemon writers",
+      "owner_feature": "mainline_source.cli",
+      "truth_store": "packages/shared/src/node/shared-config.ts and packages/shared/src/node/daemon-config-projection.ts",
+      "allowed_operations": [
+        "read_shared_config",
+        "begin_shared_config_mutation",
+        "commit_shared_config_mutation",
+        "project_daemon_config_provenance",
+        "redact_daemon_config_values"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [
+        "resource.runtime_home"
+      ],
+      "via_resources": [
+        "resource.runtime_home"
+      ],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "packages/shared/src/node/shared-config.test.ts",
+        "packages/shared/src/node/daemon-config-projection.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-10-20-remote-cli.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.cli_remote_terminal_session",
+      "status": "design",
+      "resource_type": "client_terminal_session_truth",
+      "identity": "CLI-local terminal projection, input settlement view, and client-session lifetime for one daemon target launch",
+      "owner_feature": "mainline_source.cli",
+      "truth_store": "packages/cli/src/terminal-lifecycle.ts and packages/cli/src/renderer-window.ts",
+      "allowed_operations": [
+        "project_mirror_snapshot",
+        "track_local_input_settlement",
+        "close_local_connection",
+        "restore_terminal"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [
+        "resource.daemon_target_transport",
+        "resource.client_buffer_frame_assembly",
+        "resource.renderer_window"
+      ],
+      "via_resources": [
+        "resource.daemon_target_transport",
+        "resource.client_buffer_frame_assembly"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.tmux_session",
+        "resource.backend_session",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "packages/cli/src/package-contract.test.ts",
+        "packages/cli/src/terminal-lifecycle.test.ts",
+        "packages/cli/src/renderer-window.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-10-20-remote-cli.md",
+        "docs/modules/project-modules.md"
       ]
     }
   ],

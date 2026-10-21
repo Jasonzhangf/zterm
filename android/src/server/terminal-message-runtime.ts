@@ -11,6 +11,7 @@ import type {
   BridgeClientMessage as ClientMessage,
   BridgeServerMessage as ServerMessage,
   HostConfigMessage,
+  TerminalSnapshotRequestPayload,
   TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import type {
@@ -36,6 +37,11 @@ import {
 import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 import type { DaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import { createTerminalMuxChannelRuntime } from './terminal-mux-channel-runtime';
+import { createTerminalSnapshotReadRuntime } from './terminal-snapshot-read-runtime';
+import {
+  buildBufferHeadPayload,
+  buildRequestedRangeBufferPayload,
+} from './buffer-sync-contract';
 import type {
   TerminalAttachmentClientMessage,
   TerminalAttachmentMessageRuntime,
@@ -164,12 +170,62 @@ export function createTerminalMessageRuntime(
     ensureMuxChannels: deps.channelMuxRuntime.ensureMuxChannels,
     releaseMuxChannelSubscriber: deps.channelMuxRuntime.releaseMuxChannelSubscriber,
     sanitizeSessionName: (input) => deps.controlRuntimeDeps.sanitizeSessionName(input),
+    resolveExistingSession: deps.controlRuntimeDeps.resolveExistingSession,
+    bindResolvedSession: deps.controlRuntimeDeps.bindResolvedSession,
     attachTmux: (subscriber, payload) => deps.controlRuntimeDeps.attachTmux(subscriber, payload),
     closeSession: deps.closeSession,
     handleMessage: (connection, raw, isBinary) => handleMessage(connection, raw, isBinary),
   });
   const handleMuxFrame = muxRuntime.handleMuxFrame;
   const sendMuxFrame = muxRuntime.sendMuxFrame;
+
+  function handleTerminalSnapshotRequest(
+    connection: TerminalTransportConnection,
+    request: TerminalSnapshotRequestPayload,
+  ) {
+    const resolveExistingSession = deps.controlRuntimeDeps.resolveExistingSession;
+    if (!resolveExistingSession) {
+      deps.sendTransportMessage(connection.transport, {
+        type: 'error',
+        payload: {
+          message: 'terminal snapshot identity resolver is unavailable',
+          code: 'snapshot_identity_resolver_unavailable',
+        },
+      });
+      return;
+    }
+
+    const snapshotRuntime = createTerminalSnapshotReadRuntime({
+      resolveExistingSession: (snapshotRequest) =>
+        resolveExistingSession(snapshotRequest.stableId, snapshotRequest.backend),
+      readExistingMirror: (session) => deps.controlRuntimeDeps.mirrors.get(
+        deps.controlRuntimeDeps.getMirrorKey(
+          session.identity.sessionName,
+          session.identity.backend,
+        ),
+      ),
+      buildBufferHeadPayload,
+      buildRequestedRangeBufferPayload,
+      sendSnapshotResult: (result) => {
+        deps.sendTransportMessage(connection.transport, {
+          type: 'terminal-snapshot-result',
+          payload: result,
+        });
+      },
+    });
+
+    try {
+      snapshotRuntime.handleRequest(request);
+    } catch (error) {
+      deps.sendTransportMessage(connection.transport, {
+        type: 'error',
+        payload: {
+          message: error instanceof Error ? error.message : 'terminal snapshot read failed',
+          code: 'snapshot_read_failed',
+        },
+      });
+    }
+  }
 
   function sendSessionNotReadyError(
     session: TerminalSession,
@@ -265,6 +321,13 @@ export function createTerminalMessageRuntime(
 
     if (connection.muxVersion) {
       const messageType = (message as { type?: unknown }).type;
+      if (typeof messageType === 'string' && classifyTerminalMuxClientMessage(message) === 'target') {
+        sendMuxFrame(connection, buildTerminalMuxError(
+          'mux_protocol_invalid',
+          `target message ${messageType} must be sent inside mux-target-message`,
+        ));
+        return;
+      }
       if (typeof messageType === 'string' && classifyTerminalMuxClientMessage(message) === 'channel') {
         // remote-window-* are channel-lane business messages that ride the
         // same mux channel. The channel subscriber wrapper removes mux
@@ -315,6 +378,9 @@ export function createTerminalMessageRuntime(
         break;
       case 'list-sessions':
         controlGateway.handleListSessions(connection, message);
+        break;
+      case 'terminal-snapshot-request':
+        handleTerminalSnapshotRequest(connection, message.payload);
         break;
       case 'pending-attachments-query':
       case 'attachment-history-query':

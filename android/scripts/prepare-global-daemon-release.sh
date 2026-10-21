@@ -18,6 +18,7 @@ RELEASE_DIR="${RELEASE_DIST_DIR}/${RELEASE_NAME}"
 RUNTIME_DIR="${RELEASE_DIR}/runtime"
 SUPPORT_DIR="${RELEASE_DIR}/support"
 BIN_DIR="${RELEASE_DIR}/bin"
+PACKAGE_MANIFEST_PATH="${RELEASE_DIR}/zterm-package.json"
 ARCHIVE_PATH="${RELEASE_DIST_DIR}/${RELEASE_NAME}.tar.gz"
 SHA_PATH="${ARCHIVE_PATH}.sha256"
 NODE_PTY_SOURCE="${ROOT_DIR}/node_modules/node-pty"
@@ -26,6 +27,7 @@ NATIVE_DAEMON_BIN="${SUPPORT_DIR}/zterm-daemon"
 REMOTE_WINDOW_CAPTURE_SOURCE="${ROOT_DIR}/src/server/remote-window-screen-capture-script.ts"
 REMOTE_WINDOW_CAPTURE_EXTRACTOR="${ROOT_DIR}/scripts/native/extract-remote-window-capture-swift.mjs"
 REMOTE_WINDOW_CAPTURE_SWIFT="${RELEASE_DIST_DIR}/.remote-window-capture.swift"
+TERMINAL_CONFIG_COMMAND_SOURCE="${ROOT_DIR}/src/server/terminal-config-command.ts"
 
 resolve_node_package_dir() {
   local package_name="${1:-}"
@@ -161,6 +163,19 @@ stage_native_daemon_binary() {
   chmod +x "${NATIVE_DAEMON_BIN}"
 }
 
+stage_terminal_config_command() {
+  local esbuild_bin
+  esbuild_bin="$(resolve_esbuild_bin)"
+  mkdir -p "${SUPPORT_DIR}"
+  "${esbuild_bin}" "${TERMINAL_CONFIG_COMMAND_SOURCE}" \
+    --bundle \
+    --platform=node \
+    --format=cjs \
+    --target=node20 \
+    --outfile="${SUPPORT_DIR}/terminal-config-command.cjs" >/dev/null
+  chmod +x "${SUPPORT_DIR}/terminal-config-command.cjs"
+}
+
 write_support_script() {
   cat > "${SUPPORT_DIR}/zterm-daemon.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -190,6 +205,7 @@ PREVIOUS_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${PREVIOUS_LAUNCH_AGENT
 LEGACY_LAUNCH_AGENT_LABEL="com.zterm.mobile.daemon"
 LEGACY_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LEGACY_LAUNCH_AGENT_LABEL}.plist"
 STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"
+TERMINAL_CONFIG_COMMAND="${PACKAGE_ROOT}/support/terminal-config-command.cjs"
 STAGED_NODE_PTY_HELPER_GLOB="${RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
 NATIVE_DAEMON_BIN="${WTERM_BIN_DIR}/zterm-daemon"
 DAGPIPE_NATIVE_BIN="${RUNTIME_DIR}/dagpipe.node"
@@ -197,54 +213,11 @@ ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"
 ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"
 
 read_config() {
-  "$NODE_BIN" <<'NODE'
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-const DEFAULT_BRIDGE_PORT = 3333;
-const DEFAULT_DAEMON_HOST = '0.0.0.0';
-const home = os.homedir();
-const ztermHome = path.join(home, '.zterm');
-const legacyWtermHome = path.join(home, '.wterm');
-if (!fs.existsSync(ztermHome) && fs.existsSync(legacyWtermHome)) {
-  fs.renameSync(legacyWtermHome, ztermHome);
-}
-const configPath = path.join(home, '.zterm', 'config.json');
-let config = {};
-let found = false;
-if (fs.existsSync(configPath)) {
-  found = true;
-  config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-}
-const ztermDaemonConfig = ((config.zterm || {}).android || {}).daemon || {};
-const mobileDaemonConfig = (config.mobile || {}).daemon || {};
-const env = process.env;
-const asString = (value) => typeof value === 'string' ? value.trim() : '';
-const asPositiveInteger = (value) => {
-  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(1, Math.floor(value));
-  if (typeof value === 'string' && value.trim()) {
-    const parsed = Number.parseInt(value.trim(), 10);
-    if (Number.isFinite(parsed)) return Math.max(1, parsed);
-  }
-  return undefined;
-};
-const host = asString(env.ZTERM_HOST) || asString(env.HOST) || asString(ztermDaemonConfig.host) || asString(mobileDaemonConfig.host) || DEFAULT_DAEMON_HOST;
-const port = asPositiveInteger(env.ZTERM_PORT) || asPositiveInteger(env.PORT) || asPositiveInteger(ztermDaemonConfig.port) || asPositiveInteger(mobileDaemonConfig.port) || DEFAULT_BRIDGE_PORT;
-const authTokenFromEnv = asString(env.ZTERM_AUTH_TOKEN);
-const authTokenFromConfig = asString(ztermDaemonConfig.authToken) || asString(mobileDaemonConfig.authToken);
-const authSource = authTokenFromEnv ? 'env' : (authTokenFromConfig ? 'config' : 'default');
-const sessionName = asString(env.ZTERM_DAEMON_SESSION) || asString(ztermDaemonConfig.sessionName) || asString(mobileDaemonConfig.sessionName) || `zterm-daemon-${port}`;
-console.log(`HOST=${host}`);
-console.log(`PORT=${port}`);
-console.log(`SESSION_NAME=${sessionName}`);
-console.log(`AUTH_SOURCE=${authSource}`);
-console.log(`CONFIG_FOUND=${found ? '1' : '0'}`);
-console.log(`CONFIG_DISPLAY_PATH=${configPath}`);
-NODE
+  "$NODE_BIN" "$TERMINAL_CONFIG_COMMAND" daemon-config --shell
 }
 
-eval "$(read_config)"
+config_output="$(read_config)"
+eval "$config_output"
 
 PROBE_SOCKET_HOST="$HOST"
 PROBE_URL_HOST="$HOST"
@@ -269,9 +242,10 @@ Usage:
   zterm-daemon run
   zterm-daemon start
   zterm-daemon status
+  zterm-daemon config
   zterm-daemon stop
   zterm-daemon restart
-  zterm-daemon configure-relay --relay-url URL --username USER --password PASS --host-id HOST_ID [--device-name NAME] [--restart-service]
+  zterm-daemon configure-relay --relay-url URL --username USER --password-stdin --host-id HOST_ID [--device-name NAME] [--restart-service]
   zterm-daemon install-service
   zterm-daemon uninstall-service
   zterm-daemon service-status
@@ -285,6 +259,7 @@ configure_relay() {
   local relay_host_id=""
   local relay_device_id=""
   local relay_device_name=""
+  local password_stdin="0"
   local restart_after_config="0"
 
   if [[ "${1:-}" == "configure-relay" ]]; then
@@ -302,21 +277,17 @@ configure_relay() {
         shift 2
         ;;
       --password)
-        relay_password="${2:-}"
-        shift 2
+        echo "relay passwords are accepted only with --password-stdin" >&2
+        return 1
         ;;
       --password-stdin)
         IFS= read -r relay_password
+        password_stdin="1"
         shift
         ;;
       --password-env)
-        local password_env_name="${2:-}"
-        if [[ -z "$password_env_name" ]]; then
-          echo "--password-env requires an environment variable name" >&2
-          return 1
-        fi
-        relay_password="${!password_env_name:-}"
-        shift 2
+        echo "relay passwords are accepted only with --password-stdin" >&2
+        return 1
         ;;
       --host-id)
         relay_host_id="${2:-}"
@@ -349,60 +320,26 @@ configure_relay() {
     esac
   done
 
-  if [[ -z "$relay_url" || -z "$relay_username" || -z "$relay_password" || -z "$relay_host_id" ]]; then
-    echo "configure-relay requires --relay-url, --username, --password/--password-stdin/--password-env, and --host-id" >&2
+  if [[ -z "$relay_url" || -z "$relay_username" || -z "$relay_password" || -z "$relay_host_id" || "$password_stdin" != "1" ]]; then
+    echo "configure-relay requires --relay-url, --username, --password-stdin, and --host-id" >&2
     return 1
   fi
 
-  mkdir -p "$WTERM_HOME"
-  CONFIG_PATH="${WTERM_HOME}/config.json" \
-  RELAY_URL="$relay_url" \
-  RELAY_USERNAME="$relay_username" \
-  RELAY_PASSWORD="$relay_password" \
-  RELAY_HOST_ID="$relay_host_id" \
-  RELAY_DEVICE_ID="$relay_device_id" \
-  RELAY_DEVICE_NAME="$relay_device_name" \
-  "$NODE_BIN" <<'NODE'
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-
-const configPath = process.env.CONFIG_PATH;
-const relayUrl = process.env.RELAY_URL;
-const username = process.env.RELAY_USERNAME;
-const password = process.env.RELAY_PASSWORD;
-const hostId = process.env.RELAY_HOST_ID;
-const deviceId = process.env.RELAY_DEVICE_ID || hostId;
-const deviceName = process.env.RELAY_DEVICE_NAME || os.hostname();
-
-let config = {};
-if (fs.existsSync(configPath)) {
-  const raw = fs.readFileSync(configPath, 'utf8');
-  config = raw.trim() ? JSON.parse(raw) : {};
-  if (!config || typeof config !== 'object' || Array.isArray(config)) {
-    throw new Error(`${configPath} root must be a JSON object`);
-  }
-}
-
-config.mobile = config.mobile && typeof config.mobile === 'object' && !Array.isArray(config.mobile)
-  ? config.mobile
-  : {};
-config.mobile.relay = {
-  relayUrl,
-  username,
-  password,
-  hostId,
-  deviceId,
-  deviceName,
-  platform: process.platform,
-};
-
-fs.mkdirSync(path.dirname(configPath), { recursive: true });
-fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
-fs.chmodSync(configPath, 0o600);
-NODE
-
-  echo "zterm relay configured: path=${WTERM_HOME}/config.json relayUrl=${relay_url} username=${relay_username} hostId=${relay_host_id} deviceName=${relay_device_name:-$(hostname)} passwordSet=true"
+  local -a configure_args=(
+    "$TERMINAL_CONFIG_COMMAND"
+    configure-relay
+    --relay-url "$relay_url"
+    --username "$relay_username"
+    --host-id "$relay_host_id"
+    --password-stdin
+  )
+  if [[ -n "$relay_device_id" ]]; then
+    configure_args+=(--device-id "$relay_device_id")
+  fi
+  if [[ -n "$relay_device_name" ]]; then
+    configure_args+=(--device-name "$relay_device_name")
+  fi
+  printf '%s\n' "$relay_password" | "$NODE_BIN" "${configure_args[@]}"
   if [[ "$restart_after_config" == "1" ]]; then
     restart_service
   else
@@ -968,6 +905,7 @@ case "$cmd" in
   status) status ;;
   stop) stop_service ;;
   restart) restart_service ;;
+  config) "$NODE_BIN" "$TERMINAL_CONFIG_COMMAND" daemon-config ;;
   configure-relay) configure_relay "$@" ;;
   install-service) install_service ;;
   uninstall-service) uninstall_service ;;
@@ -997,24 +935,82 @@ PY
 VERSION="$(cat "${PACKAGE_ROOT}/VERSION")"
 INSTALL_ROOT="${HOME}/.zterm/releases/zterm-daemon/${VERSION}"
 LOCAL_BIN="${HOME}/.local/bin"
+NODE_BIN="$(command -v node)"
+
+"${NODE_BIN}" - "${PACKAGE_ROOT}" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const packageRoot = process.argv[2];
+const manifestPath = path.join(packageRoot, 'zterm-package.json');
+if (!fs.existsSync(manifestPath)) {
+  throw new Error('missing daemon package platform manifest: ' + manifestPath);
+}
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+const minimum = String((manifest.platform && manifest.platform.node && manifest.platform.node.minimum) || '')
+  .split('.')
+  .map(Number);
+const actual = process.versions.node.split('.').map(Number);
+const supported =
+  minimum.length === 3 &&
+  minimum.every(Number.isFinite) &&
+  (actual[0] > minimum[0] ||
+    (actual[0] === minimum[0] &&
+      (actual[1] > minimum[1] ||
+        (actual[1] === minimum[1] && actual[2] >= minimum[2]))));
+if (
+  manifest.schemaVersion !== 1 ||
+  !manifest.package ||
+  manifest.package.name !== '@jsonstudio/zterm-daemon' ||
+  !manifest.platform ||
+  manifest.platform.os !== process.platform ||
+  manifest.platform.arch !== process.arch ||
+  manifest.platform.node.abi !== process.versions.modules ||
+  !supported
+) {
+  throw new Error(
+    'daemon package platform mismatch: expected ' +
+      JSON.stringify(manifest.platform) +
+      ', actual=' +
+      JSON.stringify({
+        os: process.platform,
+        arch: process.arch,
+        node: process.versions.node,
+        abi: process.versions.modules,
+      }),
+  );
+}
+const missing = (manifest.runtimeComponents || []).filter(
+  (component) => !fs.existsSync(path.join(packageRoot, component)),
+);
+if (missing.length > 0) {
+  throw new Error('daemon package is missing runtime components: ' + missing.join(', '));
+}
+NODE
 
 mkdir -p "${INSTALL_ROOT}" "${LOCAL_BIN}" "${HOME}/.zterm/bin"
 rm -rf "${INSTALL_ROOT}/runtime" "${INSTALL_ROOT}/support"
 cp -R "${PACKAGE_ROOT}/runtime" "${INSTALL_ROOT}/runtime"
 cp -R "${PACKAGE_ROOT}/support" "${INSTALL_ROOT}/support"
 cp "${PACKAGE_ROOT}/VERSION" "${INSTALL_ROOT}/VERSION"
+cp "${PACKAGE_ROOT}/zterm-package.json" "${INSTALL_ROOT}/zterm-package.json"
 
-cp "${INSTALL_ROOT}/support/zterm-daemon" "${HOME}/.zterm/bin/zterm-daemon"
-chmod +x "${HOME}/.zterm/bin/zterm-daemon"
+NATIVE_TMP="${HOME}/.zterm/bin/.zterm-daemon.$$"
+cp "${INSTALL_ROOT}/support/zterm-daemon" "${NATIVE_TMP}"
+chmod +x "${NATIVE_TMP}"
+mv "${NATIVE_TMP}" "${HOME}/.zterm/bin/zterm-daemon"
 
-cat > "${LOCAL_BIN}/zterm-daemon" <<WRAP
+DAEMON_TMP="${LOCAL_BIN}/.zterm-daemon.shim.$$"
+cat > "${DAEMON_TMP}" <<WRAP
 #!/usr/bin/env bash
 set -euo pipefail
 exec "${INSTALL_ROOT}/support/zterm-daemon.sh" "\$@"
 WRAP
-chmod +x "${LOCAL_BIN}/zterm-daemon"
+chmod +x "${DAEMON_TMP}"
+mv "${DAEMON_TMP}" "${LOCAL_BIN}/zterm-daemon"
 
-cat > "${LOCAL_BIN}/wterm" <<WRAP
+WTERM_TMP="${LOCAL_BIN}/.wterm.shim.$$"
+cat > "${WTERM_TMP}" <<WRAP
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "\${1:-}" == "daemon" ]]; then
@@ -1022,16 +1018,17 @@ if [[ "\${1:-}" == "daemon" ]]; then
   exec "${INSTALL_ROOT}/support/zterm-daemon.sh" "\$@"
 fi
 case "\${1:-}" in
-  start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status|run)
+  start|stop|restart|status|config|configure-relay|install-service|uninstall-service|service-status|run)
     exec "${INSTALL_ROOT}/support/zterm-daemon.sh" "\$@"
     ;;
 esac
 echo "Usage:"
-echo "  wterm daemon start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status"
-echo "  wterm start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status"
+echo "  wterm daemon start|stop|restart|status|config|configure-relay|install-service|uninstall-service|service-status"
+echo "  wterm start|stop|restart|status|config|configure-relay|install-service|uninstall-service|service-status"
 exit 1
 WRAP
-chmod +x "${LOCAL_BIN}/wterm"
+chmod +x "${WTERM_TMP}"
+mv "${WTERM_TMP}" "${LOCAL_BIN}/wterm"
 
 echo "Installed zterm-daemon release ${VERSION}"
 echo "  installRoot=${INSTALL_ROOT}"
@@ -1043,6 +1040,49 @@ echo "  zterm-daemon install-service"
 echo "  zterm-daemon service-status"
 EOF
   chmod +x "${BIN_DIR}/install-global.sh"
+}
+
+write_package_manifest() {
+  "${NODE_BIN}" - "${PACKAGE_MANIFEST_PATH}" "${PACKAGE_VERSION}" "${TARGET_OS}" "${TARGET_ARCH}" <<'NODE'
+const fs = require('fs');
+const path = require('path');
+
+const [manifestPath, version, targetOs, targetArch] = process.argv.slice(2);
+const releaseRoot = path.dirname(manifestPath);
+const runtimeComponents = [
+  'runtime/server.cjs',
+  'runtime/dagpipe.node',
+  'runtime/node_modules/node-pty',
+  'runtime/node_modules/@roamhq/wrtc',
+  `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`,
+  'support/zterm-daemon.sh',
+  'support/zterm-daemon',
+  'support/terminal-config-command.cjs',
+];
+if (targetOs === 'win32') {
+  runtimeComponents.push('support/windows/zterm-daemon.ps1');
+}
+const missing = runtimeComponents.filter((component) => !fs.existsSync(path.join(releaseRoot, component)));
+if (missing.length > 0) {
+  throw new Error('daemon release is missing runtime components: ' + missing.join(', '));
+}
+fs.writeFileSync(manifestPath, `${JSON.stringify({
+  schemaVersion: 1,
+  package: {
+    name: '@jsonstudio/zterm-daemon',
+    version,
+  },
+  platform: {
+    os: targetOs,
+    arch: targetArch,
+    node: {
+      minimum: '20.0.0',
+      abi: process.versions.modules,
+    },
+  },
+  runtimeComponents,
+}, null, 2)}\n`);
+NODE
 }
 
 write_readme() {
@@ -1069,7 +1109,8 @@ normalize_release_tree_metadata() {
   chmod 0755 \
     "${release_tree}/bin/install-global.sh" \
     "${release_tree}/support/zterm-daemon" \
-    "${release_tree}/support/zterm-daemon.sh"
+    "${release_tree}/support/zterm-daemon.sh" \
+    "${release_tree}/support/terminal-config-command.cjs"
   find "${release_tree}" -exec touch -h -t 200001010000 {} +
 }
 
@@ -1114,6 +1155,25 @@ verify_deterministic_archive() {
   rm -rf "${check_root}"
 }
 
+if [[ "${1:-}" == "--stage-platform-support" ]]; then
+  if [[ -z "${2:-}" ]]; then
+    echo "usage: $0 --stage-platform-support <output-dir>" >&2
+    exit 2
+  fi
+  RELEASE_DIR="$2"
+  RUNTIME_DIR="${RELEASE_DIR}/runtime"
+  SUPPORT_DIR="${RELEASE_DIR}/support"
+  NATIVE_DAEMON_BIN="${SUPPORT_DIR}/zterm-daemon"
+  REMOTE_WINDOW_CAPTURE_SWIFT="${RELEASE_DIR}/.remote-window-capture.swift"
+  mkdir -p "${RUNTIME_DIR}" "${SUPPORT_DIR}"
+  stage_native_daemon_binary
+  stage_terminal_config_command
+  write_support_script
+  echo "[prepare-global-daemon-release] Darwin platform support staged"
+  echo "- support: ${SUPPORT_DIR}"
+  exit 0
+fi
+
 if [[ -z "${ZTERM_DAEMON_WRTC_INPUT_MANIFEST:-}" ]]; then
   echo "[prepare-global-daemon-release] ZTERM_DAEMON_WRTC_INPUT_MANIFEST is required; refusing to build a daemon release without the strict stage manifest" >&2
   exit 1
@@ -1129,9 +1189,11 @@ mkdir -p "${RUNTIME_DIR}" "${SUPPORT_DIR}" "${BIN_DIR}"
 
 stage_runtime
 stage_native_daemon_binary
+stage_terminal_config_command
 write_support_script
 write_installer
 write_readme
+write_package_manifest
 
 verify_deterministic_archive
 shasum -a 256 "${ARCHIVE_PATH}" > "${SHA_PATH}"

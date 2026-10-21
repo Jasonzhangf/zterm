@@ -964,6 +964,44 @@
       ]
     },
     {
+      "module_id": "daemon.terminal_snapshot_read",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "mainline_source.cli",
+      "responsibility": "Own read-only existing-session preview snapshot resolution, ready-mirror tail projection, and same-revision head/body serialization without attach, capture, resize, input, or mirror writes.",
+      "owned_resources": [],
+      "consumed_resources": [
+        "resource.mirror_store",
+        "resource.shared_terminal_types"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/terminal-snapshot-read-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.daemon_input_queue",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.transport_subscriber",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/decisions/2026-10-20-remote-cli.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/server/terminal-snapshot-read-runtime.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/terminal-snapshot-read-runtime.ts"
+      ]
+    },
+    {
       "module_id": "daemon.control_center",
       "runtime_side": "daemon",
       "level": 1,
@@ -1937,7 +1975,8 @@
       ],
       "pending_resources": [],
       "public_interfaces": [
-        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts"
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts",
+        "packages/shared/src/terminal/buffer-frame-assembly/session-buffer-frame-assembly.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -1959,6 +1998,7 @@
       ],
       "status": "active",
       "owned_paths": [
+        "packages/shared/src/terminal/buffer-frame-assembly/",
         "src/lib/buffer-frame-assembly/session-buffer-frame-assembly-state.ts",
         "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts"
       ]
@@ -2305,7 +2345,8 @@
       "pending_resources": [],
       "public_interfaces": [
         "src/contexts/session-context-input-runtime.ts",
-        "src/lib/reliable-input/reliable-input-queue.ts"
+        "src/lib/reliable-input/reliable-input-queue.ts",
+        "packages/shared/src/terminal/reliable-input/reliable-input-queue.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -2326,6 +2367,7 @@
       ],
       "status": "active",
       "owned_paths": [
+        "packages/shared/src/terminal/reliable-input/",
         "src/contexts/session-context-input-runtime.ts",
         "src/lib/reliable-input/reliable-input-queue.ts"
       ]
@@ -2910,7 +2952,9 @@
       "pending_resources": [],
       "public_interfaces": [
         "packages/shared/src/connection/bridge-settings.ts",
-        "packages/shared/src/connection/relay-directory.ts"
+        "packages/shared/src/connection/relay-directory.ts",
+        "packages/shared/src/connection/traversal/types.ts",
+        "packages/shared/src/connection/traversal/socket.ts"
       ],
       "forbidden_resources": [
         "resource.terminal_channel",
@@ -2929,6 +2973,7 @@
         "packages/shared/src/connection/bridge-settings.ts",
         "packages/shared/src/connection/mobile-config.ts",
         "packages/shared/src/connection/relay-directory.ts",
+        "packages/shared/src/connection/traversal/",
         "src/lib/bridge-settings.ts",
         "src/lib/bridge-url.ts",
         "src/lib/mobile-config.ts",
@@ -3409,6 +3454,87 @@
         "native/android/app/src/main/java/com/zterm/android/AndroidConnectionServiceTarget.java",
         "native/android/app/src/main/java/com/zterm/android/AndroidRtcTransportBackend.java",
         "docs/testing/android-notification-session-actions-test-design.md"
+      ]
+    },
+    {
+      "module_id": "shared.node_config",
+      "runtime_side": "shared",
+      "level": 1,
+      "parent_module_id": "shared.contract",
+      "owner_feature": "mainline_source.cli",
+      "responsibility": "Own the shared JSON config path, lock, atomic commit, and daemon config provenance projection consumed by CLI and daemon writers.",
+      "owned_resources": [],
+      "consumed_resources": [
+        "resource.runtime_home"
+      ],
+      "pending_resources": [
+        "resource.cli_shared_config_transaction"
+      ],
+      "public_interfaces": [
+        "packages/shared/src/node/shared-config.ts",
+        "packages/shared/src/node/daemon-config-projection.ts"
+      ],
+      "forbidden_resources": [
+        "resource.daemon_process",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/decisions/2026-10-20-remote-cli.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "packages/shared/src/node/shared-config.test.ts",
+        "packages/shared/src/node/daemon-config-projection.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "packages/shared/src/node/"
+      ]
+    },
+    {
+      "module_id": "client.cli",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "project.product_runtime",
+      "owner_feature": "mainline_source.cli",
+      "responsibility": "Own the Node CLI command entry, shared-config command adapter, local terminal projection, and client-session lifetime; daemon transport, mirror, and backend truth stay external.",
+      "owned_resources": [],
+      "consumed_resources": [
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.client_buffer_frame_assembly"
+      ],
+      "pending_resources": [
+        "resource.cli_shared_config_transaction",
+        "resource.cli_remote_terminal_session"
+      ],
+      "public_interfaces": [
+        "android/src/server/terminal-config-command.ts",
+        "packages/cli/bin/zterm.mjs",
+        "packages/cli/src/terminal-lifecycle.ts"
+      ],
+      "forbidden_resources": [
+        "resource.mirror_store",
+        "resource.tmux_session",
+        "resource.daemon_input_queue",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/decisions/2026-10-20-remote-cli.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "packages/cli/src/package-contract.test.ts",
+        "packages/cli/src/terminal-lifecycle.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/terminal-config-command.ts",
+        "packages/cli/src/",
+        "packages/cli/bin/"
       ]
     }
   ]

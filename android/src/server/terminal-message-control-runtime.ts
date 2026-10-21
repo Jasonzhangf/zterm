@@ -12,6 +12,10 @@ import type {
   ScheduleJobDraft,
 } from '@zterm/shared/schedule-types';
 import type {
+  ResolvedTerminalSession,
+  TerminalSessionIdentityResolution,
+} from './terminal-source-adapter';
+import type {
   TerminalTransportSubscriber,
   TerminalSession,
   TerminalSessionTransport,
@@ -46,6 +50,12 @@ export interface TerminalMessageControlRuntimeDeps {
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
   refreshSessionCatalog?: () => Promise<unknown>;
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
+  resolveExistingSession?: (
+    stableId: string,
+    backend: 'tmux' | 'herdr',
+    requestedSessionName?: string,
+  ) => TerminalSessionIdentityResolution;
+  bindResolvedSession?: (session: ResolvedTerminalSession) => void;
   createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: 'tmux' | 'herdr') => string;
   closeDetachedTerminalSession: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
   renameTmuxSession: (currentName?: string, nextName?: string, backend?: 'tmux' | 'herdr') => string;

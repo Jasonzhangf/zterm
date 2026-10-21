@@ -335,7 +335,18 @@ const terminalRuntime = createTerminalRuntime({
     }
     externalBackend.resizeSession(sessionName, geometry);
   },
-  assertTmuxSessionExists: (sessionName, backend) => {
+  assertTmuxSessionExists: (sessionName, backend, stableId) => {
+    if (stableId && (backend === 'tmux' || backend === 'herdr')) {
+      const resolution = terminalControlRuntime.resolveExistingSession(
+        stableId,
+        backend,
+        sessionName,
+      );
+      if (!resolution.ok) {
+        throw new Error(`${resolution.code}: ${resolution.message}`);
+      }
+      return;
+    }
     if (backend === 'herdr') {
       if (!HERDR_BACKEND_RUNTIME) {
         throw new Error('herdr backend is not available on this daemon');
@@ -452,6 +463,8 @@ const {
   listTmuxSessions,
   listTerminalSessions,
   listTerminalSessionCatalog: enumerateTerminalSessionCatalog,
+  resolveExistingSession,
+  bindResolvedSession,
   resolveTerminalSessionBackend,
   createDetachedTmuxSession,
   closeDetachedTerminalSession,
@@ -630,6 +643,8 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     listTerminalSessionCatalog,
     refreshSessionCatalog: refreshDaemonSessionCatalog,
     resolveTerminalSessionBackend,
+    resolveExistingSession,
+    bindResolvedSession,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,
     renameTmuxSession,

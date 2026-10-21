@@ -15,18 +15,18 @@ cd "${DAGPIPE_DIR}"
 
 if [[ "${PROFILE}" == "release" ]]; then
   cargo build --release
-  if [[ -f target/release/libzterm_dagpipe.dylib ]]; then
-    cp target/release/libzterm_dagpipe.dylib index.node
-  else
-    cp target/release/libzterm_dagpipe.so index.node
-  fi
+  BUILD_DIR="target/release"
 else
   cargo build
-  if [[ -f target/debug/libzterm_dagpipe.dylib ]]; then
-    cp target/debug/libzterm_dagpipe.dylib index.node
-  else
-    cp target/debug/libzterm_dagpipe.so index.node
-  fi
+  BUILD_DIR="target/debug"
+fi
+
+if [[ -f "${BUILD_DIR}/zterm_dagpipe.dll" ]]; then
+  cp "${BUILD_DIR}/zterm_dagpipe.dll" index.node
+elif [[ -f "${BUILD_DIR}/libzterm_dagpipe.dylib" ]]; then
+  cp "${BUILD_DIR}/libzterm_dagpipe.dylib" index.node
+else
+  cp "${BUILD_DIR}/libzterm_dagpipe.so" index.node
 fi
 
 echo "zterm-dagpipe native built: ${DAGPIPE_DIR}/index.node (profile=${PROFILE})"

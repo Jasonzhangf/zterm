@@ -1,118 +1,186 @@
-import { execFileSync } from 'child_process';
-import { createHash } from 'crypto';
+import { execFileSync } from 'node:child_process';
 import {
   chmodSync,
   copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
-} from 'fs';
-import { arch, platform } from 'os';
-import { dirname, resolve } from 'path';
-import { fileURLToPath } from 'url';
+} from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDir, '..');
 const workspaceRoot = resolve(projectRoot, '..');
-const releaseDistDir = resolve(projectRoot, 'release-dist');
-const packageJson = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf8'));
-const version = packageJson.version;
-const targetOs = platform();
-const targetArch = arch();
-const releaseName = `zterm-daemon-${version}-${targetOs}-${targetArch}`;
-const releaseDir = resolve(releaseDistDir, releaseName);
-const npmPackageName = process.env.ZTERM_DAEMON_NPM_NAME || '@jsonstudio/zterm-daemon';
-const npmRoot = resolve(releaseDistDir, 'npm');
-const npmPackageDir = resolve(npmRoot, npmPackageName.replace('/', '__'));
+const publicPackageName = '@jsonstudio/zterm-daemon';
+const tuples = [
+  { tuple: 'darwin-arm64', os: 'darwin', arch: 'arm64' },
+  { tuple: 'linux-x64', os: 'linux', arch: 'x64' },
+  { tuple: 'win32-x64', os: 'win32', arch: 'x64' },
+];
 
-function sha256(filePath) {
-  const hash = createHash('sha256');
-  hash.update(readFileSync(filePath));
-  return hash.digest('hex');
+const payloadResolverSource = String.raw`
+function parseNodeVersion(value) {
+  const match = String(value || '').trim().match(/^v?(\d+)\.(\d+)\.(\d+)/);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
-function writeExecutable(filePath, content) {
-  writeFileSync(filePath, content);
-  chmodSync(filePath, 0o755);
-}
-
-function requirePath(path, message) {
-  if (!existsSync(path)) {
-    throw new Error(message);
+function nodeVersionAtLeast(actual, minimum) {
+  const actualParts = parseNodeVersion(actual);
+  const minimumParts = parseNodeVersion(minimum);
+  if (!actualParts || !minimumParts) return false;
+  for (let index = 0; index < 3; index += 1) {
+    if (actualParts[index] > minimumParts[index]) return true;
+    if (actualParts[index] < minimumParts[index]) return false;
   }
+  return true;
 }
 
-requirePath(
-  releaseDir,
-  `daemon release directory not found: ${releaseDir}\nRun: pnpm --dir android run daemon:prepare-release`,
-);
-requirePath(resolve(releaseDir, 'runtime/server.cjs'), `missing staged daemon runtime under ${releaseDir}`);
-requirePath(resolve(releaseDir, 'runtime/dagpipe.node'), `missing staged daemon DAGpipe native runtime under ${releaseDir}\nBuild with the DAGpipe SDK, for example: DAGPIPE_SDK_PATH=/path/to/DAGpipe bash android/scripts/build-dagpipe-native.sh`);
-requirePath(resolve(releaseDir, 'runtime/node_modules/node-pty'), `missing staged node-pty runtime under ${releaseDir}`);
-requirePath(resolve(releaseDir, 'runtime/node_modules/@roamhq/wrtc'), `missing staged @roamhq/wrtc runtime under ${releaseDir}`);
-requirePath(
-  resolve(releaseDir, `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`),
-  `missing staged @roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node under ${releaseDir}`,
-);
-requirePath(resolve(releaseDir, 'support/zterm-daemon.sh'), `missing daemon support script under ${releaseDir}`);
-requirePath(resolve(releaseDir, 'support/zterm-daemon'), `missing native zterm-daemon binary under ${releaseDir}`);
+function resolveLocalPayload() {
+  const tuple = process.platform + '-' + process.arch;
+  const payloadName = '@jsonstudio/zterm-daemon-' + tuple;
+  const optionalDependencies = packageJson.optionalDependencies || {};
+  const optionalVersion = optionalDependencies[payloadName];
+  if (!optionalVersion) {
+    throw new Error('daemon_platform_mismatch: unsupported host ' + tuple);
+  }
+  if (optionalVersion !== packageJson.version) {
+    throw new Error(
+      'daemon_payload_version_mismatch: public=' +
+        packageJson.version +
+        ' payload=' +
+        optionalVersion,
+    );
+  }
 
-rmSync(npmPackageDir, { recursive: true, force: true });
-mkdirSync(resolve(npmPackageDir, 'bin'), { recursive: true });
-mkdirSync(resolve(npmPackageDir, 'support'), { recursive: true });
-mkdirSync(resolve(npmPackageDir, 'support/windows'), { recursive: true });
+  let packagePath;
+  try {
+    packagePath = require.resolve(payloadName + '/package.json', { paths: [packageRoot] });
+  } catch {
+    throw new Error(
+      'daemon_payload_missing: install the exact optional dependency ' +
+        payloadName +
+        '@' +
+        packageJson.version,
+    );
+  }
+  const payloadRoot = dirname(packagePath);
+  const payloadPackage = JSON.parse(readFileSync(packagePath, 'utf8'));
+  if (payloadPackage.name !== payloadName || payloadPackage.version !== packageJson.version) {
+    throw new Error(
+      'daemon_payload_identity_mismatch: expected ' +
+        payloadName +
+        '@' +
+        packageJson.version,
+    );
+  }
 
-cpSync(resolve(releaseDir, 'runtime'), resolve(npmPackageDir, 'runtime'), { recursive: true });
-cpSync(resolve(releaseDir, 'support'), resolve(npmPackageDir, 'support'), { recursive: true });
-copyFileSync(resolve(releaseDir, 'VERSION'), resolve(npmPackageDir, 'VERSION'));
-copyFileSync(resolve(workspaceRoot, 'LICENSE'), resolve(npmPackageDir, 'LICENSE'));
-copyFileSync(resolve(projectRoot, 'scripts/windows/zterm-daemon.ps1'), resolve(npmPackageDir, 'support/windows/zterm-daemon.ps1'));
+  const manifestPath = join(payloadRoot, 'zterm-package.json');
+  if (!existsSync(manifestPath)) {
+    throw new Error('daemon_payload_manifest_missing: ' + manifestPath);
+  }
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  if (
+    manifest.schemaVersion !== 1 ||
+    manifest.package?.name !== payloadName ||
+    manifest.package?.version !== packageJson.version
+  ) {
+    throw new Error('daemon_payload_manifest_invalid: ' + manifestPath);
+  }
+  if (manifest.platform?.os !== process.platform || manifest.platform?.arch !== process.arch) {
+    throw new Error(
+      'daemon_platform_mismatch: payload=' +
+        String(manifest.platform?.os) +
+        '-' +
+        String(manifest.platform?.arch) +
+        ' host=' +
+        tuple,
+    );
+  }
+  if (!nodeVersionAtLeast(process.versions.node, manifest.platform?.node?.minimum)) {
+    throw new Error(
+      'daemon_node_version_mismatch: requires Node ' +
+        String(manifest.platform?.node?.minimum) +
+        ', actual=' +
+        process.versions.node,
+    );
+  }
+  if (manifest.platform?.node?.abi !== process.versions.modules) {
+    throw new Error(
+      'daemon_node_abi_mismatch: payload=' +
+        String(manifest.platform?.node?.abi) +
+        ' actual=' +
+        process.versions.modules,
+    );
+  }
+  const missing = (manifest.runtimeComponents || []).filter(
+    (component) => !existsSync(join(payloadRoot, component)),
+  );
+  if (missing.length > 0) {
+    throw new Error('daemon_runtime_component_missing: ' + missing.join(', '));
+  }
+  return { payloadName, payloadRoot, manifest };
+}
+`;
 
-writeExecutable(resolve(npmPackageDir, 'bin/zterm-daemon.cjs'), `#!/usr/bin/env node
+const publicBinSource = `#!/usr/bin/env node
 const { spawnSync } = require('node:child_process');
-const { existsSync } = require('node:fs');
-const { resolve } = require('node:path');
+const { existsSync, readFileSync } = require('node:fs');
+const { dirname, join, resolve } = require('node:path');
 
 const packageRoot = resolve(__dirname, '..');
-const args = process.argv.slice(2);
+const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+${payloadResolverSource}
 
-function run(command, commandArgs, extraEnv) {
+function fail(error) {
+  console.error('zterm-daemon: ' + (error instanceof Error ? error.message : String(error)));
+  process.exit(1);
+}
+
+try {
+  const { payloadRoot } = resolveLocalPayload();
+  const args = process.argv.slice(2);
+  if (args.length === 1 && (args[0] === '--version' || args[0] === '-v')) {
+    process.stdout.write(packageJson.version + '\\n');
+    process.exit(0);
+  }
+
+  const isWindows = process.platform === 'win32';
+  const runner = isWindows
+    ? join(payloadRoot, 'support', 'windows', 'zterm-daemon.ps1')
+    : join(payloadRoot, 'support', 'zterm-daemon.sh');
+  if (!existsSync(runner)) {
+    throw new Error('daemon_runner_missing: ' + runner);
+  }
+  const command = isWindows ? 'powershell.exe' : runner;
+  const commandArgs = isWindows
+    ? ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', runner, ...args]
+    : args;
   const result = spawnSync(command, commandArgs, {
     stdio: 'inherit',
-    env: { ...process.env, ...extraEnv },
+    env: {
+      ...process.env,
+      ZTERM_PACKAGE_ROOT: payloadRoot,
+      ZTERM_NODE_EXE: process.execPath,
+    },
     windowsHide: true,
   });
   if (result.error) {
-    console.error(result.error.message);
-    process.exit(1);
+    throw result.error;
   }
   process.exit(result.status === null ? 1 : result.status);
+} catch (error) {
+  fail(error);
 }
+`;
 
-if (process.platform === 'win32') {
-  const script = resolve(packageRoot, 'support/windows/zterm-daemon.ps1');
-  if (!existsSync(script)) {
-    console.error('missing Windows daemon runner: ' + script);
-    process.exit(1);
-  }
-  run('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script, ...args], {
-    ZTERM_PACKAGE_ROOT: packageRoot,
-  });
-}
-
-const script = resolve(packageRoot, 'support/zterm-daemon.sh');
-if (!existsSync(script)) {
-  console.error('missing daemon runner: ' + script);
-  process.exit(1);
-}
-run(script, args, {});
-`);
-
-writeExecutable(resolve(npmPackageDir, 'bin/wterm.cjs'), `#!/usr/bin/env node
+const publicWtermSource = `#!/usr/bin/env node
 const { spawnSync } = require('node:child_process');
 const { resolve } = require('node:path');
 
@@ -130,208 +198,464 @@ if (result.error) {
   process.exit(1);
 }
 process.exit(result.status === null ? 1 : result.status);
-`);
+`;
 
-writeFileSync(resolve(npmPackageDir, 'support/install-user-shims.cjs'), `#!/usr/bin/env node
-const { chmodSync, mkdirSync, rmSync, writeFileSync } = require('node:fs');
+const publicShimInstallerSource = `#!/usr/bin/env node
+const {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} = require('node:fs');
 const { homedir } = require('node:os');
-const { resolve } = require('node:path');
+const { dirname, join, resolve } = require('node:path');
 
 const packageRoot = resolve(__dirname, '..');
-const localBin = resolve(homedir(), '.local/bin');
-const isWindows = process.platform === 'win32';
+const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'));
+${payloadResolverSource}
 
-function writeShim(name, body) {
-  mkdirSync(localBin, { recursive: true });
-  const target = resolve(localBin, name);
-  rmSync(target, { force: true });
-  writeFileSync(target, body);
-  chmodSync(target, 0o755);
+function stageShim(directory, name, body) {
+  mkdirSync(directory, { recursive: true });
+  const target = join(directory, name);
+  const temporary = join(directory, '.' + name + '.' + process.pid + '.tmp');
+  writeFileSync(temporary, body, { mode: 0o755 });
+  chmodSync(temporary, 0o755);
+  return { target, temporary };
 }
 
-if (isWindows) {
-  writeShim('zterm-daemon.cmd', \`@echo off
-node "\${packageRoot}\\\\bin\\\\zterm-daemon.cjs" %*
-\`);
-  writeShim('wterm.cmd', \`@echo off
-node "\${packageRoot}\\\\bin\\\\wterm.cjs" %*
-\`);
-} else {
-  writeShim('zterm-daemon', \`#!/usr/bin/env bash
-set -euo pipefail
-exec node "\${packageRoot}/bin/zterm-daemon.cjs" "$@"
-\`);
+try {
+  resolveLocalPayload();
+  const localBin = join(homedir(), '.local', 'bin');
+  const isWindows = process.platform === 'win32';
+  const staged = isWindows
+    ? [
+        stageShim(
+          localBin,
+          'zterm-daemon.cmd',
+          '@echo off\\r\\nnode "' + join(packageRoot, 'bin', 'zterm-daemon.cjs') + '" %*\\r\\n',
+        ),
+        stageShim(
+          localBin,
+          'wterm.cmd',
+          '@echo off\\r\\nnode "' + join(packageRoot, 'bin', 'wterm.cjs') + '" %*\\r\\n',
+        ),
+      ]
+    : [
+        stageShim(
+          localBin,
+          'zterm-daemon',
+          '#!/usr/bin/env bash\\nset -euo pipefail\\nexec node "' +
+            join(packageRoot, 'bin', 'zterm-daemon.cjs') +
+            '" "$@"\\n',
+        ),
+        stageShim(
+          localBin,
+          'wterm',
+          '#!/usr/bin/env bash\\nset -euo pipefail\\nexec node "' +
+            join(packageRoot, 'bin', 'wterm.cjs') +
+            '" "$@"\\n',
+        ),
+      ];
+  for (const { target, temporary } of staged) {
+    renameSync(temporary, target);
+    console.log('[zterm-daemon] installed user shim ' + target);
+  }
+} catch (error) {
+  console.error(
+    '[zterm-daemon] shim install failed: ' +
+      (error instanceof Error ? error.message : String(error)),
+  );
+  process.exit(1);
+}
+`;
 
-  writeShim('wterm', \`#!/usr/bin/env bash
-set -euo pipefail
-exec node "\${packageRoot}/bin/wterm.cjs" "$@"
-\`);
+function usage() {
+  return [
+    'Usage:',
+    '  node android/scripts/prepare-daemon-npm-package.mjs \\',
+    '    --version <daemon-version> \\',
+    '    --release darwin-arm64=<release-dir> \\',
+    '    --release linux-x64=<release-dir> \\',
+    '    --release win32-x64=<release-dir> \\',
+    '    [--output-dir <directory>]',
+  ].join('\n');
 }
 
-console.log('[zterm-daemon] installed user shims');
-console.log(\`- \${resolve(localBin, isWindows ? 'zterm-daemon.cmd' : 'zterm-daemon')}\`);
-console.log(\`- \${resolve(localBin, isWindows ? 'wterm.cmd' : 'wterm')}\`);
-`);
-chmodSync(resolve(npmPackageDir, 'support/install-user-shims.cjs'), 0o755);
-
-writeFileSync(resolve(npmPackageDir, 'README.md'), `# zterm-daemon
-
-ZTerm daemon for macOS and Windows. It runs the local WebSocket bridge used by the ZTerm Android app to connect to local terminal sessions. macOS uses tmux; Windows uses WezTerm mux through the ZTerm WezTerm backend adapter.
-
-## Requirements
-
-- ${targetOs} ${targetArch}
-- Node.js 20+
-- macOS: tmux available on PATH
-- Windows: WezTerm available on PATH, or set \`ZTERM_WEZTERM_EXE\` to the portable \`wezterm.exe\`
-- macOS remote screenshot: grant Screen Recording permission to the installed \`zterm-daemon\` native binary when macOS prompts
-
-## Install
-
-\`\`\`bash
-npm install -g ${npmPackageName}
-printf '%s\n' "$RELAY_PASSWORD" | zterm-daemon configure-relay \\
-  --relay-url "$RELAY_BASE_URL" \\
-  --username "$RELAY_USERNAME" \\
-  --password-stdin \\
-  --host-id "$(hostname -s)" \\
-  --device-id "$(hostname -s)" \\
-  --device-name "$(hostname)"
-zterm-daemon install-service
-zterm-daemon service-status
-\`\`\`
-
-The relay password must come from a local secret manager, shell secret, or CI secret. The configure command only prints \`passwordSet=true\`; it must not echo the password.
-
-The installer uses these locations:
-
-- runtime/config/logs: \`~/.zterm\`
-- CLI: npm global bin \`zterm-daemon\`
-- legacy alias: npm global bin \`wterm\`
-- macOS launch agent: \`~/Library/LaunchAgents/com.zterm.android.zterm-daemon.plist\`
-- Windows scheduled task: \`ZTermDaemon\`
-
-## Commands
-
-\`\`\`bash
-zterm-daemon run               # run in foreground
-zterm-daemon start             # start launchd service on macOS, scheduled task/direct process on Windows
-zterm-daemon status            # direct runtime status
-zterm-daemon stop              # stop service or direct process
-zterm-daemon restart           # restart service or direct process
-zterm-daemon configure-relay   # write ~/.zterm/config.json mobile.relay from secret input
-zterm-daemon install-service   # install and start launchd service or Windows scheduled task
-zterm-daemon uninstall-service # stop and remove service
-zterm-daemon service-status    # service status
-\`\`\`
-
-\`wterm daemon <command>\` is kept as a compatibility alias.
-
-## Configuration
-
-Optional config file: \`~/.zterm/config.json\`.
-
-\`\`\`json
-{
-  "zterm": {
-    "android": {
-      "daemon": {
-        "host": "0.0.0.0",
-        "port": 3333,
-        "authToken": "change-me"
+function parseArgs(argv) {
+  const options = {
+    version: undefined,
+    outputDir: undefined,
+    releases: new Map(),
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--help' || argument === '-h') {
+      return { help: true, options };
+    }
+    if (!['--version', '--release', '--release-dir', '--output-dir'].includes(argument)) {
+      throw new Error(`unknown argument: ${argument}`);
+    }
+    const value = argv[index + 1];
+    if (!value) {
+      throw new Error(`missing value for ${argument}`);
+    }
+    index += 1;
+    if (argument === '--version') {
+      if (options.version) throw new Error('--version may be specified only once');
+      options.version = value.replace(/^v/, '');
+    } else if (argument === '--output-dir') {
+      if (options.outputDir) throw new Error('--output-dir may be specified only once');
+      options.outputDir = resolve(value);
+    } else {
+      const separator = value.indexOf('=');
+      if (separator <= 0 || separator === value.length - 1) {
+        throw new Error(`${argument} must use <tuple>=<release-dir>`);
       }
+      const tuple = value.slice(0, separator);
+      const releaseDir = resolve(value.slice(separator + 1));
+      if (!tuples.some((entry) => entry.tuple === tuple)) {
+        throw new Error(`unsupported platform tuple: ${tuple}`);
+      }
+      if (options.releases.has(tuple)) {
+        throw new Error(`duplicate platform tuple: ${tuple}`);
+      }
+      options.releases.set(tuple, releaseDir);
     }
   }
+  return { help: false, options };
 }
-\`\`\`
 
-Relay account configuration should be written through the global CLI, not by hand-editing scattered daemon files. The command shape is \`zterm-daemon configure-relay --relay-url ... --username ... --password-stdin --host-id ...\`:
+function readJson(path, label) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new Error(`${label} is not readable JSON at ${path}: ${error.message}`);
+  }
+}
 
-\`\`\`bash
-printf '%s\n' "$RELAY_PASSWORD" | zterm-daemon configure-relay \\
-  --relay-url "$RELAY_BASE_URL" \\
-  --username "$RELAY_USERNAME" \\
-  --password-stdin \\
-  --host-id "mac-studio" \\
-  --device-id "mac-studio" \\
-  --device-name "Mac Studio"
-\`\`\`
+function requirePath(path, label) {
+  if (!existsSync(path)) {
+    throw new Error(`${label} not found: ${path}`);
+  }
+}
 
-Successful output contains \`passwordSet=true\` and never prints the relay password.
+function nodeVersionParts(version) {
+  const match = String(version || '').match(/^(\d+)\.(\d+)\.(\d+)/);
+  return match ? match.slice(1).map(Number) : undefined;
+}
 
-Environment variables override config:
+function compareVersions(left, right) {
+  const leftParts = nodeVersionParts(left);
+  const rightParts = nodeVersionParts(right);
+  if (!leftParts || !rightParts) return Number.NaN;
+  for (let index = 0; index < 3; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
+  }
+  return 0;
+}
 
-- \`ZTERM_HOST\`
-- \`ZTERM_PORT\`
-- \`ZTERM_AUTH_TOKEN\`
-- \`ZTERM_DAEMON_SESSION\`
-- \`ZTERM_WEZTERM_EXE\` on Windows
+function validateVersion(version) {
+  if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version || '')) {
+    throw new Error(`--version must be an exact semver, got: ${version || '<missing>'}`);
+  }
+}
 
-## Android connection
+function tupleFiles(spec) {
+  const files = [
+    'runtime/server.cjs',
+    'runtime/dagpipe.node',
+    'runtime/node_modules/node-pty',
+    'runtime/node_modules/@roamhq/wrtc',
+    `runtime/node_modules/@roamhq/wrtc-${spec.tuple}/wrtc.node`,
+    'support/terminal-config-command.cjs',
+  ];
+  if (spec.os === 'win32') {
+    files.push('support/windows/zterm-daemon.ps1');
+  } else {
+    files.push('support/zterm-daemon.sh');
+  }
+  if (spec.os === 'darwin') {
+    files.push('support/zterm-daemon');
+  }
+  return files;
+}
 
-In the ZTerm Android app, create a connection pointing at your Mac host/IP and daemon port, usually \`3333\`. If your Mac and phone are connected by Tailscale, use the Mac Tailscale IP.
+function validateRelease(spec, releaseDir, requestedVersion) {
+  const manifestPath = join(releaseDir, 'zterm-package.json');
+  requirePath(manifestPath, `${spec.tuple} release manifest`);
+  const input = readJson(manifestPath, `${spec.tuple} release manifest`);
+  if (input.schemaVersion !== 1 || !input.platform || !input.platform.node) {
+    throw new Error(`${spec.tuple} release manifest has an unsupported schema`);
+  }
+  if (input.platform.os !== spec.os || input.platform.arch !== spec.arch) {
+    throw new Error(
+      `${spec.tuple} release manifest targets ${input.platform.os}-${input.platform.arch}`,
+    );
+  }
+  if (!/^\d+$/.test(String(input.platform.node.abi || ''))) {
+    throw new Error(`${spec.tuple} release manifest is missing Node ABI`);
+  }
+  if (
+    Number.isNaN(compareVersions(input.platform.node.minimum || '', '22.0.0')) ||
+    compareVersions(input.platform.node.minimum || '', '22.0.0') < 0
+  ) {
+    throw new Error(`${spec.tuple} release manifest must require Node 22 or newer`);
+  }
 
-## Remote screenshot permission
+  const runtimeComponents = tupleFiles(spec);
+  for (const component of runtimeComponents) {
+    requirePath(join(releaseDir, component), `${spec.tuple} ${component}`);
+  }
+  return {
+    input,
+    runtimeComponents,
+    packageName: `${publicPackageName}-${spec.tuple}`,
+    requestedVersion,
+  };
+}
 
-Remote screenshot permission belongs to the installed native \`zterm-daemon\` binary, not Node.js and not a separate GUI helper. Install the service once, trigger a screenshot from Android, and approve the macOS Screen Recording prompt for \`zterm-daemon\`.
-`);
+function writeJson(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
 
-writeFileSync(resolve(npmPackageDir, 'package.json'), `${JSON.stringify({
-  name: npmPackageName,
-  version,
-  description: 'ZTerm daemon for Android terminal bridge, file transfer, relay, and remote screenshot support.',
-  license: 'Apache-2.0',
-  homepage: 'https://github.com/Jasonzhangf/zterm#readme',
-  repository: {
-    type: 'git',
-    url: 'git+https://github.com/Jasonzhangf/zterm.git',
-  },
-  bugs: {
-    url: 'https://github.com/Jasonzhangf/zterm/issues',
-  },
-  os: ['darwin', 'win32'],
-  cpu: ['arm64', 'x64'],
-  type: 'commonjs',
-  scripts: {
-    postinstall: 'node support/install-user-shims.cjs',
-  },
-  bin: {
-    'zterm-daemon': 'bin/zterm-daemon.cjs',
-    wterm: 'bin/wterm.cjs',
-  },
-  files: [
-    'bin',
-    'runtime',
-    'support',
-    'VERSION',
-    'README.md',
-    'LICENSE',
-  ],
-  bundledDependencies: [],
-  publishConfig: {
-    access: 'public',
-    registry: 'https://registry.npmjs.org/',
-  },
-  engines: {
-    node: '>=20',
-  },
-  keywords: ['zterm', 'tmux', 'terminal', 'daemon', 'android'],
-}, null, 2)}\n`);
+function writeExecutable(path, content) {
+  writeFileSync(path, content);
+  chmodSync(path, 0o755);
+}
 
-const packOutput = execFileSync('npm', ['pack', npmPackageDir, '--pack-destination', releaseDistDir], {
-  encoding: 'utf8',
-  stdio: ['ignore', 'pipe', 'inherit'],
-}).trim();
-const tgzName = packOutput.split('\n').filter(Boolean).at(-1);
-const tgzPath = resolve(releaseDistDir, tgzName);
-const shaPath = `${tgzPath}.sha256`;
-const digest = sha256(tgzPath);
-writeFileSync(shaPath, `${digest}  ${tgzPath}\n`);
+function copyRuntimeComponent(sourceRoot, packageRoot, relativePath) {
+  const source = join(sourceRoot, relativePath);
+  const destination = join(packageRoot, relativePath);
+  mkdirSync(dirname(destination), { recursive: true });
+  const stat = statSync(source);
+  if (stat.isDirectory()) {
+    cpSync(source, destination, { recursive: true });
+  } else {
+    copyFileSync(source, destination);
+  }
+}
 
-console.log('[prepare-daemon-npm-package] ready');
-console.log(`- packageDir: ${npmPackageDir}`);
-console.log(`- packageName: ${npmPackageName}`);
-console.log(`- version: ${version}`);
-console.log(`- tarball: ${tgzPath}`);
-console.log(`- sha256: ${digest}`);
-console.log(`- size: ${statSync(tgzPath).size}`);
+function writePayloadPackage(stagingRoot, spec, releaseDir, version, release) {
+  const packageRoot = join(stagingRoot, 'packages', '@jsonstudio', `zterm-daemon-${spec.tuple}`);
+  mkdirSync(packageRoot, { recursive: true });
+  for (const relativePath of release.runtimeComponents) {
+    copyRuntimeComponent(releaseDir, packageRoot, relativePath);
+  }
+  for (const relativePath of [
+    'support/zterm-daemon.sh',
+    'support/zterm-daemon',
+    'support/windows/zterm-daemon.ps1',
+  ]) {
+    if (release.runtimeComponents.includes(relativePath)) {
+      chmodSync(join(packageRoot, relativePath), 0o755);
+    }
+  }
+
+  writeJson(join(packageRoot, 'zterm-package.json'), {
+    schemaVersion: 1,
+    package: {
+      name: release.packageName,
+      version,
+    },
+    platform: {
+      os: spec.os,
+      arch: spec.arch,
+      node: {
+        minimum: '22.0.0',
+        abi: String(release.input.platform.node.abi),
+      },
+    },
+    runtimeComponents: release.runtimeComponents,
+  });
+  writeJson(join(packageRoot, 'package.json'), {
+    name: release.packageName,
+    version,
+    description: `ZTerm daemon payload for ${spec.tuple}.`,
+    license: 'Apache-2.0',
+    type: 'commonjs',
+    os: [spec.os],
+    cpu: [spec.arch],
+    files: ['runtime', 'support', 'zterm-package.json', 'README.md', 'LICENSE'],
+    engines: {
+      node: '>=22',
+    },
+    publishConfig: {
+      access: 'public',
+      registry: 'https://registry.npmjs.org/',
+    },
+  });
+  copyFileSync(join(workspaceRoot, 'LICENSE'), join(packageRoot, 'LICENSE'));
+  writeFileSync(
+    join(packageRoot, 'README.md'),
+    `# ${release.packageName}\n\nInternal ZTerm daemon runtime payload for ${spec.os} ${spec.arch} on Node.js 22.\n`,
+  );
+  return packageRoot;
+}
+
+function writePublicPackage(stagingRoot, version, payloadPackages) {
+  const packageRoot = join(stagingRoot, 'packages', '@jsonstudio', 'zterm-daemon');
+  mkdirSync(join(packageRoot, 'bin'), { recursive: true });
+  mkdirSync(join(packageRoot, 'support'), { recursive: true });
+  writeExecutable(join(packageRoot, 'bin', 'zterm-daemon.cjs'), publicBinSource);
+  writeExecutable(join(packageRoot, 'bin', 'wterm.cjs'), publicWtermSource);
+  writeExecutable(join(packageRoot, 'support', 'install-user-shims.cjs'), publicShimInstallerSource);
+  copyFileSync(join(workspaceRoot, 'LICENSE'), join(packageRoot, 'LICENSE'));
+  writeJson(join(packageRoot, 'package.json'), {
+    name: publicPackageName,
+    version,
+    description:
+      'ZTerm daemon terminal bridge, file transfer, relay, and remote screenshot support.',
+    license: 'Apache-2.0',
+    homepage: 'https://github.com/Jasonzhangf/zterm#readme',
+    repository: {
+      type: 'git',
+      url: 'git+https://github.com/Jasonzhangf/zterm.git',
+    },
+    bugs: {
+      url: 'https://github.com/Jasonzhangf/zterm/issues',
+    },
+    type: 'commonjs',
+    bin: {
+      'zterm-daemon': 'bin/zterm-daemon.cjs',
+      wterm: 'bin/wterm.cjs',
+    },
+    files: ['bin', 'support', 'README.md', 'LICENSE'],
+    optionalDependencies: Object.fromEntries(
+      payloadPackages.map(({ packageName }) => [packageName, version]),
+    ),
+    engines: {
+      node: '>=22',
+    },
+    publishConfig: {
+      access: 'public',
+      registry: 'https://registry.npmjs.org/',
+    },
+    keywords: ['zterm', 'terminal', 'daemon', 'tmux'],
+  });
+  writeFileSync(
+    join(packageRoot, 'README.md'),
+    `# @jsonstudio/zterm-daemon
+
+Node.js 22 daemon package with platform payloads for:
+
+- darwin-arm64
+- linux-x64
+- win32-x64
+
+Install the public package and run \`zterm-daemon --version\` to verify the local payload.
+\`zterm-daemon config\` reads the shared ZTerm configuration without migration.
+\`zterm-daemon install-service\` is a separate explicit lifecycle action.
+`,
+  );
+  return packageRoot;
+}
+
+function packPackage(packageRoot, stagingRoot) {
+  const output = execFileSync(
+    'npm',
+    ['pack', packageRoot, '--pack-destination', stagingRoot],
+    {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+    },
+  )
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .at(-1);
+  if (!output) {
+    throw new Error(`npm pack returned no tarball for ${packageRoot}`);
+  }
+  return join(stagingRoot, basename(output));
+}
+
+function main() {
+  const parsed = parseArgs(process.argv.slice(2));
+  if (parsed.help) {
+    console.log(usage());
+    return;
+  }
+  const { options } = parsed;
+  validateVersion(options.version);
+  const missingTuples = tuples
+    .filter(({ tuple }) => !options.releases.has(tuple))
+    .map(({ tuple }) => tuple);
+  const extraTuples = [...options.releases.keys()].filter(
+    (tuple) => !tuples.some((entry) => entry.tuple === tuple),
+  );
+  if (missingTuples.length > 0 || extraTuples.length > 0) {
+    throw new Error(
+      `exactly three release tuples are required; missing=${missingTuples.join(',') || '-'} extra=${extraTuples.join(',') || '-'}`,
+    );
+  }
+
+  const validated = tuples.map((spec) => {
+    const releaseDir = options.releases.get(spec.tuple);
+    return {
+      ...spec,
+      releaseDir,
+      release: validateRelease(spec, releaseDir, options.version),
+    };
+  });
+  const outputDir =
+    options.outputDir ??
+    resolve(projectRoot, 'release-dist', 'npm', `zterm-daemon-${options.version}`);
+  if (existsSync(outputDir)) {
+    throw new Error(`output already exists for daemon ${options.version}: ${outputDir}`);
+  }
+
+  const outputParent = dirname(outputDir);
+  mkdirSync(outputParent, { recursive: true });
+  const stagingRoot = mkdtempSync(join(outputParent, `.${basename(outputDir)}-`));
+  try {
+    const payloadPackages = validated.map(({ spec, ...entry }) => ({
+      ...entry,
+      packageRoot: writePayloadPackage(
+        stagingRoot,
+        entry,
+        entry.releaseDir,
+        options.version,
+        entry.release,
+      ),
+      packageName: entry.release.packageName,
+    }));
+    const publicPackageRoot = writePublicPackage(
+      stagingRoot,
+      options.version,
+      payloadPackages,
+    );
+
+    const tarballs = [];
+    for (const payloadPackage of payloadPackages) {
+      tarballs.push(packPackage(payloadPackage.packageRoot, stagingRoot));
+    }
+    tarballs.unshift(packPackage(publicPackageRoot, stagingRoot));
+    if (existsSync(outputDir)) {
+      throw new Error(`output appeared during packaging: ${outputDir}`);
+    }
+    renameSync(stagingRoot, outputDir);
+    const relativePackages = join(outputDir, 'packages', '@jsonstudio');
+    console.log('[prepare-daemon-npm-package] ready');
+    console.log(`- version: ${options.version}`);
+    console.log(`- outputDir: ${outputDir}`);
+    console.log(`- publicPackage: ${join(relativePackages, 'zterm-daemon')}`);
+    for (const { tuple } of tuples) {
+      console.log(`- payload.${tuple}: ${join(relativePackages, `zterm-daemon-${tuple}`)}`);
+    }
+    for (const tarball of tarballs) {
+      console.log(`- tarball: ${join(outputDir, basename(tarball))}`);
+    }
+  } catch (error) {
+    rmSync(stagingRoot, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+try {
+  main();
+} catch (error) {
+  console.error(`[prepare-daemon-npm-package] ${error.message}`);
+  process.exitCode = 1;
+}

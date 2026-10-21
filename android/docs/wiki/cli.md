@@ -2,19 +2,101 @@
 
 Worker-readable CLI map. Generated diagram: `docs/wiki/generated/cli.html`.
 
-## Owner
+## Owners
 
 - `feature_id`: `daemon.cli_shell`
-- Shell CLI: `scripts/zterm-daemon.sh`
-- Windows CLI: `scripts/windows/zterm-daemon.ps1`
+- Remote CLI package: `packages/cli/src/main.ts`
+- CLI bin: `packages/cli/bin/zterm.mjs`
+- Public CLI package: `@jsonstudio/zterm-cli`
+- Shared configuration: `packages/shared/src/node/shared-config.ts`
+- Daemon source runner: `scripts/zterm-daemon.sh`
+- Windows daemon runner: `scripts/windows/zterm-daemon.ps1`
 - Native helper: `scripts/native/zterm-daemon.swift`
-- Global install shim: `scripts/install-global-daemon-cli.sh`
+- Global daemon install shim: `scripts/install-global-daemon-cli.sh`
 - Release staging: `scripts/prepare-global-daemon-release.sh`
-- NPM package staging: `scripts/prepare-daemon-npm-package.mjs`
-- Public global bin: `zterm-daemon`
-- Legacy alias: `wterm`
+- Three-platform daemon packager: `scripts/prepare-daemon-npm-package.mjs`
+- Public daemon package: `@jsonstudio/zterm-daemon`
+- Public daemon bins: `zterm-daemon` and legacy alias `wterm`
 
-## Command Map
+The remote CLI and daemon package are separate release surfaces. `zterm` is the
+user CLI. `zterm-daemon` runs or manages a daemon installation.
+
+## Remote CLI Commands
+
+| command | owner | side effects | gate |
+| --- | --- | --- | --- |
+| `zterm login` | account/auth owner | authenticates and atomically stores local CLI auth in `~/.zterm/config.json` | account-state and real login path |
+| `zterm login --from-config` | account/auth owner | consumes one-shot login password before authentication | account-state and config transaction tests |
+| `zterm logout` | account/auth owner | advances local auth generation and removes CLI auth; preserves slots, daemon config, and unrelated fields | stale-identity and logout tests |
+| `zterm slot list` | slot owner | reads local slot bindings only | slot-store tests |
+| `zterm slot set <1..20> [--width-mode ...]` | slot owner | resolves exact server and stable session, optionally previews, then commits the slot | slot, catalog, and snapshot tests |
+| `zterm <1..20>` | CLI connection owner | connects the exact saved binding and renders the canonical mirror | installed blackbox path |
+| `zterm` | slot selector and CLI connection owner | selects one existing slot; it does not refresh the server catalog | no-slot and selection tests |
+| `zterm upgrade [--registry <url>]` | CLI release adapter | upgrades only `@jsonstudio/zterm-cli` in the detected npm prefix | npm isolation suite |
+| `zterm daemon install [--version <version>] [--registry <url>]` | daemon package adapter | installs the public launcher and matching payload; it does not start a service | daemon-management tests |
+| `zterm daemon status` | existing daemon status owner | delegates the absolute installed daemon entry and preserves exit/status truth | daemon-management tests |
+| `zterm daemon config` | shared config projection owner | prints real path and redacted typed values; it does not migrate or write config | config tests |
+
+The only normal configuration path is `~/.zterm/config.json`. CLI and daemon
+own different typed sections. Read-only commands do not migrate `~/.wterm`.
+
+`Ctrl+] q` disconnects only the local CLI and restores terminal state. It does
+not delete or stop the remote session. Other `Ctrl+]` sequences scroll, pan,
+return to follow, or send a literal prefix.
+
+## Requirements And Status
+
+- Node.js 22 or newer.
+- Fixed platform tuples: `darwin-arm64`, `linux-x64`, `win32-x64`.
+- macOS arm64 full user path passed from an isolated npm tarball.
+- npm isolation upgrade passed 8/8.
+- Public npm publication is pending.
+- Windows and Linux real native and installed-CLI gates are pending CI or a
+  target host. They are not implied by the macOS result.
+
+## Daemon Distribution
+
+The daemon distribution has one public launcher package and exactly three
+platform payloads:
+
+```text
+@jsonstudio/zterm-daemon
+@jsonstudio/zterm-daemon-darwin-arm64
+@jsonstudio/zterm-daemon-linux-x64
+@jsonstudio/zterm-daemon-win32-x64
+```
+
+The public package is the only bin owner. Each payload contains its runtime,
+DAGpipe native, `node-pty`, `wrtc`, terminal config command, platform runner,
+and `zterm-package.json`. The Darwin payload also contains the Swift helper.
+
+```mermaid
+flowchart TD
+  Darwin["darwin-arm64 release dir"] --> Npm["prepare-daemon-npm-package.mjs"]
+  Linux["linux-x64 release dir"] --> Npm
+  Windows["win32-x64 release dir"] --> Npm
+  Npm --> Public["@jsonstudio/zterm-daemon public launcher"]
+  Npm --> Payload["three platform payload packages"]
+  Public --> PublicBin["zterm-daemon + wterm bins"]
+  Public --> Shim["support/install-user-shims.cjs"]
+  Payload --> Runtime["runtime/server.cjs + native components + runner"]
+```
+
+Pack with explicit version and release inputs:
+
+```sh
+node android/scripts/prepare-daemon-npm-package.mjs \
+  --version <daemon-version> \
+  --release darwin-arm64=<release-dir> \
+  --release linux-x64=<release-dir> \
+  --release win32-x64=<release-dir>
+```
+
+The retired single-host no-argument flow must not be used. The
+`android/package.json` Node script remains the entry point; pnpm or CI passes
+the required arguments.
+
+## Daemon Commands
 
 | command | owner function | side effects | gate |
 | --- | --- | --- | --- |
@@ -25,69 +107,19 @@ Worker-readable CLI map. Generated diagram: `docs/wiki/generated/cli.html`.
 | `status` | `status` | prints direct/service health | status smoke |
 | `service-status` | `status_service` / `Invoke-ServiceStatus` | reads launchd snapshot or Windows Scheduled Task state | service gate |
 | `install-service` | `install_service` / `Invoke-InstallService` | writes plist or registers `ZTermDaemon`, primes macOS permissions, bootstraps service | service script test |
-| `uninstall-service` | `uninstall_service` / `Invoke-UninstallService` | bootout/remove plist or unregister Windows task + legacy cleanup | service script test |
-| `configure-relay` | `configure_relay` | current JSON configuration writer; target writes validated `~/.zterm/config.toml` after one-time migration and removes JSON runtime fallback | daemon-config test; target migration gate pending |
+| `uninstall-service` | `uninstall_service` / `Invoke-UninstallService` | bootout/remove plist or unregister Windows task and clean owned legacy task state | service script test |
+| `configure-relay` | `configure_relay` / `Invoke-ConfigureRelay` | delegates typed shared-config writes through `support/terminal-config-command.cjs` | daemon-config test |
+| `config` | `config` / `Invoke-Config` | prints redacted shared config projection | daemon-config test |
 
-## Release Chain
-
-```mermaid
-flowchart TD
-  Source["src/server/server.ts"] --> Release["prepare-global-daemon-release.sh"]
-  Release --> Runtime["~/.wterm/daemon-runtime/server.cjs"]
-  Release --> Native["support/zterm-daemon native helper"]
-  Runtime --> Install["install-global-daemon-cli.sh"]
-  Install --> Bin["~/.local/bin/zterm-daemon"]
-  Release --> Npm["prepare-daemon-npm-package.mjs"]
-  Npm --> PackageBin["package/bin/zterm-daemon"]
-  Npm --> Windows["package/support/windows/zterm-daemon.ps1"]
-  Windows --> Task["Windows Scheduled Task: ZTermDaemon"]
-```
-
-## Shell Lifecycle (zterm-daemon.sh)
-
-| step | function | behavior |
-| --- | --- | --- |
-| read config | `read_config` | runs `node --import tsx` against `daemon-config.ts` to extract host/port/session/auth source |
-| dispatch | main `case` | routes `run/start/stop/restart/status/service-status/install-service/uninstall-service/configure-relay` |
-| launchd label | `LAUNCH_AGENT_LABEL` | `com.zterm.android.zterm-daemon` (legacy `com.zterm.android.daemon` and `com.wterm.mobile.daemon` removed on install) |
-| pid file | `DAEMON_PID_FILE` | `~/.wterm/run/zterm-daemon.pid` |
-| runtime bundle | `STAGED_DAEMON_ENTRY` | `~/.wterm/daemon-runtime/server.cjs` (built from `src/server/server.ts`) |
-| node-pty helper | `STAGED_NODE_PTY_HELPER_GLOB` | darwin `spawn-helper` glob for `node-pty` prebuilds |
-| native helper | `NATIVE_DAEMON_BIN` | `~/.wterm/bin/zterm-daemon` (Swift Mach-O for Screen Recording + file access) |
-
-## Windows Lifecycle (zterm-daemon.ps1)
-
-| step | function | behavior |
-| --- | --- | --- |
-| package root | `Resolve-PackageRoot` | reads `ZTERM_PACKAGE_ROOT` from npm bin wrapper, then uses packaged `runtime/server.cjs` |
-| dispatch | `switch ($command)` | routes `run/start/stop/restart/status/service-status/install-service/uninstall-service/configure-relay` |
-| scheduled task | `ZTermDaemon` | installed by `Register-ScheduledTask`, trigger is current user logon |
-| pid file | `$PidFile` | `~/.zterm/run/zterm-daemon.pid` for direct process truth |
-| runtime bundle | `$RuntimeEntry` | `runtime/server.cjs`; terminal backend auto-selects WezTerm on `win32` |
-| stop policy | `Stop-Process -Id <pid>` | only stops the explicit managed PID or explicit scheduled task; no broad process kill |
-
-## Node CLI Helpers
-
-| helper | purpose |
-| --- | --- |
-| `scripts/daemon-mirror-close-loop.ts` | terminal closed-loop verification |
-| `scripts/daemon-mirror-lab.ts` | local tmux/mirror lab cases |
-| `scripts/runtime-debug-remote.ts` | remote daemon debug pull |
-| `scripts/collect-runtime-audit.ts` | collect runtime logs/snapshots |
-| `scripts/analyze-runtime-debug.ts` | summarize runtime debug logs |
-| `scripts/terminal-real-device-evidence.ts` | Android device evidence capture |
-| `scripts/traversal-relay-local-smoke.ts` | relay smoke test |
-| `scripts/build-function-wiki.mjs` | render worker-readable wiki HTML from mermaid blocks |
-| `scripts/prepare-daemon-npm-package.mjs` | package daemon runtime + CLI bin into npm layout |
-| `scripts/windows/zterm-daemon.ps1` | Windows daemon runner and Scheduled Task installer |
-| `scripts/prepare-global-daemon-release.sh` | stage global release assets and runtime bundle |
-| `scripts/install-global-daemon-cli.sh` | install `zterm-daemon` into `~/.local/bin` |
-| `scripts/verify-release-assets.mjs` | release verify (APK + manifest + sha256) |
-| `scripts/verify-relay-server-package.mjs` | relay server package verify |
-| `scripts/check-wterm-runtime-published.mjs` | upstream runtime version check |
+The source shell entry waits for installed package-version support and owns no
+lifecycle implementation. The public npm launcher resolves the matching payload
+and sets `ZTERM_PACKAGE_ROOT` before invoking its runner.
 
 ## No-Go
 
 - Do not add broad process kill commands.
-- Do not add new public subcommands without updating this page, `docs/function-map.md`, and `src/lib/function-wiki-truth.test.ts`.
-- Do not make `status` imply readiness unless port/listener truth is verified.
+- Do not add a bin to a platform payload.
+- Do not use the no-argument single-host packer flow.
+- Do not claim public npm availability from a local tarball.
+- Do not claim three-platform acceptance from macOS evidence.
+- Do not make `status` imply readiness unless listener truth is verified.

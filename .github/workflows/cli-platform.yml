@@ -1,0 +1,493 @@
+name: CLI Platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      require_remote_cli:
+        description: Require the managed Windows remote CLI receipt
+        required: false
+        default: false
+        type: boolean
+  pull_request:
+    paths:
+      - '.github/workflows/cli-platform.yml'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'packages/cli/**'
+      - 'packages/shared/**'
+      - 'android/package.json'
+      - 'android/native/dagpipe/**'
+      - 'android/scripts/build-dagpipe-native.sh'
+      - 'android/scripts/cli-blackbox.ts'
+      - 'android/scripts/cli-blackbox-pty.ts'
+      - 'android/scripts/cli-blackbox-tmux-wrapper.mjs'
+      - 'android/scripts/ensure-dagpipe-sdk.sh'
+      - 'android/scripts/prepare-daemon-release-wrtc-input.mjs'
+      - 'android/scripts/prepare-daemon-platform-release.mjs'
+      - 'android/scripts/prepare-daemon-npm-package.mjs'
+      - 'android/scripts/prepare-daemon-ci-wrtc-input.mjs'
+      - 'android/scripts/prepare-global-daemon-release.sh'
+      - 'android/scripts/windows/zterm-daemon.ps1'
+      - 'android/src/server/**'
+      - 'android/src/traversal-relay/**'
+  push:
+    branches:
+      - main
+      - feat/daemon-cli-20261020
+    paths:
+      - '.github/workflows/cli-platform.yml'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'packages/cli/**'
+      - 'packages/shared/**'
+      - 'android/package.json'
+      - 'android/native/dagpipe/**'
+      - 'android/scripts/build-dagpipe-native.sh'
+      - 'android/scripts/cli-blackbox.ts'
+      - 'android/scripts/cli-blackbox-pty.ts'
+      - 'android/scripts/cli-blackbox-tmux-wrapper.mjs'
+      - 'android/scripts/ensure-dagpipe-sdk.sh'
+      - 'android/scripts/prepare-daemon-release-wrtc-input.mjs'
+      - 'android/scripts/prepare-daemon-platform-release.mjs'
+      - 'android/scripts/prepare-daemon-npm-package.mjs'
+      - 'android/scripts/prepare-daemon-ci-wrtc-input.mjs'
+      - 'android/scripts/prepare-global-daemon-release.sh'
+      - 'android/scripts/windows/zterm-daemon.ps1'
+      - 'android/src/server/**'
+      - 'android/src/traversal-relay/**'
+
+concurrency:
+  group: cli-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  platform:
+    name: ${{ matrix.tuple }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tuple: win32-x64
+            runner: windows-2022
+            platform: win32
+            arch: x64
+          - tuple: linux-x64
+            runner: ubuntu-22.04
+            platform: linux
+            arch: x64
+          - tuple: darwin-arm64
+            runner: macos-14
+            platform: darwin
+            arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify matrix tuple
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p 'process.platform')" = "${{ matrix.platform }}"
+          test "$(node -p 'process.arch')" = "${{ matrix.arch }}"
+          node -e 'if (Number(process.versions.node.split(".")[0]) !== 22) process.exit(1)'
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Fetch pinned DAGpipe SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_DIR="$RUNNER_TEMP/dagpipe-sdk"
+          git clone https://github.com/Jasonzhangf/DAGpipe.git "$SDK_DIR"
+          git -C "$SDK_DIR" checkout d88070c9a2ebaaf06d19ebc00ae313bd5f44fd8b
+          if command -v cygpath >/dev/null 2>&1; then
+            SDK_DIR="$(cygpath -u "$SDK_DIR")"
+          fi
+          echo "DAGPIPE_SDK_PATH=$SDK_DIR" >> "$GITHUB_ENV"
+
+      - name: Build DAGpipe native
+        shell: bash
+        run: pnpm --dir android run build:dagpipe-native
+
+      - name: Run CLI tests
+        run: pnpm --dir packages/cli test
+
+      - name: Run CLI type-check
+        run: pnpm --dir packages/cli type-check
+
+      - name: Run CLI build
+        run: pnpm --dir packages/cli build
+
+      - name: Create evidence directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/zterm-platform-evidence"
+          echo "ZTERM_PLATFORM_EVIDENCE=$RUNNER_TEMP/zterm-platform-evidence" >> "$GITHUB_ENV"
+
+      - name: Materialize declared wrtc release input
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST="$(node android/scripts/prepare-daemon-ci-wrtc-input.mjs \
+            --output-dir "$ZTERM_PLATFORM_EVIDENCE/wrtc-input")"
+          echo "ZTERM_DAEMON_WRTC_INPUT_MANIFEST=$MANIFEST" >> "$GITHUB_ENV"
+
+      - name: Configure Windows esbuild binary
+        if: matrix.platform == 'win32'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ESBUILD_PACKAGE="$(node -p "require.resolve('@esbuild/win32-x64/package.json', { paths: ['packages/cli'] })")"
+          ESBUILD_BIN="$(dirname "$ESBUILD_PACKAGE")/bin/esbuild.exe"
+          test -f "$ESBUILD_BIN"
+          echo "ZTERM_STAGE_ESBUILD_BIN=$ESBUILD_BIN" >> "$GITHUB_ENV"
+
+      - name: Stage daemon platform payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p 'require("./android/package.json").version')"
+          node android/scripts/prepare-daemon-platform-release.mjs \
+            --output-dir "$ZTERM_PLATFORM_EVIDENCE/daemon-platform" \
+            --version "$VERSION" \
+            --dagpipe-native "android/native/dagpipe/index.node" \
+            --wrtc-input-manifest "$ZTERM_DAEMON_WRTC_INPUT_MANIFEST"
+
+      - name: Archive daemon platform payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/zterm-daemon-release"
+          tar -czf "$RUNNER_TEMP/zterm-daemon-release/payload.tgz" \
+            -C "$ZTERM_PLATFORM_EVIDENCE/daemon-platform" .
+
+      - name: Upload daemon platform release
+        uses: actions/upload-artifact@v4
+        with:
+          name: zterm-daemon-release-${{ matrix.tuple }}
+          path: ${{ runner.temp }}/zterm-daemon-release/payload.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Run installed CLI platform smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          node packages/cli/scripts/platform-smoke.mjs \
+            --evidence-dir "$ZTERM_PLATFORM_EVIDENCE/platform-smoke" \
+            --daemon-native "$ZTERM_PLATFORM_EVIDENCE/daemon-platform/runtime/dagpipe.node" \
+            --daemon-package-root "$ZTERM_PLATFORM_EVIDENCE/daemon-platform"
+
+      - name: Install Linux/macOS tmux
+        if: matrix.platform != 'win32'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v tmux >/dev/null 2>&1; then
+            exit 0
+          fi
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            sudo apt-get update
+            sudo apt-get install -y tmux
+          else
+            brew install tmux
+          fi
+
+      - name: Run Linux/macOS full CLI blackbox
+        if: matrix.platform != 'win32'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BLACKBOX_HOME="$ZTERM_PLATFORM_EVIDENCE/full-user-home"
+          mkdir -p "$BLACKBOX_HOME/.zterm/daemon-runtime" "$ZTERM_PLATFORM_EVIDENCE/full-user-path"
+          cp android/native/dagpipe/index.node "$BLACKBOX_HOME/.zterm/daemon-runtime/dagpipe.node"
+          HOME="$BLACKBOX_HOME" \
+          CLI_BLACKBOX_TARBALL="$ZTERM_PLATFORM_EVIDENCE/platform-smoke/zterm-cli-platform-smoke.tgz" \
+          CLI_BLACKBOX_EVIDENCE_DIR="$ZTERM_PLATFORM_EVIDENCE/full-user-path" \
+          pnpm --dir android exec tsx ./scripts/cli-blackbox.ts \
+            2>&1 | tee "$ZTERM_PLATFORM_EVIDENCE/full-user-path/run.log"
+
+      - name: Redact uploaded evidence text
+        if: always()
+        shell: bash
+        run: |
+          if [ -d "$RUNNER_TEMP/zterm-platform-evidence" ]; then
+            node packages/cli/scripts/platform-smoke-redact.mjs \
+              "$RUNNER_TEMP/zterm-platform-evidence"
+          fi
+
+      - name: Upload platform evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zterm-cli-platform-${{ matrix.tuple }}
+          path: |
+            ${{ runner.temp }}/zterm-platform-evidence/platform-smoke
+            ${{ runner.temp }}/zterm-platform-evidence/full-user-path
+          if-no-files-found: warn
+          retention-days: 14
+
+  windows-remote:
+    name: windows remote CLI
+    needs: platform
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify Windows runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p 'process.platform')" = "win32"
+          test "$(node -p 'process.arch')" = "x64"
+          node -e 'if (Number(process.versions.node.split(".")[0]) !== 22) process.exit(1)'
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download CLI platform artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: zterm-cli-platform-win32-x64
+          path: ${{ runner.temp }}/cli-platform
+
+      - name: Download Windows daemon payload
+        uses: actions/download-artifact@v4
+        with:
+          name: zterm-daemon-release-win32-x64
+          path: ${{ runner.temp }}/zterm-daemon-release
+
+      - name: Extract Windows daemon payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$RUNNER_TEMP/zterm-daemon-release/payload.tgz"
+          mkdir -p "$RUNNER_TEMP/daemon-platform"
+          tar -xzf "$RUNNER_TEMP/zterm-daemon-release/payload.tgz" \
+            -C "$RUNNER_TEMP/daemon-platform"
+
+      - name: Run Windows remote CLI acceptance
+        shell: bash
+        env:
+          ZTERM_CLI_E2E_RECEIPT_20261020: ${{ secrets.ZTERM_CLI_E2E_RECEIPT_20261020 }}
+          ZTERM_REQUIRE_REMOTE_CLI: ${{ github.event_name == 'workflow_dispatch' && inputs.require_remote_cli || false }}
+        run: |
+          set -euo pipefail
+          CLI_TARBALL="$RUNNER_TEMP/cli-platform/platform-smoke/zterm-cli-platform-smoke.tgz"
+          test -f "$CLI_TARBALL"
+          node packages/cli/scripts/ci-remote-cli.mjs \
+            --cli-tarball "$CLI_TARBALL" \
+            --daemon-payload-root "$RUNNER_TEMP/daemon-platform" \
+            --evidence-dir "$RUNNER_TEMP/windows-remote-cli" \
+            --private-receipt-dir "$RUNNER_TEMP/zterm-cli-remote-private"
+
+      - name: Redact Windows remote evidence
+        if: always()
+        id: redact_windows_remote_evidence
+        shell: bash
+        run: |
+          if [ -d "$RUNNER_TEMP/windows-remote-cli" ]; then
+            node packages/cli/scripts/platform-smoke-redact.mjs \
+              "$RUNNER_TEMP/windows-remote-cli"
+          fi
+
+      - name: Upload Windows remote evidence
+        if: always() && steps.redact_windows_remote_evidence.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zterm-windows-remote-cli
+          path: ${{ runner.temp }}/windows-remote-cli
+          if-no-files-found: warn
+          retention-days: 14
+
+  aggregate-pack:
+    name: aggregate daemon packages
+    needs: platform
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Download darwin-arm64 daemon release
+        uses: actions/download-artifact@v4
+        with:
+          name: zterm-daemon-release-darwin-arm64
+          path: ${{ runner.temp }}/daemon-releases/darwin-arm64
+
+      - name: Download linux-x64 daemon release
+        uses: actions/download-artifact@v4
+        with:
+          name: zterm-daemon-release-linux-x64
+          path: ${{ runner.temp }}/daemon-releases/linux-x64
+
+      - name: Download win32-x64 daemon release
+        uses: actions/download-artifact@v4
+        with:
+          name: zterm-daemon-release-win32-x64
+          path: ${{ runner.temp }}/daemon-releases/win32-x64
+
+      - name: Extract daemon platform releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          for tuple in darwin-arm64 linux-x64 win32-x64; do
+            RELEASE_DIR="$RUNNER_TEMP/daemon-releases/$tuple"
+            test -f "$RELEASE_DIR/payload.tgz"
+            tar -xzf "$RELEASE_DIR/payload.tgz" -C "$RELEASE_DIR"
+          done
+
+      - name: Build three-payload daemon npm packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p 'require("./android/package.json").version')"
+          node android/scripts/prepare-daemon-npm-package.mjs \
+            --version "$VERSION" \
+            --release "darwin-arm64=$RUNNER_TEMP/daemon-releases/darwin-arm64" \
+            --release "linux-x64=$RUNNER_TEMP/daemon-releases/linux-x64" \
+            --release "win32-x64=$RUNNER_TEMP/daemon-releases/win32-x64" \
+            --output-dir "$RUNNER_TEMP/daemon-packages"
+
+      - name: Upload daemon packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: zterm-daemon-packages
+          path: ${{ runner.temp }}/daemon-packages/*.tgz
+          if-no-files-found: error
+          retention-days: 14
+
+  install:
+    name: install ${{ matrix.tuple }}
+    needs: aggregate-pack
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tuple: win32-x64
+            runner: windows-2022
+            platform: win32
+            arch: x64
+          - tuple: linux-x64
+            runner: ubuntu-22.04
+            platform: linux
+            arch: x64
+          - tuple: darwin-arm64
+            runner: macos-14
+            platform: darwin
+            arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Verify matrix tuple
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(node -p 'process.platform')" = "${{ matrix.platform }}"
+          test "$(node -p 'process.arch')" = "${{ matrix.arch }}"
+          node -e 'if (Number(process.versions.node.split(".")[0]) !== 22) process.exit(1)'
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Download daemon packages
+        uses: actions/download-artifact@v4
+        with:
+          name: zterm-daemon-packages
+          path: ${{ runner.temp }}/daemon-packages
+
+      - name: Download CLI platform artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: zterm-cli-platform-${{ matrix.tuple }}
+          path: ${{ runner.temp }}/cli-platform
+
+      - name: Run daemon install blackbox
+        shell: bash
+        run: |
+          set -euo pipefail
+          EVIDENCE_DIR="$RUNNER_TEMP/daemon-install-evidence"
+          CLI_TARBALL="$RUNNER_TEMP/cli-platform/platform-smoke/zterm-cli-platform-smoke.tgz"
+          mkdir -p "$EVIDENCE_DIR"
+          test -f "$CLI_TARBALL"
+          node packages/cli/scripts/daemon-install-blackbox.mjs \
+            --packages-dir "$RUNNER_TEMP/daemon-packages" \
+            --cli-tarball "$CLI_TARBALL" \
+            --evidence-dir "$EVIDENCE_DIR" \
+            2>&1 | tee "$EVIDENCE_DIR/run.log"
+
+      - name: Redact daemon install evidence
+        if: always()
+        id: redact_install_evidence
+        shell: bash
+        run: |
+          if [ -d "$RUNNER_TEMP/daemon-install-evidence" ]; then
+            node packages/cli/scripts/platform-smoke-redact.mjs \
+              "$RUNNER_TEMP/daemon-install-evidence"
+          fi
+
+      - name: Upload daemon install evidence
+        if: always() && steps.redact_install_evidence.outcome == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: zterm-daemon-install-${{ matrix.tuple }}
+          path: ${{ runner.temp }}/daemon-install-evidence
+          if-no-files-found: warn
+          retention-days: 14

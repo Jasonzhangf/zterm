@@ -1,0 +1,387 @@
+{
+  "id": "cli.terminal_mirror_event",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "dagpipe.extract.arc.mirror_event",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.mirror_event",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.buffer_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.buffer_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.local_buffer_state",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.local_buffer_state",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.visible_range_demand",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.visible_range_demand",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "normalize_mirror_event",
+      "operator": "cli.terminal_mirror.normalize_event",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.mirror_event"
+      ],
+      "output": {
+        "id": "arc.normalized_mirror_event",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "assemble_frame",
+      "operator": "client.buffer_frame_assembly.assemble",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.normalized_mirror_event",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.frame_assembly_state",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_complete_frame",
+      "operator": "client.buffer_frame_assembly.plan_apply",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.frame_assembly_state",
+        "arc.local_buffer_state",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.complete_frame_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "apply_sparse_once",
+      "operator": "client.sparse_buffer.apply_complete_frame",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.complete_frame_plan"
+      ],
+      "output": {
+        "id": "arc.sparse_truth",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "commit_renderer_window",
+      "operator": "client.renderer_window.commit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.sparse_truth",
+        "arc.visible_range_demand"
+      ],
+      "output": {
+        "id": "arc.render_snapshot",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "plan_exact_repair",
+      "operator": "client.buffer_manager.plan_exact_repair",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.frame_assembly_state",
+        "arc.complete_frame_plan",
+        "arc.buffer_policy"
+      ],
+      "output": {
+        "id": "arc.repair_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dispatch_exact_repair",
+      "operator": "client.buffer_manager.dispatch_exact_repair",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.repair_plan"
+      ],
+      "output": {
+        "id": "arc.repair_dispatch",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_mirror_event",
+      "operator": "cli.terminal_mirror.settle_event",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.frame_assembly_state",
+        "arc.sparse_truth",
+        "arc.render_snapshot",
+        "arc.repair_dispatch"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "normalize_mirror_event",
+      "to": "assemble_frame",
+      "arc_id": "arc.normalized_mirror_event"
+    },
+    {
+      "from": "assemble_frame",
+      "to": "plan_complete_frame",
+      "arc_id": "arc.frame_assembly_state"
+    },
+    {
+      "from": "plan_complete_frame",
+      "to": "apply_sparse_once",
+      "arc_id": "arc.complete_frame_plan"
+    },
+    {
+      "from": "apply_sparse_once",
+      "to": "commit_renderer_window",
+      "arc_id": "arc.sparse_truth"
+    },
+    {
+      "from": "assemble_frame",
+      "to": "plan_exact_repair",
+      "arc_id": "arc.frame_assembly_state"
+    },
+    {
+      "from": "plan_complete_frame",
+      "to": "plan_exact_repair",
+      "arc_id": "arc.complete_frame_plan"
+    },
+    {
+      "from": "plan_exact_repair",
+      "to": "dispatch_exact_repair",
+      "arc_id": "arc.repair_plan"
+    },
+    {
+      "from": "dagpipe.extract.arc.mirror_event",
+      "to": "normalize_mirror_event",
+      "arc_id": "arc.mirror_event"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "assemble_frame",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.local_buffer_state",
+      "to": "plan_complete_frame",
+      "arc_id": "arc.local_buffer_state"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "plan_complete_frame",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.visible_range_demand",
+      "to": "commit_renderer_window",
+      "arc_id": "arc.visible_range_demand"
+    },
+    {
+      "from": "dagpipe.extract.arc.buffer_policy",
+      "to": "plan_exact_repair",
+      "arc_id": "arc.buffer_policy"
+    },
+    {
+      "from": "assemble_frame",
+      "to": "settle_mirror_event",
+      "arc_id": "arc.frame_assembly_state"
+    },
+    {
+      "from": "apply_sparse_once",
+      "to": "settle_mirror_event",
+      "arc_id": "arc.sparse_truth"
+    },
+    {
+      "from": "commit_renderer_window",
+      "to": "settle_mirror_event",
+      "arc_id": "arc.render_snapshot"
+    },
+    {
+      "from": "dispatch_exact_repair",
+      "to": "settle_mirror_event",
+      "arc_id": "arc.repair_dispatch"
+    }
+  ],
+  "outputs": [
+    "arc.result"
+  ]
+}

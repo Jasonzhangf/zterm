@@ -19,6 +19,7 @@ import {
   validateTerminalMuxChannelEnvelope,
   type TerminalMuxChannelClientMessage,
   type TerminalMuxTargetClientMessage,
+  type TerminalSessionCatalogEntry,
   FILE_TRANSFER_WIRE_CHUNK_BYTES,
   FILE_TRANSFER_WIRE_FRAME_MAX_CHARS,
   getRemoteWindowMediaPlanContract,
@@ -233,6 +234,9 @@ describe('terminal mux protocol contract', () => {
       }),
     });
     expect(isTerminalMuxServerFrame(ready)).toBe(true);
+    if (ready.type !== 'mux-ready') {
+      throw new Error(`expected mux-ready, received ${ready.type}`);
+    }
     expect(ready.payload.capabilities).toMatchObject({
       version: TERMINAL_MUX_PROTOCOL_VERSION,
       channelEnvelope: true,
@@ -359,6 +363,200 @@ describe('terminal mux protocol contract', () => {
         },
       },
     });
+  });
+
+  it('routes typed terminal snapshot requests and results through mux target envelopes', () => {
+    const catalogEntry = {
+      name: 'work',
+      backend: 'tmux',
+      stableId: 'tmux:socket=/tmp/zterm.sock:server=1:session=$1:created=1',
+    } satisfies TerminalSessionCatalogEntry;
+    expect(catalogEntry.stableId).toContain('session=$1');
+
+    const requestMessage = {
+      type: 'terminal-snapshot-request',
+      payload: {
+        version: 1,
+        backend: 'herdr',
+        stableId: 'herdr:terminal=terminal-1:pane=pane-1',
+        maxLines: 200,
+      },
+    } as const satisfies TerminalMuxTargetClientMessage;
+    const request = buildTerminalMuxTargetMessage(requestMessage, 'snapshot-request-1');
+    expect(classifyTerminalMuxClientMessage(requestMessage)).toBe('target');
+    expect(isTerminalMuxClientFrame(request)).toBe(true);
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-a',
+        message: requestMessage,
+      },
+    })).toBe(false);
+    expect(isTerminalMuxClientFrame({
+      type: 'terminal-snapshot-request',
+      payload: requestMessage.payload,
+    })).toBe(false);
+
+    const head = {
+      sessionId: 'session-1',
+      revision: 7,
+      latestEndIndex: 120,
+      availableStartIndex: 0,
+      availableEndIndex: 120,
+    };
+    const body = {
+      revision: 7,
+      startIndex: 0,
+      endIndex: 120,
+      cols: 80,
+      rows: 24,
+      cursorKeysApp: false,
+      lines: [],
+    };
+    const resultPayloads = [
+      {
+        status: 'available',
+        backend: 'tmux',
+        stableId: 'tmux:socket=/tmp/zterm.sock:server=1:session=$1:created=1',
+        head,
+        body,
+      },
+      { status: 'unavailable', reason: 'mirror_not_ready' },
+      { status: 'failed', code: 'session_identity_mismatch' },
+    ] as const;
+    // Compile-time target-server membership is checked here; runtime validation
+    // is exercised below because the legacy server target predicate is permissive.
+    const serverMessage = {
+      type: 'terminal-snapshot-result',
+      payload: resultPayloads[0],
+    } satisfies import('./protocol').TerminalMuxTargetServerMessage;
+    expect(serverMessage.type).toBe('terminal-snapshot-result');
+    for (const [index, payload] of resultPayloads.entries()) {
+      const message = {
+        type: 'terminal-snapshot-result',
+        payload,
+      } as const satisfies import('./protocol').TerminalMuxTargetServerMessage;
+      expect(isTerminalMuxServerFrame(
+        buildTerminalMuxServerTargetMessage(message, 'snapshot-request-1'),
+      ), `snapshot result ${index} (${payload.status})`).toBe(true);
+      expect(isTerminalMuxServerFrame({
+        type: 'mux-channel-message',
+        payload: { channelId: 'channel-a', message },
+      })).toBe(false);
+      expect(() =>
+        buildTerminalMuxServerChannelMessage('channel-a', message),
+      ).toThrow('terminal mux channel message cannot carry terminal-snapshot-result');
+      expect(isTerminalMuxServerFrame(message)).toBe(false);
+    }
+  });
+
+  it('rejects malformed snapshot request and result payloads', () => {
+    const validRequest = {
+      type: 'terminal-snapshot-request',
+      payload: {
+        version: 1,
+        backend: 'tmux',
+        stableId: 'tmux:socket=/tmp/zterm.sock:server=1:session=$1:created=1',
+        maxLines: 80,
+      },
+    };
+    const invalidRequests = [
+      { ...validRequest, payload: { ...validRequest.payload, version: 2 } },
+      { ...validRequest, payload: { ...validRequest.payload, backend: 'zellij' } },
+      { ...validRequest, payload: { ...validRequest.payload, stableId: '' } },
+      { ...validRequest, payload: { ...validRequest.payload, stableId: '   ' } },
+      { ...validRequest, payload: { ...validRequest.payload, maxLines: 0 } },
+      { ...validRequest, payload: { ...validRequest.payload, maxLines: -1 } },
+      { ...validRequest, payload: { ...validRequest.payload, maxLines: 1.5 } },
+      { ...validRequest, payload: { ...validRequest.payload, maxLines: Number.NaN } },
+    ];
+    for (const message of invalidRequests) {
+      expect(isTerminalMuxClientFrame({
+        type: 'mux-target-message',
+        payload: { requestId: 'snapshot-request-1', message },
+      })).toBe(false);
+    }
+
+    const validAvailable = {
+      status: 'available',
+      backend: 'tmux',
+      stableId: 'tmux:socket=/tmp/zterm.sock:server=1:session=$1:created=1',
+      head: { sessionId: 'session-1', revision: 1, latestEndIndex: 4 },
+      body: {
+        revision: 1,
+        startIndex: 0,
+        endIndex: 4,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [],
+      },
+    };
+    const invalidResults = [
+      { ...validAvailable, status: 'unknown' },
+      { ...validAvailable, backend: 'zellij' },
+      { ...validAvailable, stableId: '' },
+      { ...validAvailable, head: null },
+      { ...validAvailable, body: [] },
+      { status: 'unavailable', reason: 'mirror_missing' },
+      { status: 'failed', code: 'session_not_ready' },
+    ];
+    for (const payload of invalidResults) {
+      expect(isTerminalMuxServerFrame({
+        type: 'mux-target-message',
+        payload: {
+          requestId: 'snapshot-request-1',
+          message: { type: 'terminal-snapshot-result', payload },
+        },
+      })).toBe(false);
+    }
+  });
+
+  it('validates exact-existing open identity without changing legacy opens', () => {
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-open',
+      payload: { channelId: 'channel-old', sessionName: 'work' },
+    })).toBe(true);
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-exact',
+        sessionName: 'work',
+        backend: 'tmux',
+        expectedSessionIdentity: 'tmux:socket=/tmp/zterm.sock:server=1:session=$1:created=1',
+        existingOnly: true,
+      },
+    })).toBe(true);
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-exact',
+        sessionName: 'work',
+        expectedSessionIdentity: '   ',
+        existingOnly: true,
+      },
+    })).toBe(false);
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-exact',
+        sessionName: 'work',
+        expectedSessionIdentity: 'tmux:socket=/tmp/zterm.sock:server=1:session=$1:created=1',
+        existingOnly: false,
+      },
+    })).toBe(false);
+    expect(isTerminalMuxServerFrame({
+      type: 'mux-channel-opened',
+      payload: {
+        channelId: 'channel-exact',
+        sessionName: 'work',
+        stableId: 'tmux:socket=/tmp/zterm.sock:server=1:session=$1:created=1',
+      },
+    })).toBe(true);
+    expect(isTerminalMuxServerFrame({
+      type: 'mux-channel-opened',
+      payload: { channelId: 'channel-exact', sessionName: 'work', stableId: '' },
+    })).toBe(false);
   });
 
   it('accepts only known channel client message envelopes', () => {

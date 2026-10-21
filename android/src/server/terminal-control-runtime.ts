@@ -8,8 +8,16 @@ import {
   TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
 } from '@zterm/shared/terminal/input-chunking';
 import type {
+  ResolvedTerminalSession,
   TerminalSourceAdapter,
+  TerminalSessionIdentity,
+  TerminalSessionIdentityResolution,
   TerminalSourceKind,
+  TmuxTerminalSessionTarget,
+} from './terminal-source-adapter';
+import {
+  buildTmuxSessionStableId,
+  parseTerminalSessionStableId,
 } from './terminal-source-adapter';
 
 const DEFAULT_MANUAL_TERMINAL_COLS = 80;
@@ -20,6 +28,7 @@ export type TerminalControlBackendKind = TerminalSourceKind;
 export interface TerminalSessionCatalogEntry {
   name: string;
   backend: 'tmux' | 'herdr';
+  stableId?: string;
   cwd?: string;
 }
 
@@ -91,6 +100,16 @@ export interface TerminalControlRuntime {
   listTmuxSessions: (backend?: TerminalControlBackendKind) => string[];
   listTerminalSessions: () => string[];
   listTerminalSessionCatalog: () => TerminalSessionCatalogEntry[];
+  readSessionIdentity: (target: {
+    backend: 'tmux' | 'herdr';
+    sessionName: string;
+  }) => TerminalSessionIdentity | null;
+  resolveExistingSession: (
+    stableId: string,
+    backend: 'tmux' | 'herdr',
+    requestedSessionName?: string,
+  ) => TerminalSessionIdentityResolution;
+  bindResolvedSession: (session: ResolvedTerminalSession) => void;
   resolveTerminalSessionBackend: (sessionName: string) => Exclude<TerminalControlBackendKind, 'wezterm'>;
   createDetachedTmuxSession: (input?: string, cwd?: string, backend?: TerminalControlBackendKind) => string;
   closeDetachedTerminalSession: (sessionName: string, backend?: TerminalControlBackendKind) => void;
@@ -118,6 +137,7 @@ export function createTerminalControlRuntime(
   let tmuxSocketMode: TmuxSocketMode = 'default';
   let tmuxSocketPathOverride: string | undefined;
   const sessionSocketPaths = new Map<string, string | undefined>();
+  const sessionNativeTargets = new Map<string, TmuxTerminalSessionTarget>();
 
   function socketPaths() {
     return [...new Set((deps.tmuxSocketPaths?.() || []).filter(Boolean))];
@@ -165,14 +185,39 @@ export function createTerminalControlRuntime(
     return sessionSocketPaths.get(sessionName);
   }
 
+  function resolveExactTmuxSessionTarget(sessionName: string) {
+    const nativeTarget = sessionNativeTargets.get(sessionName);
+    return nativeTarget
+      ? nativeTarget.sessionId
+      : buildExactTmuxSessionTarget(sessionName);
+  }
+
+  function resolveExactTmuxPaneTarget(sessionName: string) {
+    return `${resolveExactTmuxSessionTarget(sessionName)}:.{top-left}`;
+  }
+
+  function rewriteTmuxSessionTargets(args: string[], sessionName: string) {
+    const byNameSessionTarget = buildExactTmuxSessionTarget(sessionName);
+    const byNamePaneTarget = buildExactTmuxPaneTarget(sessionName);
+    const exactSessionTarget = resolveExactTmuxSessionTarget(sessionName);
+    const exactPaneTarget = resolveExactTmuxPaneTarget(sessionName);
+    return args.map((arg) => {
+      if (arg === byNameSessionTarget) return exactSessionTarget;
+      if (arg === byNamePaneTarget) return exactPaneTarget;
+      return arg;
+    });
+  }
+
   function runTmuxForSession(args: string[], sessionName: string) {
     const socketPath = resolveSessionSocketPath(sessionName);
-    return socketPath ? runTmuxWithSocketPath(args, socketPath) : runTmux(args);
+    const exactArgs = rewriteTmuxSessionTargets(args, sessionName);
+    return socketPath ? runTmuxWithSocketPath(exactArgs, socketPath) : runTmux(exactArgs);
   }
 
   function runTmuxAsyncForSession(args: string[], sessionName: string) {
     const socketPath = resolveSessionSocketPath(sessionName);
-    return socketPath ? runTmuxAsyncWithSocketPath(args, socketPath) : runTmuxAsync(args);
+    const exactArgs = rewriteTmuxSessionTargets(args, sessionName);
+    return socketPath ? runTmuxAsyncWithSocketPath(exactArgs, socketPath) : runTmuxAsync(exactArgs);
   }
 
   // Global session/panee enumerations must span every live socket, exactly like
@@ -225,6 +270,63 @@ export function createTerminalControlRuntime(
       throw firstError instanceof Error ? firstError : new Error('no reachable tmux socket');
     }
     return { ok: true as const, stdout: outputs.join('\n') };
+  }
+
+  function readTmuxSessionTargets(): TmuxTerminalSessionTarget[] {
+    const targets: TmuxTerminalSessionTarget[] = [];
+    let firstError: unknown;
+    let reached = false;
+    for (const socketPath of tmuxSocketTargets()) {
+      try {
+        const result = socketPath
+          ? runTmuxWithSocketPath([
+              'list-sessions',
+              '-F',
+              '#{session_name}\t#{session_id}\t#{session_created}\t#{pid}',
+            ], socketPath)
+          : runTmux([
+              'list-sessions',
+              '-F',
+              '#{session_name}\t#{session_id}\t#{session_created}\t#{pid}',
+            ]);
+        reached = true;
+        for (const line of result.stdout.split('\n')) {
+          const [sessionNameRaw, sessionId, createdAtRaw, serverPidRaw] = line.split('\t');
+          const sessionName = sessionNameRaw?.trim() || '';
+          const createdAt = Number.parseInt(createdAtRaw || '', 10);
+          const serverPid = serverPidRaw?.trim() || '';
+          if (
+            !sessionName
+            || deps.hiddenTmuxSessions.has(sessionName)
+            || !sessionId
+            || !Number.isFinite(createdAt)
+            || !serverPid
+          ) {
+            continue;
+          }
+          targets.push({
+            backend: 'tmux',
+            sessionName,
+            stableId: buildTmuxSessionStableId({
+              ...(socketPath ? { socketPath } : {}),
+              serverPid,
+              sessionId,
+              createdAt,
+            }),
+            ...(socketPath ? { socketPath } : {}),
+            serverPid,
+            sessionId,
+            createdAt,
+          });
+        }
+      } catch (error) {
+        if (firstError === undefined) firstError = error;
+      }
+    }
+    if (!reached) {
+      throw firstError instanceof Error ? firstError : new Error('no reachable tmux socket');
+    }
+    return targets;
   }
 
   function resolveExternalBackend(kind = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux')) {
@@ -415,7 +517,7 @@ export function createTerminalControlRuntime(
       }
       return;
     }
-    const target = buildExactTmuxPaneTarget(sessionName);
+    const target = resolveExactTmuxPaneTarget(sessionName);
     if (payload) {
       const segments = payload.split('\x04');
       for (let index = 0; index < segments.length; index += 1) {
@@ -494,6 +596,15 @@ export function createTerminalControlRuntime(
     const selectedBackend = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux');
     if (selectedBackend === 'tmux' || selectedBackend === 'wezterm') {
       const cwdBySession = new Map<string, string>();
+      const tmuxTargets = selectedBackend === 'tmux'
+        ? (() => {
+            try {
+              return readTmuxSessionTargets();
+            } catch {
+              return [];
+            }
+          })()
+        : [];
       if (selectedBackend === 'tmux') {
         try {
           const paneResult = runTmuxAcrossSockets(['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}']);
@@ -509,13 +620,26 @@ export function createTerminalControlRuntime(
       }
       for (const sessionName of listTmuxSessions('tmux')) {
         const cwd = cwdBySession.get(sessionName);
-        entries.push({ name: sessionName, backend: 'tmux', ...(cwd ? { cwd } : {}) });
+        const stableId = tmuxTargets.find((target) => target.sessionName === sessionName)?.stableId;
+        entries.push({
+          name: sessionName,
+          backend: 'tmux',
+          ...(stableId ? { stableId } : {}),
+          ...(cwd ? { cwd } : {}),
+        });
       }
     }
     if (deps.backendRuntimes?.herdr || deps.defaultBackend === 'herdr') {
       for (const sessionName of listTmuxSessions('herdr')) {
         const session = deps.backendRuntimes?.herdr?.listSessions().find((item) => item.sessionName === sessionName);
-        entries.push({ name: sessionName, backend: 'herdr', ...(session?.cwd ? { cwd: session.cwd } : {}) });
+        const stableId = deps.backendRuntimes?.herdr?.readSessionIdentity?.(sessionName)?.stableId
+          || session?.stableId;
+        entries.push({
+          name: sessionName,
+          backend: 'herdr',
+          ...(stableId ? { stableId } : {}),
+          ...(session?.cwd ? { cwd: session.cwd } : {}),
+        });
       }
     }
     return entries.sort((left, right) => {
@@ -555,6 +679,111 @@ export function createTerminalControlRuntime(
     return matches[0]!;
   }
 
+  function readSessionIdentity(target: {
+    backend: 'tmux' | 'herdr';
+    sessionName: string;
+  }): TerminalSessionIdentity | null {
+    const sessionName = deps.sanitizeSessionName(target.sessionName);
+    if (target.backend === 'herdr') {
+      const herdr = deps.backendRuntimes?.herdr;
+      return herdr?.readSessionIdentity?.(sessionName) || null;
+    }
+
+    const targets = readTmuxSessionTargets();
+    const pinned = sessionNativeTargets.get(sessionName);
+    const pinnedTarget = pinned
+      ? targets.find((entry) =>
+          entry.stableId === pinned.stableId
+          && entry.socketPath === pinned.socketPath)
+      : null;
+    const matches = pinnedTarget
+      ? [pinnedTarget]
+      : targets.filter((entry) => entry.sessionName === sessionName);
+    if (matches.length > 1) {
+      throw new Error(`terminal session identity is ambiguous: ${sessionName}`);
+    }
+    const resolved = matches[0];
+    if (!resolved) {
+      return null;
+    }
+    return {
+      backend: 'tmux',
+      sessionName: resolved.sessionName,
+      stableId: resolved.stableId,
+    };
+  }
+
+  function resolveExistingSession(
+    stableId: string,
+    backend: 'tmux' | 'herdr',
+    requestedSessionName?: string,
+  ): TerminalSessionIdentityResolution {
+    const parsed = parseTerminalSessionStableId(stableId);
+    if (!parsed || parsed.backend !== backend) {
+      return {
+        ok: false,
+        code: 'session_identity_mismatch',
+        message: `expected session identity does not belong to backend ${backend}`,
+      };
+    }
+
+    let resolved: ResolvedTerminalSession | null = null;
+    if (backend === 'tmux') {
+      const target = readTmuxSessionTargets().find((entry) => entry.stableId === stableId);
+      if (target) {
+        resolved = {
+          identity: {
+            backend: 'tmux',
+            sessionName: target.sessionName,
+            stableId: target.stableId,
+          },
+          target,
+        };
+      }
+    } else {
+      resolved = deps.backendRuntimes?.herdr?.resolveExistingSession?.(stableId) || null;
+    }
+    if (resolved?.identity.stableId === stableId) {
+      return { ok: true, session: resolved };
+    }
+
+    const requestedName = requestedSessionName
+      ? deps.sanitizeSessionName(requestedSessionName)
+      : '';
+    if (requestedName) {
+      try {
+        if (readSessionIdentity({ backend, sessionName: requestedName })) {
+          return {
+            ok: false,
+            code: 'session_identity_mismatch',
+            message: `display name ${requestedName} belongs to a different ${backend} session identity`,
+          };
+        }
+      } catch {
+        // Ambiguous display names cannot establish an identity match.
+        return {
+          ok: false,
+          code: 'session_identity_mismatch',
+          message: `display name ${requestedName} is ambiguous for ${backend}`,
+        };
+      }
+    }
+    return {
+      ok: false,
+      code: 'session_not_found',
+      message: `${backend} session identity is no longer present`,
+    };
+  }
+
+  function bindResolvedSession(session: ResolvedTerminalSession) {
+    if (session.target.backend === 'herdr') {
+      deps.backendRuntimes?.herdr?.bindResolvedSession?.(session);
+      return;
+    }
+    sessionNativeTargets.set(session.target.sessionName, session.target);
+    sessionSocketPaths.set(session.target.sessionName, session.target.socketPath);
+  }
+
   function createDetachedTmuxSession(input?: string, cwd?: string, backendKind?: TerminalControlBackendKind) {
     const externalBackend = resolveExternalBackend(backendKind);
     if (externalBackend) {
@@ -570,6 +799,17 @@ export function createTerminalControlRuntime(
       args.push('-c', cwd);
     }
     runTmux(args);
+    const target = readTmuxSessionTargets().find((entry) => entry.sessionName === sessionName);
+    if (target) {
+      bindResolvedSession({
+        identity: {
+          backend: 'tmux',
+          sessionName,
+          stableId: target.stableId,
+        },
+        target,
+      });
+    }
     return sessionName;
   }
 
@@ -581,6 +821,8 @@ export function createTerminalControlRuntime(
       return;
     }
     runTmuxForSession(['kill-session', '-t', buildExactTmuxSessionTarget(sessionName)], sessionName);
+    sessionSocketPaths.delete(sessionName);
+    sessionNativeTargets.delete(sessionName);
   }
 
   function renameTmuxSession(currentName?: string, nextName?: string, backendKind?: TerminalControlBackendKind) {
@@ -600,8 +842,17 @@ export function createTerminalControlRuntime(
     const sessionName = deps.sanitizeSessionName(currentName);
     const nextSessionName = deps.sanitizeSessionName(nextName);
     runTmuxForSession(['rename-session', '-t', buildExactTmuxSessionTarget(sessionName), nextSessionName], sessionName);
-    sessionSocketPaths.set(nextSessionName, sessionSocketPaths.get(sessionName));
+    const socketPath = sessionSocketPaths.get(sessionName);
+    const nativeTarget = sessionNativeTargets.get(sessionName);
+    sessionSocketPaths.set(nextSessionName, socketPath);
+    if (nativeTarget) {
+      sessionNativeTargets.set(nextSessionName, {
+        ...nativeTarget,
+        sessionName: nextSessionName,
+      });
+    }
     sessionSocketPaths.delete(sessionName);
+    sessionNativeTargets.delete(sessionName);
     return nextSessionName;
   }
 
@@ -619,6 +870,9 @@ export function createTerminalControlRuntime(
     listTmuxSessions,
     listTerminalSessions,
     listTerminalSessionCatalog,
+    readSessionIdentity,
+    resolveExistingSession,
+    bindResolvedSession,
     resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,

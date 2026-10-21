@@ -1,0 +1,66 @@
+{
+  "id": "cli.daemon_config",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_config_query",
+      "operator": "cli.daemon_config.validate_query",
+      "operator_version": "0.1",
+      "inputs": ["arc.request"],
+      "output": { "id": "arc.config_query", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "read_shared_config",
+      "operator": "shared.config.read",
+      "operator_version": "0.1",
+      "inputs": ["arc.config_query"],
+      "output": { "id": "arc.config_snapshot", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_daemon_sources",
+      "operator": "shared.daemon_config.resolve_sources",
+      "operator_version": "0.1",
+      "inputs": ["arc.config_snapshot"],
+      "output": { "id": "arc.daemon_resolution", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_redacted_config",
+      "operator": "shared.daemon_config.project_redacted",
+      "operator_version": "0.1",
+      "inputs": ["arc.daemon_resolution"],
+      "output": { "id": "arc.redacted_config", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_config_result",
+      "operator": "cli.daemon_config.collect_result",
+      "operator_version": "0.1",
+      "inputs": ["arc.redacted_config"],
+      "output": { "id": "arc.result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "validate_config_query", "to": "read_shared_config", "arc_id": "arc.config_query" },
+    { "from": "read_shared_config", "to": "resolve_daemon_sources", "arc_id": "arc.config_snapshot" },
+    { "from": "resolve_daemon_sources", "to": "project_redacted_config", "arc_id": "arc.daemon_resolution" },
+    { "from": "project_redacted_config", "to": "collect_config_result", "arc_id": "arc.redacted_config" }
+  ],
+  "outputs": ["arc.result"]
+}

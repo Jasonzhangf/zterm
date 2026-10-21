@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'fs';
@@ -65,6 +66,40 @@ function makeTempHome(): string {
   return home;
 }
 
+function resolveEsbuildBinary(): string {
+  const pnpmRoots = [
+    join(ANDROID_ROOT, 'node_modules', '.pnpm'),
+    join(ANDROID_ROOT, '..', 'node_modules', '.pnpm'),
+  ];
+  for (const pnpmRoot of pnpmRoots) {
+    if (!existsSync(pnpmRoot)) continue;
+    const entries = readdirSync(pnpmRoot)
+      .filter((entry) => entry.startsWith('esbuild@'))
+      .sort((left, right) => left.localeCompare(right, undefined, { numeric: true }));
+    for (const entry of entries.reverse()) {
+      const candidate = join(pnpmRoot, entry, 'node_modules', 'esbuild', 'bin', 'esbuild');
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  throw new Error('unable to locate esbuild for the terminal config fixture bundle');
+}
+
+function buildTerminalConfigBundle(packageRoot: string): string {
+  const supportDir = join(packageRoot, 'support');
+  const bundlePath = join(supportDir, 'terminal-config-command.cjs');
+  mkdirSync(supportDir, { recursive: true });
+  execFileSync(resolveEsbuildBinary(), [
+    join(ANDROID_ROOT, 'src', 'server', 'terminal-config-command.ts'),
+    '--bundle',
+    '--platform=node',
+    '--format=cjs',
+    '--target=node20',
+    `--outfile=${bundlePath}`,
+  ], { cwd: ANDROID_ROOT, stdio: 'ignore' });
+  chmodSync(bundlePath, 0o755);
+  return bundlePath;
+}
+
 function installRealSupportAtVersion(home: string): string {
   const version = packageVersion();
   const supportDir = join(home, '.zterm', 'releases', 'zterm-daemon', version, 'support');
@@ -72,6 +107,7 @@ function installRealSupportAtVersion(home: string): string {
   const supportPath = join(supportDir, 'zterm-daemon.sh');
   writeFileSync(supportPath, extractSupportHeredocBody());
   chmodSync(supportPath, 0o755);
+  buildTerminalConfigBundle(join(supportDir, '..'));
   return supportPath;
 }
 
@@ -101,11 +137,16 @@ type CliResult = {
   stderr: string;
 };
 
-function runSourceCli(home: string, args: string[]): CliResult {
+function runSourceCli(
+  home: string,
+  args: string[],
+  options: { input?: string; env?: NodeJS.ProcessEnv } = {},
+): CliResult {
   try {
     const stdout = execFileSync('bash', [join(ANDROID_ROOT, 'scripts', 'zterm-daemon.sh'), ...args], {
       cwd: ANDROID_ROOT,
-      env: { ...process.env, HOME: home },
+      env: { ...process.env, HOME: home, ...options.env },
+      input: options.input,
       encoding: 'utf8',
     });
     return { status: 0, stdout, stderr: '' };
@@ -187,8 +228,7 @@ describe('zterm daemon service script truth gates', () => {
       'https://relay.example.com/',
       '--username',
       'zterm-relay-smoke',
-      '--password',
-      'secret-password',
+      '--password-stdin',
       '--host-id',
       'mac-studio',
       '--device-name',
@@ -214,8 +254,7 @@ describe('zterm daemon service script truth gates', () => {
       'https://relay.example.com/',
       '--username',
       'zterm-relay-smoke',
-      '--password',
-      'secret-password',
+      '--password-stdin',
       '--host-id',
       'mac-studio',
       '--device-name',
@@ -267,14 +306,13 @@ describe('zterm daemon service script truth gates', () => {
       'https://relay.example.com/relay/',
       '--username',
       'zterm-relay-smoke',
-      '--password',
-      'secret-password',
+      '--password-stdin',
       '--host-id',
       'mac-studio',
       '--device-name',
       'Mac Studio',
       '--no-restart',
-    ]);
+    ], { input: 'secret-password\n' });
 
     expect(result.status).toBe(0);
     expect(result.stderr).toBe('');
@@ -316,92 +354,321 @@ describe('zterm daemon service script truth gates', () => {
     expect(execFileSync('bash', ['-n', supportPath], { encoding: 'utf8' })).toBe('');
   });
 
-  it('keeps relay account configuration explicit and secret-free in generated support', () => {
-    const support = extractSupportHeredocBody();
-    const usageBlock = block(support, 'Usage:', 1200, 'generated support');
-    const caseBlock = block(support, 'case "$cmd" in', 1200, 'generated support');
-    const configureBody = block(support, 'configure_relay() {', 5200, 'generated support');
+  it('projects config through the shared bundle without exposing account or auth secrets', () => {
+    const home = makeTempHome();
+    installRealSupportAtVersion(home);
+    const configPath = join(home, '.zterm', 'config.json');
+    mkdirSync(join(home, '.zterm'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      zterm: {
+        android: {
+          daemon: {
+            host: '127.0.0.1',
+            port: 17680,
+            authToken: 'daemon-auth-secret',
+          },
+        },
+      },
+      mobile: {
+        relay: {
+          username: 'relay-account-secret',
+          password: 'relay-password-secret',
+        },
+        unknownToken: 'unknown-secret',
+      },
+    }, null, 2));
 
-    expect(usageBlock).toContain('configure-relay --relay-url');
-    expect(caseBlock).toContain('configure-relay) configure_relay "$@" ;;');
-    expect(configureBody).toContain('mobile.relay');
-    expect(configureBody).toContain('passwordSet=true');
+    const result = runSourceCli(home, ['config']);
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
+    expect(result.stdout).toContain(`configPath=${configPath}`);
+    expect(result.stdout).toContain('configFound=yes');
+    expect(result.stdout).toContain('host=127.0.0.1 source=zterm.android.daemon.host');
+    expect(result.stdout).toContain('port=17680 source=zterm.android.daemon.port');
+    expect(result.stdout).toContain('auth=configured source=zterm.android.daemon.authToken');
+    for (const secret of ['daemon-auth-secret', 'relay-account-secret', 'relay-password-secret', 'unknown-secret']) {
+      expect(result.stdout).not.toContain(secret);
+    }
+
+    const configureBody = block(extractSupportHeredocBody(), 'configure_relay() {', 3600, 'generated support');
+    expect(configureBody).toContain('"$TERMINAL_CONFIG_COMMAND"');
+    expect(configureBody).toContain('configure-relay');
+    expect(configureBody).not.toContain('mobile.relay =');
     expect(configureBody).not.toContain('password=${relay_password}');
   });
 
-  it('migrates legacy ~/.wterm home before reading released daemon config', () => {
-    const support = extractSupportHeredocBody();
-    const configBlock = block(support, "const configPath = path.join(home, '.zterm', 'config.json');", 500, 'generated support');
+  it('does not migrate a legacy ~/.wterm home when projecting ~/.zterm config', () => {
+    const home = makeTempHome();
+    installRealSupportAtVersion(home);
+    const legacyPath = join(home, '.wterm', 'config.json');
+    const legacyBody = JSON.stringify({ mobile: { daemon: { host: 'legacy-host', port: 19999 } } }, null, 2);
+    mkdirSync(join(home, '.wterm'), { recursive: true });
+    writeFileSync(legacyPath, legacyBody);
 
-    expect(support).toContain("const ztermHome = path.join(home, '.zterm');");
-    expect(support).toContain("const legacyWtermHome = path.join(home, '.wterm');");
-    expect(support).toContain('fs.renameSync(legacyWtermHome, ztermHome)');
-    expect(support.indexOf('fs.renameSync(legacyWtermHome, ztermHome)')).toBeLessThan(support.indexOf("const configPath = path.join(home, '.zterm', 'config.json');"));
-    expect(configBlock).toContain("const configPath = path.join(home, '.zterm', 'config.json');");
+    const result = runSourceCli(home, ['config']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('host=0.0.0.0 source=default');
+    expect(result.stdout).toContain('port=3333 source=default');
+    expect(result.stdout).toContain('configFound=no');
+    expect(readFileSync(legacyPath, 'utf8')).toBe(legacyBody);
+    expect(existsSync(join(home, '.zterm', 'config.json'))).toBe(false);
   });
 
-  it('merges released daemon config per field so empty zterm config cannot mask legacy mobile auth', () => {
-    const support = extractSupportHeredocBody();
-    const configBlock = block(support, 'read_config() {', 3600, 'generated support');
+  it('merges projected daemon config per field with mobile fallback', () => {
+    const home = makeTempHome();
+    installRealSupportAtVersion(home);
+    const configPath = join(home, '.zterm', 'config.json');
+    mkdirSync(join(home, '.zterm'), { recursive: true });
+    writeFileSync(configPath, JSON.stringify({
+      zterm: {
+        android: {
+          daemon: {
+            host: '127.0.0.1',
+            port: 17680,
+          },
+        },
+      },
+      mobile: {
+        daemon: {
+          authToken: 'mobile-auth-secret',
+          sessionName: 'mobile-session',
+        },
+      },
+    }, null, 2));
 
-    expect(configBlock).toContain('const ztermDaemonConfig = ((config.zterm || {}).android || {}).daemon || {};');
-    expect(configBlock).toContain('const mobileDaemonConfig = (config.mobile || {}).daemon || {};');
-    expect(configBlock).toContain('asString(ztermDaemonConfig.host) || asString(mobileDaemonConfig.host)');
-    expect(configBlock).toContain('asPositiveInteger(ztermDaemonConfig.port) || asPositiveInteger(mobileDaemonConfig.port)');
-    expect(configBlock).toContain('const authTokenFromConfig = asString(ztermDaemonConfig.authToken) || asString(mobileDaemonConfig.authToken);');
-    expect(configBlock).toContain('asString(ztermDaemonConfig.sessionName) || asString(mobileDaemonConfig.sessionName)');
-    expect(configBlock).not.toContain('const daemonConfig = ((config.zterm || {}).android || {}).daemon || ((config.mobile || {}).daemon || {});');
+    const result = runSourceCli(home, ['config']);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('host=127.0.0.1 source=zterm.android.daemon.host');
+    expect(result.stdout).toContain('port=17680 source=zterm.android.daemon.port');
+    expect(result.stdout).toContain('sessionName=mobile-session source=mobile.daemon.sessionName');
+    expect(result.stdout).toContain('auth=configured source=mobile.daemon.authToken');
+    expect(result.stdout).not.toContain('mobile-auth-secret');
   });
 
   it('keeps install-time native RTC dependencies inside the daemon npm package', () => {
     const script = readDaemonNpmPackageScript();
 
-    expect(script).not.toContain("rmSync(resolve(npmPackageDir, 'runtime/node_modules')");
-    expect(script).toContain("requirePath(resolve(releaseDir, 'runtime/node_modules/node-pty')");
-    expect(script).toContain("requirePath(resolve(releaseDir, 'runtime/node_modules/@roamhq/wrtc')");
-    expect(script).toContain("resolve(releaseDir, `runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`)");
-    expect(script).toContain('zterm-daemon configure-relay --relay-url');
-    expect(script).toContain('--password-stdin');
-    expect(script).toContain('passwordSet=true');
+    expect(script).toContain("'runtime/node_modules/node-pty'");
+    expect(script).toContain("'runtime/node_modules/@roamhq/wrtc'");
+    expect(script).toContain(
+      "`runtime/node_modules/@roamhq/wrtc-${spec.tuple}/wrtc.node`",
+    );
   });
 
-  it('makes npm global installs create stable user-level daemon shims', () => {
+  it('keeps the public launcher as the sole bin owner and packages a stable shim installer', () => {
     const script = readDaemonNpmPackageScript();
 
-    expect(script).toContain("writeFileSync(resolve(npmPackageDir, 'support/install-user-shims.cjs')");
-    expect(script).toContain("postinstall: 'node support/install-user-shims.cjs'");
+    expect(script).toContain('const publicBinSource');
+    expect(script).toContain('const publicWtermSource');
+    expect(script).toContain('const publicShimInstallerSource');
     expect(script).toContain("bin/zterm-daemon.cjs");
     expect(script).toContain("bin/wterm.cjs");
     expect(script).toContain("'zterm-daemon': 'bin/zterm-daemon.cjs'");
     expect(script).toContain("wterm: 'bin/wterm.cjs'");
-    expect(script).toContain("writeShim('zterm-daemon'");
-    expect(script).toContain("writeShim('wterm'");
-    expect(script).toContain("writeShim('zterm-daemon.cmd'");
-    expect(script).toContain("writeShim('wterm.cmd'");
-    expect(script).toContain("resolve(homedir(), '.local/bin')");
-    expect(script).toContain("rmSync(target, { force: true })");
-    expect(script).toContain('exec node "\\${packageRoot}/bin/zterm-daemon.cjs" "$@"');
+    expect(script).toContain("join(homedir(), '.local', 'bin')");
+    expect(script).toContain("renameSync(temporary, target)");
+    expect(script).toContain("join(packageRoot, 'bin', 'zterm-daemon.cjs')");
+    expect(script).toContain("join(packageRoot, 'bin', 'wterm.cjs')");
+    expect(script).toContain('payloadResolverSource');
+  });
+
+  it('packs one public launcher package and three platform payload tarballs', () => {
+    const workspace = makeTempHome();
+    const projectRoot = join(workspace, 'android');
+    const scriptPath = join(projectRoot, 'scripts', 'prepare-daemon-npm-package.mjs');
+    const version = '9.9.9';
+    const tuples = [
+      { tuple: 'darwin-arm64', os: 'darwin', arch: 'arm64' },
+      { tuple: 'linux-x64', os: 'linux', arch: 'x64' },
+      { tuple: 'win32-x64', os: 'win32', arch: 'x64' },
+    ];
+    mkdirSync(join(projectRoot, 'scripts'), { recursive: true });
+    writeFileSync(scriptPath, readDaemonNpmPackageScript());
+    writeFileSync(join(workspace, 'LICENSE'), 'fixture license\n');
+    writeFileSync(join(projectRoot, 'package.json'), JSON.stringify({ version }));
+
+    const releases = tuples.map((spec) => {
+      const releaseDir = join(projectRoot, 'release-dist', spec.tuple);
+      for (const relativePath of [
+        'runtime/server.cjs',
+        'runtime/dagpipe.node',
+        'runtime/node_modules/node-pty/package.json',
+        'runtime/node_modules/@roamhq/wrtc/package.json',
+        `runtime/node_modules/@roamhq/wrtc-${spec.tuple}/wrtc.node`,
+      ]) {
+        const path = join(releaseDir, relativePath);
+        mkdirSync(join(path, '..'), { recursive: true });
+        writeFileSync(path, 'fixture runtime component\n');
+      }
+      if (spec.os === 'win32') {
+        mkdirSync(join(releaseDir, 'support', 'windows'), { recursive: true });
+        writeFileSync(
+          join(releaseDir, 'support', 'windows', 'zterm-daemon.ps1'),
+          readWindowsDaemonScript(),
+        );
+      } else {
+        mkdirSync(join(releaseDir, 'support'), { recursive: true });
+        writeFileSync(
+          join(releaseDir, 'support', 'zterm-daemon.sh'),
+          '#!/usr/bin/env bash\nexit 0\n',
+        );
+      }
+      if (spec.os === 'darwin') {
+        mkdirSync(join(releaseDir, 'support'), { recursive: true });
+        writeFileSync(join(releaseDir, 'support', 'zterm-daemon'), 'fixture helper\n');
+      }
+      writeFileSync(join(releaseDir, 'VERSION'), `${version}\n`);
+      writeFileSync(
+        join(releaseDir, 'zterm-package.json'),
+        `${JSON.stringify({
+          schemaVersion: 1,
+          package: {
+            name: `@jsonstudio/zterm-daemon-${spec.tuple}`,
+            version,
+          },
+          platform: {
+            os: spec.os,
+            arch: spec.arch,
+            node: { minimum: '22.0.0', abi: '127' },
+          },
+          runtimeComponents: [],
+        }, null, 2)}\n`,
+      );
+      buildTerminalConfigBundle(releaseDir);
+      return { ...spec, releaseDir };
+    });
+
+    const packOutput = execFileSync(process.execPath, [
+      scriptPath,
+      '--version',
+      version,
+      ...releases.flatMap(({ tuple, releaseDir }) => [
+        '--release',
+        `${tuple}=${releaseDir}`,
+      ]),
+    ], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    expect(packOutput).toContain('[prepare-daemon-npm-package] ready');
+
+    const outputDir = join(
+      projectRoot,
+      'release-dist',
+      'npm',
+      `zterm-daemon-${version}`,
+    );
+    const publicPackageRoot = join(outputDir, 'packages', '@jsonstudio', 'zterm-daemon');
+    const publicManifest = JSON.parse(
+      readFileSync(join(publicPackageRoot, 'package.json'), 'utf8'),
+    );
+    expect(publicManifest.name).toBe('@jsonstudio/zterm-daemon');
+    expect(publicManifest.version).toBe(version);
+    expect(publicManifest.bin).toEqual({
+      'zterm-daemon': 'bin/zterm-daemon.cjs',
+      wterm: 'bin/wterm.cjs',
+    });
+    expect(publicManifest.optionalDependencies).toEqual(Object.fromEntries(
+      tuples.map(({ tuple }) => [
+        `@jsonstudio/zterm-daemon-${tuple}`,
+        version,
+      ]),
+    ));
+    expect(existsSync(join(publicPackageRoot, 'runtime'))).toBe(false);
+
+    for (const { tuple, os, arch } of tuples) {
+      const payloadRoot = join(
+        outputDir,
+        'packages',
+        '@jsonstudio',
+        `zterm-daemon-${tuple}`,
+      );
+      const payloadManifest = JSON.parse(
+        readFileSync(join(payloadRoot, 'package.json'), 'utf8'),
+      );
+      expect(payloadManifest.name).toBe(`@jsonstudio/zterm-daemon-${tuple}`);
+      expect(payloadManifest.os).toEqual([os]);
+      expect(payloadManifest.cpu).toEqual([arch]);
+      expect(payloadManifest.bin).toBeUndefined();
+      expect(existsSync(join(payloadRoot, 'runtime', 'server.cjs'))).toBe(true);
+      expect(existsSync(join(
+        payloadRoot,
+        'runtime',
+        'node_modules',
+        `@roamhq/wrtc-${tuple}`,
+        'wrtc.node',
+      ))).toBe(true);
+      expect(existsSync(join(payloadRoot, 'support', 'terminal-config-command.cjs'))).toBe(true);
+
+      const tarballName = `jsonstudio-zterm-daemon-${tuple}-${version}.tgz`;
+      const tarballPath = join(outputDir, tarballName);
+      expect(existsSync(tarballPath), tarballName).toBe(true);
+      const entries = execFileSync('tar', ['-tf', tarballPath], { encoding: 'utf8' })
+        .trim()
+        .split('\n');
+      expect(entries).toContain('package/runtime/server.cjs');
+      expect(entries).toContain('package/zterm-package.json');
+      expect(entries).toContain('package/support/terminal-config-command.cjs');
+    }
+
+    expect(existsSync(join(outputDir, `jsonstudio-zterm-daemon-${version}.tgz`))).toBe(true);
+    const payloadManifest = JSON.parse(execFileSync(
+      'tar',
+      [
+        '-xOf',
+        join(outputDir, `jsonstudio-zterm-daemon-darwin-arm64-${version}.tgz`),
+        'package/zterm-package.json',
+      ],
+      { encoding: 'utf8' },
+    ));
+    expect(payloadManifest.package.name).toBe('@jsonstudio/zterm-daemon-darwin-arm64');
+    expect(payloadManifest.runtimeComponents).toContain('support/terminal-config-command.cjs');
+
+    const extractedBundle = join(workspace, 'extracted', 'terminal-config-command.cjs');
+    mkdirSync(join(workspace, 'extracted'), { recursive: true });
+    writeFileSync(extractedBundle, execFileSync(
+      'tar',
+      [
+        '-xOf',
+        join(outputDir, `jsonstudio-zterm-daemon-darwin-arm64-${version}.tgz`),
+        'package/support/terminal-config-command.cjs',
+      ],
+      { encoding: 'utf8' },
+    ));
+    const bundleResult = execFileSync(process.execPath, [extractedBundle, 'daemon-config', '--shell'], {
+      encoding: 'utf8',
+      env: { ...process.env, HOME: workspace },
+    });
+    expect(bundleResult).toContain("HOST='0.0.0.0'");
+    expect(bundleResult).toContain("PORT='3333'");
+    expect(bundleResult).toContain("AUTH_SOURCE='default'");
   });
 
   it('packages a Windows PowerShell daemon runner without duplicating terminal backend truth', () => {
     const packageScript = readDaemonNpmPackageScript();
     const windowsScript = readWindowsDaemonScript();
 
-    expect(packageScript).toContain("mkdirSync(resolve(npmPackageDir, 'support/windows')");
-    expect(packageScript).toContain("scripts/windows/zterm-daemon.ps1");
-    expect(packageScript).toContain("support/windows/zterm-daemon.ps1");
-    expect(packageScript).toContain("process.platform === 'win32'");
-    expect(packageScript).toContain("ZTERM_PACKAGE_ROOT: packageRoot");
+    expect(packageScript).toContain("if (spec.os === 'win32')");
+    expect(packageScript).toContain("files.push('support/windows/zterm-daemon.ps1')");
+    expect(packageScript).toContain('ZTERM_PACKAGE_ROOT: payloadRoot');
     expect(packageScript).toContain("powershell.exe");
 
-    expect(windowsScript).toContain('$RuntimeEntry = Join-Path $PackageRoot "runtime\\server.cjs"');
+    expect(windowsScript).toContain('$NativeDir = Join-Path $PackageRoot "runtime"');
+    expect(windowsScript).toContain('$RuntimeEntry = Join-Path $NativeDir "server.cjs"');
+    expect(windowsScript).toContain('$TerminalConfigCommand = Join-Path $PackageRoot "support\\terminal-config-command.cjs"');
+    expect(windowsScript).toContain('function Invoke-TerminalConfigCommand');
+    expect(windowsScript).toContain('Invoke-TerminalConfigCommand @("daemon-config", "--shell")');
+    expect(windowsScript).toContain('configure-relay');
+    expect(windowsScript).toContain('"config" { Invoke-Config }');
     expect(windowsScript).toContain('$TaskName = "ZTermDaemon"');
     expect(windowsScript).toContain('$FirewallRuleName = "ZTerm Daemon 3333"');
-    expect(windowsScript).toContain('function Write-JsonNoBom');
-    expect(windowsScript).toContain('[System.Text.UTF8Encoding]::new($false)');
-    expect(windowsScript).toContain('[System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)');
-    expect(windowsScript).toContain('Write-JsonNoBom $configPath $config');
-    expect(windowsScript).not.toContain('Set-Content -LiteralPath $configPath -Encoding UTF8');
+    expect(windowsScript).not.toContain('function Write-JsonNoBom');
+    expect(windowsScript).not.toContain('ConvertFrom-Json');
+    expect(windowsScript).not.toContain("mobile.relay");
     expect(windowsScript).toContain('$env:ZTERM_TERMINAL_BACKEND = "wezterm"');
     expect(windowsScript).toContain('$env:ZTERM_WEZTERM_EXE = $pathCandidate.Source');
     expect(windowsScript).toContain('"D:\\zterm-tools\\wezterm\\portable"');
@@ -435,17 +702,31 @@ describe('zterm daemon service script truth gates', () => {
 
   it('writes the version-scoped installed support and synchronized user-level CLI shims in the release installer', () => {
     const script = readReleaseScript();
-    const installerBody = block(script, 'write_installer() {', 2600, 'release packager');
+    const installerBody = block(script, 'write_installer() {', 6500, 'release packager');
 
     expect(installerBody).toContain('VERSION="$(cat "${PACKAGE_ROOT}/VERSION")"');
     expect(installerBody).toContain('INSTALL_ROOT="${HOME}/.zterm/releases/zterm-daemon/${VERSION}"');
     expect(installerBody).toContain('cp -R "${PACKAGE_ROOT}/support" "${INSTALL_ROOT}/support"');
-    expect(installerBody).toContain('cp "${INSTALL_ROOT}/support/zterm-daemon" "${HOME}/.zterm/bin/zterm-daemon"');
+    expect(installerBody).toContain('NATIVE_TMP="${HOME}/.zterm/bin/.zterm-daemon.$$"');
+    expect(installerBody).toContain('cp "${INSTALL_ROOT}/support/zterm-daemon" "${NATIVE_TMP}"');
+    expect(installerBody).toContain('mv "${NATIVE_TMP}" "${HOME}/.zterm/bin/zterm-daemon"');
+    expect(installerBody).not.toContain('cp "${INSTALL_ROOT}/support/zterm-daemon" "${HOME}/.zterm/bin/zterm-daemon"');
     expect(installerBody).toContain('LOCAL_BIN="${HOME}/.local/bin"');
-    expect(installerBody).toContain('cat > "${LOCAL_BIN}/zterm-daemon" <<WRAP');
+    expect(installerBody).toContain('DAEMON_TMP="${LOCAL_BIN}/.zterm-daemon.shim.$$"');
+    expect(installerBody).toContain('cat > "${DAEMON_TMP}" <<WRAP');
+    expect(installerBody).toContain('mv "${DAEMON_TMP}" "${LOCAL_BIN}/zterm-daemon"');
     expect(installerBody).toContain('exec "${INSTALL_ROOT}/support/zterm-daemon.sh" "\\$@"');
-    expect(installerBody).toContain('cat > "${LOCAL_BIN}/wterm" <<WRAP');
-    expect(installerBody.indexOf('cp "${INSTALL_ROOT}/support/zterm-daemon"')).toBeLessThan(installerBody.indexOf('cat > "${LOCAL_BIN}/zterm-daemon" <<WRAP'));
+    expect(installerBody).toContain('WTERM_TMP="${LOCAL_BIN}/.wterm.shim.$$"');
+    expect(installerBody).toContain('cat > "${WTERM_TMP}" <<WRAP');
+    expect(installerBody).toContain('mv "${WTERM_TMP}" "${LOCAL_BIN}/wterm"');
+    expect(installerBody).toContain('cp "${PACKAGE_ROOT}/zterm-package.json" "${INSTALL_ROOT}/zterm-package.json"');
+
+    expect(script).toContain('stage_terminal_config_command() {');
+    expect(script).toContain('--outfile="${SUPPORT_DIR}/terminal-config-command.cjs"');
+    expect(script).toContain("'support/terminal-config-command.cjs'");
+    expect(script.lastIndexOf('stage_terminal_config_command')).toBeGreaterThan(
+      script.indexOf('stage_terminal_config_command() {'),
+    );
   });
 
   it('compiles and installs the daemon native binary before the global installer copies it', () => {

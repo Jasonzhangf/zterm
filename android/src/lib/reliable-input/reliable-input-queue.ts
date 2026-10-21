@@ -1,10 +1,20 @@
-import type { Session, TerminalInputAckPayload, TerminalReliableInputPayload } from '../types';
+import type {
+  Session,
+  TerminalInputAckPayload,
+  TerminalReliableInputPayload,
+} from '../types';
 import type { BridgeTransportSocket } from '../traversal/types';
 import type { SessionTransportResource } from '../session-transport-runtime';
 import type { ClientDaemonConnection } from '../client-daemon-connection';
 import {
-  getTerminalInputUtf8ByteLength,
-} from '@zterm/shared/terminal/input-chunking';
+  createReliableInputQueue,
+  type ReliableInputEnqueueResult,
+  type ReliableInputFailure,
+  type ReliableInputPolicy,
+  type ReliableInputQueue,
+  type ReliableInputRuntimeEvent,
+  type ReliableInputTransportSnapshot,
+} from '@zterm/shared/terminal/reliable-input/reliable-input-queue';
 
 export interface RuntimeDebugFn {
   (event: string, payload?: Record<string, unknown>): void;
@@ -39,26 +49,16 @@ export interface SendInputTransportOptions {
   ) => void;
 }
 
-interface ReliableInputQueueItem {
-  seq: string;
-  data: string;
-  bytes: number;
-  attempt: number;
-  sentAt: number | null;
-  sentTargetKey: string | null;
-  sentTransportSocket: BridgeTransportSocket | null;
+interface AndroidReliableInputQueue {
+  sessionId: string;
+  options: SendInputTransportOptions;
+  core: ReliableInputQueue;
   headRefreshMarked: boolean;
 }
 
-interface ReliableInputSessionQueue {
-  sessionId: string;
-  items: ReliableInputQueueItem[];
-  timer: ReturnType<typeof globalThis.setTimeout> | null;
-  options: SendInputTransportOptions;
-}
-
-const reliableInputQueues = new Map<string, ReliableInputSessionQueue>();
-let reliableInputSequence = 0;
+const reliableInputQueues = new Map<string, AndroidReliableInputQueue>();
+let socketGenerationSequence = 0;
+let socketGenerations = new WeakMap<object, string>();
 
 const pendingInputHeadRefreshes = new Map<string, {
   daemonConnection: ClientDaemonConnection;
@@ -118,269 +118,19 @@ export function scheduleInputHeadRefresh(options: {
   });
 }
 
-function buildReliableInputSeq(sessionId: string) {
-  reliableInputSequence += 1;
-  return `${sessionId}:input:${Date.now()}:${reliableInputSequence}`;
-}
-
-function clearReliableInputTimer(queue: ReliableInputSessionQueue) {
-  if (queue.timer !== null) {
-    globalThis.clearTimeout(queue.timer);
-    queue.timer = null;
-  }
-}
-
-function scheduleReliableInputFlush(queue: ReliableInputSessionQueue, delayMs = TERMINAL_RELIABLE_INPUT_RETRY_MS) {
-  clearReliableInputTimer(queue);
-  queue.timer = globalThis.setTimeout(() => {
-    queue.timer = null;
-    flushReliableInputQueue(queue.sessionId);
-  }, delayMs);
-}
-
-function isReliableInputInFlight(item: ReliableInputQueueItem) {
-  return item.sentAt !== null;
-}
-
-function countReliableInputInFlight(queue: ReliableInputSessionQueue) {
-  return queue.items.reduce(
-    (count, item) => count + (isReliableInputInFlight(item) ? 1 : 0),
-    0,
-  );
-}
-
-function hasReliableInputTransportGenerationChanged(
-  queue: ReliableInputSessionQueue,
-  resource: SessionTransportResource,
+function computeReliableInputRetryDelayMs(
+  attempt: number,
+  baseMs = TERMINAL_RELIABLE_INPUT_RETRY_MS,
+  capMs = 2000,
 ) {
-  return queue.items.some((item) => (
-    isReliableInputInFlight(item)
-    && (
-      item.sentTargetKey !== resource.targetKey
-      || item.sentTransportSocket !== resource.socket
-    )
-  ));
-}
-
-function resetReliableInputTransportGeneration(queue: ReliableInputSessionQueue) {
-  let resetCount = 0;
-  for (const item of queue.items) {
-    if (!isReliableInputInFlight(item)) {
-      continue;
-    }
-    item.sentAt = null;
-    item.sentTargetKey = null;
-    item.sentTransportSocket = null;
-    resetCount += 1;
+  const safeBase = Math.max(50, baseMs);
+  const safeCap = Math.max(safeBase, capMs);
+  const attemptClamped = Math.min(8, Math.max(0, attempt | 0));
+  if (attemptClamped <= 1) {
+    return 0;
   }
-  return resetCount;
-}
-
-function getReliableInputQueue(sessionId: string, options: SendInputTransportOptions) {
-  const current = reliableInputQueues.get(sessionId);
-  if (current) {
-    current.options = options;
-    return current;
-  }
-  const next: ReliableInputSessionQueue = {
-    sessionId,
-    items: [],
-    timer: null,
-    options,
-  };
-  reliableInputQueues.set(sessionId, next);
-  return next;
-}
-
-function sendReliableInputFrame(
-  queue: ReliableInputSessionQueue,
-  item: ReliableInputQueueItem,
-  ws: BridgeTransportSocket,
-  resource: SessionTransportResource,
-) {
-  const localRevision = queue.options.readSessionBufferSnapshot(queue.sessionId).revision;
-  item.attempt += 1;
-  item.sentAt = Date.now();
-  item.sentTargetKey = resource.targetKey;
-  item.sentTransportSocket = ws;
-  const payload: TerminalReliableInputPayload = {
-    version: 1,
-    seq: item.seq,
-    data: item.data,
-    sentAt: item.sentAt,
-    attempt: item.attempt,
-  };
-  queue.options.sendSocketPayload(
-    queue.sessionId,
-    ws,
-    JSON.stringify({ type: 'input', payload }),
-  );
-  if (!item.headRefreshMarked) {
-    item.headRefreshMarked = true;
-    const isFirstPendingInputTailRefresh = queue.options.markPendingInputTailRefresh(
-      queue.sessionId,
-      localRevision,
-    );
-    if (isFirstPendingInputTailRefresh) {
-      scheduleInputHeadRefresh({
-        sessionId: queue.sessionId,
-        daemonConnection: queue.options.daemonConnection,
-        requestSessionBufferHead: queue.options.requestSessionBufferHead,
-      });
-    }
-  }
-  queue.options.runtimeDebug('session.input.reliable-send', {
-    sessionId: queue.sessionId,
-    seq: item.seq,
-    bytes: item.bytes,
-    attempt: item.attempt,
-    queueDepth: queue.items.length,
-    resourceTargetKey: resource.targetKey,
-    resourceSocketState: resource.socketState,
-  });
-}
-
-function flushReliableInputQueue(sessionId: string) {
-  const queue = reliableInputQueues.get(sessionId);
-  if (!queue || queue.items.length === 0) {
-    if (queue) {
-      clearReliableInputTimer(queue);
-      reliableInputQueues.delete(sessionId);
-    }
-    return;
-  }
-
-  const session = queue.options.refs.sessionsRef.current.find((item) => item.id === sessionId) || null;
-  if (!session) {
-    clearReliableInputTimer(queue);
-    reliableInputQueues.delete(sessionId);
-    queue.options.runtimeDebug('session.input.reliable-drop.missing-session', {
-      sessionId,
-      queueDepth: queue.items.length,
-    });
-    return;
-  }
-
-  const resource = readDaemonConnectionSessionResource(queue.options, sessionId);
-  const ws = readDaemonConnectionSessionSocket(queue.options, sessionId);
-  const wsReadyState = readSocketReadyState(ws);
-  const reconnectInFlight = queue.options.isReconnectInFlight(sessionId);
-  if (!isSessionMessageTransportReady(resource, ws)) {
-    queue.options.runtimeDebug('session.input.reliable-wait.transport-unavailable', {
-      sessionId,
-      queueDepth: queue.items.length,
-      wsReadyState,
-      reconnectInFlight,
-      resourceTargetKey: resource.targetKey,
-      resourceSocketState: resource.socketState,
-      channelState: resource.channel?.state ?? null,
-    });
-    scheduleReliableInputFlush(queue);
-    return;
-  }
-
-  const bufferedBytes = Number.isFinite(ws.bufferedAmount)
-    ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
-    : 0;
-  if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
-    queue.options.runtimeDebug('session.input.reliable-wait.backpressured-transport', {
-      sessionId,
-      queueDepth: queue.items.length,
-      bufferedBytes,
-      thresholdBytes: TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES,
-      reconnectInFlight,
-    });
-    scheduleReliableInputFlush(queue);
-    return;
-  }
-
-  if (queue.items.length === 0) {
-    clearReliableInputTimer(queue);
-    reliableInputQueues.delete(sessionId);
-    return;
-  }
-
-  const transportGenerationChanged = hasReliableInputTransportGenerationChanged(queue, resource);
-  if (transportGenerationChanged) {
-    const resetCount = resetReliableInputTransportGeneration(queue);
-    queue.options.runtimeDebug('session.input.reliable-retry.transport-generation', {
-      sessionId,
-      queueDepth: queue.items.length,
-      resetCount,
-      resourceTargetKey: resource.targetKey,
-    });
-  }
-
-  const oldestItem = queue.items[0]!;
-  let retryDelayMs = TERMINAL_RELIABLE_INPUT_RETRY_MS;
-  if (!transportGenerationChanged && isReliableInputInFlight(oldestItem)) {
-    const retryDecision = shouldRetryReliableInputInFlight(oldestItem);
-    retryDelayMs = Math.max(TERMINAL_RELIABLE_INPUT_RETRY_MS, retryDecision.delayMs);
-    if (retryDecision.retry) {
-      queue.options.runtimeDebug('session.input.reliable-retry.in-flight', {
-        sessionId,
-        seq: oldestItem.seq,
-        attempt: oldestItem.attempt,
-        reason: retryDecision.reason,
-        queueDepth: queue.items.length,
-        resourceTargetKey: resource.targetKey,
-        transportSocketChanged: oldestItem.sentTransportSocket !== resource.socket,
-      });
-      oldestItem.sentAt = null;
-    } else {
-      queue.options.runtimeDebug('session.input.reliable-wait.ack', {
-        sessionId,
-        seq: oldestItem.seq,
-        attempt: oldestItem.attempt,
-        queueDepth: queue.items.length,
-      });
-    }
-  }
-
-  const availableInFlight = Math.max(
-    0,
-    TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT - countReliableInputInFlight(queue),
-  );
-  let sentInFlush = 0;
-  for (const item of queue.items) {
-    if (sentInFlush >= availableInFlight) {
-      break;
-    }
-    if (isReliableInputInFlight(item)) {
-      continue;
-    }
-    sendReliableInputFrame(queue, item, ws, resource);
-    sentInFlush += 1;
-    const bufferedBytesAfterSend = Number.isFinite(ws.bufferedAmount)
-      ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
-      : 0;
-    if (bufferedBytesAfterSend >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
-      break;
-    }
-  }
-  scheduleReliableInputFlush(queue, retryDelayMs);
-}
-
-export function enqueueReliableInputChunks(options: SendInputTransportOptions, sessionId: string, inputChunks: string[]) {
-  const queue = getReliableInputQueue(sessionId, options);
-  for (const chunk of inputChunks) {
-    queue.items.push({
-      seq: buildReliableInputSeq(sessionId),
-      data: chunk,
-      bytes: getTerminalInputUtf8ByteLength(chunk),
-      attempt: 0,
-      sentAt: null,
-      sentTargetKey: null,
-      sentTransportSocket: null,
-      headRefreshMarked: false,
-    });
-  }
-  options.runtimeDebug('session.input.reliable-enqueue', {
-    sessionId,
-    chunks: inputChunks.length,
-    queueDepth: queue.items.length,
-  });
-  flushReliableInputQueue(sessionId);
+  const shift = attemptClamped - 2;
+  return Math.min(safeCap, safeBase * (1 << shift));
 }
 
 function isRetryableReliableInputNack(payload: TerminalInputAckPayload) {
@@ -392,98 +142,321 @@ function isRetryableReliableInputNack(payload: TerminalInputAckPayload) {
   );
 }
 
-function computeReliableInputRetryDelayMs(attempt: number, baseMs = TERMINAL_RELIABLE_INPUT_RETRY_MS, capMs = 2000) {
-  // 2026-08-09 BUG #2 fix: exponential backoff for reliable input retry.
-  // 1st retry (attempt=1) is immediate (0ms) so an ack-timeout is acted on
-  // without an extra beat of latency. Subsequent retries (attempt=2,3,4,...)
-  // grow exponentially: 500ms → 1000ms → 2000ms (cap). Without this, a daemon
-  // stall keeps triggering retry loops at a fixed 500ms cadence, so backoff
-  // bounds repeated attempts while the transport drains.
-  const safeBase = Math.max(50, baseMs);
-  const safeCap = Math.max(safeBase, capMs);
-  const attemptClamped = Math.min(8, Math.max(0, attempt | 0));
-  if (attemptClamped <= 1) {
-    return 0;
-  }
-  const shift = attemptClamped - 2;
-  const delay = Math.min(safeCap, safeBase * (1 << shift));
-  return delay;
+function androidFailure(
+  stage: ReliableInputFailure['stage'],
+  code: string,
+  message: string,
+): ReliableInputFailure {
+  return { stage, code, message };
 }
 
-function shouldRetryReliableInputInFlight(item: ReliableInputQueueItem) {
-  if (item.sentAt === null) {
-    return { retry: false, delayMs: computeReliableInputRetryDelayMs(item.attempt), reason: null };
-  }
-  const ageMs = Math.max(0, Date.now() - item.sentAt);
-  if (ageMs >= TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS) {
+const androidExistingPolicy: ReliableInputPolicy = {
+  maxInFlight: TERMINAL_RELIABLE_INPUT_MAX_IN_FLIGHT,
+  initialAttempt: 1,
+  decide(event) {
+    if (event.kind === 'ack' && event.ack.accepted === true) {
+      return { action: 'accept' };
+    }
+    if (event.kind === 'ack' && isRetryableReliableInputNack(event.ack)) {
+      return { action: 'retry', delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS };
+    }
+    if (event.kind === 'ack') {
+      return {
+        action: 'drop',
+        outcome: 'rejected',
+        error: androidFailure(
+          'nack',
+          event.ack.error || 'input_rejected',
+          'reliable input was rejected',
+        ),
+      };
+    }
+    if (event.kind === 'timeout' || event.kind === 'generation-change') {
+      return { action: 'retry', delayMs: 0 };
+    }
+    if (event.kind === 'send-error') {
+      return {
+        action: 'stop',
+        outcome: 'rejected',
+        error: androidFailure('send', 'input_send_failed', String(event.error)),
+      };
+    }
     return {
-      retry: true,
-      delayMs: computeReliableInputRetryDelayMs(item.attempt + 1),
-      reason: 'ack-timeout',
+      action: 'stop',
+      outcome: 'uncertain',
+      error: androidFailure('protocol', event.reason, 'input ACK fields conflicted'),
+    };
+  },
+  acknowledgePollDelayMs(item) {
+    return Math.max(
+      TERMINAL_RELIABLE_INPUT_RETRY_MS,
+      computeReliableInputRetryDelayMs(item.attempt),
+    );
+  },
+};
+
+function readSocketGeneration(ws: BridgeTransportSocket | null) {
+  if (!ws) {
+    return null;
+  }
+  let generation = socketGenerations.get(ws);
+  if (!generation) {
+    socketGenerationSequence += 1;
+    generation = `socket:${socketGenerationSequence}`;
+    socketGenerations.set(ws, generation);
+  }
+  return generation;
+}
+
+function readAndroidTransport(
+  queue: AndroidReliableInputQueue,
+): ReliableInputTransportSnapshot {
+  const session = queue.options.refs.sessionsRef.current.find(
+    (candidate) => candidate.id === queue.sessionId,
+  );
+  if (!session) {
+    return {
+      available: false,
+      ready: false,
+      backpressured: false,
+      channel: null,
+      generation: null,
+      closed: true,
     };
   }
+  const resource = readDaemonConnectionSessionResource(queue.options, queue.sessionId);
+  const ws = readDaemonConnectionSessionSocket(queue.options, queue.sessionId);
+  const socketGeneration = readSocketGeneration(ws);
+  const targetKey = resource.targetKey || queue.sessionId;
+  const generation = socketGeneration ? `${targetKey}:${socketGeneration}` : null;
+  const channel = `${targetKey}:${resource.channel?.channelId ?? 'legacy'}`;
+  const bufferedBytes = ws && Number.isFinite(ws.bufferedAmount)
+    ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
+    : 0;
   return {
-    retry: false,
-    delayMs: computeReliableInputRetryDelayMs(item.attempt),
-    reason: null,
+    available: true,
+    ready: isSessionMessageTransportReady(resource, ws),
+    backpressured: bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES,
+    channel,
+    generation,
   };
 }
 
-export function handleTerminalInputAck(sessionId: string, payload: TerminalInputAckPayload) {
-  if (!payload || payload.version !== 1 || typeof payload.seq !== 'string') {
+function activeQueueDepth(queue: AndroidReliableInputQueue) {
+  return queue.core.snapshot().activeDepth;
+}
+
+function logQueueEvent(
+  queue: AndroidReliableInputQueue,
+  event: ReliableInputRuntimeEvent,
+) {
+  const { options, sessionId } = queue;
+  if (event.kind === 'enqueue') {
+    options.runtimeDebug('session.input.reliable-enqueue', {
+      sessionId,
+      chunks: event.count,
+      queueDepth: event.depth,
+    });
     return;
   }
+  if (event.kind === 'wait') {
+    const resource = readDaemonConnectionSessionResource(options, sessionId);
+    const ws = readDaemonConnectionSessionSocket(options, sessionId);
+    const bufferedBytes = ws && Number.isFinite(ws.bufferedAmount)
+      ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
+      : 0;
+    if (event.reason === 'ack') {
+      options.runtimeDebug('session.input.reliable-wait.ack', {
+        sessionId,
+        seq: event.item?.seq ?? null,
+        attempt: event.item?.attempt ?? 0,
+        queueDepth: activeQueueDepth(queue),
+      });
+    } else if (event.reason === 'backpressure') {
+      options.runtimeDebug('session.input.reliable-wait.backpressured-transport', {
+        sessionId,
+        queueDepth: activeQueueDepth(queue),
+        bufferedBytes,
+        thresholdBytes: TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES,
+        reconnectInFlight: options.isReconnectInFlight(sessionId),
+      });
+    } else {
+      options.runtimeDebug('session.input.reliable-wait.transport-unavailable', {
+        sessionId,
+        queueDepth: activeQueueDepth(queue),
+        wsReadyState: readSocketReadyState(ws),
+        reconnectInFlight: options.isReconnectInFlight(sessionId),
+        resourceTargetKey: resource.targetKey,
+        resourceSocketState: resource.socketState,
+        channelState: resource.channel?.state ?? null,
+      });
+    }
+    return;
+  }
+  if (event.kind === 'retry') {
+    if (event.event.kind === 'generation-change') {
+      options.runtimeDebug('session.input.reliable-retry.transport-generation', {
+        sessionId,
+        queueDepth: activeQueueDepth(queue),
+        resetCount: 1,
+        resourceTargetKey: readDaemonConnectionSessionResource(options, sessionId).targetKey,
+      });
+    } else if (event.event.kind === 'ack') {
+      options.runtimeDebug('session.input.reliable-nack.retry', {
+        sessionId,
+        seq: event.item.seq,
+        accepted: event.event.ack.accepted,
+        bytes: event.event.ack.bytes,
+        error: event.event.ack.error,
+        queueDepth: activeQueueDepth(queue),
+      });
+    } else {
+      options.runtimeDebug('session.input.reliable-retry.in-flight', {
+        sessionId,
+        seq: event.item.seq,
+        attempt: event.item.attempt,
+        reason: event.event.kind,
+        queueDepth: activeQueueDepth(queue),
+      });
+    }
+    return;
+  }
+  if (event.kind === 'settled') {
+    if (event.settlement.outcome === 'accepted') {
+      options.runtimeDebug('session.input.reliable-ack', {
+        sessionId,
+        seq: event.settlement.item.seq,
+        accepted: true,
+        queueDepth: activeQueueDepth(queue),
+      });
+    } else if (
+      event.settlement.error?.stage === 'nack'
+      || event.settlement.error?.stage === 'protocol'
+    ) {
+      options.runtimeDebug('session.input.reliable-nack', {
+        sessionId,
+        seq: event.settlement.item.seq,
+        accepted: false,
+        bytes: event.settlement.error.ack?.bytes ?? 0,
+        error: event.settlement.error.code,
+        queueDepth: activeQueueDepth(queue),
+      });
+    }
+    return;
+  }
+  if (event.kind === 'idle') {
+    queue.headRefreshMarked = false;
+    reliableInputQueues.delete(sessionId);
+  }
+}
+
+function createAndroidQueue(
+  sessionId: string,
+  options: SendInputTransportOptions,
+): AndroidReliableInputQueue {
+  let queue: AndroidReliableInputQueue;
+  const core = createReliableInputQueue({
+    policy: androidExistingPolicy,
+    readTransport: () => readAndroidTransport(queue),
+    send: (item) => {
+      const resource = readDaemonConnectionSessionResource(options, sessionId);
+      const ws = readDaemonConnectionSessionSocket(options, sessionId);
+      if (!isSessionMessageTransportReady(resource, ws)) {
+        throw new Error('reliable input transport is not ready');
+      }
+      const localRevision = options.readSessionBufferSnapshot(sessionId).revision;
+      const payload: TerminalReliableInputPayload = {
+        version: 1,
+        seq: item.seq,
+        data: item.data,
+        sentAt: item.sentAt,
+        attempt: item.attempt,
+      };
+      options.sendSocketPayload(
+        sessionId,
+        ws,
+        JSON.stringify({ type: 'input', payload }),
+      );
+      if (!queue.headRefreshMarked) {
+        queue.headRefreshMarked = true;
+        const isFirstPendingInputTailRefresh = options.markPendingInputTailRefresh(
+          sessionId,
+          localRevision,
+        );
+        if (isFirstPendingInputTailRefresh) {
+          scheduleInputHeadRefresh({
+            sessionId,
+            daemonConnection: options.daemonConnection,
+            requestSessionBufferHead: options.requestSessionBufferHead,
+          });
+        }
+      }
+      options.runtimeDebug('session.input.reliable-send', {
+        sessionId,
+        seq: item.seq,
+        bytes: item.bytes,
+        attempt: item.attempt,
+        queueDepth: core.snapshot().activeDepth,
+        resourceTargetKey: resource.targetKey,
+        resourceSocketState: resource.socketState,
+      });
+    },
+    onEvent: (event) => logQueueEvent(queue, event),
+  });
+  queue = {
+    sessionId,
+    options,
+    core,
+    headRefreshMarked: false,
+  };
+  return queue;
+}
+
+function getReliableInputQueue(
+  sessionId: string,
+  options: SendInputTransportOptions,
+) {
+  const current = reliableInputQueues.get(sessionId);
+  if (current) {
+    current.options = options;
+    return current;
+  }
+  const next = createAndroidQueue(sessionId, options);
+  reliableInputQueues.set(sessionId, next);
+  return next;
+}
+
+export function enqueueReliableInputChunks(
+  options: SendInputTransportOptions,
+  sessionId: string,
+  inputChunks: string[],
+): ReliableInputEnqueueResult {
+  const queue = getReliableInputQueue(sessionId, options);
+  const result = queue.core.enqueueChunks(inputChunks);
+  queue.core.pump();
+  return result;
+}
+
+export function handleTerminalInputAck(
+  sessionId: string,
+  payload: TerminalInputAckPayload,
+) {
   const queue = reliableInputQueues.get(sessionId);
   if (!queue) {
     return;
   }
-  const index = queue.items.findIndex((item) => item.seq === payload.seq);
-  if (index < 0) {
-    queue.options.runtimeDebug('session.input.reliable-ack.unknown', {
-      sessionId,
-      seq: payload.seq,
-      accepted: payload.accepted,
-      error: payload.error,
-    });
-    return;
-  }
-  if (isRetryableReliableInputNack(payload)) {
-    const item = queue.items[index];
-    if (item) {
-      item.sentAt = null;
-    }
-    queue.options.runtimeDebug('session.input.reliable-nack.retry', {
-      sessionId,
-      seq: payload.seq,
-      accepted: payload.accepted,
-      bytes: payload.bytes,
-      error: payload.error,
-      queueDepth: queue.items.length,
-    });
-    scheduleReliableInputFlush(queue);
-    return;
-  }
-  queue.items.splice(index, 1);
-  queue.options.runtimeDebug(payload.accepted ? 'session.input.reliable-ack' : 'session.input.reliable-nack', {
-    sessionId,
-    seq: payload.seq,
-    accepted: payload.accepted,
-    bytes: payload.bytes,
-    error: payload.error,
-    queueDepth: queue.items.length,
+  const transport = readAndroidTransport(queue);
+  queue.core.handleAck(payload, {
+    channel: transport.channel,
+    generation: transport.generation,
   });
-  if (queue.items.length === 0) {
-    clearReliableInputTimer(queue);
-    reliableInputQueues.delete(sessionId);
-    return;
-  }
-  flushReliableInputQueue(sessionId);
 }
 
 export function resetTerminalReliableInputRuntimeForTests() {
   for (const queue of reliableInputQueues.values()) {
-    clearReliableInputTimer(queue);
+    queue.core.close();
   }
   reliableInputQueues.clear();
-  reliableInputSequence = 0;
+  socketGenerationSequence = 0;
+  socketGenerations = new WeakMap<object, string>();
 }

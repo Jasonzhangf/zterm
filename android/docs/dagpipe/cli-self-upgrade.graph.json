@@ -1,0 +1,180 @@
+{
+  "id": "cli.self_upgrade",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "dagpipe.extract.arc.upgrade_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.upgrade_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_npm_install_context",
+      "operator": "cli.upgrade.resolve_npm_install_context",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.upgrade_request"
+      ],
+      "output": {
+        "id": "arc.upgrade_context",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_target_version",
+      "operator": "cli.upgrade.resolve_target_version",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.upgrade_context"
+      ],
+      "output": {
+        "id": "arc.upgrade_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "install_with_npm",
+      "operator": "cli.upgrade.install_with_npm",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.upgrade_plan"
+      ],
+      "output": {
+        "id": "arc.npm_install_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "verify_installed_entry",
+      "operator": "cli.upgrade.verify_installed_entry",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.npm_install_result"
+      ],
+      "output": {
+        "id": "arc.upgrade_verification",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_upgrade",
+      "operator": "cli.upgrade.settle",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.upgrade_verification"
+      ],
+      "output": {
+        "id": "arc.upgrade_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dagpipe.extract.arc.upgrade_request",
+      "to": "resolve_npm_install_context",
+      "arc_id": "arc.upgrade_request"
+    },
+    {
+      "from": "resolve_npm_install_context",
+      "to": "resolve_target_version",
+      "arc_id": "arc.upgrade_context"
+    },
+    {
+      "from": "resolve_target_version",
+      "to": "install_with_npm",
+      "arc_id": "arc.upgrade_plan"
+    },
+    {
+      "from": "install_with_npm",
+      "to": "verify_installed_entry",
+      "arc_id": "arc.npm_install_result"
+    },
+    {
+      "from": "verify_installed_entry",
+      "to": "settle_upgrade",
+      "arc_id": "arc.upgrade_verification"
+    }
+  ],
+  "outputs": [
+    "arc.upgrade_result"
+  ]
+}
