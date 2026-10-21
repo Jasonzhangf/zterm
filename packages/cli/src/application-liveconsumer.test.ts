@@ -5,7 +5,7 @@ import {
   AccountClient,
   type AuthenticatedAccount,
 } from './account-client.js';
-import { createApplicationConnection } from './application-connection.js';
+import type { createApplicationConnection } from './application-connection.js';
 import { SessionConnectionError } from './connection.js';
 import { assertExternalRtcRelayEvidence } from './external-rtc-evidence.js';
 import type {
@@ -73,6 +73,18 @@ async function loadRtcFixture() {
       timeoutMs?: number;
     }): Promise<RtcFixture>;
   };
+}
+
+async function loadNativeTimingObserver() {
+  const observerUrl = new URL(
+    '../scripts/rtc-passive-observer.mjs',
+    import.meta.url,
+  ).href;
+  return import(observerUrl) as Promise<{
+    installNativeTimingObserver(options: {
+      emit: (value: Record<string, unknown>) => void;
+    }): () => void;
+  }>;
 }
 
 async function assertReceiptPrivacy(receiptPath: string) {
@@ -313,6 +325,7 @@ describe('createApplicationConnection bound-initial live consumer', () => {
       }
       let fixture: RtcFixture | null = null;
       let connection: Awaited<ReturnType<typeof createApplicationConnection>> | null = null;
+      let restoreTiming: (() => void) | null = null;
       try {
         let activeReceiptPath: string;
         if (input.kind === 'fixture') {
@@ -359,6 +372,17 @@ describe('createApplicationConnection bound-initial live consumer', () => {
         }
 
         useUnreachableFirstWs(device);
+        const timing = await loadNativeTimingObserver();
+        restoreTiming = timing.installNativeTimingObserver({
+          emit: (value) => {
+            process.stdout.write(
+              `rtc-timing-evidence: ${JSON.stringify(value)}\n`,
+            );
+          },
+        });
+        const { createApplicationConnection } = await import(
+          './application-connection.js'
+        );
         const connectionController = new AbortController();
         const connectionTimeout = setTimeout(
           () => connectionController.abort(new Error('RTC consumer timed out')),
@@ -397,6 +421,7 @@ describe('createApplicationConnection bound-initial live consumer', () => {
         }
       } finally {
         connection?.close('live-consumer-complete');
+        restoreTiming?.();
         if (fixture) {
           await fixture.close();
         }

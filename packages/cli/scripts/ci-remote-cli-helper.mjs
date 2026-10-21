@@ -49,10 +49,74 @@ const RTC_CONSUMER_STAGE = 'rtc-consumer';
 const COMMAND_TIMEOUT_MS = 20 * 60 * 1_000;
 const NPM_TIMEOUT_MS = 5 * 60 * 1_000;
 const SAFE_LOG_LIMIT = 8_000;
+const TIMING_EVIDENCE_PREFIX = 'rtc-timing-evidence:';
+const TIMING_EVIDENCE_LIMIT = 512;
 const SENSITIVE_ENVIRONMENT_NAME =
   /(?:TOKEN|PASSWORD|SECRET|KEY|RECEIPT)/iu;
 const SENSITIVE_RECEIPT_FIELD =
   /(?:token|password|secret|credential|authorization|key)/iu;
+
+const RTC_TIMING_EVENTS = new Set([
+  'ws.construct',
+  'ws.open',
+  'ws.close',
+  'ws.error',
+  'ws.send',
+  'ws.receive',
+  'network.socket',
+  'network.lookup',
+  'network.connect',
+  'network.secureConnect',
+  'pc.construct',
+  'pc.close',
+  'pc.first-relay-candidate',
+  'datachannel.create',
+  'datachannel.open',
+  'datachannel.close',
+  'iceconnectionstatechange',
+  'connectionstatechange',
+  'icegatheringstatechange',
+  ...[
+    'createOffer',
+    'setLocalDescription',
+    'setRemoteDescription',
+    'addIceCandidate',
+    'getStats',
+  ].flatMap((method) => [
+    `${method}.begin`,
+    `${method}.end`,
+    `${method}.error`,
+  ]),
+]);
+const RTC_TIMING_TYPES = new Set([
+  'rtc-init', 'rtc-offer', 'rtc-answer', 'rtc-candidate', 'rtc-error',
+  'hello', 'mux-hello', 'ping', 'pong', 'other',
+]);
+const RTC_TIMING_STATES = new Set([
+  'new',
+  'checking',
+  'connecting',
+  'connected',
+  'completed',
+  'disconnected',
+  'failed',
+  'closed',
+  'gathering',
+  'complete',
+  'open',
+  'closing',
+]);
+const RTC_TIMING_KEYS = new Set([
+  'event',
+  'ms',
+  'ws',
+  'pc',
+  'type',
+  'state',
+  'ice',
+  'connection',
+  'gathering',
+]);
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(scriptDir, '..');
@@ -563,6 +627,7 @@ export function summarizeVitestReport(value) {
     skippedAssertions: assertions.filter((entry) =>
       entry.status === 'skipped' || entry.status === 'pending').length,
     routeEvidence: collectRouteEvidence(value),
+    timingEvidence: collectTimingEvidence(value),
     testResults,
   };
 }
@@ -682,16 +747,101 @@ function collectRouteEvidence(value, output = []) {
   return output;
 }
 
-function rtcConsumerLog(result, routeEvidence) {
+function timingFieldNumber(value, integer) {
+  return typeof value === 'number'
+    && Number.isFinite(value)
+    && value >= 0
+    && (!integer || Number.isInteger(value));
+}
+
+export function projectTimingEvidence(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  if (Object.keys(value).some((key) => !RTC_TIMING_KEYS.has(key))) return null;
+  if (!timingFieldNumber(value.ms, false)) return null;
+  if (typeof value.event !== 'string' || !RTC_TIMING_EVENTS.has(value.event)) {
+    return null;
+  }
+  const compact = { event: value.event };
+  for (const field of ['ms', 'ws', 'pc']) {
+    if (!(field in value)) continue;
+    if (!timingFieldNumber(value[field], field !== 'ms')) return null;
+    compact[field] = value[field];
+  }
+  for (const field of ['type', 'state', 'ice', 'connection', 'gathering']) {
+    if (!(field in value)) continue;
+    const entry = value[field];
+    const allowed = field === 'type' ? RTC_TIMING_TYPES : RTC_TIMING_STATES;
+    if (typeof entry !== 'string' || !allowed.has(entry)) return null;
+    compact[field] = entry;
+  }
+  return compact;
+}
+
+export function compactTimingEvidenceLine(line) {
+  if (typeof line !== 'string' || !line.startsWith(TIMING_EVIDENCE_PREFIX)) {
+    return '';
+  }
+  const text = line.slice(TIMING_EVIDENCE_PREFIX.length).trim();
+  if (!text) return '';
+  let value;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return '';
+  }
+  const compact = projectTimingEvidence(value);
+  return compact
+    ? `${TIMING_EVIDENCE_PREFIX} ${JSON.stringify(compact)}`
+    : '';
+}
+
+export function collectTimingEvidence(value, output = []) {
+  const push = (compact) => {
+    if (compact && output.length < TIMING_EVIDENCE_LIMIT) {
+      output.push(compact);
+    }
+  };
+  if (typeof value === 'string') {
+    for (const line of value.split(/\r?\n/u)) {
+      if (output.length >= TIMING_EVIDENCE_LIMIT) break;
+      push(compactTimingEvidenceLine(line));
+    }
+    return output;
+  }
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (output.length >= TIMING_EVIDENCE_LIMIT) break;
+      collectTimingEvidence(entry, output);
+    }
+    return output;
+  }
+  if (value && typeof value === 'object') {
+    for (const entry of Object.values(value)) {
+      if (output.length >= TIMING_EVIDENCE_LIMIT) break;
+      collectTimingEvidence(entry, output);
+    }
+  }
+  return output;
+}
+
+export function rtcConsumerLog(result, routeEvidence, timingEvidence) {
   const merged = [
     ...collectRouteEvidence(result.stdout),
     ...(routeEvidence || []),
   ];
+  const mergedTiming = [
+    ...collectTimingEvidence(result.stdout),
+    ...(timingEvidence || []),
+  ].slice(0, TIMING_EVIDENCE_LIMIT);
   return [
     commandMetadata(result),
     '',
     '[safe-route-output]',
     ...[...new Set(merged)],
+    '[safe-timing-output]',
+    ...[...new Set(mergedTiming)],
     '[other-output-omitted]',
   ].join('\n');
 }
@@ -838,10 +988,18 @@ function runRtcConsumerStage({
       ...summary.routeEvidence,
       ...collectRouteEvidence(result.stdout),
     ])];
+    summary.timingEvidence = [...new Set([
+      ...summary.timingEvidence,
+      ...collectTimingEvidence(result.stdout),
+    ])].slice(0, TIMING_EVIDENCE_LIMIT);
   }
   writeSafeFile(
     join(stageDir, 'vitest-command.log'),
-    rtcConsumerLog(result, summary?.routeEvidence || []),
+    rtcConsumerLog(
+      result,
+      summary?.routeEvidence || [],
+      summary?.timingEvidence || collectTimingEvidence(result.stdout),
+    ),
     secrets,
   );
   if (summary) {
