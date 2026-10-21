@@ -28,6 +28,7 @@ export class ConfigStoreError extends Error {
   readonly code: ConfigStoreErrorCode;
   readonly path: string;
   readonly lockPath?: string;
+  declare readonly cause: unknown;
 
   constructor(
     code: ConfigStoreErrorCode,
@@ -35,7 +36,12 @@ export class ConfigStoreError extends Error {
     path: string,
     options?: { lockPath?: string; cause?: unknown },
   ) {
-    super(message, { cause: options?.cause });
+    super(message);
+    Object.defineProperty(this, 'cause', {
+      value: options?.cause,
+      writable: true,
+      configurable: true,
+    });
     this.name = 'ConfigStoreError';
     this.code = code;
     this.path = path;

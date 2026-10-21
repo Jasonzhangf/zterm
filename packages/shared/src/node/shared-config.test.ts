@@ -60,14 +60,18 @@ function runWriter(homeDir: string, marker: string, delayMs: number) {
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+  const childEvents = child as typeof child & {
+    on(event: 'error', listener: (error: Error) => void): void;
+    on(event: 'exit', listener: (code: number | null) => void): void;
+  };
   let stderr = '';
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (chunk) => {
     stderr += chunk;
   });
   return new Promise<void>((resolve, reject) => {
-    child.on('error', reject);
-    child.on('exit', (code) => {
+    childEvents.on('error', reject);
+    childEvents.on('exit', (code) => {
       if (code === 0) {
         resolve();
       } else {
@@ -174,6 +178,12 @@ describe('SharedConfigStore', () => {
     }), new AbortController().signal).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(ConfigStoreError);
+    expect(Object.getOwnPropertyDescriptor(error, 'cause')).toEqual({
+      value: undefined,
+      writable: true,
+      configurable: true,
+      enumerable: false,
+    });
     expect(error).toMatchObject({
       code: 'config_busy',
       lockPath,
