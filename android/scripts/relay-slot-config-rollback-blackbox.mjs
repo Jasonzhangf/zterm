@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
+  isAbsolute,
   join,
   relative,
   resolve,
@@ -50,7 +51,7 @@ function assert(condition, message) {
 
 function outsideSource(path) {
   const relation = relative(repoRoot, path);
-  return relation.startsWith('..');
+  return relation.startsWith('..') || isAbsolute(relation);
 }
 
 export function parseRollbackArgs(argv, env = process.env) {

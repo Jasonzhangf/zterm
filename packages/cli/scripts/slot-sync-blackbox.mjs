@@ -9,6 +9,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import {
+  isAbsolute,
   join,
   relative,
   resolve,
@@ -103,7 +104,7 @@ class SkippedCase extends Error {}
 
 function outsideSource(path) {
   const relation = relative(repoRoot, path);
-  return relation.startsWith('..') || resolve(repoRoot, relation) !== resolve(path);
+  return relation.startsWith('..') || isAbsolute(relation);
 }
 
 function isolatedEnvironment(homeDir, extra = {}) {
