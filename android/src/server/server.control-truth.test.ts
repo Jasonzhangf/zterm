@@ -59,8 +59,9 @@ describe('server control runtime truth gates', () => {
 
   it('keeps wezterm attach assertion backend-aware instead of falling through tmux has-session', () => {
     const source = readServerSource();
-    const assertBlock = extractBlock(source, 'assertTmuxSessionExists: (sessionName, backend) => {', 700);
+    const assertBlock = extractBlock(source, 'assertTmuxSessionExists: (sessionName, backend, stableId) => {', 1600);
 
+    expect(assertBlock).toContain('terminalControlRuntime.resolveExistingSession(');
     expect(assertBlock).toContain("if (backend === 'herdr')");
     expect(assertBlock).toContain('HERDR_BACKEND_RUNTIME.listSessions()');
     expect(assertBlock).toContain("TERMINAL_BACKEND_RUNTIMES.wezterm?.listSessions()");
@@ -88,7 +89,7 @@ describe('server control runtime truth gates', () => {
     expect(source).toContain("runTmuxWithSocketMode(['list-sessions'], 'default')");
     expect(source).toContain('function buildExactTmuxPaneTarget(sessionName: string)');
     expect(source).toContain(":.{top-left}");
-    expect(source).toContain('const target = buildExactTmuxPaneTarget(sessionName)');
+    expect(backendWriteBlock).toContain('const target = resolveExactTmuxPaneTarget(sessionName)');
     expect(backendWriteBlock).toContain("const segments = payload.split('\\x04');");
     expect(backendWriteBlock).toContain("await runTmuxAsync(['send-keys', '-t', target, '-l', '--', segments[index]!])");
     expect(source).not.toContain('function writeToTmuxSession(');

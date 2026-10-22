@@ -116,6 +116,50 @@ Phase 9 static graphs:
 
 - `windows-remote-access-client.graph.json`
 
+## Phase 10 static CLI design graphs (2026-10-20)
+
+The remote daemon CLI design adds these static object-flow graphs:
+
+- `cli-account-login.graph.json` - login input -> auth generation -> login
+  commit -> one result.
+- `cli-account-logout.graph.json` - local logout -> auth removal -> loginId
+  connection close -> one result.
+- `cli-slot-configure.graph.json` - slot draft -> server/session selection ->
+  optional snapshot -> checked commit -> one result.
+- `cli-slot-launch.graph.json` - local slot lookup/direct launch -> route/mux
+  open -> first authoritative projection -> one result.
+- `cli-terminal-mirror-event.graph.json` - mux mirror event -> frame assembly
+  -> sparse apply -> renderer projection -> one result.
+- `cli-terminal-input-event.graph.json` - local input classification -> shared
+  reliable input -> no-replay settlement -> one result.
+- `cli-terminal-close.graph.json` - local close/error -> pending input settle ->
+  subscriber release -> terminal restore -> one result.
+- `cli-self-upgrade.graph.json` - npm install context -> delegated install ->
+  new-process version check -> one result.
+- `cli-daemon-install.graph.json` - local platform check -> existing installer
+  -> actual shim/artifact result -> one result.
+- `cli-daemon-status.graph.json` - existing status owner -> service/PID/listener
+  facts and stale-PID cleanup -> one result.
+- `cli-daemon-config.graph.json` - shared config read -> provenance projection
+  -> redaction -> one result.
+
+These graphs are static design consumers of the existing CLI contract. They do
+not create daemon client state, a second mirror source, or a second config
+writer. Production CLI MAY consume shared config, traversal, frame assembly,
+reliable input, and renderer contracts. CLI session launch consumes the
+daemon's target catalog, mux channel, and existing terminal mirror; the daemon
+continues to own tmux truth, physical transport, channel registry, subscriber
+publishing, and backend identity. The CLI owns only its local terminal
+projection and client-session lifetime. `zterm upgrade` delegates to npm and
+does not upgrade or control the daemon.
+
+The phase 0 validator already discovers every `*.graph.json` file in this
+directory, so these graphs require no separate CLI graph gate. The existing
+`test:dagpipe-phase0` command runs `validate` and `inspect` for each discovered
+graph. Phase 1 compilation remains limited to operators registered in the
+native SDK; static CLI graphs are not proof of operator registration, runtime
+binding, published packages, or black-box behavior.
+
 Validation:
 
 ```sh

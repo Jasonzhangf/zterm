@@ -193,6 +193,7 @@ describe('resource registry truth gate', () => {
     const devCli = read('../android/scripts/zterm-daemon.sh');
     const releaseBuilder = read('../android/scripts/prepare-global-daemon-release.sh');
     const npmPackager = read('../android/scripts/prepare-daemon-npm-package.mjs');
+    const platformComponents = read('../android/scripts/prepare-daemon-platform-release.mjs');
     const windowsRunner = read('../android/scripts/windows/zterm-daemon.ps1');
 
     // The dev CLI is a thin delegate: it never runs the daemon runtime itself, and only execs the fixed support
@@ -219,13 +220,31 @@ describe('resource registry truth gate', () => {
     expect(releaseBuilder).not.toContain('"$NODE_BIN" "${ROOT_DIR}/src/server/server.ts"');
     expect(releaseBuilder).not.toContain('tsx src/server/server.ts');
 
-    expect(npmPackager).toContain("requirePath(resolve(releaseDir, 'runtime/server.cjs')");
-    expect(npmPackager).toContain("requirePath(resolve(releaseDir, 'runtime/dagpipe.node')");
-    expect(npmPackager).toContain("cpSync(resolve(releaseDir, 'runtime'), resolve(npmPackageDir, 'runtime')");
-    expect(npmPackager).toContain("const script = resolve(packageRoot, 'support/windows/zterm-daemon.ps1')");
+    expect(npmPackager).toContain('const tuples = [');
+    expect(npmPackager).toContain("tuple: 'darwin-arm64', os: 'darwin', arch: 'arm64'");
+    expect(npmPackager).toContain("tuple: 'linux-x64', os: 'linux', arch: 'x64'");
+    expect(npmPackager).toContain("tuple: 'win32-x64', os: 'win32', arch: 'x64'");
+    expect(npmPackager).toContain('function tupleFiles(spec)');
+    expect(npmPackager).toContain('return platformRuntimeComponents(spec.os, spec.arch)');
+    expect(platformComponents).toContain('export function platformRuntimeComponents(targetOs, targetArch)');
+    expect(platformComponents).toContain("'runtime/server.cjs'");
+    expect(platformComponents).toContain("'runtime/dagpipe.node'");
+    expect(platformComponents).toContain('`runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`');
+    expect(npmPackager).toContain("requirePath(join(releaseDir, component), `${spec.tuple} ${component}`)");
+    expect(npmPackager).toContain(
+      'if (input.platform.os !== spec.os || input.platform.arch !== spec.arch)',
+    );
+    expect(npmPackager).toContain('for (const relativePath of release.runtimeComponents)');
+    expect(npmPackager).toContain('copyRuntimeComponent(releaseDir, packageRoot, relativePath)');
+    expect(npmPackager).toContain('cpSync(source, destination, { recursive: true })');
+    expect(npmPackager).toContain('function writePublicPackage(stagingRoot, version, payloadPackages)');
+    expect(npmPackager).toContain('optionalDependencies: Object.fromEntries(');
+    expect(npmPackager).toContain("'zterm-daemon': 'bin/zterm-daemon.cjs'");
+    expect(npmPackager).toContain("wterm: 'bin/wterm.cjs'");
     expect(npmPackager).not.toContain("resolve(projectRoot, 'src/server/server.ts')");
 
-    expect(windowsRunner).toContain('$RuntimeEntry = Join-Path $PackageRoot "runtime\\server.cjs"');
+    expect(windowsRunner).toContain('$NativeDir = Join-Path $PackageRoot "runtime"');
+    expect(windowsRunner).toContain('$RuntimeEntry = Join-Path $NativeDir "server.cjs"');
     expect(windowsRunner).toContain('throw "missing daemon runtime: $RuntimeEntry"');
     expect(windowsRunner).toContain('& $NodeExe $RuntimeEntry');
     expect(windowsRunner).not.toContain('src\\server\\server.ts');

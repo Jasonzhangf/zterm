@@ -967,6 +967,7 @@ export type BridgeClientMessage =
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'list-sessions'; payload?: { terminalBackend?: TerminalBackendKind } }
+  | { type: 'terminal-snapshot-request'; payload: TerminalSnapshotRequestPayload }
   | { type: 'schedule-list'; payload: { sessionName: string; idempotencyKey?: string } }
   | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft; idempotencyKey?: string } }
   | { type: 'schedule-delete'; payload: { jobId: string; idempotencyKey?: string } }
@@ -1054,6 +1055,7 @@ export type BridgeServerControlMessage =
     }
   | { type: 'buffer-head'; payload: BufferHeadPayload }
   | { type: 'sessions'; payload: { sessions: string[]; sessionCatalog?: TerminalSessionCatalogEntry[] } }
+  | { type: 'terminal-snapshot-result'; payload: TerminalSnapshotResultPayload }
   | { type: 'session-activity'; payload: { activities: SessionActivity[] } }
   | { type: 'schedule-state'; payload: ScheduleStatePayload }
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
@@ -1114,6 +1116,7 @@ export interface SessionActivity {
 export interface TerminalSessionCatalogEntry {
   name: string;
   backend: TerminalBackendKind;
+  stableId?: string;
   /** daemon-owned pane working directory; UI must render, never infer */
   cwd?: string;
   observation?: TerminalSessionObservation;
@@ -1213,9 +1216,38 @@ export type TerminalMuxTargetClientMessageType =
   | 'pending-attachments-query'
   | 'attachment-history-query'
   | 'attachment-asset-request'
-  | 'attachment-receipt';
+  | 'attachment-receipt'
+  | 'terminal-snapshot-request';
 
 export type TerminalBackendKind = 'tmux' | 'herdr';
+
+export type TerminalSnapshotUnavailableReason = 'mirror_not_ready' | 'mirror_not_present';
+
+export type TerminalSnapshotFailureCode = 'session_not_found' | 'session_identity_mismatch';
+
+export interface TerminalSnapshotRequestPayload {
+  version: 1;
+  backend: TerminalBackendKind;
+  stableId: string;
+  maxLines: number;
+}
+
+export type TerminalSnapshotResultPayload =
+  | {
+      status: 'available';
+      backend: TerminalBackendKind;
+      stableId: string;
+      head: BufferHeadPayload;
+      body: TerminalBufferPayload;
+    }
+  | {
+      status: 'unavailable';
+      reason: TerminalSnapshotUnavailableReason;
+    }
+  | {
+      status: 'failed';
+      code: TerminalSnapshotFailureCode;
+    };
 
 export type TerminalMuxLegacyClientMessageType =
   | 'session-open'
@@ -1246,19 +1278,23 @@ export type TerminalMuxTargetServerMessageType =
   | 'session-activity'
   | 'pending-attachments'
   | 'attachment-history'
-  | 'attachment-asset-data';
+  | 'attachment-asset-data'
+  | 'terminal-snapshot-result';
 
 export type TerminalMuxTargetServerMessage = Extract<
   BridgeServerMessage,
   { type: TerminalMuxTargetServerMessageType }
 >;
 
-export type TerminalMuxChannelServerMessage = BridgeServerMessage;
+export type TerminalMuxChannelServerMessage = Exclude<
+  BridgeServerMessage,
+  { type: 'terminal-snapshot-result' }
+>;
 
 export type TerminalMuxClientFrame =
   | { type: 'mux-hello'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; clientInstanceId: string; deviceId?: string } }
   | { type: 'mux-target-message'; payload: { requestId?: string; message: TerminalMuxTargetClientMessage } }
-  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; backend?: TerminalBackendKind; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string; bodySubscribed?: boolean } }
+  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; backend?: TerminalBackendKind; expectedSessionIdentity?: string; existingOnly?: true; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string; bodySubscribed?: boolean } }
   | { type: 'mux-channel-message'; payload: { channelId: string; message: TerminalMuxChannelClientMessage } }
   | { type: 'mux-channel-binary'; payload: { channelId: string; dataBase64: string } }
   | { type: 'mux-channel-close'; payload: { channelId: string; reason?: string } }
@@ -1267,7 +1303,7 @@ export type TerminalMuxClientFrame =
 export type TerminalMuxServerFrame =
   | { type: 'mux-ready'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; daemonHostId?: string; capabilities: TerminalMuxCapabilities } }
   | { type: 'mux-target-message'; payload: { requestId?: string; message: TerminalMuxTargetServerMessage } }
-  | { type: 'mux-channel-opened'; payload: { channelId: string; sessionName: string; capabilities?: TerminalSessionCapabilitiesPayload } }
+  | { type: 'mux-channel-opened'; payload: { channelId: string; sessionName: string; stableId?: string; capabilities?: TerminalSessionCapabilitiesPayload } }
   | { type: 'mux-channel-message'; payload: { channelId: string; message: TerminalMuxChannelServerMessage } }
   | { type: 'mux-channel-closed'; payload: { channelId: string; reason: string; code?: string } }
   | { type: 'mux-pong'; payload: { sentAt: number; receivedAt: number } }
@@ -1284,6 +1320,7 @@ export const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES: readonly TerminalMuxTarge
   'attachment-history-query',
   'attachment-asset-request',
   'attachment-receipt',
+  'terminal-snapshot-request',
 ] as const;
 
 export const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES: readonly TerminalMuxLegacyClientMessageType[] = [
@@ -1307,6 +1344,39 @@ function asNonEmptyString(value: unknown) {
 
 function hasFiniteNumber(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isTerminalBackendKind(value: unknown): value is TerminalBackendKind {
+  return value === 'tmux' || value === 'herdr';
+}
+
+function isTerminalSnapshotRequestPayload(value: unknown): value is TerminalSnapshotRequestPayload {
+  return isRecord(value)
+    && value.version === 1
+    && isTerminalBackendKind(value.backend)
+    && Boolean(asNonEmptyString(value.stableId))
+    && typeof value.maxLines === 'number'
+    && Number.isSafeInteger(value.maxLines)
+    && value.maxLines > 0;
+}
+
+function isTerminalSnapshotResultPayload(value: unknown): value is TerminalSnapshotResultPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+  switch (value.status) {
+    case 'available':
+      return isTerminalBackendKind(value.backend)
+        && Boolean(asNonEmptyString(value.stableId))
+        && isRecord(value.head)
+        && isRecord(value.body);
+    case 'unavailable':
+      return value.reason === 'mirror_not_ready' || value.reason === 'mirror_not_present';
+    case 'failed':
+      return value.code === 'session_not_found' || value.code === 'session_identity_mismatch';
+    default:
+      return false;
+  }
 }
 
 export function isTerminalMuxTargetClientMessageType(type: string): type is TerminalMuxTargetClientMessageType {
@@ -1466,11 +1536,14 @@ export function buildTerminalMuxPing(sentAt: number): TerminalMuxClientFrame {
 
 export function buildTerminalMuxServerChannelMessage(
   channelId: string,
-  message: TerminalMuxChannelServerMessage,
+  message: BridgeServerMessage,
 ): TerminalMuxServerFrame {
   const normalizedChannelId = asNonEmptyString(channelId);
   if (!normalizedChannelId) {
     throw new Error('terminal mux channelId is required');
+  }
+  if (message.type === 'terminal-snapshot-result') {
+    throw new Error('terminal mux channel message cannot carry terminal-snapshot-result');
   }
   return {
     type: 'mux-channel-message',
@@ -1527,10 +1600,22 @@ export function isTerminalMuxClientFrame(value: unknown): value is TerminalMuxCl
     case 'mux-target-message':
       return isRecord(value.payload.message)
         && typeof value.payload.message.type === 'string'
-        && isTerminalMuxTargetClientMessageType(value.payload.message.type);
+        && isTerminalMuxTargetClientMessageType(value.payload.message.type)
+        && (
+          value.payload.message.type !== 'terminal-snapshot-request'
+          || isTerminalSnapshotRequestPayload(value.payload.message.payload)
+        );
     case 'mux-channel-open':
       return Boolean(asNonEmptyString(value.payload.channelId))
         && Boolean(asNonEmptyString(value.payload.sessionName))
+        && (
+          typeof value.payload.expectedSessionIdentity === 'undefined'
+          || Boolean(asNonEmptyString(value.payload.expectedSessionIdentity))
+        )
+        && (
+          typeof value.payload.existingOnly === 'undefined'
+          || value.payload.existingOnly === true
+        )
         && (typeof value.payload.bodySubscribed === 'undefined' || typeof value.payload.bodySubscribed === 'boolean');
     case 'mux-channel-message':
       return Boolean(asNonEmptyString(value.payload.channelId))
@@ -1561,14 +1646,24 @@ export function isTerminalMuxServerFrame(value: unknown): value is TerminalMuxSe
         && value.payload.capabilities.channelEnvelope === true
         && value.payload.capabilities.targetMessages === true;
     case 'mux-target-message':
-      return isRecord(value.payload.message) && typeof value.payload.message.type === 'string';
+      return isRecord(value.payload.message)
+        && typeof value.payload.message.type === 'string'
+        && (
+          value.payload.message.type !== 'terminal-snapshot-result'
+          || isTerminalSnapshotResultPayload(value.payload.message.payload)
+        );
     case 'mux-channel-opened':
       return Boolean(asNonEmptyString(value.payload.channelId))
-        && Boolean(asNonEmptyString(value.payload.sessionName));
+        && Boolean(asNonEmptyString(value.payload.sessionName))
+        && (
+          typeof value.payload.stableId === 'undefined'
+          || Boolean(asNonEmptyString(value.payload.stableId))
+        );
     case 'mux-channel-message':
       return Boolean(asNonEmptyString(value.payload.channelId))
         && isRecord(value.payload.message)
-        && typeof value.payload.message.type === 'string';
+        && typeof value.payload.message.type === 'string'
+        && value.payload.message.type !== 'terminal-snapshot-result';
     case 'mux-channel-closed':
       return Boolean(asNonEmptyString(value.payload.channelId))
         && typeof value.payload.reason === 'string';

@@ -258,10 +258,12 @@ describe('architecture boundary truth gate', () => {
   });
 
   it('keeps traversal sockets from owning a second default reconnect state machine', () => {
-    const source = stripComments(read('src/lib/traversal/socket.ts'));
+    const source = stripComments(read('../packages/shared/src/connection/traversal/socket.ts'));
 
-    expect(source).toContain('this.autoReconnect = options?.autoReconnect === true');
-    expect(source).not.toContain('this.autoReconnect = options?.autoReconnect !== false');
+    expect(source).toContain(
+      'this.autoReconnect = !this.boundInitial && options.autoReconnect === true',
+    );
+    expect(source).not.toContain('this.autoReconnect = options.autoReconnect !== false');
   });
 
   it('keeps the mainline call map free of force-replace lifecycle semantics', () => {

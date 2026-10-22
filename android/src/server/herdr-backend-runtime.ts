@@ -3,9 +3,15 @@ import type { TerminalCell } from '@zterm/shared/types';
 import { normalizeCapturedLineBlock } from './canonical-buffer';
 import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
 import type {
+  ResolvedTerminalSession,
   TerminalSourceAdapter,
   TerminalSourceMirrorSnapshot,
   TerminalSourceSession,
+  TerminalSessionIdentity,
+} from './terminal-source-adapter';
+import {
+  buildHerdrSessionStableId,
+  parseTerminalSessionStableId,
 } from './terminal-source-adapter';
 import {
   parseHerdrScrollMetrics,
@@ -37,6 +43,7 @@ interface ManagedHerdrSession extends TerminalSourceSession {
   herdrSessionName: string;
   terminalId: string;
   herdrPaneId: string;
+  stableId: string;
   adapterBundle: HerdrProcessSessionAdapter | null;
   adapterPromise: Promise<HerdrProcessSessionAdapter> | null;
   latestSnapshot: HerdrCanonicalSnapshot | null;
@@ -167,6 +174,7 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
   // enters zterm truth.
   const maxMirrorLines = Math.max(1, Math.floor(options.maxMirrorLines || 1000));
   const sessions = new Map<string, ManagedHerdrSession>();
+  const boundSessions = new Map<string, ManagedHerdrSession>();
 
   function cli(sessionName: string, args: string[]) {
     return execFileSync(options.executable, ['--session', sessionName, ...args], {
@@ -483,6 +491,10 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     const managed: ManagedHerdrSession = {
       sessionName,
       paneId: root.paneId,
+      stableId: buildHerdrSessionStableId({
+        terminalId: root.terminalId,
+        paneId: root.paneId,
+      }),
       title: sessionName,
       cwd: root.cwd,
       cols: geometry.cols,
@@ -542,6 +554,10 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     const managed: ManagedHerdrSession = {
       sessionName,
       paneId: resolved.paneId,
+      stableId: buildHerdrSessionStableId({
+        terminalId: resolved.terminalId,
+        paneId: resolved.paneId,
+      }),
       title: sessionName,
       cwd: process.cwd(),
       cols: geometry.cols,
@@ -567,12 +583,74 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
   }
 
   function resolve(sessionName: string) {
+    const bound = boundSessions.get(sessionName);
+    if (bound) return bound;
     const existing = sessions.get(sessionName);
     if (existing) return existing;
     // Preserve the official list/pane discovery error. Converting an
     // ambiguous or malformed external surface into "not found" would be a
     // silent fallback and could make the caller choose another backend.
     return discoverSession(sessionName);
+  }
+
+  function readSessionIdentity(sessionName: string): TerminalSessionIdentity {
+    const resolved = resolveHerdrTerminalFromNamedSession({
+      executable: options.executable,
+      sessionName,
+    });
+    return {
+      backend: 'herdr',
+      sessionName,
+      stableId: buildHerdrSessionStableId({
+        terminalId: resolved.terminalId,
+        paneId: resolved.paneId,
+      }),
+    };
+  }
+
+  function resolveExistingSession(stableId: string): ResolvedTerminalSession | null {
+    const parsed = parseTerminalSessionStableId(stableId);
+    if (!parsed || parsed.backend !== 'herdr') {
+      return null;
+    }
+    const session = listSessions().find((entry) =>
+      readSessionIdentity(entry.sessionName).stableId === stableId);
+    if (!session) {
+      return null;
+    }
+    return {
+      identity: {
+        backend: 'herdr',
+        sessionName: session.sessionName,
+        stableId,
+      },
+      target: {
+        backend: 'herdr',
+        sessionName: session.sessionName,
+        stableId,
+        terminalId: session.terminalId,
+        paneId: session.herdrPaneId,
+      },
+    };
+  }
+
+  function bindResolvedSession(session: ResolvedTerminalSession) {
+    if (session.target.backend !== 'herdr') {
+      throw new Error('herdr backend cannot bind a non-Herdr session target');
+    }
+    if (session.identity.stableId !== session.target.stableId) {
+      throw new Error('herdr resolved session identity does not match its native target');
+    }
+    const existing = sessions.get(session.target.sessionName);
+    const exact = existing?.stableId === session.target.stableId
+      ? existing
+      : discoverSession(session.target.sessionName);
+    if (exact.stableId !== session.target.stableId) {
+      throw new Error(
+        `herdr resolved session target changed before bind: ${session.target.sessionName}`,
+      );
+    }
+    boundSessions.set(session.target.sessionName, exact);
   }
 
   function ensureAdapter(session: ManagedHerdrSession) {
@@ -640,7 +718,10 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
         'session is not tracked by the zterm Herdr backend runtime',
       );
     }
-    sessions.delete(sessionName);
+    if (sessions.get(sessionName) === session) {
+      sessions.delete(sessionName);
+    }
+    boundSessions.delete(sessionName);
     if (session.historyRefreshTimer) {
       clearTimeout(session.historyRefreshTimer);
       session.historyRefreshTimer = null;
@@ -703,5 +784,8 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     supportsSessionRename: false,
     closeSession,
     readCurrentPath: (sessionName) => resolve(sessionName).cwd,
+    readSessionIdentity,
+    resolveExistingSession,
+    bindResolvedSession,
   };
 }

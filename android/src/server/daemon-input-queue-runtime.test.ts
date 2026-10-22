@@ -2,7 +2,6 @@ import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
-  TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
   getTerminalInputUtf8ByteLength,
 } from '@zterm/shared/terminal/input-chunking';
 import type { SessionMirror } from './terminal-runtime-types';
@@ -96,8 +95,32 @@ async function runSpawnMockImmediately() {
   });
 }
 
-async function waitForTmuxWriteSettle() {
-  await new Promise((resolve) => setTimeout(resolve, TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS + 1));
+function trackSpawnedChildren() {
+  const children: Array<ReturnType<typeof createFakeChild>> = [];
+  const waiters: Array<{ count: number; resolve: () => void }> = [];
+  spawnMock.mockImplementation(() => {
+    const child = createFakeChild();
+    children.push(child);
+    for (const waiter of [...waiters]) {
+      if (children.length < waiter.count) {
+        continue;
+      }
+      waiters.splice(waiters.indexOf(waiter), 1);
+      waiter.resolve();
+    }
+    return child;
+  });
+  return {
+    children,
+    async waitForSpawnCount(count: number) {
+      if (children.length >= count) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        waiters.push({ count, resolve });
+      });
+    },
+  };
 }
 
 describe('daemon input queue runtime', () => {
@@ -151,12 +174,7 @@ describe('daemon input queue runtime', () => {
   });
 
   it('serializes generic backend writes with live input through the same physical queue', async () => {
-    const children: Array<ReturnType<typeof createFakeChild>> = [];
-    spawnMock.mockImplementation(() => {
-      const child = createFakeChild();
-      children.push(child);
-      return child;
-    });
+    const { children, waitForSpawnCount } = trackSpawnedChildren();
     const { queue } = createRuntime();
 
     const liveWrite = queue.enqueueLiveMirrorInput('demo', 'interactive', false, () => true);
@@ -175,7 +193,7 @@ describe('daemon input queue runtime', () => {
 
     children[0]?.emit('close', 0);
     await expect(liveWrite).resolves.toBe(true);
-    await waitForTmuxWriteSettle();
+    await waitForSpawnCount(2);
     expect(spawnMock).toHaveBeenCalledTimes(2);
     expect(spawnMock.mock.calls[1]?.[1]).toEqual([
       'send-keys',
@@ -186,7 +204,7 @@ describe('daemon input queue runtime', () => {
       'schedule',
     ]);
     children[1]?.emit('close', 0);
-    await waitForTmuxWriteSettle();
+    await waitForSpawnCount(3);
     expect(spawnMock).toHaveBeenCalledTimes(3);
     expect(spawnMock.mock.calls[2]?.[1]).toEqual(['send-keys', '-t', '=demo:.{top-left}', 'Enter']);
     children[2]?.emit('close', 0);
@@ -204,12 +222,7 @@ describe('daemon input queue runtime', () => {
   });
 
   it('keeps generic backend writes queued across live input dispose', async () => {
-    const children: Array<ReturnType<typeof createFakeChild>> = [];
-    spawnMock.mockImplementation(() => {
-      const child = createFakeChild();
-      children.push(child);
-      return child;
-    });
+    const { children, waitForSpawnCount } = trackSpawnedChildren();
     const { queue, mirrors } = createRuntime();
 
     const liveWrite = queue.enqueueLiveMirrorInput('demo', 'interactive', false, () => true);
@@ -223,7 +236,7 @@ describe('daemon input queue runtime', () => {
     expect(evicted).toBe(0);
     children[0]?.emit('close', 0);
     await expect(liveWrite).resolves.toBe(true);
-    await waitForTmuxWriteSettle();
+    await waitForSpawnCount(2);
     expect(spawnMock).toHaveBeenCalledTimes(2);
     children[1]?.emit('close', 0);
     await expect(genericWrite).resolves.toBe(true);
@@ -285,12 +298,7 @@ describe('daemon input queue runtime', () => {
   });
 
   it('does not resolve an oversized single input item until all of its tmux chunks finish', async () => {
-    const children: Array<ReturnType<typeof createFakeChild>> = [];
-    spawnMock.mockImplementation(() => {
-      const child = createFakeChild();
-      children.push(child);
-      return child;
-    });
+    const { children, waitForSpawnCount } = trackSpawnedChildren();
     const { queue } = createRuntime();
     const source = `${'x'.repeat(TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES)}${'y'.repeat(64)}`;
 
@@ -305,7 +313,7 @@ describe('daemon input queue runtime', () => {
     children[0]?.emit('close', 0);
     await Promise.resolve();
     expect(resolved).toBe(false);
-    await waitForTmuxWriteSettle();
+    await waitForSpawnCount(2);
     expect(spawnMock).toHaveBeenCalledTimes(2);
     children[1]?.emit('close', 0);
     await expect(write).resolves.toBe(true);
@@ -313,12 +321,7 @@ describe('daemon input queue runtime', () => {
   });
 
   it('drains input queued while a previous tmux write is still in flight', async () => {
-    const children: Array<ReturnType<typeof createFakeChild>> = [];
-    spawnMock.mockImplementation(() => {
-      const child = createFakeChild();
-      children.push(child);
-      return child;
-    });
+    const { children, waitForSpawnCount } = trackSpawnedChildren();
     const { queue } = createRuntime();
 
     const firstWrite = queue.enqueueLiveMirrorInput('demo', 'first', false, () => true);
@@ -329,7 +332,7 @@ describe('daemon input queue runtime', () => {
     children[0]?.emit('close', 0);
     await expect(firstWrite).resolves.toBe(true);
     await Promise.resolve();
-    await waitForTmuxWriteSettle();
+    await waitForSpawnCount(2);
     expect(spawnMock).toHaveBeenCalledTimes(2);
     expect(spawnMock.mock.calls[1]?.[1]).toEqual([
       'send-keys',

@@ -1,0 +1,180 @@
+{
+  "id": "cli.daemon_install",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "dagpipe.extract.arc.daemon_install_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.daemon_install_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_daemon_distribution",
+      "operator": "cli.daemon_install.resolve_distribution",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_install_request"
+      ],
+      "output": {
+        "id": "arc.daemon_install_plan",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "stage_daemon_package",
+      "operator": "cli.daemon_install.stage_package",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_install_plan"
+      ],
+      "output": {
+        "id": "arc.staged_daemon_package",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "publish_daemon_shim",
+      "operator": "cli.daemon_install.publish_global_entry",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.staged_daemon_package"
+      ],
+      "output": {
+        "id": "arc.daemon_install_effect",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "verify_daemon_entry",
+      "operator": "cli.daemon_install.verify_entry",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_install_effect"
+      ],
+      "output": {
+        "id": "arc.daemon_install_verification",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_daemon_install",
+      "operator": "cli.daemon_install.settle",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.daemon_install_verification"
+      ],
+      "output": {
+        "id": "arc.daemon_install_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "dagpipe.extract.arc.daemon_install_request",
+      "to": "resolve_daemon_distribution",
+      "arc_id": "arc.daemon_install_request"
+    },
+    {
+      "from": "resolve_daemon_distribution",
+      "to": "stage_daemon_package",
+      "arc_id": "arc.daemon_install_plan"
+    },
+    {
+      "from": "stage_daemon_package",
+      "to": "publish_daemon_shim",
+      "arc_id": "arc.staged_daemon_package"
+    },
+    {
+      "from": "publish_daemon_shim",
+      "to": "verify_daemon_entry",
+      "arc_id": "arc.daemon_install_effect"
+    },
+    {
+      "from": "verify_daemon_entry",
+      "to": "settle_daemon_install",
+      "arc_id": "arc.daemon_install_verification"
+    }
+  ],
+  "outputs": [
+    "arc.daemon_install_result"
+  ]
+}

@@ -4014,11 +4014,6 @@
       "status": "active"
     },
     {
-      "from_module": "client.buffer_frame_assembly",
-      "to_module": "shared.terminal_types",
-      "status": "active"
-    },
-    {
       "from_module": "client.wire_ingress",
       "to_module": "shared.terminal_types",
       "status": "active"
@@ -4412,6 +4407,17 @@
     },
     {
       "from_module": "daemon.mirror_store",
+      "to_module": "daemon.source_adapter",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/terminal-mirror-runtime.ts"
+      ],
+      "allowed_callees": [
+        "src/server/terminal-source-adapter.ts"
+      ]
+    },
+    {
+      "from_module": "daemon.mirror_store",
       "to_module": "daemon.transport_subscriber",
       "status": "active",
       "allowed_callers": [
@@ -4433,6 +4439,42 @@
     },
     {
       "from_module": "daemon.terminal_backend",
+      "to_module": "daemon.source_adapter",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime",
+      "to_module": "daemon.source_adapter",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.schedule_runtime",
+      "to_module": "daemon.source_adapter",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.source_adapter",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.transport_subscriber",
+      "to_module": "daemon.terminal_snapshot_read",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/terminal-message-runtime.ts"
+      ],
+      "allowed_callees": [
+        "src/server/terminal-snapshot-read-runtime.ts"
+      ]
+    },
+    {
+      "from_module": "daemon.terminal_snapshot_read",
+      "to_module": "daemon.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.terminal_snapshot_read",
       "to_module": "daemon.source_adapter",
       "status": "active"
     },

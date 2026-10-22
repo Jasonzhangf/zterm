@@ -1,0 +1,325 @@
+{
+  "id": "cli.terminal_input_event",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "dagpipe.extract.arc.local_input_event",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.local_input_event",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.input_ack_event",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.input_ack_event",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.input_policy",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.input_policy",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.transport_facts",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.transport_facts",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "classify_local_input",
+      "operator": "cli.local_input.classify_bytes",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.local_input_event",
+        "arc.input_policy"
+      ],
+      "output": {
+        "id": "arc.input_classification",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "decode_remote_input",
+      "operator": "client.input_normalizer.decode_utf8",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.input_classification"
+      ],
+      "output": {
+        "id": "arc.normalized_input",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "enqueue_reliable_input",
+      "operator": "client.reliable_input.enqueue",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.normalized_input",
+        "arc.input_policy"
+      ],
+      "output": {
+        "id": "arc.queued_input",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "pump_reliable_input",
+      "operator": "client.reliable_input.pump",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.queued_input",
+        "arc.transport_facts",
+        "arc.input_policy"
+      ],
+      "output": {
+        "id": "arc.input_send_attempt",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_reliable_input",
+      "operator": "client.reliable_input.settle",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.input_send_attempt",
+        "arc.input_ack_event",
+        "arc.transport_facts",
+        "arc.input_policy"
+      ],
+      "output": {
+        "id": "arc.reliable_input_outcome",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_input_event",
+      "operator": "cli.terminal_input.settle_event",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.input_classification",
+        "arc.reliable_input_outcome"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "classify_local_input",
+      "to": "decode_remote_input",
+      "arc_id": "arc.input_classification"
+    },
+    {
+      "from": "decode_remote_input",
+      "to": "enqueue_reliable_input",
+      "arc_id": "arc.normalized_input"
+    },
+    {
+      "from": "enqueue_reliable_input",
+      "to": "pump_reliable_input",
+      "arc_id": "arc.queued_input"
+    },
+    {
+      "from": "pump_reliable_input",
+      "to": "settle_reliable_input",
+      "arc_id": "arc.input_send_attempt"
+    },
+    {
+      "from": "dagpipe.extract.arc.local_input_event",
+      "to": "classify_local_input",
+      "arc_id": "arc.local_input_event"
+    },
+    {
+      "from": "dagpipe.extract.arc.input_policy",
+      "to": "classify_local_input",
+      "arc_id": "arc.input_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.input_policy",
+      "to": "enqueue_reliable_input",
+      "arc_id": "arc.input_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.transport_facts",
+      "to": "pump_reliable_input",
+      "arc_id": "arc.transport_facts"
+    },
+    {
+      "from": "dagpipe.extract.arc.input_policy",
+      "to": "pump_reliable_input",
+      "arc_id": "arc.input_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.input_ack_event",
+      "to": "settle_reliable_input",
+      "arc_id": "arc.input_ack_event"
+    },
+    {
+      "from": "dagpipe.extract.arc.transport_facts",
+      "to": "settle_reliable_input",
+      "arc_id": "arc.transport_facts"
+    },
+    {
+      "from": "dagpipe.extract.arc.input_policy",
+      "to": "settle_reliable_input",
+      "arc_id": "arc.input_policy"
+    },
+    {
+      "from": "classify_local_input",
+      "to": "settle_input_event",
+      "arc_id": "arc.input_classification"
+    },
+    {
+      "from": "settle_reliable_input",
+      "to": "settle_input_event",
+      "arc_id": "arc.reliable_input_outcome"
+    }
+  ],
+  "outputs": [
+    "arc.result"
+  ]
+}

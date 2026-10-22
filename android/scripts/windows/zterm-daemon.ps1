@@ -6,14 +6,25 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Resolve-PackageRoot {
-  if ($env:ZTERM_PACKAGE_ROOT -and (Test-Path -LiteralPath $env:ZTERM_PACKAGE_ROOT)) {
+  if ($env:ZTERM_PACKAGE_ROOT) {
+    if (-not (Test-Path -LiteralPath $env:ZTERM_PACKAGE_ROOT)) {
+      throw "missing daemon package root: $env:ZTERM_PACKAGE_ROOT"
+    }
     return (Resolve-Path -LiteralPath $env:ZTERM_PACKAGE_ROOT).Path
   }
   return (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..\..")).Path
 }
 
 $PackageRoot = Resolve-PackageRoot
-$RuntimeEntry = Join-Path $PackageRoot "runtime\server.cjs"
+$NativeDir = Join-Path $PackageRoot "runtime"
+$DagpipeNative = Join-Path $NativeDir "dagpipe.node"
+if (-not (Test-Path -LiteralPath $DagpipeNative)) {
+  throw "missing daemon DAGPIPE native: $DagpipeNative"
+}
+$env:ZTERM_DAGPIPE_NATIVE = $DagpipeNative
+$env:PATH = "$NativeDir;$env:PATH"
+$RuntimeEntry = Join-Path $NativeDir "server.cjs"
+$TerminalConfigCommand = Join-Path $PackageRoot "support\terminal-config-command.cjs"
 $NodeExe = if ($env:ZTERM_NODE_EXE) { $env:ZTERM_NODE_EXE } else { "node.exe" }
 $HomeDir = [Environment]::GetFolderPath("UserProfile")
 $ZtermHome = Join-Path $HomeDir ".zterm"
@@ -23,34 +34,46 @@ $PidFile = Join-Path $RunDir "zterm-daemon.pid"
 $TaskName = "ZTermDaemon"
 $FirewallRuleName = "ZTerm Daemon 3333"
 
+function Assert-TerminalConfigCommand {
+  if (-not (Test-Path -LiteralPath $TerminalConfigCommand)) {
+    throw "missing shared terminal config command: $TerminalConfigCommand"
+  }
+}
+
+function ConvertFrom-ShellSingleQuotedValue([string]$Value) {
+  if ($Value.Length -lt 2 -or $Value[0] -ne "'" -or $Value[$Value.Length - 1] -ne "'") {
+    throw "invalid terminal config shell value: $Value"
+  }
+  return $Value.Substring(1, $Value.Length - 2).Replace("'\''", "'")
+}
+
+function Invoke-TerminalConfigCommand([string[]]$CommandArgs) {
+  Assert-TerminalConfigCommand
+  $output = @(& $NodeExe $TerminalConfigCommand @CommandArgs)
+  if ($LASTEXITCODE -ne 0) {
+    throw "terminal-config-command failed with exit code $LASTEXITCODE"
+  }
+  return $output
+}
+
 function Read-DaemonConfig {
-  $configPath = Join-Path $ZtermHome "config.json"
-  $hostValue = "0.0.0.0"
-  $portValue = 3333
-  $authSource = "default"
-  if (Test-Path -LiteralPath $configPath) {
-    $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
-    $daemon = $null
-    if ($config.zterm -and $config.zterm.android -and $config.zterm.android.daemon) {
-      $daemon = $config.zterm.android.daemon
-    } elseif ($config.mobile -and $config.mobile.daemon) {
-      $daemon = $config.mobile.daemon
-    }
-    if ($daemon) {
-      if ($daemon.host) { $hostValue = [string]$daemon.host }
-      if ($daemon.port) { $portValue = [int]$daemon.port }
-      if ($daemon.authToken) { $authSource = "config" }
+  $values = @{}
+  foreach ($line in (Invoke-TerminalConfigCommand @("daemon-config", "--shell"))) {
+    if ($line -match '^(HOST|PORT|SESSION_NAME|AUTH_SOURCE|CONFIG_FOUND|CONFIG_DISPLAY_PATH)=(.*)$') {
+      $values[$Matches[1]] = ConvertFrom-ShellSingleQuotedValue $Matches[2]
     }
   }
-  if ($env:ZTERM_HOST) { $hostValue = $env:ZTERM_HOST }
-  if ($env:ZTERM_PORT) { $portValue = [int]$env:ZTERM_PORT }
-  if ($env:ZTERM_AUTH_TOKEN) { $authSource = "env" }
+  foreach ($name in @("HOST", "PORT", "SESSION_NAME", "AUTH_SOURCE", "CONFIG_FOUND", "CONFIG_DISPLAY_PATH")) {
+    if (-not $values.ContainsKey($name)) {
+      throw "terminal config projection omitted $name"
+    }
+  }
   [pscustomobject]@{
-    Host = $hostValue
-    Port = $portValue
-    AuthSource = $authSource
-    ConfigPath = $configPath
-    ConfigFound = Test-Path -LiteralPath $configPath
+    Host = [string]$values["HOST"]
+    Port = [int]$values["PORT"]
+    AuthSource = [string]$values["AUTH_SOURCE"]
+    ConfigPath = [string]$values["CONFIG_DISPLAY_PATH"]
+    ConfigFound = $values["CONFIG_FOUND"] -eq "1"
   }
 }
 
@@ -133,12 +156,6 @@ function Ensure-WindowsBackendEnv {
   }
 }
 
-function Write-JsonNoBom([string]$Path, [object]$Value) {
-  $json = $Value | ConvertTo-Json -Depth 8
-  $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
-  [System.IO.File]::WriteAllText($Path, $json, $utf8NoBom)
-}
-
 function Invoke-ConfigureRelay([string[]]$CommandArgs) {
   $relayUrl = ""
   $username = ""
@@ -146,13 +163,15 @@ function Invoke-ConfigureRelay([string[]]$CommandArgs) {
   $hostId = ""
   $deviceId = ""
   $deviceName = ""
+  $passwordStdin = $false
   $restartAfterConfig = $false
   for ($i = 0; $i -lt $CommandArgs.Count; $i++) {
     switch ($CommandArgs[$i]) {
       "--relay-url" { $i++; $relayUrl = $CommandArgs[$i]; continue }
       "--username" { $i++; $username = $CommandArgs[$i]; continue }
-      "--password" { $i++; $password = $CommandArgs[$i]; continue }
-      "--password-stdin" { $password = [Console]::In.ReadLine(); continue }
+      "--password" { throw "relay passwords are accepted only with --password-stdin" }
+      "--password-env" { throw "relay passwords are accepted only with --password-stdin" }
+      "--password-stdin" { $password = [Console]::In.ReadLine(); $passwordStdin = $true; continue }
       "--host-id" { $i++; $hostId = $CommandArgs[$i]; continue }
       "--device-id" { $i++; $deviceId = $CommandArgs[$i]; continue }
       "--device-name" { $i++; $deviceName = $CommandArgs[$i]; continue }
@@ -161,31 +180,29 @@ function Invoke-ConfigureRelay([string[]]$CommandArgs) {
       default { throw "unknown configure-relay option: $($CommandArgs[$i])" }
     }
   }
-  if (-not $relayUrl -or -not $username -or -not $password -or -not $hostId) {
-    throw "configure-relay requires --relay-url, --username, --password/--password-stdin, and --host-id"
+  if (-not $relayUrl -or -not $username -or -not $password -or -not $hostId -or -not $passwordStdin) {
+    throw "configure-relay requires --relay-url, --username, --password-stdin, and --host-id"
   }
-  Ensure-Dirs
-  $configPath = Join-Path $ZtermHome "config.json"
-  $config = [pscustomobject]@{}
-  if (Test-Path -LiteralPath $configPath) {
-    $raw = Get-Content -LiteralPath $configPath -Raw
-    if ($raw.Trim()) { $config = $raw | ConvertFrom-Json }
+  Assert-TerminalConfigCommand
+  $commandArgs = @(
+    $TerminalConfigCommand,
+    "configure-relay",
+    "--relay-url", $relayUrl,
+    "--username", $username,
+    "--host-id", $hostId,
+    "--password-stdin"
+  )
+  if ($deviceId) { $commandArgs += @("--device-id", $deviceId) }
+  if ($deviceName) { $commandArgs += @("--device-name", $deviceName) }
+  $password | & $NodeExe @commandArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "terminal-config-command failed with exit code $LASTEXITCODE"
   }
-  if (-not $config.PSObject.Properties["mobile"]) {
-    Add-Member -InputObject $config -MemberType NoteProperty -Name "mobile" -Value ([pscustomobject]@{})
-  }
-  $config.mobile | Add-Member -Force -MemberType NoteProperty -Name "relay" -Value ([pscustomobject]@{
-    relayUrl = $relayUrl
-    username = $username
-    password = $password
-    hostId = $hostId
-    deviceId = if ($deviceId) { $deviceId } else { $hostId }
-    deviceName = if ($deviceName) { $deviceName } else { [Environment]::MachineName }
-    platform = "win32"
-  })
-  Write-JsonNoBom $configPath $config
-  Write-Output "zterm relay configured: path=$configPath relayUrl=$relayUrl username=$username hostId=$hostId deviceName=$(if ($deviceName) { $deviceName } else { [Environment]::MachineName }) passwordSet=true"
   if ($restartAfterConfig) { Invoke-Restart }
+}
+
+function Invoke-Config {
+  Invoke-TerminalConfigCommand @("daemon-config") | Write-Output
 }
 
 function Invoke-Run {
@@ -386,9 +403,10 @@ Usage:
   zterm-daemon run
   zterm-daemon start
   zterm-daemon status
+  zterm-daemon config
   zterm-daemon stop
   zterm-daemon restart
-  zterm-daemon configure-relay --relay-url URL --username USER --password PASS --host-id HOST_ID [--device-name NAME] [--restart-service]
+  zterm-daemon configure-relay --relay-url URL --username USER --password-stdin --host-id HOST_ID [--device-name NAME] [--restart-service]
   zterm-daemon install-service
   zterm-daemon uninstall-service
   zterm-daemon service-status
@@ -402,6 +420,7 @@ switch ($command) {
   "run" { Invoke-Run }
   "start" { Invoke-Start }
   "status" { Invoke-Status }
+  "config" { Invoke-Config }
   "stop" { Invoke-Stop }
   "restart" { Invoke-Restart }
   "configure-relay" { Invoke-ConfigureRelay $rest }

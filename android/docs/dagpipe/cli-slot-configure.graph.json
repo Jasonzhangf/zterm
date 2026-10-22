@@ -1,0 +1,264 @@
+{
+  "id": "cli.slot_configure",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "validate_slot_request",
+      "operator": "cli.slot_input.validate",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.slot_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "read_slot_context",
+      "operator": "cli.slot_store.read_context",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.slot_request"
+      ],
+      "output": {
+        "id": "arc.slot_context",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "select_server",
+      "operator": "cli.account_directory.select_server",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.slot_context"
+      ],
+      "output": {
+        "id": "arc.server_selection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "select_session",
+      "operator": "cli.session_catalog.select_session",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.server_selection"
+      ],
+      "output": {
+        "id": "arc.session_selection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_stable_identity",
+      "operator": "cli.session_identity.resolve",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.session_selection"
+      ],
+      "output": {
+        "id": "arc.identified_session",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "preview_ready_mirror",
+      "operator": "cli.terminal_snapshot.preview",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.identified_session"
+      ],
+      "output": {
+        "id": "arc.previewed_selection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "confirm_selection",
+      "operator": "cli.slot_selection.confirm",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.previewed_selection"
+      ],
+      "output": {
+        "id": "arc.confirmed_selection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "commit_slot_binding",
+      "operator": "cli.slot_store.commit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.confirmed_selection"
+      ],
+      "output": {
+        "id": "arc.committed_binding",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_slot_result",
+      "operator": "cli.slot_configure.collect_result",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.committed_binding"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "validate_slot_request",
+      "to": "read_slot_context",
+      "arc_id": "arc.slot_request"
+    },
+    {
+      "from": "read_slot_context",
+      "to": "select_server",
+      "arc_id": "arc.slot_context"
+    },
+    {
+      "from": "select_server",
+      "to": "select_session",
+      "arc_id": "arc.server_selection"
+    },
+    {
+      "from": "select_session",
+      "to": "resolve_stable_identity",
+      "arc_id": "arc.session_selection"
+    },
+    {
+      "from": "resolve_stable_identity",
+      "to": "preview_ready_mirror",
+      "arc_id": "arc.identified_session"
+    },
+    {
+      "from": "preview_ready_mirror",
+      "to": "confirm_selection",
+      "arc_id": "arc.previewed_selection"
+    },
+    {
+      "from": "confirm_selection",
+      "to": "commit_slot_binding",
+      "arc_id": "arc.confirmed_selection"
+    },
+    {
+      "from": "commit_slot_binding",
+      "to": "collect_slot_result",
+      "arc_id": "arc.committed_binding"
+    }
+  ],
+  "outputs": [
+    "arc.result"
+  ]
+}

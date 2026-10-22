@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createTerminalMirrorRuntime } from './terminal-mirror-runtime';
 import { buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
 import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
+import type { ResolvedTerminalSession } from './terminal-source-adapter';
 import { findChangedIndexedRanges } from './canonical-buffer';
 import type { TerminalCell } from '../lib/types';
 import type { AdaptiveWidthOwnershipStore, AdaptiveWidthOwnershipRecord } from './adaptive-width-ownership-store';
@@ -49,6 +50,10 @@ function createRuntime(overrides: {
     backend: 'tmux' | 'herdr' | undefined,
     operation: 'apply' | 'release',
   ) => void;
+  resolveMirrorSessionProvenance?: (
+    sessionName: string,
+    backend: 'tmux' | 'herdr',
+  ) => ResolvedTerminalSession | null;
 } = {}) {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
@@ -113,6 +118,7 @@ function createRuntime(overrides: {
     logTimePrefix: () => '2026-05-01 00:00:00',
     runTmuxForSession: (args, _sessionName) => runTmux(args),
     resizeBackendSession: overrides.resizeBackendSession,
+    resolveMirrorSessionProvenance: overrides.resolveMirrorSessionProvenance,
     adaptiveWidthOwnershipStore: overrides.adaptiveWidthOwnershipStore,
     closeTransportSubscriber,
     getSessionMirror: (session: TerminalSession) => (session.mirrorKey ? mirrors.get(session.mirrorKey) || null : null),
@@ -2622,5 +2628,144 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
         type: 'buffer-sync',
       }),
     );
+  });
+});
+
+describe('terminal mirror stable identity binding', () => {
+  const stableA = 'tmux:v1:opaque-stable-a';
+  const stableB = 'tmux:v1:opaque-stable-b';
+
+  function resolved(stableId: string, sessionId: string): ResolvedTerminalSession {
+    return {
+      identity: {
+        backend: 'tmux',
+        sessionName: 'demo',
+        stableId,
+      },
+      target: {
+        backend: 'tmux',
+        sessionName: 'demo',
+        stableId,
+        socketPath: `/tmp/zterm-identity-${sessionId}/default`,
+        serverPid: '900',
+        sessionId,
+        createdAt: 1,
+      },
+    };
+  }
+
+  it('records actual native provenance for a normal app attach', async () => {
+    const { runtime, sessions, mirrors } = createRuntime({
+      resolveMirrorSessionProvenance: () => resolved(stableA, '$1'),
+    });
+    const session = createSession();
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      backend: 'tmux',
+      cols: 120,
+      rows: 40,
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(session.sessionIdentity).toBe(stableA);
+    expect(mirror?.sessionIdentity).toBe(stableA);
+    expect(mirror?.sessionTarget?.stableId).toBe(stableA);
+  });
+
+  it('rejects an exact attach that conflicts with a live mirror before mutating subscriber or mirror', async () => {
+    const { runtime, sessions, mirrors } = createRuntime();
+    const first = createSession('session-1');
+    sessions.set(first.id, first);
+    await runtime.attachTmux(first, {
+      sessionName: 'demo',
+      backend: 'tmux',
+      resolvedSession: resolved(stableA, '$1'),
+      cols: 120,
+      rows: 40,
+    });
+    const mirror = mirrors.get('demo')!;
+    mirror.bufferStartIndex = 10;
+    mirror.revision = 5;
+    mirror.bufferLines = [[{ char: 65, fg: 256, bg: 256, flags: 0, width: 1 }]];
+
+    const second = createSession('session-2');
+    sessions.set(second.id, second);
+
+    await expect(runtime.attachTmux(second, {
+      sessionName: 'demo',
+      backend: 'tmux',
+      resolvedSession: resolved(stableB, '$2'),
+      cols: 120,
+      rows: 40,
+    })).rejects.toThrow(/different|conflict|bound/u);
+
+    expect(mirror.sessionIdentity).toBe(stableA);
+    expect(mirror.sessionTarget?.stableId).toBe(stableA);
+    expect(mirror.subscribers).toEqual(new Set(['session-1']));
+    expect(mirror.bufferStartIndex).toBe(10);
+    expect(mirror.revision).toBe(5);
+    expect(mirror.bufferLines).toHaveLength(1);
+    expect(first.sessionIdentity).toBe(stableA);
+    expect(first.sessionTarget?.stableId).toBe(stableA);
+    expect(first.mirrorKey).toBe('demo');
+    expect(second.sessionIdentity).toBeUndefined();
+    expect(second.mirrorKey).toBeNull();
+  });
+
+  it.each([false, true])('rejects an exact attach for a mirror without provenance (subscribed=%s)', async (subscribed) => {
+    const { runtime, sessions, mirrors } = createRuntime();
+    const existing = runtime.createMirror('demo');
+    existing.lifecycle = 'ready';
+    if (subscribed) existing.subscribers.add('old-session');
+    const oldSession = createSession('old-session');
+    oldSession.mirrorKey = 'demo';
+    sessions.set(oldSession.id, oldSession);
+
+    const incoming = createSession('session-2');
+    sessions.set(incoming.id, incoming);
+
+    await expect(runtime.attachTmux(incoming, {
+      sessionName: 'demo',
+      backend: 'tmux',
+      resolvedSession: resolved(stableA, '$1'),
+      cols: 120,
+      rows: 40,
+    })).rejects.toThrow(/provenance|identity|bound/u);
+
+    expect(mirrors.get('demo')).toBe(existing);
+    expect(existing.sessionIdentity).toBeUndefined();
+    expect(existing.subscribers).toEqual(new Set(subscribed ? ['old-session'] : []));
+    expect(incoming.mirrorKey).toBeNull();
+  });
+
+  it('allows an exact attach that matches the live mirror stable identity', async () => {
+    const { runtime, sessions, mirrors } = createRuntime();
+    const first = createSession('session-1');
+    sessions.set(first.id, first);
+    await runtime.attachTmux(first, {
+      sessionName: 'demo',
+      backend: 'tmux',
+      resolvedSession: resolved(stableA, '$1'),
+      cols: 120,
+      rows: 40,
+    });
+
+    const second = createSession('session-2');
+    sessions.set(second.id, second);
+    await runtime.attachTmux(second, {
+      sessionName: 'demo',
+      backend: 'tmux',
+      resolvedSession: resolved(stableA, '$1'),
+      cols: 120,
+      rows: 40,
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(mirror?.sessionIdentity).toBe(stableA);
+    expect(mirror?.subscribers).toEqual(new Set(['session-1', 'session-2']));
+    expect(second.sessionIdentity).toBe(stableA);
+    expect(second.mirrorKey).toBe('demo');
   });
 });

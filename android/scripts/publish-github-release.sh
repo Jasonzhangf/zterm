@@ -25,10 +25,14 @@ NOTES_FILE="$(mktemp -t zterm-release-notes.XXXXXX.md)"
 APK="${RELEASE_DIST}/${APK_URL}"
 DAEMON_ARCHIVE="${RELEASE_DIST}/zterm-daemon-${BASE_VERSION}-darwin-arm64.tar.gz"
 DAEMON_ARCHIVE_SHA="${DAEMON_ARCHIVE}.sha256"
-DAEMON_NPM="${RELEASE_DIST}/jsonstudio-zterm-daemon-${BASE_VERSION}.tgz"
-DAEMON_NPM_SHA="${DAEMON_NPM}.sha256"
+DAEMON_PACKAGE_SET="${ZTERM_DAEMON_PACKAGES_DIR:-${RELEASE_DIST}/npm/zterm-daemon-${BASE_VERSION}}"
+DAEMON_NPM="${DAEMON_PACKAGE_SET}/jsonstudio-zterm-daemon-${BASE_VERSION}.tgz"
+DAEMON_NPM_DARWIN="${DAEMON_PACKAGE_SET}/jsonstudio-zterm-daemon-darwin-arm64-${BASE_VERSION}.tgz"
+DAEMON_NPM_LINUX="${DAEMON_PACKAGE_SET}/jsonstudio-zterm-daemon-linux-x64-${BASE_VERSION}.tgz"
+DAEMON_NPM_WIN32="${DAEMON_PACKAGE_SET}/jsonstudio-zterm-daemon-win32-x64-${BASE_VERSION}.tgz"
 
-node "${ROOT_DIR}/scripts/verify-release-assets.mjs" >/dev/null
+node "${ROOT_DIR}/scripts/verify-release-assets.mjs" \
+  --daemon-packages-dir "${DAEMON_PACKAGE_SET}" >/dev/null
 
 cat > "${NOTES_FILE}" <<NOTES
 ## ZTerm Android ${VERSION_NAME}
@@ -78,7 +82,7 @@ zterm-daemon service-status
 
 - Android package built by \`./scripts/build-android-debug.sh\`
 - daemon standalone package built by \`pnpm --dir android run daemon:prepare-release\`
-- daemon npm package built by \`pnpm --dir android run daemon:prepare-npm\`
+- daemon npm package set supplied by the CLI Platform aggregate-pack artifact
 - release assets verified by \`pnpm --dir android run release:verify\`
 NOTES
 
@@ -88,7 +92,9 @@ ASSETS=(
   "${DAEMON_ARCHIVE}"
   "${DAEMON_ARCHIVE_SHA}"
   "${DAEMON_NPM}"
-  "${DAEMON_NPM_SHA}"
+  "${DAEMON_NPM_DARWIN}"
+  "${DAEMON_NPM_LINUX}"
+  "${DAEMON_NPM_WIN32}"
 )
 
 if gh release view "${TAG}" >/dev/null 2>&1; then

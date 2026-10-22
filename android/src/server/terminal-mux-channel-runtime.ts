@@ -11,6 +11,10 @@ import {
 } from '@zterm/shared/protocol';
 import type { BridgeServerMessage as ServerMessage } from '@zterm/shared/protocol';
 import type { SessionMirror } from './terminal-runtime-types';
+import type {
+  ResolvedTerminalSession,
+  TerminalSessionIdentityResolution,
+} from './terminal-source-adapter';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 import { handleMuxChannelOpenedMessageRuntime } from './terminal-message-control-runtime';
 import type {
@@ -41,6 +45,12 @@ export interface TerminalMuxChannelRuntimeDeps {
     channelId: string,
   ) => void;
   sanitizeSessionName: (input?: string) => string;
+  resolveExistingSession?: (
+    stableId: string,
+    backend: 'tmux' | 'herdr',
+    requestedSessionName?: string,
+  ) => TerminalSessionIdentityResolution;
+  bindResolvedSession?: (session: ResolvedTerminalSession) => void;
   attachTmux: (subscriber: TerminalTransportSubscriber, payload: TerminalAttachPayload) => Promise<void>;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   handleMessage: (
@@ -183,9 +193,89 @@ export function createTerminalMuxChannelRuntime(
           ));
           return;
         }
+        let resolvedSession: ResolvedTerminalSession | null = null;
+        if (frame.payload.existingOnly) {
+          const expectedSessionIdentity = frame.payload.expectedSessionIdentity?.trim() || '';
+          const backend = frame.payload.backend;
+          if (
+            !expectedSessionIdentity
+            || !backend
+            || !deps.resolveExistingSession
+            || !deps.bindResolvedSession
+          ) {
+            sendMuxFrame(connection, {
+              type: 'mux-channel-closed',
+              payload: {
+                channelId: frame.payload.channelId,
+                reason: 'exact-existing open requires expectedSessionIdentity, backend, and stable resolver',
+                code: 'session_identity_mismatch',
+              },
+            });
+            return;
+          }
+          let resolution: TerminalSessionIdentityResolution;
+          try {
+            resolution = deps.resolveExistingSession(
+              expectedSessionIdentity,
+              backend,
+              deps.sanitizeSessionName(frame.payload.sessionName),
+            );
+          } catch (error) {
+            resolution = {
+              ok: false,
+              code: 'session_identity_mismatch',
+              message: `session identity resolution failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            };
+          }
+          if (!resolution.ok) {
+            sendMuxFrame(connection, {
+              type: 'mux-channel-closed',
+              payload: {
+                channelId: frame.payload.channelId,
+                reason: resolution.message,
+                code: resolution.code,
+              },
+            });
+            return;
+          }
+          if (resolution.session.identity.stableId !== expectedSessionIdentity) {
+            sendMuxFrame(connection, {
+              type: 'mux-channel-closed',
+              payload: {
+                channelId: frame.payload.channelId,
+                reason: 'resolved session identity does not match expectedSessionIdentity',
+                code: 'session_identity_mismatch',
+              },
+            });
+            return;
+          }
+          try {
+            deps.bindResolvedSession(resolution.session);
+          } catch (error) {
+            sendMuxFrame(connection, {
+              type: 'mux-channel-closed',
+              payload: {
+                channelId: frame.payload.channelId,
+                reason: `failed to bind exact session target: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+                code: 'session_identity_mismatch',
+              },
+            });
+            return;
+          }
+          resolvedSession = resolution.session;
+        }
         const subscriber = deps.createMuxChannelSubscriber(connection, frame.payload.channelId);
-        subscriber.sessionName = deps.sanitizeSessionName(frame.payload.sessionName);
-        subscriber.backend = frame.payload.backend;
+        subscriber.sessionName = resolvedSession?.identity.sessionName
+          || deps.sanitizeSessionName(frame.payload.sessionName);
+        subscriber.backend = resolvedSession?.identity.backend || frame.payload.backend;
+        if (resolvedSession) {
+          subscriber.sessionIdentity = resolvedSession.identity.stableId;
+          subscriber.sessionTarget = resolvedSession.target;
+        }
         subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
         subscriber.sessionAttachHeartbeatAt = subscriber.bodySubscribed ? Date.now() : undefined;
         try {
@@ -215,18 +305,20 @@ export function createTerminalMuxChannelRuntime(
           payload: {
             channelId: frame.payload.channelId,
             sessionName: subscriber.sessionName,
+            ...(resolvedSession ? { stableId: resolvedSession.identity.stableId } : {}),
             capabilities: {
               reliableInput: { version: 1 },
             },
           },
         });
         void deps.attachTmux(subscriber, {
-          sessionName: frame.payload.sessionName,
-          backend: frame.payload.backend,
+          sessionName: subscriber.sessionName,
+          backend: subscriber.backend,
           cols: frame.payload.cols,
           rows: frame.payload.rows,
           widthMode: frame.payload.widthMode,
           autoCommand: frame.payload.autoCommand,
+          ...(resolvedSession ? { resolvedSession } : {}),
         }).catch((error: unknown) => {
           const reason = `mux channel attach failed: ${
             error instanceof Error ? error.message : String(error)

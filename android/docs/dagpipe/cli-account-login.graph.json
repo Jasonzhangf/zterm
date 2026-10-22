@@ -1,0 +1,66 @@
+{
+  "id": "cli.account_login",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_login_request",
+      "operator": "cli.account_input.validate",
+      "operator_version": "0.1",
+      "inputs": ["arc.request"],
+      "output": { "id": "arc.login_input", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "begin_login_attempt",
+      "operator": "cli.account_state.begin_login",
+      "operator_version": "0.1",
+      "inputs": ["arc.login_input"],
+      "output": { "id": "arc.login_attempt", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "authenticate_account",
+      "operator": "cli.account_client.authenticate",
+      "operator_version": "0.1",
+      "inputs": ["arc.login_attempt"],
+      "output": { "id": "arc.authenticated_login", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "commit_login_state",
+      "operator": "cli.account_state.commit_login",
+      "operator_version": "0.1",
+      "inputs": ["arc.authenticated_login"],
+      "output": { "id": "arc.committed_login", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_login_result",
+      "operator": "cli.account_login.collect_result",
+      "operator_version": "0.1",
+      "inputs": ["arc.committed_login"],
+      "output": { "id": "arc.result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "validate_login_request", "to": "begin_login_attempt", "arc_id": "arc.login_input" },
+    { "from": "begin_login_attempt", "to": "authenticate_account", "arc_id": "arc.login_attempt" },
+    { "from": "authenticate_account", "to": "commit_login_state", "arc_id": "arc.authenticated_login" },
+    { "from": "commit_login_state", "to": "collect_login_result", "arc_id": "arc.committed_login" }
+  ],
+  "outputs": ["arc.result"]
+}

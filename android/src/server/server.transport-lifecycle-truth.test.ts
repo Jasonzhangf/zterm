@@ -349,10 +349,20 @@ describe('server transport/session lifecycle truth gates', () => {
     const startMirrorBlock = extractBlock(mirrorRuntimeSource, 'async function startMirror(', 1200);
     const createBlock = extractBlock(controlRuntimeSource, "case 'tmux-create-session':", 420);
 
-    expect(source).toContain('assertTmuxSessionExists: (sessionName, backend) => {');
+    expect(source).toContain(`assertTmuxSessionExists: (sessionName, backend, stableId) => {
+    if (stableId && (backend === 'tmux' || backend === 'herdr')) {
+      const resolution = terminalControlRuntime.resolveExistingSession(
+        stableId,
+        backend,
+        sessionName,
+      );`);
     expect(source).toContain("'has-session', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName)");
     expect(source).not.toContain("runTmux(['new-session', '-d', '-s', sessionName");
-    expect(startMirrorBlock).toContain('deps.assertTmuxSessionExists(mirror.sessionName, mirror.backend);');
+    expect(startMirrorBlock).toContain(`deps.assertTmuxSessionExists(
+        mirror.sessionName,
+        mirror.backend,
+        mirror.sessionIdentity,
+      );`);
     expect(startMirrorBlock).not.toContain('new-session');
     expect(createBlock).toContain('deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd, backend');
   });

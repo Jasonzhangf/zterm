@@ -1,10 +1,19 @@
 import { Buffer } from 'node:buffer';
 import { describe, expect, it, vi } from 'vitest';
 import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
-import { isTerminalMuxServerFrame, type TerminalTransportServerFrame } from '@zterm/shared/protocol';
+import type { TerminalCell } from '@zterm/shared/types';
+import {
+  isTerminalMuxServerFrame,
+  type TerminalSessionCatalogEntry,
+  type TerminalTransportServerFrame,
+} from '@zterm/shared/protocol';
 import { createTerminalChannelMuxRuntime } from './terminal-channel-mux-runtime';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
 import { createDaemonInputQueueRuntime } from './daemon-input-queue-runtime';
+import type {
+  ResolvedTerminalSession,
+  TerminalSessionIdentityResolution,
+} from './terminal-source-adapter';
 import type {
   TerminalSession,
   TerminalSessionTransport,
@@ -125,6 +134,37 @@ function createReadyMirror(): SessionMirror {
   };
 }
 
+const SNAPSHOT_STABLE_ID = 'tmux:v1:snapshot-server-glue';
+
+function snapshotRow(text: string): TerminalCell[] {
+  return Array.from(text).map((char) => ({
+    char: char.codePointAt(0) || 32,
+    fg: 256,
+    bg: 256,
+    flags: 0,
+    width: 1,
+  }));
+}
+
+function resolvedSnapshotSession(): ResolvedTerminalSession {
+  return {
+    identity: {
+      backend: 'tmux',
+      sessionName: 'demo',
+      stableId: SNAPSHOT_STABLE_ID,
+    },
+    target: {
+      backend: 'tmux',
+      sessionName: 'demo',
+      stableId: SNAPSHOT_STABLE_ID,
+      socketPath: '/tmp/zterm-snapshot-test.sock',
+      serverPid: '1',
+      sessionId: '$1',
+      createdAt: 1,
+    },
+  };
+}
+
 function createFileTransferMessageRuntimeStub(): TerminalFileTransferMessageRuntime {
   return {
     handleMessage: vi.fn(async () => {}),
@@ -138,12 +178,23 @@ function flushAsyncHandlers() {
   });
 }
 
+function sentTextFrames(connection: TerminalTransportConnection) {
+  return (connection.transport.sendText as ReturnType<typeof vi.fn>).mock.calls
+    .map((call) => JSON.parse(String(call[0])) as { type: string; payload?: unknown });
+}
+
 function createRuntime(options?: {
   mirror?: SessionMirror | null;
   passThroughTransportSend?: boolean;
   failSessionActivityPublish?: boolean;
   failAttachTmux?: boolean;
   useRealChannelMux?: boolean;
+  sessionCatalog?: TerminalSessionCatalogEntry[];
+  resolveExistingSession?: (
+    stableId: string,
+    backend: 'tmux' | 'herdr',
+    requestedSessionName?: string,
+  ) => TerminalSessionIdentityResolution;
 }) {
   type RemoteWindowListTargetsResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['listTargets']>>;
       type RemoteWindowStartStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['startStream']>>;
@@ -174,6 +225,13 @@ function createRuntime(options?: {
   const closeSession = vi.fn();
   const handleAdaptiveResize = vi.fn();
   const daemonRuntimeDebug = vi.fn();
+  const createDetachedTmuxSession = vi.fn(() => 'demo');
+  const closeDetachedTerminalSession = vi.fn();
+  const renameTmuxSession = vi.fn(() => 'demo');
+  const destroyMirror = vi.fn();
+  const listTerminalSessions = vi.fn(() =>
+    [...new Set((options?.sessionCatalog || []).map((entry) => entry.name))].sort());
+  const listTerminalSessionCatalog = vi.fn(() => options?.sessionCatalog || []);
   const daemonInputQueue = createDaemonInputQueueRuntime({
     sessions,
     mirrors,
@@ -332,22 +390,26 @@ function createRuntime(options?: {
       sendMessage,
       sendScheduleStateToSession: vi.fn(),
       listTmuxSessions: vi.fn(() => []),
-      createDetachedTmuxSession: vi.fn(() => 'demo'),
-      closeDetachedTerminalSession: vi.fn(),
-      renameTmuxSession: vi.fn(() => 'demo'),
+      listTerminalSessions,
+      listTerminalSessionCatalog,
+      resolveExistingSession: options?.resolveExistingSession,
+      createDetachedTmuxSession,
+      closeDetachedTerminalSession,
+      renameTmuxSession,
       sanitizeSessionName: vi.fn((input?: string) => input?.trim() || 'demo'),
       createTransportSubscriber: vi.fn(),
       bindConnectionToSubscriber: vi.fn(),
       getMirrorKey: vi.fn((sessionName: string) => sessionName),
       attachTmux,
       handleAdaptiveResize,
-      destroyMirror: vi.fn(),
+      destroyMirror,
     },
   });
 
   return {
     runtime,
     sessions,
+    mirrors,
     closeConnection: runtime.closeConnection,
     sendTransportMessage,
     sendMessage,
@@ -366,6 +428,10 @@ function createRuntime(options?: {
     remoteWindowStreamRuntime,
     createMuxChannelSubscriber,
     daemonInputQueue,
+    createDetachedTmuxSession,
+    closeDetachedTerminalSession,
+    renameTmuxSession,
+    destroyMirror,
   };
 }
 
@@ -460,6 +526,334 @@ describe('terminal message runtime explicit error truth', () => {
       },
     });
     expect(sentFrames.every((frame) => frame.type.startsWith('mux-'))).toBe(true);
+  });
+
+  it('rejects an unwrapped snapshot request on a negotiated mux transport', async () => {
+    const resolveExistingSession = vi.fn(() => ({
+      ok: true as const,
+      session: resolvedSnapshotSession(),
+    }));
+    const { runtime } = createRuntime({
+      passThroughTransportSend: true,
+      resolveExistingSession,
+    });
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: { version: 1, clientInstanceId: 'android-unwrapped-snapshot' },
+    })));
+    (connection.transport.sendText as ReturnType<typeof vi.fn>).mockClear();
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'terminal-snapshot-request',
+      payload: {
+        version: 1,
+        backend: 'tmux',
+        stableId: SNAPSHOT_STABLE_ID,
+        maxLines: 40,
+      },
+    })));
+
+    expect(resolveExistingSession).not.toHaveBeenCalled();
+    expect(sentTextFrames(connection)).toEqual([{
+      type: 'mux-error',
+      payload: {
+        code: 'mux_protocol_invalid',
+        message: 'target message terminal-snapshot-request must be sent inside mux-target-message',
+      },
+    }]);
+  });
+
+  it('serves an existing mirror after mux list with the exact snapshot request id and no write side effects', async () => {
+    const mirror = createReadyMirror();
+    const provenance = resolvedSnapshotSession();
+    mirror.sessionIdentity = provenance.identity.stableId;
+    mirror.sessionTarget = provenance.target;
+    mirror.revision = 9;
+    mirror.bufferStartIndex = 20;
+    mirror.bufferLines = [snapshotRow('zero'), snapshotRow('one')];
+    const resolveExistingSession = vi.fn((
+      stableId: string,
+      backend: 'tmux' | 'herdr',
+    ): TerminalSessionIdentityResolution => {
+      expect(stableId).toBe(SNAPSHOT_STABLE_ID);
+      expect(backend).toBe('tmux');
+      return { ok: true, session: resolvedSnapshotSession() };
+    });
+    const sessionCatalog: TerminalSessionCatalogEntry[] = [{
+      name: 'demo',
+      backend: 'tmux',
+      stableId: SNAPSHOT_STABLE_ID,
+    }];
+    const {
+      runtime,
+      mirrors,
+      sendBufferHeadToSession,
+      enqueueRangeBufferSyncResponse,
+      scheduleMirrorLiveSync,
+      refreshMirrorHeadForSession,
+      releaseMirrorIfNoBodyDemand,
+      attachTmux,
+      handleInput,
+      handleAdaptiveResize,
+      closeSession,
+      createDetachedTmuxSession,
+      closeDetachedTerminalSession,
+      renameTmuxSession,
+      destroyMirror,
+      daemonInputQueue,
+    } = createRuntime({
+      passThroughTransportSend: true,
+      sessionCatalog,
+      resolveExistingSession,
+    });
+    mirrors.set('demo', mirror);
+    const handleInputMessage = vi.spyOn(daemonInputQueue, 'handleInputMessage');
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: { version: 1, clientInstanceId: 'android-snapshot-client' },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-target-message',
+      payload: {
+        requestId: 'list-before-snapshot',
+        message: { type: 'list-sessions' },
+      },
+    })));
+
+    expect(sentTextFrames(connection)).toContainEqual({
+      type: 'mux-target-message',
+      payload: {
+        requestId: 'list-before-snapshot',
+        message: {
+          type: 'sessions',
+          payload: {
+            sessions: ['demo'],
+            sessionCatalog,
+          },
+        },
+      },
+    });
+
+    (connection.transport.sendText as ReturnType<typeof vi.fn>).mockClear();
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-target-message',
+      payload: {
+        requestId: 'snapshot-correlation-1',
+        message: {
+          type: 'terminal-snapshot-request',
+          payload: {
+            version: 1,
+            backend: 'tmux',
+            stableId: SNAPSHOT_STABLE_ID,
+            maxLines: 1,
+          },
+        },
+      },
+    })));
+
+    const frames = sentTextFrames(connection);
+    expect(frames).toHaveLength(1);
+    expect(frames[0]).toEqual({
+      type: 'mux-target-message',
+      payload: {
+        requestId: 'snapshot-correlation-1',
+        message: {
+          type: 'terminal-snapshot-result',
+          payload: {
+            status: 'available',
+            backend: 'tmux',
+            stableId: SNAPSHOT_STABLE_ID,
+            head: expect.objectContaining({
+              sessionId: SNAPSHOT_STABLE_ID,
+              revision: 9,
+              availableStartIndex: 20,
+              availableEndIndex: 22,
+            }),
+            body: expect.objectContaining({
+              revision: 9,
+              startIndex: 21,
+              endIndex: 22,
+              availableStartIndex: 20,
+              availableEndIndex: 22,
+            }),
+          },
+        },
+      },
+    });
+    expect(mirrors.get('demo')).toBe(mirror);
+    expect(mirror.revision).toBe(9);
+    expect(mirror.bufferLines).toHaveLength(2);
+    for (const sideEffect of [
+      sendBufferHeadToSession,
+      enqueueRangeBufferSyncResponse,
+      scheduleMirrorLiveSync,
+      refreshMirrorHeadForSession,
+      releaseMirrorIfNoBodyDemand,
+      attachTmux,
+      handleInput,
+      handleAdaptiveResize,
+      closeSession,
+      createDetachedTmuxSession,
+      closeDetachedTerminalSession,
+      renameTmuxSession,
+      destroyMirror,
+      handleInputMessage,
+    ]) {
+      expect(sideEffect).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    {
+      status: 'absent',
+      mirror: undefined,
+      expected: { status: 'unavailable', reason: 'mirror_not_present' },
+    },
+    {
+      status: 'not-ready',
+      mirror: { ...createReadyMirror(), lifecycle: 'booting' as const },
+      expected: { status: 'unavailable', reason: 'mirror_not_ready' },
+    },
+  ])('returns snapshot unavailable normally when the mirror is $status', async ({
+    mirror,
+    expected,
+  }) => {
+    const {
+      runtime,
+      mirrors,
+      sendBufferHeadToSession,
+      enqueueRangeBufferSyncResponse,
+      scheduleMirrorLiveSync,
+      refreshMirrorHeadForSession,
+      releaseMirrorIfNoBodyDemand,
+      attachTmux,
+      handleInput,
+      handleAdaptiveResize,
+      createDetachedTmuxSession,
+      closeDetachedTerminalSession,
+      renameTmuxSession,
+      destroyMirror,
+      daemonInputQueue,
+    } = createRuntime({
+      passThroughTransportSend: true,
+      resolveExistingSession: () => ({
+        ok: true,
+        session: resolvedSnapshotSession(),
+      }),
+    });
+    if (mirror) {
+      mirrors.set('demo', mirror);
+    }
+    const handleInputMessage = vi.spyOn(daemonInputQueue, 'handleInputMessage');
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: { version: 1, clientInstanceId: 'android-snapshot-unavailable' },
+    })));
+    (connection.transport.sendText as ReturnType<typeof vi.fn>).mockClear();
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-target-message',
+      payload: {
+        requestId: `snapshot-${expected.reason}`,
+        message: {
+          type: 'terminal-snapshot-request',
+          payload: {
+            version: 1,
+            backend: 'tmux',
+            stableId: SNAPSHOT_STABLE_ID,
+            maxLines: 40,
+          },
+        },
+      },
+    })));
+
+    expect(sentTextFrames(connection)).toEqual([{
+      type: 'mux-target-message',
+      payload: {
+        requestId: `snapshot-${expected.reason}`,
+        message: {
+          type: 'terminal-snapshot-result',
+          payload: expected,
+        },
+      },
+    }]);
+    for (const sideEffect of [
+      sendBufferHeadToSession,
+      enqueueRangeBufferSyncResponse,
+      scheduleMirrorLiveSync,
+      refreshMirrorHeadForSession,
+      releaseMirrorIfNoBodyDemand,
+      attachTmux,
+      handleInput,
+      handleAdaptiveResize,
+      createDetachedTmuxSession,
+      closeDetachedTerminalSession,
+      renameTmuxSession,
+      destroyMirror,
+      handleInputMessage,
+    ]) {
+      expect(sideEffect).not.toHaveBeenCalled();
+    }
+  });
+
+  it.each([
+    'session_not_found',
+    'session_identity_mismatch',
+  ] as const)('fails stale snapshot identity explicitly with %s', async (code) => {
+    const resolveExistingSession = vi.fn(() => ({
+      ok: false as const,
+      code,
+      message: code,
+    }));
+    const { runtime, mirrors } = createRuntime({
+      passThroughTransportSend: true,
+      resolveExistingSession,
+    });
+    mirrors.set('demo', createReadyMirror());
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: { version: 1, clientInstanceId: 'android-snapshot-stale' },
+    })));
+    (connection.transport.sendText as ReturnType<typeof vi.fn>).mockClear();
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-target-message',
+      payload: {
+        requestId: `snapshot-stale-${code}`,
+        message: {
+          type: 'terminal-snapshot-request',
+          payload: {
+            version: 1,
+            backend: 'tmux',
+            stableId: SNAPSHOT_STABLE_ID,
+            maxLines: 40,
+          },
+        },
+      },
+    })));
+
+    expect(sentTextFrames(connection)).toEqual([{
+      type: 'mux-target-message',
+      payload: {
+        requestId: `snapshot-stale-${code}`,
+        message: {
+          type: 'terminal-snapshot-result',
+          payload: {
+            status: 'failed',
+            code,
+          },
+        },
+      },
+    }]);
+    expect(resolveExistingSession).toHaveBeenCalledWith(
+      SNAPSHOT_STABLE_ID,
+      'tmux',
+    );
   });
 
   it('publishes attach-time session activity only through the mux target control envelope', async () => {

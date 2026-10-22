@@ -11,6 +11,7 @@ import type {
   HerdrScrollMetrics,
   HerdrTerminalFrame,
 } from './herdr-frame-canonicalizer';
+import type { ResolvedTerminalSession } from './terminal-source-adapter';
 
 const childProcessMocks = vi.hoisted(() => ({
   execFileSync: vi.fn(),
@@ -233,6 +234,66 @@ describe('Herdr backend runtime mirror projection', () => {
       'hd-codex',
       'manual-project',
     ]);
+  });
+
+  it('resolves exact Herdr identity and rejects a recreated same-name pane after binding', () => {
+    let currentTerminalId = 'terminal-1';
+    let currentPaneId = 'pane-1';
+    childProcessMocks.execFileSync.mockImplementation((_executable: string, args: string[]) => {
+      if (args.join(' ') === 'session list --json') {
+        return JSON.stringify({ sessions: [{ name: 'hd-codex', running: true }] });
+      }
+      if (args[args.length - 2] === 'pane' && args[args.length - 1] === 'list') {
+        return JSON.stringify({
+          result: { panes: [{ terminal_id: currentTerminalId, pane_id: currentPaneId }] },
+        });
+      }
+      if (args[args.length - 2] === 'api' && args[args.length - 1] === 'snapshot') {
+        return JSON.stringify({
+          result: {
+            snapshot: {
+              layouts: [{
+                panes: [{ pane_id: currentPaneId, rect: { x: 0, y: 0, width: 120, height: 90 } }],
+              }],
+            },
+          },
+        });
+      }
+      throw new Error(`unexpected Herdr command: ${args.join(' ')}`);
+    });
+
+    const runtime = createHerdrBackendRuntime({ executable: 'herdr' }) as ReturnType<
+      typeof createHerdrBackendRuntime
+    > & {
+      readSessionIdentity: (sessionName: string) => {
+        backend: 'herdr';
+        sessionName: string;
+        stableId: string;
+      };
+      resolveExistingSession: (stableId: string) => {
+        identity: { backend: 'herdr'; sessionName: string; stableId: string };
+        target: { backend: 'herdr'; sessionName: string; stableId: string; terminalId: string; paneId: string };
+      } | null;
+      bindResolvedSession: (session: ResolvedTerminalSession) => void;
+    };
+    runtime.listSessions();
+    const identity = runtime.readSessionIdentity('hd-codex');
+
+    expect(identity.stableId).toMatch(/^herdr:v1:/u);
+    expect(identity.stableId).not.toContain('hd-codex');
+    expect(runtime.resolveExistingSession(identity.stableId)).toMatchObject({
+      identity: { backend: 'herdr', sessionName: 'hd-codex', stableId: identity.stableId },
+      target: { backend: 'herdr', terminalId: 'terminal-1', paneId: 'pane-1' },
+    });
+
+    const resolved = runtime.resolveExistingSession(identity.stableId);
+    runtime.bindResolvedSession(resolved!);
+    currentTerminalId = 'terminal-2';
+    currentPaneId = 'pane-2';
+
+    expect(runtime.readSessionIdentity('hd-codex').stableId).not.toBe(identity.stableId);
+    expect(runtime.resolveExistingSession(identity.stableId)).toBeNull();
+    expect(() => runtime.writeInput('hd-codex', 'input')).toThrow(/transport is not ready/u);
   });
 
   it('reads existing pane geometry from layout rect and ignores stale viewport rows', async () => {

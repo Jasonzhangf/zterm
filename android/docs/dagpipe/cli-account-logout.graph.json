@@ -1,0 +1,66 @@
+{
+  "id": "cli.account_logout",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "validate_logout_request",
+      "operator": "cli.account_logout.validate",
+      "operator_version": "0.1",
+      "inputs": ["arc.request"],
+      "output": { "id": "arc.logout_intent", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "advance_logout_generation",
+      "operator": "cli.account_state.advance_logout_generation",
+      "operator_version": "0.1",
+      "inputs": ["arc.logout_intent"],
+      "output": { "id": "arc.logout_authority", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "remove_local_cli_auth",
+      "operator": "cli.account_state.remove_auth",
+      "operator_version": "0.1",
+      "inputs": ["arc.logout_authority"],
+      "output": { "id": "arc.auth_invalidated", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "close_invalidated_connections",
+      "operator": "cli.connection.close_invalidated_login",
+      "operator_version": "0.1",
+      "inputs": ["arc.auth_invalidated"],
+      "output": { "id": "arc.connections_closed", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_logout_result",
+      "operator": "cli.account_logout.collect_result",
+      "operator_version": "0.1",
+      "inputs": ["arc.connections_closed"],
+      "output": { "id": "arc.result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "validate_logout_request", "to": "advance_logout_generation", "arc_id": "arc.logout_intent" },
+    { "from": "advance_logout_generation", "to": "remove_local_cli_auth", "arc_id": "arc.logout_authority" },
+    { "from": "remove_local_cli_auth", "to": "close_invalidated_connections", "arc_id": "arc.auth_invalidated" },
+    { "from": "close_invalidated_connections", "to": "collect_logout_result", "arc_id": "arc.connections_closed" }
+  ],
+  "outputs": ["arc.result"]
+}

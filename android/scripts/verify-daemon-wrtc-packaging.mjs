@@ -33,7 +33,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
@@ -51,6 +51,11 @@ const PACKAGE_VERSION = '0.10.0';
 const BASELINE_ADDON_SHA256 =
   '844f7e2ed329c652b9f07f26c8aa46930d72f6c8220dba2e63038bbe2e73cdf5';
 const FAKE_PATCH_SHA256 = 'a'.repeat(64);
+const DAEMON_TUPLES = [
+  { tuple: 'darwin-arm64', os: 'darwin', arch: 'arm64' },
+  { tuple: 'linux-x64', os: 'linux', arch: 'x64' },
+  { tuple: 'win32-x64', os: 'win32', arch: 'x64' },
+];
 
 const failures = [];
 
@@ -320,7 +325,19 @@ function runStageScenarios(tmpRoot) {
   });
 }
 
-function buildReleaseDist(dir, daemonVersion, { addonBytes, provenanceAddonSha, includeProvenance = true }) {
+function buildReleaseDist(
+  dir,
+  daemonVersion,
+  {
+    addonBytes,
+    provenanceAddonSha,
+    includeProvenance = true,
+    omitPayload = null,
+    publicVersion = daemonVersion,
+    payloadVersion = daemonVersion,
+    omitPublicBin = false,
+  },
+) {
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
 
@@ -334,29 +351,17 @@ function buildReleaseDist(dir, daemonVersion, { addonBytes, provenanceAddonSha, 
     size: apk.length,
   });
 
-  const archiveName = `zterm-daemon-${daemonVersion}-darwin-arm64.tar.gz`;
-  const archive = Buffer.from('fixture-daemon-archive');
-  writeFileSync(join(dir, archiveName), archive);
-  writeFileSync(join(dir, `${archiveName}.sha256`), `${sha256Buffer(archive)}  ${archiveName}\n`);
-
-  const stageRoot = join(dir, '.npm-stage');
-  const pkg = join(stageRoot, 'package');
-  mkdirSync(join(pkg, 'runtime/node_modules/node-pty'), { recursive: true });
-  mkdirSync(join(pkg, 'runtime/node_modules/@roamhq/wrtc'), { recursive: true });
-  mkdirSync(join(pkg, 'runtime/node_modules/@roamhq/wrtc-darwin-arm64'), { recursive: true });
-  mkdirSync(join(pkg, 'support'), { recursive: true });
-  writeJson(join(pkg, 'runtime/node_modules/node-pty/package.json'), { name: 'node-pty', version: '1.0.0' });
-  writeJson(join(pkg, 'runtime/node_modules/@roamhq/wrtc/package.json'), {
-    name: '@roamhq/wrtc',
-    version: PACKAGE_VERSION,
-  });
-  writeJson(join(pkg, 'runtime/node_modules/@roamhq/wrtc-darwin-arm64/package.json'), {
-    name: '@roamhq/wrtc-darwin-arm64',
-    version: PACKAGE_VERSION,
-  });
-  writeFileSync(join(pkg, 'runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node'), addonBytes);
+  const releaseName = `zterm-daemon-${daemonVersion}-darwin-arm64`;
+  const archiveStage = join(dir, '.archive-stage');
+  const archiveRoot = join(archiveStage, releaseName);
+  const archiveAddon = join(
+    archiveRoot,
+    'runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node',
+  );
+  mkdirSync(dirname(archiveAddon), { recursive: true });
+  writeFileSync(archiveAddon, addonBytes);
   if (includeProvenance) {
-    writeJson(join(pkg, 'runtime/wrtc-provenance.json'), {
+    writeJson(join(archiveRoot, 'runtime/wrtc-provenance.json'), {
       schema: PROVENANCE_SCHEMA,
       sourcePin: PINNED_SOURCE_PIN,
       patchSha256: FAKE_PATCH_SHA256,
@@ -367,12 +372,118 @@ function buildReleaseDist(dir, daemonVersion, { addonBytes, provenanceAddonSha, 
       platformPackage: '@roamhq/wrtc-darwin-arm64',
     });
   }
-  writeFileSync(join(pkg, 'support/zterm-daemon.sh'), '#!/usr/bin/env bash\n# configure-relay\n');
+  const archiveName = `${releaseName}.tar.gz`;
+  const archive = join(dir, archiveName);
+  execFileSync('tar', ['-czf', archive, '-C', archiveStage, releaseName]);
+  writeFileSync(`${archive}.sha256`, `${sha256File(archive)}  ${archiveName}\n`);
+  rmSync(archiveStage, { recursive: true, force: true });
 
-  const tgz = join(dir, `jsonstudio-zterm-daemon-${daemonVersion}.tgz`);
-  execFileSync('tar', ['-czf', tgz, '-C', stageRoot, 'package']);
-  writeFileSync(`${tgz}.sha256`, `${sha256File(tgz)}  ${basename(tgz)}\n`);
-  rmSync(stageRoot, { recursive: true, force: true });
+  const packageSet = join(dir, 'npm', `zterm-daemon-${daemonVersion}`);
+  const packageStage = join(dir, '.package-stage');
+  mkdirSync(packageSet, { recursive: true });
+  const packPackage = (packageRoot, tarballName) => {
+    execFileSync('tar', ['-czf', join(packageSet, tarballName), '-C', packageRoot, 'package']);
+  };
+
+  const publicStage = join(packageStage, 'public');
+  const publicPackage = join(publicStage, 'package');
+  mkdirSync(join(publicPackage, 'bin'), { recursive: true });
+  mkdirSync(join(publicPackage, 'support'), { recursive: true });
+  writeJson(join(publicPackage, 'package.json'), {
+    name: '@jsonstudio/zterm-daemon',
+    version: publicVersion,
+    bin: {
+      'zterm-daemon': 'bin/zterm-daemon.cjs',
+      wterm: 'bin/wterm.cjs',
+    },
+    optionalDependencies: Object.fromEntries(
+      DAEMON_TUPLES.map(({ tuple }) => [`@jsonstudio/zterm-daemon-${tuple}`, payloadVersion]),
+    ),
+  });
+  if (!omitPublicBin) {
+    writeFileSync(join(publicPackage, 'bin/zterm-daemon.cjs'), 'fixture-public-bin');
+    writeFileSync(join(publicPackage, 'bin/wterm.cjs'), 'fixture-public-wterm-bin');
+  }
+  writeFileSync(join(publicPackage, 'support/install-user-shims.cjs'), 'fixture-shim-installer');
+  packPackage(publicStage, `jsonstudio-zterm-daemon-${daemonVersion}.tgz`);
+
+  for (const { tuple, os, arch } of DAEMON_TUPLES) {
+    if (tuple === omitPayload) continue;
+    const payloadStage = join(packageStage, tuple);
+    const payloadPackage = join(payloadStage, 'package');
+    const payloadAddon = join(
+      payloadPackage,
+      `runtime/node_modules/@roamhq/wrtc-${tuple}/wrtc.node`,
+    );
+    mkdirSync(dirname(payloadAddon), { recursive: true });
+    writeFileSync(payloadAddon, Buffer.from(`fixture-${tuple}-addon`));
+    for (const relativePath of [
+      'runtime/server.cjs',
+      'runtime/dagpipe.node',
+      'runtime/node_modules/node-pty/package.json',
+      'runtime/node_modules/@roamhq/wrtc/package.json',
+      'support/terminal-config-command.cjs',
+    ]) {
+      const target = join(payloadPackage, relativePath);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(
+        target,
+        relativePath.endsWith('package.json')
+          ? `${JSON.stringify({ name: relativePath, version: PACKAGE_VERSION })}\n`
+          : 'fixture',
+      );
+    }
+    const runtimeComponents = [
+      'runtime/server.cjs',
+      'runtime/dagpipe.node',
+      'runtime/node_modules/node-pty',
+      'runtime/node_modules/@roamhq/wrtc',
+      `runtime/node_modules/@roamhq/wrtc-${tuple}/wrtc.node`,
+      'support/terminal-config-command.cjs',
+    ];
+    if (os === 'win32') {
+      runtimeComponents.push('support/windows/zterm-daemon.ps1');
+    } else {
+      runtimeComponents.push('support/zterm-daemon.sh');
+    }
+    if (os === 'darwin') {
+      runtimeComponents.push('support/zterm-daemon');
+    }
+    for (const runtimeComponent of runtimeComponents.slice(-(os === 'darwin' ? 2 : 1))) {
+      const target = join(payloadPackage, runtimeComponent);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(
+        target,
+        runtimeComponent.endsWith('.ps1')
+          ? '# configure-relay fixture\n'
+          : '#!/usr/bin/env bash\n# configure-relay fixture\n',
+      );
+    }
+    writeJson(join(payloadPackage, 'package.json'), {
+      name: `@jsonstudio/zterm-daemon-${tuple}`,
+      version: payloadVersion,
+      os: [os],
+      cpu: [arch],
+    });
+    writeJson(join(payloadPackage, 'zterm-package.json'), {
+      schemaVersion: 1,
+      package: {
+        name: `@jsonstudio/zterm-daemon-${tuple}`,
+        version: payloadVersion,
+      },
+      platform: {
+        os,
+        arch,
+        node: {
+          minimum: '22.0.0',
+          abi: '127',
+        },
+      },
+      runtimeComponents,
+    });
+    packPackage(payloadStage, `jsonstudio-zterm-daemon-${tuple}-${daemonVersion}.tgz`);
+  }
+  rmSync(packageStage, { recursive: true, force: true });
 }
 
 function runVerifierScenarios(tmpRoot) {
@@ -396,10 +507,29 @@ function runVerifierScenarios(tmpRoot) {
   if (positiveResult) {
     check('positive: verifier ok=true', positiveResult.ok === true);
     check(
-      'positive: addon digest matches provenance',
-      positiveResult.checks.daemonNpmWrtcAddonShaMatchesProvenance === true,
+      'positive: APK digest still checked',
+      positiveResult.checks.apkShaMatches === true,
     );
-    check('positive: provenance present', positiveResult.checks.daemonNpmWrtcProvenancePresent === true);
+    check(
+      'positive: APK size still checked',
+      positiveResult.checks.apkSizeMatches === true,
+    );
+    check(
+      'positive: standalone archive digests still checked',
+      positiveResult.checks.daemonArchiveShaMatches === true,
+    );
+    check(
+      'positive: standalone archive addon digest matches provenance',
+      positiveResult.checks.daemonArchiveWrtcAddonShaMatchesProvenance === true,
+    );
+    check(
+      'positive: standalone archive provenance present',
+      positiveResult.checks.daemonArchiveWrtcProvenancePresent === true,
+    );
+    check(
+      'positive: daemon package set has four tarballs',
+      positiveResult.checks.daemonPackageSetHasExactlyFourTarballs === true,
+    );
   }
 
   buildReleaseDist(releaseDist, daemonVersion, {
@@ -417,12 +547,12 @@ function runVerifierScenarios(tmpRoot) {
   if (tamperedResult) {
     check('tampered: verifier ok=false', tamperedResult.ok === false);
     check(
-      'tampered: addon digest mismatch flagged',
-      tamperedResult.checks.daemonNpmWrtcAddonShaMatchesProvenance === false,
+      'tampered: standalone archive addon digest mismatch flagged',
+      tamperedResult.checks.daemonArchiveWrtcAddonShaMatchesProvenance === false,
     );
     check(
-      'tampered: tarball sha still matches (isolates the digest gate)',
-      tamperedResult.checks.daemonNpmShaMatches === true,
+      'tampered: archive sha still matches (isolates the digest gate)',
+      tamperedResult.checks.daemonArchiveShaMatches === true,
     );
   }
 
@@ -442,8 +572,69 @@ function runVerifierScenarios(tmpRoot) {
   if (missingResult) {
     check('missing provenance: verifier ok=false', missingResult.ok === false);
     check(
-      'missing provenance: presence flagged',
-      missingResult.checks.daemonNpmWrtcProvenancePresent === false,
+      'missing provenance: standalone archive presence flagged',
+      missingResult.checks.daemonArchiveWrtcProvenancePresent === false,
+    );
+  }
+
+  buildReleaseDist(releaseDist, daemonVersion, {
+    addonBytes: baselineAddon,
+    provenanceAddonSha: BASELINE_ADDON_SHA256,
+    omitPayload: 'linux-x64',
+  });
+  const missingPayload = runCli(verifierCli, ['--release-dist', releaseDist]);
+  check('missing payload: verifier exits nonzero', missingPayload.status !== 0, `rc=${missingPayload.status}`);
+  check(
+    'missing payload: failure names linux-x64 tarball',
+    `${missingPayload.stdout}\n${missingPayload.stderr}`.includes(
+      `jsonstudio-zterm-daemon-linux-x64-${daemonVersion}.tgz`,
+    ),
+    `${missingPayload.stdout}${missingPayload.stderr}`.trim(),
+  );
+
+  buildReleaseDist(releaseDist, daemonVersion, {
+    addonBytes: baselineAddon,
+    provenanceAddonSha: BASELINE_ADDON_SHA256,
+    publicVersion: '0.0.0',
+  });
+  const wrongVersion = runCli(verifierCli, ['--release-dist', releaseDist]);
+  check('wrong version: verifier exits nonzero', wrongVersion.status !== 0, `rc=${wrongVersion.status}`);
+  let wrongVersionResult = null;
+  try {
+    wrongVersionResult = JSON.parse(wrongVersion.stdout);
+  } catch (error) {
+    check('wrong version: verifier prints JSON', false, error.message);
+  }
+  if (wrongVersionResult) {
+    check('wrong version: ok=false', wrongVersionResult.ok === false);
+    check(
+      'wrong version: public package mismatch flagged',
+      wrongVersionResult.checks.daemonPublicPackageVersionMatches === false,
+    );
+  }
+
+  buildReleaseDist(releaseDist, daemonVersion, {
+    addonBytes: baselineAddon,
+    provenanceAddonSha: BASELINE_ADDON_SHA256,
+    omitPublicBin: true,
+  });
+  const missingPublicBin = runCli(verifierCli, ['--release-dist', releaseDist]);
+  check(
+    'missing public bin: verifier exits nonzero',
+    missingPublicBin.status !== 0,
+    `rc=${missingPublicBin.status}`,
+  );
+  let missingPublicBinResult = null;
+  try {
+    missingPublicBinResult = JSON.parse(missingPublicBin.stdout);
+  } catch (error) {
+    check('missing public bin: verifier prints JSON', false, error.message);
+  }
+  if (missingPublicBinResult) {
+    check('missing public bin: ok=false', missingPublicBinResult.ok === false);
+    check(
+      'missing public bin: presence flagged',
+      missingPublicBinResult.checks.daemonPublicPackageBinsPresent === false,
     );
   }
 }

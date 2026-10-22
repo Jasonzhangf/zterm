@@ -1,0 +1,313 @@
+{
+  "id": "cli.terminal_close",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "dagpipe.extract.arc.close_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.close_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.input_state",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.input_state",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.owned_resources",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.owned_resources",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.terminal_state",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.terminal_state",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "stop_new_input",
+      "operator": "cli.terminal_lifecycle.stop_input",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.close_request",
+        "arc.input_state"
+      ],
+      "output": {
+        "id": "arc.input_closure",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_input_queue",
+      "operator": "client.reliable_input.close",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.input_closure"
+      ],
+      "output": {
+        "id": "arc.input_settlement",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "release_owned_connection",
+      "operator": "cli.terminal_lifecycle.release_connection",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.input_settlement",
+        "arc.owned_resources"
+      ],
+      "output": {
+        "id": "arc.connection_release",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "record_release_outcome",
+      "operator": "cli.terminal_lifecycle.record_release",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.connection_release"
+      ],
+      "output": {
+        "id": "arc.cleanup_facts",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "restore_terminal",
+      "operator": "cli.terminal_lifecycle.restore_terminal",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.terminal_state",
+        "arc.cleanup_facts"
+      ],
+      "output": {
+        "id": "arc.terminal_restore",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_terminal_close",
+      "operator": "cli.terminal_lifecycle.settle_close",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.close_request",
+        "arc.input_settlement",
+        "arc.cleanup_facts",
+        "arc.terminal_restore"
+      ],
+      "output": {
+        "id": "arc.result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "stop_new_input",
+      "to": "settle_input_queue",
+      "arc_id": "arc.input_closure"
+    },
+    {
+      "from": "settle_input_queue",
+      "to": "release_owned_connection",
+      "arc_id": "arc.input_settlement"
+    },
+    {
+      "from": "release_owned_connection",
+      "to": "record_release_outcome",
+      "arc_id": "arc.connection_release"
+    },
+    {
+      "from": "record_release_outcome",
+      "to": "restore_terminal",
+      "arc_id": "arc.cleanup_facts"
+    },
+    {
+      "from": "dagpipe.extract.arc.close_request",
+      "to": "stop_new_input",
+      "arc_id": "arc.close_request"
+    },
+    {
+      "from": "dagpipe.extract.arc.input_state",
+      "to": "stop_new_input",
+      "arc_id": "arc.input_state"
+    },
+    {
+      "from": "dagpipe.extract.arc.owned_resources",
+      "to": "release_owned_connection",
+      "arc_id": "arc.owned_resources"
+    },
+    {
+      "from": "dagpipe.extract.arc.terminal_state",
+      "to": "restore_terminal",
+      "arc_id": "arc.terminal_state"
+    },
+    {
+      "from": "dagpipe.extract.arc.close_request",
+      "to": "settle_terminal_close",
+      "arc_id": "arc.close_request"
+    },
+    {
+      "from": "settle_input_queue",
+      "to": "settle_terminal_close",
+      "arc_id": "arc.input_settlement"
+    },
+    {
+      "from": "record_release_outcome",
+      "to": "settle_terminal_close",
+      "arc_id": "arc.cleanup_facts"
+    },
+    {
+      "from": "restore_terminal",
+      "to": "settle_terminal_close",
+      "arc_id": "arc.terminal_restore"
+    }
+  ],
+  "outputs": [
+    "arc.result"
+  ]
+}

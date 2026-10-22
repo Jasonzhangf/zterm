@@ -361,12 +361,12 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  DevCLI["pnpm run daemon:*"] --> Shell["scripts/zterm-daemon.sh"]
+  DevCLI["packages/cli/src/main.ts + pnpm run daemon:*"] --> Shell["scripts/zterm-daemon.sh"]
   Shell --> Launchd["~/Library/LaunchAgents/com.zterm.android.zterm-daemon.plist"]
-  Shell --> Direct["~/.wterm/run/zterm-daemon.pid"]
-  Shell --> Runtime["~/.wterm/daemon-runtime/server.cjs"]
+  Shell --> Direct["~/.zterm/run/zterm-daemon.pid"]
+  Shell --> Runtime["installed payload runtime/server.cjs"]
   Shell --> Native["scripts/native/zterm-daemon.swift"]
-  WinShell["scripts/windows/zterm-daemon.ps1"] --> WinTask["Windows Scheduled Task: ZTermDaemon"]
+  WinShell["support/windows/zterm-daemon.ps1 payload runner"] --> WinTask["Windows Scheduled Task: ZTermDaemon"]
   WinTask --> Runtime
   Release["scripts/prepare-global-daemon-release.sh"] --> DaemonReleaseOut01StageRuntime["scripts/prepare-global-daemon-release.sh#stage_runtime"]
   DaemonReleaseOut01StageRuntime --> DaemonReleaseOut02VerifyDeterminism["scripts/prepare-global-daemon-release.sh#verify_deterministic_archive"]
@@ -375,10 +375,17 @@ flowchart TD
   DaemonReleaseOut02VerifyDeterminism --> Runtime
   Release --> Install["scripts/install-global-daemon-cli.sh"]
   Install --> GlobalBin["~/.local/bin/zterm-daemon"]
-  Npm["scripts/prepare-daemon-npm-package.mjs"] --> PackageBin["package/bin/zterm-daemon"]
+  Npm["scripts/prepare-daemon-npm-package.mjs"] --> PackageBin["public package/bin/zterm-daemon.cjs"]
   Npm --> WinShell
   GitProtectionSetup["scripts/setup/enable-local-protection.sh"] --> GitProtectionVerify["appsdk verify-git-main-protection ."]
 ```
+
+The remote CLI is `packages/cli/src/main.ts`, built to the `zterm` package bin.
+It uses `~/.zterm/config.json`, supports `Ctrl+] q`, and exposes `zterm upgrade`
+plus `zterm daemon install/status/config`. The daemon distribution is one public
+launcher package with the only `zterm-daemon`/`wterm` bins and exactly three
+Node 22 payloads: `darwin-arm64`, `linux-x64`, and `win32-x64`. The retired
+no-argument single-host packer flow is not part of this mainline.
 
 Git main protection is a repository control path. Each clean owner worktree
 installs the tracked hooks and runs `appsdk verify-git-main-protection .`.

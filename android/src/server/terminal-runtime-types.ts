@@ -8,6 +8,10 @@ import type {
   TerminalCursorState,
   TerminalBufferPayload,
 } from '@zterm/shared/types';
+import type {
+  ResolvedTerminalSession,
+  TerminalSessionNativeTarget,
+} from './terminal-source-adapter';
 
 export interface TerminalSessionTransport {
   kind: 'ws' | 'rtc';
@@ -87,6 +91,8 @@ export interface TerminalTransportSubscriber {
   muxParentTransportId?: string | null;
   sessionName: string;
   backend?: 'tmux' | 'herdr';
+  sessionIdentity?: string;
+  sessionTarget?: TerminalSessionNativeTarget;
   mirrorKey: string | null;
   bodySubscribed?: boolean;
   /** Last valid foreground attach heartbeat for this session. The daemon holds
@@ -108,6 +114,8 @@ export interface SessionMirror {
   key: string;
   sessionName: string;
   backend?: 'tmux' | 'herdr';
+  sessionIdentity?: string;
+  sessionTarget?: TerminalSessionNativeTarget;
   scratchBridge: WasmBridge | null;
   lifecycle: 'idle' | 'booting' | 'ready' | 'failed' | 'destroyed';
   cols: number;
@@ -176,6 +184,7 @@ export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 export interface TerminalAttachPayload {
   sessionName: string;
   backend?: 'tmux' | 'herdr';
+  resolvedSession?: ResolvedTerminalSession;
   cols?: number;
   rows?: number;
   autoCommand?: string;

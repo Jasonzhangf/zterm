@@ -7,6 +7,10 @@ on:
         description: Release tag. Defaults to v<latest.json versionName>.
         required: false
         type: string
+      daemon_packages_run_id:
+        description: CLI Platform run ID that produced the zterm-daemon-packages artifact.
+        required: true
+        type: string
       publish_npm:
         description: Publish zterm-daemon to npm. Requires NPM_TOKEN secret.
         required: false
@@ -14,6 +18,7 @@ on:
         type: boolean
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -63,17 +68,34 @@ jobs:
       - name: Prepare daemon standalone release
         run: pnpm --dir android run daemon:prepare-release
 
-      - name: Prepare daemon npm package
-        run: pnpm --dir android run daemon:prepare-npm
+      - name: Download daemon npm package set
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p 'require("./android/package.json").version')"
+          PACKAGE_DIR="${GITHUB_WORKSPACE}/android/release-dist/npm/zterm-daemon-${VERSION}"
+          mkdir -p "${PACKAGE_DIR}"
+          gh run download "${{ inputs.daemon_packages_run_id }}" \
+            --name zterm-daemon-packages \
+            --dir "${PACKAGE_DIR}"
+          echo "ZTERM_DAEMON_PACKAGES_DIR=${PACKAGE_DIR}" >> "${GITHUB_ENV}"
 
       - name: Verify release assets
-        run: pnpm --dir android run release:verify
+        run: pnpm --dir android run release:verify -- --daemon-packages-dir "${ZTERM_DAEMON_PACKAGES_DIR}"
 
       - name: Publish daemon to npm
         if: ${{ inputs.publish_npm }}
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish android/release-dist/npm/@jsonstudio__zterm-daemon --access public
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p 'require("./android/package.json").version')"
+          PACKAGE_SET="${ZTERM_DAEMON_PACKAGES_DIR:?}"
+          npm publish "${PACKAGE_SET}/jsonstudio-zterm-daemon-darwin-arm64-${VERSION}.tgz" --access public
+          npm publish "${PACKAGE_SET}/jsonstudio-zterm-daemon-linux-x64-${VERSION}.tgz" --access public
+          npm publish "${PACKAGE_SET}/jsonstudio-zterm-daemon-win32-x64-${VERSION}.tgz" --access public
+          npm publish "${PACKAGE_SET}/jsonstudio-zterm-daemon-${VERSION}.tgz" --access public
 
       - name: Publish GitHub release
         env:

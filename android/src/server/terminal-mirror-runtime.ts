@@ -22,6 +22,7 @@ import type {
   TerminalGeometry,
   TmuxPaneMetrics,
 } from './terminal-runtime-types';
+import type { ResolvedTerminalSession } from './terminal-source-adapter';
 
 export interface TerminalMirrorRuntimeDeps {
   defaultViewport: { cols: number; rows: number };
@@ -45,6 +46,10 @@ export interface TerminalMirrorRuntimeDeps {
   ) => Extract<ServerMessage, { type: 'buffer-sync' }>['payload'] | null;
   sanitizeSessionName: (input?: string) => string;
   getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  resolveMirrorSessionProvenance?: (
+    sessionName: string,
+    backend: 'tmux' | 'herdr',
+  ) => ResolvedTerminalSession | null;
   normalizeTerminalCols: (cols: number | undefined) => number;
   normalizeTerminalRows: (rows: number | undefined) => number;
   resolveAttachGeometry: (options: {
@@ -60,7 +65,11 @@ export interface TerminalMirrorRuntimeDeps {
     backend: 'tmux' | 'herdr' | undefined,
     operation: 'apply' | 'release',
   ) => void;
-  assertTmuxSessionExists: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
+  assertTmuxSessionExists: (
+    sessionName: string,
+    backend?: 'tmux' | 'herdr',
+    stableId?: string,
+  ) => void;
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
   mirrorBufferChanged: (
@@ -1098,7 +1107,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.lifecycle = 'booting';
 
     try {
-      deps.assertTmuxSessionExists(mirror.sessionName, mirror.backend);
+      deps.assertTmuxSessionExists(
+        mirror.sessionName,
+        mirror.backend,
+        mirror.sessionIdentity,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       mirror.lifecycle = 'failed';
@@ -1202,9 +1215,43 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
   }
 
+  function assertMirrorIdentityCompatible(
+    mirror: SessionMirror | null,
+    resolved: ResolvedTerminalSession | null,
+    sessionName: string,
+  ): void {
+    if (!mirror || !resolved) {
+      return;
+    }
+    const nextStableId = resolved.identity.stableId;
+    if (mirror.sessionIdentity) {
+      if (mirror.sessionIdentity !== nextStableId) {
+        throw new Error(
+          `session name ${sessionName} is already bound to a different live stable identity; refusing to rebind`,
+        );
+      }
+      return;
+    }
+    throw new Error(
+      `session name ${sessionName} has a mirror without established stable identity; refusing to adopt a new identity`,
+    );
+  }
+
   async function attachTmux(session: TerminalSession, payload: TerminalAttachPayload) {
-    const nextSessionName = deps.sanitizeSessionName(payload.sessionName);
-    const requestedBackend = payload.backend
+    const resolvedSession = payload.resolvedSession;
+    if (
+      resolvedSession
+      && payload.backend
+      && payload.backend !== resolvedSession.target.backend
+    ) {
+      throw new Error(
+        `resolved session backend ${resolvedSession.target.backend} does not match attach backend ${payload.backend}`,
+      );
+    }
+    const nextSessionName = resolvedSession?.identity.sessionName
+      || deps.sanitizeSessionName(payload.sessionName);
+    const requestedBackend = resolvedSession?.target.backend
+      || payload.backend
       || session.backend
       || deps.resolveTerminalSessionBackend?.(nextSessionName);
     if (!requestedBackend) {
@@ -1214,13 +1261,21 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       throw new Error(`session backend changed after channel allocation: ${session.backend} -> ${requestedBackend}`);
     }
     const nextMirrorKey = deps.getMirrorKey(nextSessionName, requestedBackend);
+    const existingMirror = mirrors.get(nextMirrorKey) || null;
+    if (existingMirror && existingMirror.backend !== requestedBackend) {
+      throw new Error(`session name ${nextSessionName} is already owned by ${existingMirror.backend}`);
+    }
+    const resolvedProvenance = resolvedSession
+      || deps.resolveMirrorSessionProvenance?.(nextSessionName, requestedBackend)
+      || null;
+    assertMirrorIdentityCompatible(existingMirror, resolvedProvenance, nextSessionName);
     if (!attemptPendingAdaptiveWidthCleanup(nextMirrorKey)) {
       throw new Error(`adaptive width cleanup pending for ${nextSessionName}; refusing to attach until cleanup succeeds`);
     }
     session.backend = requestedBackend;
-    const existingMirror = mirrors.get(nextMirrorKey) || null;
-    if (existingMirror && existingMirror.backend !== requestedBackend) {
-      throw new Error(`session name ${nextSessionName} is already owned by ${existingMirror.backend}`);
+    if (resolvedProvenance) {
+      session.sessionIdentity = resolvedProvenance.identity.stableId;
+      session.sessionTarget = resolvedProvenance.target;
     }
     const existingTmuxGeometry = existingMirror
       ? null
@@ -1284,6 +1339,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     let mirror = existingMirror;
     if (!mirror) {
       mirror = createMirror(nextSessionName, session.backend);
+    }
+    if (resolvedProvenance) {
+      mirror.sessionIdentity ??= resolvedProvenance.identity.stableId;
+      mirror.sessionTarget ??= resolvedProvenance.target;
     }
     mirror.subscribers.add(session.id);
     if (payload.widthMode === 'adaptive-phone') {
