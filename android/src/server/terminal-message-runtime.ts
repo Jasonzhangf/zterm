@@ -50,7 +50,10 @@ import type {
   TerminalFileTransferClientMessage,
   TerminalFileTransferMessageRuntime,
 } from './terminal-file-transfer-message-runtime';
-import type { ResolvedTerminalSession } from './terminal-source-adapter';
+import type {
+  ResolvedTerminalSession,
+  TerminalSourceMirrorSnapshot,
+} from './terminal-source-adapter';
 
 const TERMINAL_FILE_TRANSFER_MESSAGE_TYPES = new Set<TerminalFileTransferClientMessage['type']>([
   'paste-image-start',
@@ -90,6 +93,9 @@ export interface TerminalMessageRuntimeDeps {
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   releaseMirrorIfNoBodyDemand: (mirror: SessionMirror, reason: string) => boolean;
+  captureSessionSnapshot: (
+    session: ResolvedTerminalSession,
+  ) => Promise<TerminalSourceMirrorSnapshot>;
   daemonInputQueue: DaemonInputQueueRuntime;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   fileTransferMessageRuntime: TerminalFileTransferMessageRuntime;
@@ -210,7 +216,7 @@ export function createTerminalMessageRuntime(
   const handleMuxFrame = muxRuntime.handleMuxFrame;
   const sendMuxFrame = muxRuntime.sendMuxFrame;
 
-  function handleTerminalSnapshotRequest(
+  async function handleTerminalSnapshotRequest(
     connection: TerminalTransportConnection,
     request: TerminalSnapshotRequestPayload,
   ) {
@@ -229,12 +235,7 @@ export function createTerminalMessageRuntime(
     const snapshotRuntime = createTerminalSnapshotReadRuntime({
       resolveExistingSession: (snapshotRequest) =>
         resolveExistingSession(snapshotRequest.stableId, snapshotRequest.backend),
-      readExistingMirror: (session) => deps.controlRuntimeDeps.mirrors.get(
-        deps.controlRuntimeDeps.getMirrorKey(
-          session.identity.sessionName,
-          session.identity.backend,
-        ),
-      ),
+      captureSessionSnapshot: deps.captureSessionSnapshot,
       buildBufferHeadPayload,
       buildRequestedRangeBufferPayload,
       sendSnapshotResult: (result) => {
@@ -246,7 +247,7 @@ export function createTerminalMessageRuntime(
     });
 
     try {
-      snapshotRuntime.handleRequest(request);
+      await snapshotRuntime.handleRequest(request);
     } catch (error) {
       deps.sendTransportMessage(connection.transport, {
         type: 'error',
@@ -411,7 +412,7 @@ export function createTerminalMessageRuntime(
         controlGateway.handleListSessions(connection, message);
         break;
       case 'terminal-snapshot-request':
-        handleTerminalSnapshotRequest(connection, message.payload);
+        await handleTerminalSnapshotRequest(connection, message.payload);
         break;
       case 'pending-attachments-query':
       case 'attachment-history-query':

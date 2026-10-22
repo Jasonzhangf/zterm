@@ -560,14 +560,14 @@ async function executeHarness({
       },
     );
     await shell.waitForVisibleText(
-      /保存到槽位 1？/u,
-      'slot save prompt',
+      /保存到槽位 1/u,
+      'slot action menu',
       {
         from: command.from,
         timeoutMs: CONNECTION_TIMEOUT_MS,
       },
     );
-    shell.sendLine('y');
+    shell.sendLine('1');
     const result = await command.finish();
     if (result.exitCode !== 0) {
       throw new RemoteCliContractError(

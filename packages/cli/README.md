@@ -5,6 +5,15 @@ ZTerm daemon session and managing the local daemon installation.
 
 ## Current status
 
+CLI 0.1.3 labels, preview navigation, and fresh on-demand tmux snapshots passed
+installed macOS acceptance. The Air daemon also passed socket-alias catalog
+deduplication and exact snapshot retrieval with an existing saved slot. Source
+integration status is recorded in `android/note.md`.
+
+The configurable tmux socket and local daemon configuration commands below are
+the Increment A candidate contract. They are not claimed as delivered until the
+built candidate passes installed CLI and native socket acceptance.
+
 `packages/cli/src/main.ts` is the formal command entry. The package build and
 isolated tarball installation work on the current development host.
 
@@ -188,6 +197,78 @@ Field meaning:
 | `zterm.android.daemon.sessionName` | Default daemon session name. Omit it to use the current default. |
 | `zterm.android.daemon.terminalCacheLines` | Daemon mirror retention in lines. Omit it to use the current default. |
 
+### Configurable tmux sockets
+
+The canonical tmux socket block is:
+
+```json
+{
+  "zterm": {
+    "android": {
+      "daemon": {
+        "tmux": {
+          "sockets": [
+            {
+              "name": "main",
+              "socketPath": "~/.tmux/run/tmux-<uid>/default"
+            },
+            {
+              "name": "old",
+              "socketPath": "/private/tmp/tmux-<uid>/default"
+            }
+          ],
+          "primary": "main"
+        }
+      }
+    }
+  }
+}
+```
+
+Replace `<uid>` with the current user's numeric UID. The CLI derives that value
+at runtime; it does not hardcode a user name or UID.
+
+`sockets` is a non-empty ordered list of explicit socket routes. `name` is the
+local display label and CLI selection key. It does not enter a stable session
+identity. `socketPath` must be absolute or start with `~/`. The CLI stores the
+portable `~/` form and resolves it only for runtime use.
+
+When the block is absent, the CLI derives one route named `default`:
+
+```text
+~/.tmux/run/tmux-<current uid>/default
+```
+
+There is no `mobile.daemon.tmux` compatibility reader or writer. Unknown data
+at that older location is preserved.
+
+The CLI accepts no tmux socket environment override or filesystem discovery.
+An invalid block, empty path, unsupported relative path, duplicate name,
+duplicate resolved path, or missing primary fails without replacing the file.
+
+Local socket configuration uses the shared configuration owner directly. It
+does not require account login, Relay access, daemon installation, a running
+daemon, or the installed daemon shim. Reading a missing configuration does not
+create a file. Existing-only reads and catalog preview do not start a server,
+session, keepalive, directory, or lease.
+
+Configure a socket with:
+
+```sh
+zterm daemon config
+zterm daemon config tmux set main --socket '~/.tmux/run/tmux-501/default'
+zterm daemon config tmux set old --socket /private/tmp/tmux-501/default
+zterm daemon config tmux primary old
+zterm daemon config tmux remove main
+```
+
+The first `set` creates the tmux block and makes that entry primary. Later
+`set` commands add or update one named route. You cannot remove the primary
+route while other routes remain, and you cannot remove the final route.
+Mutations preserve authentication, slots, Relay settings, other daemon fields,
+and unknown fields. The output reports the real config path and says that the
+change applies to the next daemon start, not to a running process.
+
 Do not copy a daemon endpoint from another platform or infer one from the host
 OS. The account directory and saved slot are the source for the selected
 remote server.
@@ -265,17 +346,64 @@ The interactive flow is:
 3. Choose one exact `deviceId + daemonHostId` server.
 4. Read the daemon session catalog.
 5. Choose a session with both `backend` and non-empty `stableId`.
-6. Optionally preview a snapshot from an already-ready mirror.
-7. Confirm the save.
+6. Optionally preview a one-shot snapshot of the exact selected target.
+7. Choose an action from the menu.
+
+The catalog reads only the configured tmux socket routes. If two configured
+sockets have a session with the same name, both entries appear with distinct
+labels, for example:
+
+```text
+work [tmux · main]
+work [tmux · old]
+```
+
+Labels are display metadata only. Selection and save use the exact
+`{ backend, stableId }` identity.
+
+When one configured route is unavailable, the catalog still returns reachable
+entries and shows the failure for that route. Each failure contains the socket
+name, socket path, error code, and a safe message. Cached resident reads keep
+the failures beside the entries. Reachable entries remain selectable. A
+reachable route with zero sessions is a successful empty result. If every
+configured route fails, the catalog request fails with a correlated error. No
+unconfigured route is used as a fallback, and reading an absent socket does not
+start a replacement server.
 
 Cancellation leaves the original slot unchanged. If another process changes
 the same slot before save, the command reports `slot_changed` and keeps the
 newer binding instead of overwriting it.
 
 Snapshot preview is read-only. It does not attach a terminal, create a mirror,
-start capture, resize a terminal, or send input. A preview can be unavailable
-when no mirror is ready; that does not itself create a mirror. You may still
-save the stable session binding after an explicit confirmation.
+start continuous capture, resize a terminal, or send input. Older daemons may
+still report a preview as unavailable when no mirror is ready; that does not
+itself create a mirror. After preview, or when you decline it, the action menu
+has four choices:
+
+| Choice | Behavior |
+|---|---|
+| 保存到槽位 N | Build the binding from the current selection and save to slot N with the original slot baseline. |
+| 重新选择 session | Refresh the session catalog on the current connection, discard the current selection and preview, and choose again. |
+| 返回服务器选择 | Close the current connection once, show the retained server directory, and connect only after another server selection. |
+| 退出配置 | Cancel the whole command without writing the slot. |
+
+Only the save choice writes the slot. `Ctrl+C` and EOF cancel the whole
+command at every prompt without writing. Authentication, account directory
+lookup, and the original slot baseline happen once before navigation. Each
+successfully opened connection has one close scope; returning to servers
+closes it before the server picker, and a cleanup failure is reported and
+stops the command instead of opening another connection. Same-server session
+reselection keeps the current connection. `slot_changed` preserves the newer
+concurrent binding and the original baseline; it never promotes the navigation
+draft. Saving preserves the existing alias and width mode. If cleanup fails
+after a successful save, the saved result remains and the cleanup error is
+reported separately.
+
+The candidate keeps exact `{ backend, stableId }` targeting and the current
+one-shot capture contract: the preview captures one fresh frame without
+attaching, resizing, sending input, starting continuous capture, or writing
+the live mirror. A failed or timed-out preview is explicit and does not reach
+save.
 
 ### Width mode
 
@@ -391,6 +519,9 @@ exists, but public upgrade delivery remains unverified.
 zterm daemon install
 zterm daemon status
 zterm daemon config
+zterm daemon config tmux set <name> --socket <path>
+zterm daemon config tmux primary <name>
+zterm daemon config tmux remove <name>
 ```
 
 Daemon package distribution is one public launcher package plus exactly three
@@ -440,14 +571,23 @@ failure. A health endpoint alone is not treated as complete status truth.
 
 ### `zterm daemon config`
 
-Delegates to the formal `zterm-daemon config` owner. It shows the real config
-path and the host, port, session name, cache lines, and auth configuration
-sources. Auth is shown only as configured or not configured, with its source.
-Secrets are not printed.
+Reads the local shared configuration directly through the shared reader and
+projection. It does not require login, daemon installation, a running daemon,
+or the installed `zterm-daemon config` command.
 
-If only the old `~/.wterm` directory exists and `~/.zterm` is missing, status
-and config fail with `legacy_migration_required`. They do not perform an
-implicit legacy migration.
+It shows the real config path and existence, host, port, session name, cache
+lines, configured tmux socket labels, stored and resolved socket paths, primary
+socket, and their source locations. Auth is shown only as configured or not
+configured, with its source. Secrets are not printed.
+
+Reading a missing config reports it as absent and does not create a file. A
+malformed config or invalid tmux block fails explicitly. The output says that a
+mutation affects the next daemon start, not a running process. `daemon config`
+does not perform a legacy migration or start, stop, restart, install, or
+contact a daemon.
+
+`daemon status` keeps its formal status owner and preserves its current exit
+semantics.
 
 ## Common failures
 
@@ -459,9 +599,11 @@ implicit legacy migration.
 | `auth_required` or `auth_invalid` | No usable CLI login exists, or the server rejected it. | Run `zterm login` and select the slot again only if its identity changed. |
 | `slot_changed` | Another process changed the same slot during configuration. | Re-run `zterm slot set` and review the newer binding. |
 | `session_not_found` or `session_identity_mismatch` | The saved stable session no longer matches the daemon catalog. | Reconfigure the slot explicitly. The CLI does not create or rename a replacement session. |
-| `mirror_not_ready` or `mirror_not_present` | Snapshot preview has no ready mirror to read. | Preview is unavailable; save only after confirming the intended stable session. |
+| `snapshot_read_failed` | The daemon could not capture a fresh preview of the selected existing session. | Check that the selected session still exists and retry. Preview captures one frame without attaching, resizing, sending input, or starting continuous capture. Older daemons may return `mirror_not_ready` or `mirror_not_present`; update the daemon to enable on-demand capture. |
 | `config_busy` | Another cooperating writer holds the shared config lock. | Wait for that process to finish and retry. Do not delete the lock without confirming its owner. |
 | `invalid_json` or `invalid_config` | The shared config is malformed or a typed section has the wrong shape. | Repair the file manually or from a known backup; the CLI does not overwrite invalid content with an empty object. |
+| One configured daemon socket is unavailable | The catalog keeps reachable entries selectable and prints the failed socket label and path. | Check the configured socket or remove/update it. Cached reads keep the failure so it is not silently discarded. |
+| Every configured daemon socket is unavailable | The catalog request fails with a correlated error. | Check the configured socket routes and rerun the request. |
 | `legacy_migration_required` | Only `~/.wterm` exists, so read-only daemon commands stop before an implicit migration. | Move or initialize the current `~/.zterm` configuration explicitly, then rerun. |
 | `daemon_platform_mismatch` or `daemon_node_abi_mismatch` | The daemon package does not match the current OS, CPU, Node version, or ABI. | Use a daemon artifact built for the current host. |
 | `upgrade_install_context_unsupported` | The running CLI is not in the npm global package tree. | Install through npm global installation before using `zterm upgrade`. |

@@ -6,21 +6,21 @@
   ],
   "nodes": [
     {
-      "id": "validate_config_query",
-      "operator": "cli.daemon_config.validate_query",
+      "id": "validate_config_intent",
+      "operator": "cli.daemon_config.validate_intent",
       "operator_version": "0.1",
       "inputs": ["arc.request"],
-      "output": { "id": "arc.config_query", "schema": "Object" },
+      "output": { "id": "arc.config_intent", "schema": "Object" },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole"
     },
     {
-      "id": "read_shared_config",
-      "operator": "shared.config.read",
+      "id": "execute_shared_config_access",
+      "operator": "shared.config.transaction_or_read",
       "operator_version": "0.1",
-      "inputs": ["arc.config_query"],
-      "output": { "id": "arc.config_snapshot", "schema": "Object" },
+      "inputs": ["arc.config_intent"],
+      "output": { "id": "arc.config_access", "schema": "Object" },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
       "iterator": "Whole"
@@ -29,7 +29,7 @@
       "id": "resolve_daemon_sources",
       "operator": "shared.daemon_config.resolve_sources",
       "operator_version": "0.1",
-      "inputs": ["arc.config_snapshot"],
+      "inputs": ["arc.config_access"],
       "output": { "id": "arc.daemon_resolution", "schema": "Object" },
       "input_selector": { "include": [], "exclude": [], "predicate": null },
       "output_selector": { "include": [], "exclude": [], "predicate": null },
@@ -57,8 +57,8 @@
     }
   ],
   "edges": [
-    { "from": "validate_config_query", "to": "read_shared_config", "arc_id": "arc.config_query" },
-    { "from": "read_shared_config", "to": "resolve_daemon_sources", "arc_id": "arc.config_snapshot" },
+    { "from": "validate_config_intent", "to": "execute_shared_config_access", "arc_id": "arc.config_intent" },
+    { "from": "execute_shared_config_access", "to": "resolve_daemon_sources", "arc_id": "arc.config_access" },
     { "from": "resolve_daemon_sources", "to": "project_redacted_config", "arc_id": "arc.daemon_resolution" },
     { "from": "project_redacted_config", "to": "collect_config_result", "arc_id": "arc.redacted_config" }
   ],

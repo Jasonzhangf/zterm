@@ -124,8 +124,11 @@ The remote daemon CLI design adds these static object-flow graphs:
   commit -> one result.
 - `cli-account-logout.graph.json` - local logout -> auth removal -> loginId
   connection close -> one result.
-- `cli-slot-configure.graph.json` - slot draft -> server/session selection ->
-  optional snapshot -> checked commit -> one result.
+- `cli-slot-configure.graph.json` - request validation -> slot context read ->
+  navigation owner -> guarded commit -> one result. The navigation owner
+  returns only a final save, cancellation, or failure; its internal session and
+  server return transitions are a separate state machine in the remote CLI
+  decision, not DAG back edges.
 - `cli-slot-launch.graph.json` - local slot lookup/direct launch -> route/mux
   open -> first authoritative projection -> one result.
 - `cli-terminal-mirror-event.graph.json` - mux mirror event -> frame assembly
@@ -152,6 +155,14 @@ continues to own tmux truth, physical transport, channel registry, subscriber
 publishing, and backend identity. The CLI owns only its local terminal
 projection and client-session lifetime. `zterm upgrade` delegates to npm and
 does not upgrade or control the daemon.
+
+These CLI graphs are command-level acyclic SESE flows. Their operators are
+declarative architecture mappings, not an executable registry. In particular,
+`cli-slot-configure` maps its navigation owner to `slotSetCommand`; the former
+server, session, identity, preview, and confirm operator ids existed only in
+the graph JSON. Phase 0 validation and inspect prove topology and syntactic
+operator-version bindings only; they do not prove runtime registration or
+behavior.
 
 The phase 0 validator already discovers every `*.graph.json` file in this
 directory, so these graphs require no separate CLI graph gate. The existing

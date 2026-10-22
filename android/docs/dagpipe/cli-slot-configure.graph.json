@@ -55,14 +55,14 @@
       "iterator": "Whole"
     },
     {
-      "id": "select_server",
-      "operator": "cli.account_directory.select_server",
+      "id": "navigate_slot_selection",
+      "operator": "cli.slot_configure.navigate",
       "operator_version": "0.1",
       "inputs": [
         "arc.slot_context"
       ],
       "output": {
-        "id": "arc.server_selection",
+        "id": "arc.slot_decision",
         "schema": "Object"
       },
       "input_selector": {
@@ -78,106 +78,14 @@
       "iterator": "Whole"
     },
     {
-      "id": "select_session",
-      "operator": "cli.session_catalog.select_session",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.server_selection"
-      ],
-      "output": {
-        "id": "arc.session_selection",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "resolve_stable_identity",
-      "operator": "cli.session_identity.resolve",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.session_selection"
-      ],
-      "output": {
-        "id": "arc.identified_session",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "preview_ready_mirror",
-      "operator": "cli.terminal_snapshot.preview",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.identified_session"
-      ],
-      "output": {
-        "id": "arc.previewed_selection",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "confirm_selection",
-      "operator": "cli.slot_selection.confirm",
-      "operator_version": "0.1",
-      "inputs": [
-        "arc.previewed_selection"
-      ],
-      "output": {
-        "id": "arc.confirmed_selection",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "commit_slot_binding",
+      "id": "guarded_commit_slot",
       "operator": "cli.slot_store.commit",
       "operator_version": "0.1",
       "inputs": [
-        "arc.confirmed_selection"
+        "arc.slot_decision"
       ],
       "output": {
-        "id": "arc.committed_binding",
+        "id": "arc.slot_commit",
         "schema": "Object"
       },
       "input_selector": {
@@ -197,7 +105,7 @@
       "operator": "cli.slot_configure.collect_result",
       "operator_version": "0.1",
       "inputs": [
-        "arc.committed_binding"
+        "arc.slot_commit"
       ],
       "output": {
         "id": "arc.result",
@@ -224,38 +132,18 @@
     },
     {
       "from": "read_slot_context",
-      "to": "select_server",
+      "to": "navigate_slot_selection",
       "arc_id": "arc.slot_context"
     },
     {
-      "from": "select_server",
-      "to": "select_session",
-      "arc_id": "arc.server_selection"
+      "from": "navigate_slot_selection",
+      "to": "guarded_commit_slot",
+      "arc_id": "arc.slot_decision"
     },
     {
-      "from": "select_session",
-      "to": "resolve_stable_identity",
-      "arc_id": "arc.session_selection"
-    },
-    {
-      "from": "resolve_stable_identity",
-      "to": "preview_ready_mirror",
-      "arc_id": "arc.identified_session"
-    },
-    {
-      "from": "preview_ready_mirror",
-      "to": "confirm_selection",
-      "arc_id": "arc.previewed_selection"
-    },
-    {
-      "from": "confirm_selection",
-      "to": "commit_slot_binding",
-      "arc_id": "arc.confirmed_selection"
-    },
-    {
-      "from": "commit_slot_binding",
+      "from": "guarded_commit_slot",
       "to": "collect_slot_result",
-      "arc_id": "arc.committed_binding"
+      "arc_id": "arc.slot_commit"
     }
   ],
   "outputs": [

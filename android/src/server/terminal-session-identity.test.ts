@@ -40,10 +40,12 @@ function successful(stdout: string) {
 
 describe('terminal session stable identity', () => {
   let rowsBySocket: Map<string, string>;
+  let defaultRows: string | undefined;
 
   beforeEach(() => {
     childProcessMocks.spawn.mockReset();
     childProcessMocks.spawnSync.mockReset();
+    defaultRows = undefined;
     rowsBySocket = new Map([
       [socketA, ['work\t$1\t100\t900', 'other\t$2\t101\t900'].join('\n')],
       [socketB, ['remote\t$3\t102\t901'].join('\n')],
@@ -51,15 +53,12 @@ describe('terminal session stable identity', () => {
     childProcessMocks.spawnSync.mockImplementation((_binary: string, args: string[]) => {
       const socketIndex = args.indexOf('-S');
       const socketPath = socketIndex >= 0 ? args[socketIndex + 1] : undefined;
-      if (!socketPath) {
+      const command = socketIndex >= 0 ? args[socketIndex + 2] : args[0];
+      const rows = socketPath ? rowsBySocket.get(socketPath) : defaultRows;
+      if (!rows) {
         return { status: 1, stdout: '', stderr: 'no server running', error: undefined };
       }
-      const command = socketIndex >= 0 ? args[socketIndex + 2] : args[0];
       if (command === 'list-sessions') {
-        const rows = rowsBySocket.get(socketPath);
-        if (!rows) {
-          return { status: 1, stdout: '', stderr: 'no server running', error: undefined };
-        }
         const formatIndex = args.indexOf('-F');
         const format = formatIndex >= 0 ? args[formatIndex + 1] : '';
         const stdout = format === '#S'
@@ -68,7 +67,7 @@ describe('terminal session stable identity', () => {
         return successful(`${stdout}\n`);
       }
       if (command === 'list-panes') {
-        return successful(`${rowsBySocket.get(socketPath) || ''}\n`);
+        return successful(`${rows}\n`);
       }
       return successful('');
     });
@@ -407,5 +406,75 @@ describe('terminal session stable identity', () => {
     expect(legacyEntry).toMatchObject({ name: 'legacy', backend: 'tmux' });
     expect(legacyEntry).not.toHaveProperty('stableId');
     expect(runtime.listTerminalSessions()).toEqual(['legacy', 'work']);
+  });
+
+  it('projects one unchanged first stable ID when default and explicit routes expose the same native target', () => {
+    defaultRows = ['work\t$1\t100\t900'].join('\n');
+    rowsBySocket.set(socketA, ['work\t$1\t100\t900'].join('\n'));
+    rowsBySocket.set(socketB, ['remote\t$3\t102\t901'].join('\n'));
+    const runtime = createRuntime();
+    const firstStableId = buildTmuxSessionStableId({
+      serverPid: '900',
+      sessionId: '$1',
+      createdAt: 100,
+    });
+    const explicitStableId = buildTmuxSessionStableId({
+      socketPath: socketA,
+      serverPid: '900',
+      sessionId: '$1',
+      createdAt: 100,
+    });
+
+    const catalog = runtime.listTerminalSessionCatalog();
+    const workEntries = catalog.filter((entry) => entry.name === 'work');
+
+    expect(firstStableId).not.toBe(explicitStableId);
+    expect(workEntries).toHaveLength(1);
+    expect(workEntries[0]?.stableId).toBe(firstStableId);
+    expect(catalog.filter((entry) => entry.name === 'remote')).toHaveLength(1);
+  });
+
+  it('resolves and binds both former alias stable IDs before and after a public catalog refresh', () => {
+    defaultRows = ['work\t$1\t100\t900'].join('\n');
+    rowsBySocket.set(socketA, ['work\t$1\t100\t900'].join('\n'));
+    const runtime = createRuntime();
+    const defaultAlias = buildTmuxSessionStableId({
+      serverPid: '900',
+      sessionId: '$1',
+      createdAt: 100,
+    });
+    const explicitAlias = buildTmuxSessionStableId({
+      socketPath: socketA,
+      serverPid: '900',
+      sessionId: '$1',
+      createdAt: 100,
+    });
+
+    const resolveAliases = () => {
+      const defaultResolution = runtime.resolveExistingSession(defaultAlias, 'tmux', 'work');
+      const explicitResolution = runtime.resolveExistingSession(explicitAlias, 'tmux', 'work');
+
+      expect(defaultResolution).toMatchObject({
+        ok: true,
+        session: {
+          identity: { backend: 'tmux', sessionName: 'work', stableId: defaultAlias },
+        },
+      });
+      expect(explicitResolution).toMatchObject({
+        ok: true,
+        session: {
+          identity: { backend: 'tmux', sessionName: 'work', stableId: explicitAlias },
+          target: { socketPath: socketA },
+        },
+      });
+      if (!explicitResolution.ok) {
+        throw new Error(explicitResolution.message);
+      }
+      return explicitResolution;
+    };
+
+    runtime.bindResolvedSession(resolveAliases().session);
+    expect(runtime.listTerminalSessionCatalog().filter((entry) => entry.name === 'work')).toHaveLength(1);
+    runtime.bindResolvedSession(resolveAliases().session);
   });
 });

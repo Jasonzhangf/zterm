@@ -59,6 +59,7 @@
 - terminal 链路必须保持 `server / buffer manager / renderer / UI shell` 独立，禁止越层漂移
 - daemon / buffer manager / renderer 都必须遵守 **读写解耦**：写侧只维护本层真相，读侧只读取当前真相；**请求不得触发上游同步策略**
 - daemon 只关心 `tmux -> mirror store`，**不关心也不能关心任何客户端逻辑/状态**；client buffer manager 只关心 `daemon -> local sparse buffer + visible-range gap repair`，**不持有 renderer follow/reading/renderBottomIndex**
+- 窄例外：显式 `terminal-snapshot-request` 预览可对精确 `{ backend, stableId }` 做一次请求局部的一次性源捕获，读取前后校验同一 native target，结果进入 detached 状态并交给 snapshot serializer；现有或缺失 live mirror 都返回新帧。该路径不得改写 live mirror，也不得 attach、input、resize、createSession、启动 capture timer 或取 lease。其他 buffer 读取保持只读，连续同步调度不变。
 - daemon mirror 与正文发布分离：`daemon.mirror_store` 只维护 canonical mirror truth；per-subscriber `buffer-sync` pending/backpressure/head/frame-split 唯一 owner 是 `daemon.buffer_publisher`，mirror runtime 不得重放发布语义
 - Herdr adapter 是唯一显式 history/live 分层例外：history tail truth 来自官方 `pane read --source recent --lines N`，canonical frame 只做 live visible tail overlay；该合并只能在 `herdr-backend-runtime` adapter 内完成，mirror store 不得再拆第二语义，不得把 1000 行 history 放进 33ms capture loop
 - renderer 是唯一可见窗口真相：只负责 `follow / reading / renderBottomIndex / visible range`；有 gap 先画空白，占位后等 buffer patch 按行/区间重刷

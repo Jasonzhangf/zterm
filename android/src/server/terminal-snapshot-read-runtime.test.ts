@@ -14,8 +14,8 @@ import {
 import type {
   ResolvedTerminalSession,
   TerminalSessionIdentityResolution,
+  TerminalSourceMirrorSnapshot,
 } from './terminal-source-adapter';
-import type { SessionMirror } from './terminal-runtime-types';
 import { createTerminalSnapshotReadRuntime } from './terminal-snapshot-read-runtime';
 
 const STABLE_ID = 'tmux:v1:opaque-snapshot-id';
@@ -28,46 +28,6 @@ function row(text: string): TerminalCell[] {
     flags: 0,
     width: 1,
   }));
-}
-
-function createMirror(overrides: Partial<SessionMirror> = {}): SessionMirror {
-  return {
-    key: 'tmux:work',
-    sessionName: 'work',
-    backend: 'tmux',
-    sessionIdentity: STABLE_ID,
-    sessionTarget: resolvedSession().target,
-    scratchBridge: null,
-    lifecycle: 'ready',
-    cols: 80,
-    rows: 24,
-    baselineCols: 80,
-    baselineRows: 24,
-    consecutiveFailures: 0,
-    cursorKeysApp: false,
-    revision: 7,
-    lastScrollbackCount: 0,
-    bufferStartIndex: 100,
-    bufferLines: [row('zero'), row('one'), row('two')],
-    cursor: { rowIndex: 2, col: 3, visible: true },
-    lastFlushStartedAt: 0,
-    lastFlushCompletedAt: 0,
-    lastLiveActivityAt: 0,
-    lastHeadBroadcastAt: 0,
-    flushInFlight: false,
-    flushPromise: null,
-    quietFlushStreak: 0,
-    lastFlushHadContentChanges: false,
-    pendingStableCaptureSnapshot: null,
-    pendingPerformanceTraceCapture: null,
-    adaptiveWidthBaselineGeometry: null,
-    adaptiveWidthAppliedCols: null,
-    adaptiveWidthAppliedRows: null,
-    adaptiveWidthLeaseTimer: null,
-    liveSyncTimer: null,
-    subscribers: new Set(),
-    ...overrides,
-  };
 }
 
 function resolvedSession(): ResolvedTerminalSession {
@@ -89,6 +49,25 @@ function resolvedSession(): ResolvedTerminalSession {
   };
 }
 
+function snapshot(
+  overrides: Partial<TerminalSourceMirrorSnapshot> = {},
+): TerminalSourceMirrorSnapshot {
+  return {
+    revision: 7,
+    bufferStartIndex: 100,
+    bufferLines: [row('zero'), row('one'), row('two')],
+    cols: 80,
+    rows: 24,
+    cursorKeysApp: false,
+    cursor: { rowIndex: 2, col: 3, visible: true },
+    capturedLineCount: 3,
+    canonicalLineCount: 3,
+    totalAvailableLines: 103,
+    visibleTopIndex: 100,
+    ...overrides,
+  };
+}
+
 function request(overrides: Partial<TerminalSnapshotRequestPayload> = {}): TerminalSnapshotRequestPayload {
   return {
     version: 1,
@@ -99,38 +78,26 @@ function request(overrides: Partial<TerminalSnapshotRequestPayload> = {}): Termi
   };
 }
 
-function createNoWriteSpies() {
-  return {
-    attach: vi.fn(),
-    capture: vi.fn(),
-    resize: vi.fn(),
-    input: vi.fn(),
-    createSession: vi.fn(),
-    scheduler: vi.fn(),
-  };
-}
-
-function expectNoWriteCalls(spies: ReturnType<typeof createNoWriteSpies>) {
-  for (const spy of Object.values(spies)) {
-    expect(spy).not.toHaveBeenCalled();
-  }
-}
-
 function lineIndexes(body: TerminalBufferPayload): number[] {
   return body.lines.map((line) => ('i' in line ? line.i : line.index));
 }
 
+function bodyText(body: TerminalBufferPayload): string {
+  return body.lines
+    .map((line) => ('t' in line ? line.t : ''))
+    .join('|');
+}
+
 describe('createTerminalSnapshotReadRuntime', () => {
-  it('returns one ready mirror revision as the immutable tail body and sends the typed result once', () => {
-    const mirror = createMirror();
+  it('captures one fresh detached frame and serializes head and body from the same revision', async () => {
     const resolved = resolvedSession();
+    const captured = snapshot();
     const sent: TerminalSnapshotResultPayload[] = [];
-    const writeSpies = createNoWriteSpies();
     const resolveExistingSession = vi.fn(() => ({
       ok: true,
       session: resolved,
     } satisfies TerminalSessionIdentityResolution));
-    const readExistingMirror = vi.fn(() => mirror);
+    const captureSessionSnapshot = vi.fn(async () => captured);
     const buildHead = vi.fn(buildBufferHeadPayload);
     const buildBody = vi.fn(buildRequestedRangeBufferPayload);
     const sendSnapshotResult = vi.fn((result: TerminalSnapshotResultPayload) => {
@@ -138,14 +105,13 @@ describe('createTerminalSnapshotReadRuntime', () => {
     });
     const runtime = createTerminalSnapshotReadRuntime({
       resolveExistingSession,
-      readExistingMirror,
+      captureSessionSnapshot,
       buildBufferHeadPayload: buildHead,
       buildRequestedRangeBufferPayload: buildBody,
       sendSnapshotResult,
-      ...writeSpies,
     });
 
-    const result = runtime.handleRequest(request());
+    const result = await runtime.handleRequest(request());
 
     expect(result).toEqual(sent[0]);
     expect(sendSnapshotResult).toHaveBeenCalledTimes(1);
@@ -173,17 +139,21 @@ describe('createTerminalSnapshotReadRuntime', () => {
     expect(buildHead).toHaveBeenCalledTimes(1);
     expect(buildBody).toHaveBeenCalledTimes(1);
     expect(buildHead.mock.calls[0]![1]).toBe(buildBody.mock.calls[0]![0]);
-    expect(buildHead.mock.calls[0]![1]).not.toBe(mirror);
-    expect(readExistingMirror).toHaveBeenCalledWith(resolved);
-    expectNoWriteCalls(writeSpies);
+    expect(buildHead.mock.calls[0]![1]).not.toBe(captured);
+    expect(captureSessionSnapshot).toHaveBeenCalledWith(resolved);
+    expect(resolveExistingSession).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps the response value independent from later mirror mutation', () => {
-    const mirror = createMirror();
+  it('captures a fresh frame even when a live mirror would be absent or stale', async () => {
     const sent: TerminalSnapshotResultPayload[] = [];
+    const captureSessionSnapshot = vi.fn(async () => snapshot({
+      bufferLines: [row('fresh-source-line')],
+      bufferStartIndex: 40,
+      revision: 11,
+    }));
     const runtime = createTerminalSnapshotReadRuntime({
       resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
-      readExistingMirror: () => mirror,
+      captureSessionSnapshot,
       buildBufferHeadPayload: buildBufferHeadPayload,
       buildRequestedRangeBufferPayload: buildRequestedRangeBufferPayload,
       sendSnapshotResult: (result) => {
@@ -191,11 +161,137 @@ describe('createTerminalSnapshotReadRuntime', () => {
       },
     });
 
-    const result = runtime.handleRequest(request());
-    mirror.revision = 99;
-    mirror.bufferStartIndex = 900;
-    mirror.bufferLines[2]![0]!.char = 'X'.codePointAt(0)!;
-    mirror.cursor!.col = 77;
+    const result = await runtime.handleRequest(request({ maxLines: 1 }));
+
+    expect(result.status).toBe('available');
+    if (result.status !== 'available') return;
+    expect(bodyText(result.body)).toBe('fresh-source-line');
+    expect(captureSessionSnapshot).toHaveBeenCalledTimes(1);
+    expect(sent).toEqual([result]);
+  });
+
+  it('returns newly captured source content on each repeated preview request', async () => {
+    const markers = [row('preview-marker-old'), row('preview-marker-new')];
+    const captureSessionSnapshot = vi
+      .fn(async (_session: ResolvedTerminalSession) => snapshot())
+      .mockResolvedValueOnce(snapshot({ bufferLines: [markers[0]!] }))
+      .mockResolvedValueOnce(snapshot({ bufferLines: [markers[1]!] }));
+    const runtime = createTerminalSnapshotReadRuntime({
+      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
+      captureSessionSnapshot,
+      buildBufferHeadPayload: buildBufferHeadPayload,
+      buildRequestedRangeBufferPayload: buildRequestedRangeBufferPayload,
+      sendSnapshotResult: vi.fn(),
+    });
+
+    const first = await runtime.handleRequest(request({ maxLines: 1 }));
+    const second = await runtime.handleRequest(request({ maxLines: 1 }));
+
+    expect(captureSessionSnapshot).toHaveBeenCalledTimes(2);
+    expect(first.status).toBe('available');
+    expect(second.status).toBe('available');
+    if (first.status !== 'available' || second.status !== 'available') return;
+    expect(bodyText(first.body)).toBe('preview-marker-old');
+    expect(bodyText(second.body)).toBe('preview-marker-new');
+  });
+
+  it.each([
+    'session_not_found',
+    'session_identity_mismatch',
+  ] as const)('rejects a target that changes during capture with %s before publishing', async (code) => {
+    let resolutionCount = 0;
+    const captureSessionSnapshot = vi.fn(async () => snapshot({ bufferLines: [row('replacement-content')] }));
+    const buildHead = vi.fn(buildBufferHeadPayload);
+    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
+    const sent: TerminalSnapshotResultPayload[] = [];
+    const runtime = createTerminalSnapshotReadRuntime({
+      resolveExistingSession: () => {
+        resolutionCount += 1;
+        return resolutionCount === 1
+          ? { ok: true, session: resolvedSession() }
+          : { ok: false, code, message: code };
+      },
+      captureSessionSnapshot,
+      buildBufferHeadPayload: buildHead,
+      buildRequestedRangeBufferPayload: buildBody,
+      sendSnapshotResult: (result) => {
+        sent.push(result);
+      },
+    });
+
+    const result = await runtime.handleRequest(request());
+
+    expect(result).toEqual({ status: 'failed', code });
+    expect(sent).toEqual([result]);
+    expect(captureSessionSnapshot).toHaveBeenCalledTimes(1);
+    expect(buildHead).not.toHaveBeenCalled();
+    expect(buildBody).not.toHaveBeenCalled();
+  });
+
+  it('does not capture when the pre-read identity resolution fails', async () => {
+    const captureSessionSnapshot = vi.fn(async () => snapshot());
+    const buildHead = vi.fn(buildBufferHeadPayload);
+    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
+    const sent: TerminalSnapshotResultPayload[] = [];
+    const runtime = createTerminalSnapshotReadRuntime({
+      resolveExistingSession: () => ({
+        ok: false,
+        code: 'session_not_found',
+        message: 'gone',
+      }),
+      captureSessionSnapshot,
+      buildBufferHeadPayload: buildHead,
+      buildRequestedRangeBufferPayload: buildBody,
+      sendSnapshotResult: (result) => {
+        sent.push(result);
+      },
+    });
+
+    const result = await runtime.handleRequest(request());
+
+    expect(result).toEqual({ status: 'failed', code: 'session_not_found' });
+    expect(sent).toEqual([result]);
+    expect(captureSessionSnapshot).not.toHaveBeenCalled();
+    expect(buildHead).not.toHaveBeenCalled();
+    expect(buildBody).not.toHaveBeenCalled();
+  });
+
+  it('propagates capture rejection so the message owner sends one explicit failure', async () => {
+    const sent: TerminalSnapshotResultPayload[] = [];
+    const runtime = createTerminalSnapshotReadRuntime({
+      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
+      captureSessionSnapshot: async () => {
+        throw new Error('fresh capture failed');
+      },
+      buildBufferHeadPayload: buildBufferHeadPayload,
+      buildRequestedRangeBufferPayload: buildRequestedRangeBufferPayload,
+      sendSnapshotResult: (result) => {
+        sent.push(result);
+      },
+    });
+
+    await expect(runtime.handleRequest(request())).rejects.toThrow('fresh capture failed');
+    expect(sent).toEqual([]);
+  });
+
+  it('keeps the response independent from later mutation of the captured source frame', async () => {
+    const captured = snapshot();
+    const sent: TerminalSnapshotResultPayload[] = [];
+    const runtime = createTerminalSnapshotReadRuntime({
+      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
+      captureSessionSnapshot: async () => captured,
+      buildBufferHeadPayload: buildBufferHeadPayload,
+      buildRequestedRangeBufferPayload: buildRequestedRangeBufferPayload,
+      sendSnapshotResult: (result) => {
+        sent.push(result);
+      },
+    });
+
+    const result = await runtime.handleRequest(request());
+    captured.revision = 99;
+    captured.bufferStartIndex = 900;
+    captured.bufferLines[2]![0]!.char = 'X'.codePointAt(0)!;
+    captured.cursor!.col = 77;
 
     expect(result.status).toBe('available');
     if (result.status !== 'available') return;
@@ -215,161 +311,23 @@ describe('createTerminalSnapshotReadRuntime', () => {
     expect(Object.isFrozen(result.body.lines)).toBe(true);
   });
 
-  it('returns mirror_not_present without creating or capturing a mirror', () => {
-    const writeSpies = createNoWriteSpies();
-    const buildHead = vi.fn(buildBufferHeadPayload);
-    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
-    const sent: TerminalSnapshotResultPayload[] = [];
-    const runtime = createTerminalSnapshotReadRuntime({
-      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
-      readExistingMirror: () => undefined,
-      buildBufferHeadPayload: buildHead,
-      buildRequestedRangeBufferPayload: buildBody,
-      sendSnapshotResult: (result) => {
-        sent.push(result);
-      },
-      ...writeSpies,
-    });
-
-    const result = runtime.handleRequest(request());
-
-    expect(result).toEqual({ status: 'unavailable', reason: 'mirror_not_present' });
-    expect(sent).toEqual([result]);
-    expect(buildHead).not.toHaveBeenCalled();
-    expect(buildBody).not.toHaveBeenCalled();
-    expectNoWriteCalls(writeSpies);
-  });
-
-  it('returns mirror_not_ready without serializing or starting capture', () => {
-    const mirror = createMirror({ lifecycle: 'booting' });
-    const writeSpies = createNoWriteSpies();
-    const buildHead = vi.fn(buildBufferHeadPayload);
-    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
-    const sent: TerminalSnapshotResultPayload[] = [];
-    const runtime = createTerminalSnapshotReadRuntime({
-      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
-      readExistingMirror: () => mirror,
-      buildBufferHeadPayload: buildHead,
-      buildRequestedRangeBufferPayload: buildBody,
-      sendSnapshotResult: (result) => {
-        sent.push(result);
-      },
-      ...writeSpies,
-    });
-
-    const result = runtime.handleRequest(request());
-
-    expect(result).toEqual({ status: 'unavailable', reason: 'mirror_not_ready' });
-    expect(sent).toEqual([result]);
-    expect(buildHead).not.toHaveBeenCalled();
-    expect(buildBody).not.toHaveBeenCalled();
-    expectNoWriteCalls(writeSpies);
-  });
-
-  it('returns unavailable instead of relabeling a ready mirror with a different stable identity', () => {
-    const otherStableId = 'tmux:v1:opaque-other-id';
-    const mirror = createMirror({
-      sessionIdentity: otherStableId,
-      sessionTarget: {
-        ...resolvedSession().target,
-        stableId: otherStableId,
-      },
-    });
-    const buildHead = vi.fn(buildBufferHeadPayload);
-    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
-    const sent: TerminalSnapshotResultPayload[] = [];
-    const runtime = createTerminalSnapshotReadRuntime({
-      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
-      readExistingMirror: () => mirror,
-      buildBufferHeadPayload: buildHead,
-      buildRequestedRangeBufferPayload: buildBody,
-      sendSnapshotResult: (result) => {
-        sent.push(result);
-      },
-    });
-
-    const result = runtime.handleRequest(request());
-
-    expect(result).toEqual({ status: 'unavailable', reason: 'mirror_not_present' });
-    expect(sent).toEqual([result]);
-    expect(buildHead).not.toHaveBeenCalled();
-    expect(buildBody).not.toHaveBeenCalled();
-  });
-
-  it('returns unavailable when a ready mirror has no established native provenance', () => {
-    const mirror = createMirror({
-      sessionIdentity: undefined,
-      sessionTarget: undefined,
-    });
-    const buildHead = vi.fn(buildBufferHeadPayload);
-    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
-    const sent: TerminalSnapshotResultPayload[] = [];
-    const runtime = createTerminalSnapshotReadRuntime({
-      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
-      readExistingMirror: () => mirror,
-      buildBufferHeadPayload: buildHead,
-      buildRequestedRangeBufferPayload: buildBody,
-      sendSnapshotResult: (result) => {
-        sent.push(result);
-      },
-    });
-
-    const result = runtime.handleRequest(request());
-
-    expect(result).toEqual({ status: 'unavailable', reason: 'mirror_not_present' });
-    expect(sent).toEqual([result]);
-    expect(buildHead).not.toHaveBeenCalled();
-    expect(buildBody).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    'session_not_found',
-    'session_identity_mismatch',
-  ] as const)('returns failed %s without reading a different mirror', (code) => {
-    const readExistingMirror = vi.fn();
-    const buildHead = vi.fn(buildBufferHeadPayload);
-    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
-    const sent: TerminalSnapshotResultPayload[] = [];
-    const runtime = createTerminalSnapshotReadRuntime({
-      resolveExistingSession: () => ({
-        ok: false,
-        code,
-        message: code,
-      }),
-      readExistingMirror,
-      buildBufferHeadPayload: buildHead,
-      buildRequestedRangeBufferPayload: buildBody,
-      sendSnapshotResult: (result) => {
-        sent.push(result);
-      },
-    });
-
-    const result = runtime.handleRequest(request());
-
-    expect(result).toEqual({ status: 'failed', code });
-    expect(sent).toEqual([result]);
-    expect(readExistingMirror).not.toHaveBeenCalled();
-    expect(buildHead).not.toHaveBeenCalled();
-    expect(buildBody).not.toHaveBeenCalled();
-  });
-
   it.each([
     { maxLines: 1, expectedIndexes: [102] },
     { maxLines: 3, expectedIndexes: [100, 101, 102] },
     { maxLines: Number.MAX_SAFE_INTEGER, expectedIndexes: [100, 101, 102] },
-  ])('clamps maxLines=$maxLines to the legal positive wire range and mirror tail', ({
+  ])('clamps maxLines=$maxLines to the legal positive wire range and captured tail', async ({
     maxLines,
     expectedIndexes,
   }) => {
     const runtime = createTerminalSnapshotReadRuntime({
       resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
-      readExistingMirror: () => createMirror(),
+      captureSessionSnapshot: async () => snapshot(),
       buildBufferHeadPayload: buildBufferHeadPayload,
       buildRequestedRangeBufferPayload: buildRequestedRangeBufferPayload,
       sendSnapshotResult: vi.fn(),
     });
 
-    const result = runtime.handleRequest(request({ maxLines }));
+    const result = await runtime.handleRequest(request({ maxLines }));
 
     expect(result.status).toBe('available');
     if (result.status !== 'available') return;
