@@ -54,8 +54,9 @@ return to follow, or send a literal prefix.
 - Windows x64 and Linux x64 native payload, installed CLI, and daemon installation
   gates passed in CI. Windows remote acceptance passed in run 39707241211 with
   actual RTC relay/relay statistics and the original 2500 ms connection budget.
-- Main integration awaits closure of two independent-review findings concerning
-  pinned native socket routing and ambiguous same-name session observations.
+- Independent review findings are closed: pinned socket routing survives catalog
+  refresh, and ambiguous same-name sessions omit observations without exact
+  provenance. Integration status is tracked in PR #167.
 
 ## Daemon Distribution
 

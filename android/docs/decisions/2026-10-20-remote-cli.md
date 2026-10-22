@@ -1,6 +1,6 @@
 # 2026-10-20 Remote daemon CLI design
 状态：`DESIGN_PASS`；三平台 CLI、原生包及 daemon 安装 gate 已 PASS。Windows
-外部 RTC 已通过真实连接验收；独立 Review 的两项 session 身份问题正在修复，main 集成及资源收口待完成。本文是已审设计与
+外部 RTC 已通过真实连接验收；独立 Review 的登录、取消及 session 身份问题均已修复并通过独立复核。集成状态见 PR #167。本文是已审设计与
 当前实现边界的项目入口；平台安装通过不能替代远程连接验收。
 
 | 当前项 | 事实 |
