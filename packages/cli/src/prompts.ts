@@ -33,18 +33,20 @@ export interface PromptPort {
 export interface NodePromptOptions {
   input: Readable;
   output: Writable;
+  signal?: AbortSignal;
 }
 
 export function createNodePrompts(
   options: NodePromptOptions = { input: process.stdin, output: process.stdout },
 ): PromptPort {
-  return new NodePromptHandler(options.input, options.output);
+  return new NodePromptHandler(options.input, options.output, options.signal);
 }
 
 class NodePromptHandler implements PromptPort {
   constructor(
     private readonly input: Readable,
     private readonly output: Writable,
+    private readonly signal?: AbortSignal,
   ) {}
 
   text(message: string): Promise<string> {
@@ -55,8 +57,12 @@ class NodePromptHandler implements PromptPort {
     if (!isTty(this.input)) {
       return Promise.reject(new PromptUnsupportedError());
     }
+    if (this.signal?.aborted) {
+      return Promise.reject(new PromptCancelledError('password'));
+    }
     const tty = this.input;
     this.output.write(message);
+    const wasRaw = tty.isRaw === true;
     try {
       tty.setRawMode(true);
     } catch {
@@ -66,18 +72,25 @@ class NodePromptHandler implements PromptPort {
     let value = '';
 
     return new Promise<string>((resolve, reject) => {
+      const wasPaused = this.input.isPaused();
+      let settled = false;
       const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
         this.input.removeListener('data', onData);
         this.input.removeListener('end', onEnd);
+        this.signal?.removeEventListener('abort', onAbort);
         try {
-          tty.setRawMode(false);
+          tty.setRawMode(wasRaw);
         } catch {
           // The password promise still settles after a failed terminal restore.
         }
+        if (wasPaused) this.input.pause();
         this.output.write('\n');
         if (error) reject(error);
         else resolve(value);
       };
+      const onAbort = () => finish(new PromptCancelledError('password'));
       const onData = (chunk: Buffer | string) => {
         const text = typeof chunk === 'string'
           ? chunk
@@ -103,6 +116,12 @@ class NodePromptHandler implements PromptPort {
       const onEnd = () => finish(new PromptCancelledError('password'));
       this.input.on('data', onData);
       this.input.once('end', onEnd);
+      this.signal?.addEventListener('abort', onAbort, { once: true });
+      if (this.signal?.aborted) {
+        onAbort();
+        return;
+      }
+      this.input.resume();
     });
   }
 
@@ -131,6 +150,9 @@ class NodePromptHandler implements PromptPort {
   }
 
   private askLine(message: string): Promise<string> {
+    if (this.signal?.aborted) {
+      return Promise.reject(new PromptCancelledError('text'));
+    }
     return new Promise<string>((resolve, reject) => {
       const interface_ = createInterface({
         input: this.input,
@@ -143,15 +165,22 @@ class NodePromptHandler implements PromptPort {
         settled = true;
         interface_.removeListener('SIGINT', onSignal);
         interface_.removeListener('close', onClose);
+        this.signal?.removeEventListener('abort', onAbort);
         interface_.close();
         action();
       };
       const onSignal = () => settle(() => reject(new PromptCancelledError('text')));
+      const onAbort = () => settle(() => reject(new PromptCancelledError('text')));
       const onClose = () => {
         if (!settled) settle(() => reject(new PromptCancelledError('text')));
       };
       interface_.once('SIGINT', onSignal);
       interface_.once('close', onClose);
+      this.signal?.addEventListener('abort', onAbort, { once: true });
+      if (this.signal?.aborted) {
+        onAbort();
+        return;
+      }
       interface_.question(message, (answer) => {
         if (answer.includes('\u0003') || answer.includes('\u0004')) {
           settle(() => reject(new PromptCancelledError('text')));
@@ -165,6 +194,7 @@ class NodePromptHandler implements PromptPort {
 
 function isTty(stream: Readable): stream is Readable & {
   isTTY: true;
+  isRaw?: boolean;
   setRawMode(value: boolean): unknown;
 } {
   return Boolean(

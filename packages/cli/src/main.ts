@@ -723,16 +723,18 @@ export async function runMain(
 ): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
+  const signal = options.signal ?? new AbortController().signal;
   const context: MainContext = {
     store: options.store ?? new SharedConfigStore(),
     accountClient: options.accountClient ?? new AccountClient(),
     prompts: options.prompts ?? createNodePrompts({
       input: options.stdin ?? process.stdin,
       output: stdout,
+      signal,
     }),
     stdout,
     stderr,
-    signal: options.signal ?? new AbortController().signal,
+    signal,
     connectionFactory: options.connectionFactory ?? createApplicationConnection,
     upgrade: options.upgrade ?? upgradeCli,
     daemonInstall: options.daemonInstall ?? installDaemon,

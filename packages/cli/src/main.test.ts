@@ -1,7 +1,9 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Writable } from 'node:stream';
+import { getEventListeners } from 'node:events';
+import { PassThrough, Writable } from 'node:stream';
+import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AccountClient, AuthenticatedAccount } from './account-client.js';
 import type {
@@ -31,6 +33,16 @@ class TestPrompts implements PromptPort {
   confirm = vi.fn(async () => false);
 }
 
+class TestPromptInput extends PassThrough {
+  isTTY = true;
+  isRaw = false;
+
+  setRawMode(value: boolean) {
+    this.isRaw = value;
+    return this;
+  }
+}
+
 function outputCapture() {
   let text = '';
   const stream = new Writable({
@@ -43,6 +55,19 @@ function outputCapture() {
     stream,
     read: () => text,
   };
+}
+
+async function waitForOutput(
+  capture: ReturnType<typeof outputCapture>,
+  pattern: RegExp,
+  timeoutMs = 1_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (pattern.test(capture.read())) return;
+    await delay(10);
+  }
+  throw new Error(`timed out waiting for ${pattern}: ${capture.read()}`);
 }
 
 function account(accessToken = 'account-access-secret'): AuthenticatedAccount {
@@ -276,6 +301,53 @@ describe('zterm public main contract', () => {
     expect(logoutExit).toBe(0);
     expect(logoutStdout.read()).toContain('已清除本机 CLI 登录态');
     expect(readFileSync(getSharedConfigPath(homeDir), 'utf8')).not.toContain(secret);
+  });
+
+  it('cancels the default login prompt through the resolved command signal', async () => {
+    const { store } = testStore();
+    await store.update((config) => {
+      config.zterm = {
+        cli: {
+          server: { relayBaseUrl: 'http://127.0.0.1:9/zterm/' },
+        },
+      };
+      return { value: undefined, changed: true };
+    });
+    const controller = new AbortController();
+    const input = new TestPromptInput();
+    const stdout = outputCapture();
+    const stderr = outputCapture();
+    const accountClient = {
+      login: vi.fn(),
+      me: vi.fn(),
+      directory: vi.fn(),
+    } as unknown as Pick<AccountClient, 'login' | 'me' | 'directory'>;
+
+    const pending = runMain(['login'], {
+      store,
+      accountClient,
+      stdin: input,
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+      signal: controller.signal,
+    });
+    await waitForOutput(stdout, /账号/);
+    controller.abort();
+
+    const outcome = await Promise.race([
+      pending,
+      delay(500).then(() => 'timeout' as const),
+    ]);
+    if (outcome === 'timeout') {
+      input.end();
+      await pending.catch(() => undefined);
+    }
+
+    expect(outcome).toBe(130);
+    expect(accountClient.login).not.toHaveBeenCalled();
+    expect(input.listenerCount('keypress')).toBe(0);
+    expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+    expect(stderr.read()).toContain('登录已取消');
   });
 
   it('preserves daemon status exit semantics and output', async () => {
