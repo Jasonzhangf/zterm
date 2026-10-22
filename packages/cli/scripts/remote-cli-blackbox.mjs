@@ -560,7 +560,7 @@ async function executeHarness({
       },
     );
     await shell.waitForVisibleText(
-      /保存到槽位 1/u,
+      /选择 \[1-4\]:/u,
       'slot action menu',
       {
         from: command.from,

@@ -1793,11 +1793,11 @@ export async function runCliBlackboxHarness(
           from: command.from,
           timeoutMs,
         });
-        await cliShell!.waitFor(/保存到槽位 1/u, 'slot save prompt', {
+        await cliShell!.waitFor(/选择 \[1-4\]:/u, 'slot action menu', {
           from: command.from,
           timeoutMs,
         });
-        cliShell!.sendLine('y');
+        cliShell!.sendLine('1');
         const result = await command.finish();
         if (result.exitCode !== 0) {
           throw new Error(`zterm slot set exited ${result.exitCode}`);
