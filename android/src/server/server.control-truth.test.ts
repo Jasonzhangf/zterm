@@ -87,6 +87,9 @@ describe('server control runtime truth gates', () => {
     expect(source).toContain('throw new Error(stderr || `tmux exited with status ${result.status}`)');
     expect(source).toContain("env.TMUX_TMPDIR = deps.tmuxSocketDir");
     expect(source).toContain("runTmuxWithSocketMode(['list-sessions'], 'default')");
+    expect(source).toContain('function runTmuxAsyncForTarget(');
+    expect(source).toContain('tmux command timed out after');
+    expect(source).toContain("child.kill('SIGKILL')");
     expect(source).toContain('function buildExactTmuxPaneTarget(sessionName: string)');
     expect(source).toContain(":.{top-left}");
     expect(backendWriteBlock).toContain('const target = resolveExactTmuxPaneTarget(sessionName)');

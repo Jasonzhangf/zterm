@@ -22,6 +22,7 @@ import {
 
 const DEFAULT_MANUAL_TERMINAL_COLS = 80;
 const DEFAULT_MANUAL_TERMINAL_ROWS = 80;
+const DEFAULT_TMUX_COMMAND_TIMEOUT_MS = 10_000;
 
 export type TerminalControlBackendKind = TerminalSourceKind;
 
@@ -43,6 +44,7 @@ export interface TerminalControlRuntimeDeps {
   wezTermBackend?: TerminalSourceAdapter | null;
   backendRuntimes?: Partial<Record<'herdr' | 'wezterm', TerminalSourceAdapter>>;
   defaultBackend?: TerminalControlBackendKind;
+  tmuxCommandTimeoutMs?: number;
 }
 
 /** Enumerate live tmux sockets without persisting a session catalog. */
@@ -86,6 +88,7 @@ export interface TerminalControlRuntime {
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runTmuxForSession: (args: string[], sessionName: string) => { ok: true; stdout: string };
   runTmuxAsyncForSession: (args: string[], sessionName: string) => Promise<{ ok: true; stdout: string }>;
+  runTmuxAsyncForTarget: (args: string[], target: TmuxTerminalSessionTarget) => Promise<{ ok: true; stdout: string }>;
   runTmuxAcrossSockets: (args: string[]) => { ok: true; stdout: string };
   runTmuxAsyncAcrossSockets: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
@@ -157,28 +160,57 @@ export function createTerminalControlRuntime(
     return { ok: true as const, stdout: result.stdout || '' };
   }
 
-  function runTmuxAsyncWithSocketPath(args: string[], socketPath: string) {
+  function resolveTmuxCommandTimeoutMs() {
+    const configured = deps.tmuxCommandTimeoutMs;
+    return Number.isFinite(configured) && configured !== undefined
+      ? Math.max(1, Math.floor(configured))
+      : DEFAULT_TMUX_COMMAND_TIMEOUT_MS;
+  }
+
+  function runTmuxAsyncChild(args: string[], env: Record<string, string>) {
     return new Promise<{ ok: true; stdout: string }>((resolve, reject) => {
-      const child = spawn(deps.tmuxBinary, ['-S', socketPath, ...args], {
+      const timeoutMs = resolveTmuxCommandTimeoutMs();
+      const child = spawn(deps.tmuxBinary, args, {
         cwd: process.env.HOME || homedir(),
-        env: cleanEnv('default'),
+        env,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = '';
       let stderr = '';
+      let settled = false;
+      const settle = (finish: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        finish();
+      };
+      const timer = setTimeout(() => {
+        settle(() => {
+          child.kill('SIGKILL');
+          reject(new Error(`tmux command timed out after ${timeoutMs}ms: ${args.join(' ')}`));
+        });
+      }, timeoutMs);
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (chunk) => { stdout += chunk; });
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk) => { stderr += chunk; });
-      child.on('error', reject);
+      child.on('error', (error) => {
+        settle(() => reject(error));
+      });
       child.on('close', (code) => {
-        if (code !== 0) {
-          reject(new Error(stderr.trim() || `tmux exited with status ${code ?? 'unknown'}`));
-          return;
-        }
-        resolve({ ok: true, stdout });
+        settle(() => {
+          if (code !== 0) {
+            reject(new Error(stderr.trim() || `tmux exited with status ${code ?? 'unknown'}`));
+            return;
+          }
+          resolve({ ok: true, stdout });
+        });
       });
     });
+  }
+
+  function runTmuxAsyncWithSocketPath(args: string[], socketPath: string) {
+    return runTmuxAsyncChild(['-S', socketPath, ...args], cleanEnv('default'));
   }
 
   function resolveSessionSocketPath(sessionName: string) {
@@ -224,6 +256,12 @@ export function createTerminalControlRuntime(
     const socketPath = resolveSessionSocketPath(sessionName);
     const exactArgs = rewriteTmuxSessionTargets(args, sessionName);
     return socketPath ? runTmuxAsyncWithSocketPath(exactArgs, socketPath) : runTmuxAsync(exactArgs);
+  }
+
+  function runTmuxAsyncForTarget(args: string[], target: TmuxTerminalSessionTarget) {
+    return target.socketPath
+      ? runTmuxAsyncWithSocketPath(args, target.socketPath)
+      : runTmuxAsync(args);
   }
 
   // Global session/panee enumerations must span every live socket, exactly like
@@ -418,38 +456,7 @@ export function createTerminalControlRuntime(
   }
 
   function runTmuxAsyncWithSocketMode(args: string[], socketMode: TmuxSocketMode) {
-    return new Promise<{ ok: true; stdout: string }>((resolve, reject) => {
-      const child = spawn(deps.tmuxBinary, args, {
-        cwd: process.env.HOME || homedir(),
-        env: cleanEnv(socketMode),
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-
-      let stdout = '';
-      let stderr = '';
-
-      child.stdout?.setEncoding('utf8');
-      child.stdout?.on('data', (chunk) => {
-        stdout += chunk;
-      });
-      child.stderr?.setEncoding('utf8');
-      child.stderr?.on('data', (chunk) => {
-        stderr += chunk;
-      });
-
-      child.on('error', (error) => {
-        reject(error);
-      });
-
-      child.on('close', (code) => {
-        if (code !== 0) {
-          const trimmedStderr = stderr.trim();
-          reject(new Error(trimmedStderr || `tmux exited with status ${code ?? 'unknown'}`));
-          return;
-        }
-        resolve({ ok: true, stdout });
-      });
-    });
+    return runTmuxAsyncChild(args, cleanEnv(socketMode));
   }
 
   function runTmuxAsync(args: string[]) {
@@ -624,8 +631,18 @@ export function createTerminalControlRuntime(
           // Session names remain authoritative when pane metadata is unavailable.
         }
       }
-      const targetsBySession = new Map<string, TmuxTerminalSessionTarget[]>();
+      const seenNativeTargets = new Set<string>();
+      const distinctTmuxTargets: TmuxTerminalSessionTarget[] = [];
       for (const target of tmuxTargets) {
+        const nativeKey = `${target.backend}\u0000${target.serverPid}\u0000${target.sessionId}\u0000${target.createdAt}`;
+        if (seenNativeTargets.has(nativeKey)) {
+          continue;
+        }
+        seenNativeTargets.add(nativeKey);
+        distinctTmuxTargets.push(target);
+      }
+      const targetsBySession = new Map<string, TmuxTerminalSessionTarget[]>();
+      for (const target of distinctTmuxTargets) {
         const targets = targetsBySession.get(target.sessionName);
         if (targets) {
           targets.push(target);
@@ -901,6 +918,7 @@ export function createTerminalControlRuntime(
     runTmuxAsync,
     runTmuxForSession,
     runTmuxAsyncForSession,
+    runTmuxAsyncForTarget,
     runTmuxAcrossSockets,
     runTmuxAsyncAcrossSockets,
     runCommand,

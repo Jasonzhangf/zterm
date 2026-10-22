@@ -241,7 +241,7 @@ function sessionChoices(catalog: TerminalSessionCatalog): SlotSessionTarget[] {
 }
 
 function sessionLabel(session: SlotSessionTarget) {
-  return `${session.name} · ${session.backend} · ${session.stableId}`;
+  return `${session.name} · ${session.backend}`;
 }
 
 export function slotDisplayLabel(entry: SlotListEntry): string {
@@ -520,230 +520,247 @@ export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetRe
     };
   }
 
-  let serverIndex: number;
-  try {
-    serverIndex = await options.prompts.select(
-      '选择服务器',
-      servers.map((server, index) => ({ label: serverLabel(server), value: index })),
-    );
-  } catch (error) {
-    if (isCancellation(error)) return { kind: 'cancelled', stage: 'server' };
-    return mapFailure('server', error, 'server_select_failed', '无法选择服务器。');
-  }
-  const server = servers[serverIndex];
-  if (!server) {
-    return mapFailure(
-      'server',
-      new Error('selected server index is invalid'),
-      'server_select_failed',
-      '服务器选择无效。',
-    );
-  }
-
-  let connection: SlotConnection | undefined;
   const cleanupErrors: CommandError[] = [];
-  const connectionState = { closed: false };
-  let result: SlotSetResult;
-  try {
+
+  while (true) {
+    let serverIndex: number;
+    try {
+      serverIndex = await options.prompts.select(
+        '选择服务器',
+        servers.map((server, index) => ({ label: serverLabel(server), value: index })),
+      );
+    } catch (error) {
+      if (isCancellation(error)) return { kind: 'cancelled', stage: 'server' };
+      return mapFailure('server', error, 'server_select_failed', '无法选择服务器。');
+    }
+    const server = servers[serverIndex];
+    if (!server) {
+      return mapFailure(
+        'server',
+        new Error('selected server index is invalid'),
+        'server_select_failed',
+        '服务器选择无效。',
+      );
+    }
+
+    let connection: SlotConnection;
     try {
       connection = await options.connectionFactory({ account: auth, server, signal });
     } catch (error) {
-      if (isCancellation(error)) {
-        return { kind: 'cancelled', stage: 'connection' };
-      }
+      if (isCancellation(error)) return { kind: 'cancelled', stage: 'connection' };
       return mapFailure('connection', error, 'connection_failed', '无法建立目标连接。');
     }
 
-    let sessions: SlotSessionTarget[];
-    try {
-      sessions = sessionChoices(await connection.listSessions());
-    } catch (error) {
-      if (isCancellation(error)) {
-        result = { kind: 'cancelled', stage: 'sessions' };
-      } else {
-        result = mapFailure('sessions', error, 'session_list_failed', '无法读取 session 列表。');
+    let closeAttempted = false;
+    const closeOnce = async (): Promise<boolean> => {
+      if (closeAttempted) return true;
+      closeAttempted = true;
+      try {
+        await connection.close('slot-configure-complete');
+        return true;
+      } catch (error) {
+        cleanupErrors.push(
+          toCommandError('cleanup', error, 'connection_close_failed', '无法关闭本次连接。'),
+        );
+        return false;
       }
-      return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-    }
-    if (sessions.length === 0) {
-      result = {
-        kind: 'failed',
-        stage: 'sessions',
-        error: {
-          code: 'stable_session_unavailable',
-          message: '没有同时提供 backend 和 stableId 的可绑定 session。',
-          action: '请确认 daemon backend 支持稳定 session 身份。',
-        },
-      };
-      return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-    }
-
-    let sessionIndex: number;
-    try {
-      sessionIndex = await options.prompts.select(
-        '选择 session',
-        sessions.map((session, index) => ({
-          label: sessionLabel(session),
-          value: index,
-        })),
-      );
-    } catch (error) {
-      result = isCancellation(error)
-        ? { kind: 'cancelled', stage: 'session' }
-        : mapFailure('session', error, 'session_select_failed', '无法选择 session。');
-      return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-    }
-    const session = sessions[sessionIndex];
-    if (!session) {
-      result = mapFailure(
-        'session',
-        new Error('selected session index is invalid'),
-        'session_select_failed',
-        'session 选择无效。',
-      );
-      return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-    }
-
-    let preview: TerminalSnapshotResultPayload | undefined;
-    try {
-      const wantsPreview = await options.prompts.confirm('预览 snapshot？');
-      if (wantsPreview) {
-        preview = await connection.readSnapshot(session, options.maxLines ?? 80);
-        if (preview.status === 'failed') {
-          result = {
-            kind: 'failed',
-            stage: 'preview',
-            error: {
-              code: preview.code,
-              message: preview.code === 'session_not_found'
-                ? '预览时 session 已不存在。'
-                : '预览时 session 身份已改变。',
-              action: '请重新读取 session 列表后重试。',
-            },
-          };
-          return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-        }
-        if (
-          preview.status === 'available'
-          && (preview.backend !== session.backend || preview.stableId !== session.stableId)
-        ) {
-          result = {
-            kind: 'failed',
-            stage: 'preview',
-            error: {
-              code: 'snapshot_identity_mismatch',
-              message: 'snapshot 身份与所选 session 不一致。',
-              action: '请重新读取 session 列表后重试。',
-            },
-          };
-          return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-        }
-        await options.renderPreview(preview, session);
-      }
-    } catch (error) {
-      result = isCancellation(error)
-        ? { kind: 'cancelled', stage: 'preview' }
-        : mapFailure('preview', error, 'preview_failed', '无法预览 snapshot。');
-      return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-    }
-
-    try {
-      const confirmed = await options.prompts.confirm(`保存到槽位 ${options.slot}？`);
-      if (!confirmed) {
-        result = { kind: 'cancelled', stage: 'confirm' };
-        return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-      }
-    } catch (error) {
-      result = isCancellation(error)
-        ? { kind: 'cancelled', stage: 'confirm' }
-        : mapFailure('confirm', error, 'confirm_failed', '无法确认槽位保存。');
-      return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-    }
-
-    const binding: CliSlotBinding = {
-      ...(original?.alias === undefined ? {} : { alias: original.alias }),
-      account: {
-        relayBaseUrl: auth.relayBaseUrl,
-        userId: auth.userId,
-      },
-      server: {
-        deviceId: server.deviceId,
-        daemonHostId: server.daemonHostId,
-        displayName: server.displayName,
-      },
-      session: {
-        backend: session.backend,
-        stableId: session.stableId,
-        name: session.name,
-      },
-      widthMode: options.widthMode ?? original?.widthMode ?? 'adaptive-phone',
+    };
+    const finish = async (result: SlotSetResult): Promise<SlotSetResult> => {
+      await closeOnce();
+      if (cleanupErrors.length === 0) return result;
+      return { ...result, cleanupErrors: [...cleanupErrors] };
     };
 
-    let saved;
     try {
-      saved = await slotStore.saveIfUnchanged({
-        slot: options.slot,
-        expected: original,
-        binding,
-        signal,
-      });
-    } catch (error) {
-      result = isCancellation(error)
-        ? { kind: 'cancelled', stage: 'save' }
-        : mapFailure('save', error, 'slot_save_failed', '无法保存槽位。');
-      return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-    }
-    if (saved.kind === 'slot_changed') {
-      result = {
-        kind: 'failed',
-        stage: 'save',
-        error: {
-          code: 'slot_changed',
-          message: '槽位已被其他进程修改，本次草稿未覆盖。',
-          action: '请重新运行 zterm slot set 并确认最新绑定。',
-        },
-        current: saved.current,
-      };
-      return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-    }
-    result = {
-      kind: 'ok',
-      value: {
-        slot: options.slot,
-        binding: saved.binding,
-      },
-    };
-    return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-  } catch (error) {
-    if (!connection) {
-      return mapFailure('command', error, 'slot_command_failed', '槽位配置未完成。');
-    }
-    result = isCancellation(error)
-      ? { kind: 'cancelled', stage: 'command' }
-      : mapFailure('command', error, 'slot_command_failed', '槽位配置未完成。');
-    return await finishWithCleanup(result, connection, cleanupErrors, connectionState);
-  } finally {
-    if (connection && !connectionState.closed) {
-      connectionState.closed = true;
-      await connection.close('slot-configure-complete').catch(() => undefined);
-    }
-  }
-}
+      while (true) {
+        let sessions: SlotSessionTarget[];
+        try {
+          sessions = sessionChoices(await connection.listSessions());
+        } catch (error) {
+          return await finish(
+            isCancellation(error)
+              ? { kind: 'cancelled', stage: 'sessions' }
+              : mapFailure('sessions', error, 'session_list_failed', '无法读取 session 列表。'),
+          );
+        }
+        if (sessions.length === 0) {
+          return await finish({
+            kind: 'failed',
+            stage: 'sessions',
+            error: {
+              code: 'stable_session_unavailable',
+              message: '没有同时提供 backend 和 stableId 的可绑定 session。',
+              action: '请确认 daemon backend 支持稳定 session 身份。',
+            },
+          });
+        }
 
-async function finishWithCleanup(
-  result: SlotSetResult,
-  connection: SlotConnection,
-  cleanupErrors: CommandError[],
-  state: { closed: boolean },
-): Promise<SlotSetResult> {
-  state.closed = true;
-  try {
-    await connection.close('slot-configure-complete');
-  } catch (error) {
-    cleanupErrors.push(
-      toCommandError('cleanup', error, 'connection_close_failed', '无法关闭本次连接。'),
-    );
+        let sessionIndex: number;
+        try {
+          sessionIndex = await options.prompts.select(
+            '选择 session',
+            sessions.map((session, index) => ({
+              label: sessionLabel(session),
+              value: index,
+            })),
+          );
+        } catch (error) {
+          return await finish(
+            isCancellation(error)
+              ? { kind: 'cancelled', stage: 'session' }
+              : mapFailure('session', error, 'session_select_failed', '无法选择 session。'),
+          );
+        }
+        const session = sessions[sessionIndex];
+        if (!session) {
+          return await finish(mapFailure(
+            'session',
+            new Error('selected session index is invalid'),
+            'session_select_failed',
+            'session 选择无效。',
+          ));
+        }
+
+        try {
+          const wantsPreview = await options.prompts.confirm('预览 snapshot？');
+          if (wantsPreview) {
+            const preview = await connection.readSnapshot(session, options.maxLines ?? 80);
+            if (preview.status === 'failed') {
+              return await finish({
+                kind: 'failed',
+                stage: 'preview',
+                error: {
+                  code: preview.code,
+                  message: preview.code === 'session_not_found'
+                    ? '预览时 session 已不存在。'
+                    : '预览时 session 身份已改变。',
+                  action: '请重新读取 session 列表后重试。',
+                },
+              });
+            }
+            if (
+              preview.status === 'available'
+              && (preview.backend !== session.backend || preview.stableId !== session.stableId)
+            ) {
+              return await finish({
+                kind: 'failed',
+                stage: 'preview',
+                error: {
+                  code: 'snapshot_identity_mismatch',
+                  message: 'snapshot 身份与所选 session 不一致。',
+                  action: '请重新读取 session 列表后重试。',
+                },
+              });
+            }
+            await options.renderPreview(preview, session);
+          }
+        } catch (error) {
+          return await finish(
+            isCancellation(error)
+              ? { kind: 'cancelled', stage: 'preview' }
+              : mapFailure('preview', error, 'preview_failed', '无法预览 snapshot。'),
+          );
+        }
+
+        let action: 'save' | 'sessions' | 'servers' | 'exit';
+        try {
+          action = await options.prompts.select<'save' | 'sessions' | 'servers' | 'exit'>(
+            `配置槽位 ${options.slot}`,
+            [
+              { label: `保存到槽位 ${options.slot}`, value: 'save' },
+              { label: '重新选择 session', value: 'sessions' },
+              { label: '返回服务器选择', value: 'servers' },
+              { label: '退出配置', value: 'exit' },
+            ],
+          );
+        } catch (error) {
+          return await finish(
+            isCancellation(error)
+              ? { kind: 'cancelled', stage: 'action' }
+              : mapFailure('action', error, 'action_select_failed', '无法选择下一步操作。'),
+          );
+        }
+
+        if (action === 'sessions') continue;
+        if (action === 'servers') {
+          if (!await closeOnce()) {
+            return {
+              kind: 'failed',
+              stage: 'cleanup',
+              error: {
+                code: 'connection_close_failed',
+                message: '无法关闭本次连接。',
+                action: '请检查连接状态后重试 zterm slot set。',
+              },
+              cleanupErrors: [...cleanupErrors],
+            };
+          }
+          break;
+        }
+        if (action === 'exit') {
+          return await finish({ kind: 'cancelled', stage: 'exit' });
+        }
+
+        const binding: CliSlotBinding = {
+          ...(original?.alias === undefined ? {} : { alias: original.alias }),
+          account: {
+            relayBaseUrl: auth.relayBaseUrl,
+            userId: auth.userId,
+          },
+          server: {
+            deviceId: server.deviceId,
+            daemonHostId: server.daemonHostId,
+            displayName: server.displayName,
+          },
+          session: {
+            backend: session.backend,
+            stableId: session.stableId,
+            name: session.name,
+          },
+          widthMode: options.widthMode ?? original?.widthMode ?? 'adaptive-phone',
+        };
+
+        let result: SlotSetResult;
+        try {
+          const saved = await slotStore.saveIfUnchanged({
+            slot: options.slot,
+            expected: original,
+            binding,
+            signal,
+          });
+          if (saved.kind === 'slot_changed') {
+            result = {
+              kind: 'failed',
+              stage: 'save',
+              error: {
+                code: 'slot_changed',
+                message: '槽位已被其他进程修改，本次草稿未覆盖。',
+                action: '请重新运行 zterm slot set 并确认最新绑定。',
+              },
+              current: saved.current,
+            };
+          } else {
+            result = {
+              kind: 'ok',
+              value: {
+                slot: options.slot,
+                binding: saved.binding,
+              },
+            };
+          }
+        } catch (error) {
+          result = isCancellation(error)
+            ? { kind: 'cancelled', stage: 'save' }
+            : mapFailure('save', error, 'slot_save_failed', '无法保存槽位。');
+        }
+        return await finish(result);
+      }
+    } catch (error) {
+      return await finish(
+        isCancellation(error)
+          ? { kind: 'cancelled', stage: 'command' }
+          : mapFailure('command', error, 'slot_command_failed', '槽位配置未完成。'),
+      );
+    }
   }
-  if (cleanupErrors.length === 0) return result;
-  return { ...result, cleanupErrors: [...cleanupErrors] };
 }

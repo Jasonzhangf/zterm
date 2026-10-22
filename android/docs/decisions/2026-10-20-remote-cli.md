@@ -3,6 +3,9 @@
 外部 RTC 已通过真实连接验收；独立 Review 的登录、取消及 session 身份问题均已修复并通过独立复核。集成状态见 PR #167。本文是已审设计与
 当前实现边界的项目入口；平台安装通过不能替代远程连接验收。
 
+本次槽位导航改动归入 CLI 0.1.3 候选。在候选构建和安装后验收完成前，以下 action 菜单只
+表示候选契约，不表示该改动已集成或已交付。已安装的一次性快照行为沿用既有验收证据。
+
 | 当前项 | 事实 |
 |---|---|
 | 正式入口 | `packages/cli/src/main.ts` 已落地并接通 argv、登录、槽位、终端、升级和 daemon 管理。 |
@@ -19,6 +22,9 @@ zterm login | zterm login --from-config | zterm logout
 zterm slot set <1..20> | zterm slot list | zterm <1..20> | zterm
 zterm upgrade [--registry <url>]
 zterm daemon install | zterm daemon status | zterm daemon config
+zterm daemon config tmux set <name> --socket <path>
+zterm daemon config tmux primary <name>
+zterm daemon config tmux remove <name>
 ```
 无参数 `zterm` 只列出已配置槽位并让用户选择；编号入口不重新询问服务器和 session。
 槽位失效、未登录或登录失效必须显式失败，不得切换目标、按名称重绑或创建同名 session。
@@ -37,13 +43,14 @@ zterm daemon install | zterm daemon status | zterm daemon config
 | 安装 | `npm install --global @jsonstudio/zterm-cli` | Node.js 22 或更高版本；公开发布待完成。本地开发使用构建后的 tarball 隔离安装。 |
 | 登录 | `zterm login` | 交互输入账号和密码；已有 Relay 地址时不再询问地址。 |
 | 一次性配置登录 | `zterm login --from-config` | 只用于受控的一次性自动化，密码在请求前消费。 |
-| 配置槽位 | `zterm slot set 1` | 槽位为 1～20；交互选择服务器、稳定 session 和可选快照预览。 |
+| 配置槽位 | `zterm slot set 1` | 槽位为 1～20；交互选择服务器、稳定 session 和可选快照预览，然后选择保存、重新选择 session、返回服务器选择或退出配置。该交互是 CLI 0.1.3 候选。 |
 | 查看槽位 | `zterm slot list` | 只读本地绑定，不刷新远端目录。 |
 | 选择或启动 | `zterm` 或 `zterm 1` | 无参数只选择已保存槽位；编号直接使用精确绑定。 |
 | 查看本地终端 | `Ctrl+]` 后按 `k/j/u/d/h/l/f` | 翻行、翻页、横向平移或回到 follow。 |
 | 本地退出 | `Ctrl+]` 后按 `q` | 只断开本地连接，不删除或停止远端 session。 |
 | 登出 | `zterm logout` | 只清本地 CLI 登录态；不宣称撤销远端已经签发的 token。 |
 | 升级与管理 | `zterm upgrade`、`zterm daemon install/status/config` | upgrade 只升级 CLI；daemon install 不启动或重启服务。 |
+| 配置 tmux socket | `zterm daemon config tmux ...` | 直接读写本机共享配置；不需要登录、安装或运行 daemon。 |
 
 ## 2. 架构映射与十一图
 CLI 新增终端消费者，不复制 runtime 源码，不改变 daemon 的 tmux/mirror/transport 真源。
@@ -64,7 +71,7 @@ CLI 新增终端消费者，不复制 runtime 源码，不改变 daemon 的 tmux
 |---|---|---|
 | `cli-account-login.graph.json` | 登录与持久化 | account-state；shared-config 提交 |
 | `cli-account-logout.graph.json` | 本地登录态失效 | account-state；连接按 loginId 收口 |
-| `cli-slot-configure.graph.json` | 选择、预览和保存槽位 | slot owner；shared-config 提交 |
+| `cli-slot-configure.graph.json` | 校验请求、读取槽位上下文、交互导航、受保护提交和单一结果汇总 | slot owner；shared-config 提交 |
 | `cli-slot-launch.graph.json` | 读取、选择或连接槽位 | CLI connection；route/mux owner |
 | `cli-terminal-mirror-event.graph.json` | 帧、sparse、renderer 投影 | frame assembly/sparse/renderer |
 | `cli-terminal-input-event.graph.json` | 本地意图与远端输入 | local-input；reliable-input core |
@@ -72,7 +79,7 @@ CLI 新增终端消费者，不复制 runtime 源码，不改变 daemon 的 tmux
 | `cli-self-upgrade.graph.json` | npm CLI 升级 | CLI release adapter；npm |
 | `cli-daemon-install.graph.json` | 本机全局 daemon 安装 | 既有 installer/shim owner |
 | `cli-daemon-status.graph.json` | daemon 状态查询 | 既有 status owner |
-| `cli-daemon-config.graph.json` | daemon 配置脱敏投影 | shared reader；config projection |
+| `cli-daemon-config.graph.json` | daemon 配置脱敏投影与本地 tmux 配置 mutation | shared reader/writer；config projection；tmux resolver |
 
 ```mermaid
 flowchart TD
@@ -86,16 +93,15 @@ flowchart TD
   B1 --> B2{提交成功}:::decision
   B2 -->|是| BO([本地登录态已清除]):::success
   B2 -->|否| BF([保留真实文件状态和原错]):::failure
-  C0([槽位配置请求]):::boundary --> C1[校验编号并读取原绑定]:::action
-  C1 --> C2[选择服务器和稳定 session]:::action
-  C2 --> C3{预览}:::decision
-  C3 -->|是| C4[只读现存 mirror snapshot]:::action
-  C3 -->|否| C5{确认保存}:::decision
-  C4 --> C5
-  C5 -->|是| C6[锁内比较并原子提交]:::action
+  C0([槽位配置请求]):::boundary --> C1[校验槽位请求]:::action
+  C1 --> C2[读取登录、目录和原始槽位基线]:::action
+  C2 --> C3[导航 owner 选择服务器和稳定 session]:::action
+  C3 -->|最终 save| C4[受保护提交：按原基线锁内比较并写入]:::action
+  C3 -->|退出或失败| C5[汇总单一结果]:::action
+  C4 -->|提交结果| C5
+  C5 -->|保存成功| CO([槽位已保存]):::success
   C5 -->|取消| CC([原槽位不变]):::failure
-  C6 -->|成功| CO([槽位已保存]):::success
-  C6 -->|冲突或失败| CF([保留最新槽位和草稿]):::failure
+  C5 -->|冲突或失败| CF([保留最新槽位和原错]):::failure
   classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
   classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
   classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
@@ -103,6 +109,68 @@ flowchart TD
   classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
   linkStyle default stroke:#475569
 ```
+
+### 槽位导航与连接生命周期
+
+`cli-slot-configure.graph.json` 只保留命令级五步 SESE：
+校验请求 → 读取上下文 → 导航 owner → 受保护提交 → 单一结果汇总。
+`cli.slot_configure.navigate` 是 `slotSetCommand` 的声明式架构映射，不是可执行 operator
+注册项。导航 owner 内部封装服务器和 session 循环；这些返回动作只记录为下面的独立状态机，
+不写成 DAG 回边，也不新增框架。
+
+每次导航尝试依次执行：选择服务器或复用当前连接 → 刷新/选择 session → 解析
+`{ backend, stableId }` 精确身份 → 可选的一次性源帧预览 → 选择动作。动作结果只有
+`save | sessions | servers | exit | failed`。`sessions` 和 `servers` 是导航内部继续动作；
+只有最终 `save` 到达受保护提交。导航 owner 最终只返回保存、取消或失败；其他结果原样进入
+单一结果汇总。
+
+| 动作 | 行为 |
+|---|---|
+| 保存到槽位 N | 用当前选择构造绑定，并以导航开始前的原始槽位基线执行锁内比较提交。 |
+| 重新选择 session | 在当前连接上刷新 session 目录并形成新的选择 scope；丢弃旧选择和预览，不复用旧目录下标；cleanup scope 不变。 |
+| 返回服务器选择 | 展示保留的服务器目录前先关闭当前连接一次；下一次服务器选择后才建立新连接。 |
+| 退出配置 | 取消整个配置，不写槽位；当前连接关闭一次。 |
+
+认证、账号目录和原始槽位基线在导航循环外读取一次。每个成功打开的连接只有一个 cleanup
+scope 和一个新的关闭 guard；session 重选留在同一 scope，返回服务器选择必须先关闭旧 scope。
+关闭失败会显式报告并停止，不能在 cleanup 未解决时打开新连接。所有提示上的 `Ctrl+C` 和
+EOF 都取消整个命令，且不写槽位。槽位冲突返回 `slot_changed`，保留最新绑定，不把导航中的
+新草稿提升为基线。只有保存动作写槽位，并沿用原 alias 和 width mode 规则；导航不写中间
+绑定。保存已持久化后再发生 cleanup 失败时，仍保留已写入结果，同时显式报告 cleanup 错误。
+
+导航状态机（独立视图，不是 DAG；允许 session 和服务器返回边）：
+
+```mermaid
+flowchart TD
+  N0([导航 attempt 开始]):::boundary --> N1[选择服务器或复用当前连接]:::action
+  N1 --> N2[刷新并选择 session]:::action
+  N2 --> N3[解析 backend 与 stableId 精确身份]:::action
+  N3 --> N4{预览}:::decision
+  N4 -->|是| N5[请求一次性源帧预览]:::action
+  N4 -->|否| N6{选择动作}:::decision
+  N5 -->|成功| N6
+  N5 -->|捕获失败| NF([最终失败，保留原错]):::failure
+  N6 -->|保存到槽位 N| NS([最终 save]):::success
+  N6 -->|重新选择 session| N2
+  N6 -->|返回服务器选择| N7[关闭当前连接一次]:::action
+  N7 -->|关闭成功| N1
+  N7 -->|关闭失败| NF
+  N6 -->|退出配置| NC([最终取消，不写槽位]):::failure
+  N6 -->|失败| NF
+  N1 -->|Ctrl+C 或 EOF| NC
+  N2 -->|Ctrl+C 或 EOF| NC
+  N3 -->|Ctrl+C 或 EOF| NC
+  N4 -->|Ctrl+C 或 EOF| NC
+  N5 -->|Ctrl+C 或 EOF| NC
+  N6 -->|Ctrl+C 或 EOF| NC
+  classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
+  classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
+  classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px
+  classDef success fill:#E8F7EE,stroke:#16A34A,color:#0F172A,stroke-width:1.5px
+  classDef failure fill:#FDECEC,stroke:#DC2626,color:#0F172A,stroke-width:1.5px
+  linkStyle default stroke:#475569
+```
+
 ## 3. 共享配置与事务
 CLI 与 daemon 共用当前真实文件 `~/.zterm/config.json`。CLI 不提供独立配置路径，
 不引入 TOML，不推动迁移。所有合作 writer 通过
@@ -125,6 +193,74 @@ CLI 与 daemon 共用当前真实文件 `~/.zterm/config.json`。CLI 不提供�
   }
 }
 ```
+
+Increment A 增加唯一的 canonical tmux 配置块。下例中的 `<uid>` 表示当前用户
+数字 UID，不是固定值：
+
+```json
+{
+  "zterm": {
+    "android": {
+      "daemon": {
+        "tmux": {
+          "sockets": [
+            {
+              "name": "main",
+              "socketPath": "~/.tmux/run/tmux-<uid>/default"
+            },
+            {
+              "name": "old",
+              "socketPath": "/private/tmp/tmux-<uid>/default"
+            }
+          ],
+          "primary": "main"
+        }
+      }
+    }
+  }
+}
+```
+
+`sockets` 是非空、有序的显式允许路由。`name` 是唯一显示标签和 CLI 选择键，
+不进入 stable ID。`socketPath` 只接受绝对路径或以 `~/` 开头的路径；保存原字符串，
+使用时相对共享配置的 home 展开一次，不展开其他环境变量，不执行 shell，不使用
+`realpath()` 改写身份路径。`primary` 必须引用一个已配置 socket，只供显式创建新 session
+使用。
+
+canonical tmux 块缺失时，派生一个名为 `default` 的路由：
+
+```text
+~/.tmux/run/tmux-<current uid>/default
+```
+
+只读取和写入 `zterm.android.daemon.tmux`。不新增 `mobile.daemon.tmux` 兼容 reader 或
+writer；该旧位置如含未知数据必须原样保留。malformed canonical 块显式失败，不回退到默认。
+记录中的 portable `~/` 不得改写为绝对路径。没有可用原生 tmux 后端或默认 UID 的平台上，
+显式 route 的存储和无关 daemon 配置投影仍可用；tmux 默认解析返回明确 unsupported，
+不得虚构 UID 或 socket 路径。
+
+本机配置命令：
+
+```sh
+zterm daemon config
+zterm daemon config tmux set main --socket '~/.tmux/run/tmux-501/default'
+zterm daemon config tmux set old --socket /private/tmp/tmux-501/default
+zterm daemon config tmux primary old
+zterm daemon config tmux remove main
+```
+
+第一次 `set` 创建 tmux 块并把该路由设为 primary；后续 `set` 新增或更新一个具名路由。
+还有其他路由时不得删除 primary；不得删除最后一条路由。所有 mutation 通过唯一
+`SharedConfigStore.update` 在锁内读取最新文档后校验并提交，保留 auth、slots、relay、
+其他 daemon 字段、未知字段以及未更新 socket entry 的未知字段。空路径、非 `~/` 相对路径、
+重复 name、重复解析路径、缺失 primary 或目标容器结构错误必须在提交前失败，且不得替换原文件。
+
+`zterm daemon config` 直接通过 `SharedConfigStore.read` 和共享 projection 读取本机文件，
+不调用已安装的 `zterm-daemon config`、不执行 home migration、不创建配置、不获取写锁、
+不联系 Relay、不启动 daemon。读取文件缺失时报告 absent，不创建文件。输出保留现有脱敏
+daemon 字段，并增加 socket 标签、stored/resolved path、primary、来源位置和
+`runtimeLoaded: unknown`。mutation 输出必须给出真实文件路径、已写入变化和“下一次 daemon
+启动生效，当前运行进程未应用”的事实；不得把文件投影冒充运行态真源。
 
 以上只列出用户可提供的最小配置。当前 typed owner 还使用以下 CLI 管理字段；正常操作时
 不要手工编辑：
@@ -165,6 +301,40 @@ CLI 的 catalog entry 必须含 `name`、`backend`、`stableId`，可选 `cwd`�
 实际 socket、server 进程代次、`session_id` 和创建事实组成；Herdr 使用 `terminalId`
 与 pane identity。`stableId` 是不透明值，CLI 不解析内部结构；名称只用于显示，没有稳定
 身份时不得保存槽位。catalog、snapshot 和 open 使用同一 resolver。
+
+Increment A 的 catalog 只枚举 canonical tmux 配置中的显式路由，每条路由使用自己的
+`tmux -S <resolved path>` 读取，不再按环境或文件系统做隐式 discovery。catalog 直接由
+native target 构建，CWD 必须在同一路由读取并按 native identity 关联。不同 socket 上的
+同名 session 都保留并使用可读标签区分，例如：
+
+```text
+work [tmux · main]
+work [tmux · old]
+```
+
+标签只用于显示，不进入 stable ID。显式路径旧绑定的身份编码保持不变；改变标签不改变身份，
+改变 socket path 是路由变化，可以令旧绑定显式失效。未配置路由或旧的无 socket path 身份
+不得按同名或 primary 重绑。
+
+单条路由不可用时，现有 `sessions` payload 和 resident catalog result 使用同一 optional
+字段携带失败。成功入口与失败并排返回，picker 逐条显示失败，可达到的 entries 仍可选择：
+
+```ts
+routeFailures?: Array<{
+  socketName: string;
+  socketPath: string;
+  code: string;
+  message: string;
+}>
+```
+
+该字段必须经过 catalog builder、resident catalog/cache、publisher、protocol、CLI
+connection result、main projection 和 picker。cached resident read 必须保留与 entries
+同一快照的 failures，不能丢弃。message 不含凭据。全部 configured routes 都失败时，返回带
+correlation 的 request-level catalog error，不伪造成功空目录；某条 route 可达但 session
+数为零是成功 empty enumeration，不算该 route 失败。不得回退到未配置路由，也不得因读取
+启动 tmux server、session、keepalive 或创建目录。
+
 `mux-channel-open` 必须同时携带 `expectedSessionIdentity` 和 `existingOnly: true`。
 daemon 在创建 subscriber、mirror 或 lease 前解析精确 target；不符返回
 `session_identity_mismatch`，不存在返回 `session_not_found`。`mux-channel-opened`
@@ -174,12 +344,26 @@ snapshot 使用 `mux-target-message`：
 { type: 'terminal-snapshot-request',
   payload: { version: 1, backend, stableId, maxLines } }
 ```
-成功时在同一 revision 返回 head 与 body；没有 ready mirror 返回
-`mirror_not_ready | mirror_not_present`，身份问题显式失败。快照 owner 只获得 resolver、
-只读 mirrors map 和 serializer，不获得 attach、capture、resize、input 或
-createSession。读取不改变 mirror revision、subscriber、adaptive holder、capture timer
-或 publisher pending。没有现存 mirror 时允许跳过预览并保存槽位，不得为预览创建 mirror
-或触发 capture。
+成功时把同一 revision 的 head 和 body 按 `maxLines` 投影后一起序列化返回。
+`terminal-snapshot-request` 的显式预览是窄例外：它经 `daemon.mirror_writer` 既有权威捕获/
+规范化管线，对精确
+`{ backend, stableId }` 解析出的原生 target 做一次请求局部的一次性源捕获，再复用 snapshot
+serializer。没有 ready mirror 或完全没有 live mirror 都返回这次新捕获的帧，不再返回
+`mirror_not_ready | mirror_not_present`；捕获失败或超时显式返回有界请求错误，不得用缓存的
+live frame 冒充成功。读取前后都校验同一 backend 与 stableId；删除、server 替换或身份变化
+显式失败，不按同名 target 重试。捕获结果只进入 detached 请求局部状态：不写入或克隆 live
+mirror，不改变 mirror revision、subscriber、adaptive holder、publisher pending，也不触发
+attach、input、resize、createSession、capture timer 或 lease。快照 owner 只获得 resolver、
+只读 mirrors map、一次性捕获能力和 serializer；capture/canonicalization owner 仍是
+`daemon.mirror_writer`。其他 buffer 读取保持只读，连续同步调度不变。
+
+Increment A 只交付 local config、configured catalog、labels 和 exact-target preview。
+现有 name-keyed live bind 冲突拒绝继续保留；不同 socket 上的同名 session 同时打开、输入、
+mirror 隔离和 detach cleanup 属于 Increment B，不能据本轮 catalog 可选性宣称已实现。
+read、catalog 和 existing-target open 都不得启动 server；只有现有 explicit session
+creation 公共入口可以使用 configured primary。没有 live cutover 授权：已经占用
+`~/.tmux/run/tmux-<uid>/default` 的 canonical server 和承载现有工作的 old server
+必须继续运行，不得覆盖 socket、停止 server 或改写 live endpoint。
 ## 5. Transport、mux、镜像与输入
 物理连接完成 `mux-hello/mux-ready` 后只使用 mux envelope。target 控制使用
 `mux-target-message`，session 业务使用 `mux-channel-message/binary`。channel 打开失败
@@ -295,7 +479,7 @@ local-input 消费，远端只收到两者之间的内容，不生成或透传�
 | `auth_required` / `auth_invalid` | 重新 `zterm login`；身份变化时再显式重配槽位。 |
 | `slot_not_found` / `no_slots` | 先 `zterm slot set <1..20>`；无参数入口不能猜测目标。 |
 | `session_not_found` / `session_identity_mismatch` | 稳定 session 已变化；显式重配槽位，不创建同名替代 session。 |
-| `mirror_not_ready` / `mirror_not_present` | 快照预览暂不可用；预览不创建 mirror，确认目标后可继续保存。 |
+| 快照捕获失败或超时 | 一次性源捕获显式失败；不用缓存 live 帧冒充成功，也不能进入保存。重新选择或重试。 |
 | `config_busy` / `invalid_json` / `invalid_config` | 等待合作 writer 或修复真实配置；不删除未知锁、不覆盖坏 JSON。 |
 | `daemon_platform_mismatch` / `daemon_node_abi_mismatch` | 使用匹配当前 OS、arch、Node 和 ABI 的 daemon 产物。 |
 | `upgrade_install_context_unsupported` | 只从已识别的 npm 全局安装上下文运行 `zterm upgrade`。 |
@@ -395,11 +579,13 @@ daemon，不写 `config.json`。安装使用受管理 staging，检查产物平�
 failure、监听归属不明和观测失败。现有 stale PID 清理必须可见；CLI 不新增第二套 PID
 修复逻辑，health 200 不单独证明运行成功。
 
-`daemon config` 显示真实路径与存在状态，以及 host、port、sessionName、cacheLines 的
-file/env/default 来源。authToken 只显示是否配置及来源；密码、账号 token、CLI auth 和
-未知字段不输出。文件缺失不创建，格式错误显式失败，查询进程环境不冒充运行中 daemon 已
-加载值。status/config 不得触发 `.wterm` 迁移；旧目录冲突返回
-`legacy_migration_required`。
+`daemon config` 不再委托已安装的 `zterm-daemon config`。它直接通过共享 reader 和
+projection 显示真实路径与存在状态、host/port/sessionName/cacheLines、tmux sockets、
+stored/resolved paths、primary 及对应 file/env/default 来源。authToken 只显示是否配置及
+来源；密码、账号 token、CLI auth 和未知字段不输出。文件缺失不创建，malformed 显式失败，
+查询进程环境不冒充运行中 daemon 已加载值。`daemon status` 保留正式 status owner；本地
+config read/write 不需要登录、daemon install、daemon 进程或 shim，也不触发 `.wterm`
+迁移或启动 daemon。
 
 ## 8. 黑盒验收与阶段边界
 
@@ -407,16 +593,25 @@ file/env/default 来源。authToken 只显示是否配置及来源；密码、�
 session、必要字节代理和真实 npm tarball/registry。按顺序覆盖：
 
 ```text
-login -> 新进程复用登录 -> slot set -> preview -> save -> zterm N
+login -> 新进程复用登录 -> slot set -> preview -> reselect/server return -> save -> zterm N
 -> mirror/input -> resize -> local exit -> stale identity -> logout
 -> upgrade -> daemon install/status/config
+```
+
+Increment A 另有一条不依赖登录和 daemon 的正式 CLI 子流程：
+
+```text
+daemon config -> tmux set A -> tmux set B -> tmux primary -> daemon config
+-> tmux remove -> daemon config
 ```
 
 | 验收组 | 必须抓住的失败 |
 |---|---|
 | 配置/认证 | 无效 JSON 不覆盖；字段和未知值保留；并发 logout 使旧 login 失效 |
+| 本地 socket 配置 | 无配置 read 不创建文件；两条 route 和 primary 无登录/daemon/shim 即可写入；stored `~/` 保持 portable；isolated home 输出 resolved path；invalid path/duplicate/primary removal 失败且文件不变；别的字段和未知字段保留 |
+| configured catalog | 只返回 A/B configured routes，不返回未配置路由；A 可达且 B 缺失时 reachable entries 可选并显示 B 的 typed failure；cached read 保留 failure；全部失败为 correlated request error；可达零 session 为成功空目录；读取缺失 socket 不启动 server/session/keepalive |
 | 登录输入 | 仅 `--from-config` 消费一次性密码；失败不复活；不泄漏 token |
-| 槽位/snapshot | 取消不变；冲突不覆盖；无现存 mirror 不创建；无 input/resize/capture |
+| 槽位/snapshot | 预览后可重新选择 session 或返回服务器；只有保存写入；冲突不覆盖；同名不同 stableId 的预览和最终绑定都使用所选身份；返回服务器先关闭再连接；无现存 mirror 也即刻返回新捕获帧；已有 live mirror 不被改写；删除或同名替换显式失败；正常路径每个打开的连接关闭一次；cleanup 失败停止；无 input/resize/create/timer/lease |
 | 稳定身份 | 同名删除重建后旧绑定失败；跨 backend 同名不混淆；不创建替代 session |
 | 镜像 | 缺片/乱序/旧帧不提交；完整帧一次提交；gap repair 状态真实；控制字符不外泄 |
 | 输入 | 跨 group 部分写入后 NACK 不重发；超时 uncertain；新 channel 不重放 |
@@ -432,11 +627,14 @@ width 抽离保留必要消费者回归；本次验收使用 Windows、macOS、L
 | 阶段 | 产物与完成条件 |
 |---|---|
 | T0 设计 | 已 PASS。DAG 与详细设计通过独立审查；本文仍是设计与状态入口。 |
-| T1 图/gate | 11 图及受影响 owner gate 已完成静态校验；拓扑不再由本次集成修改。 |
+| T1 图/gate | 11 图及受影响 owner gate 已完成静态校验；当前 socket Increment A 只更新 `cli-daemon-config` 与 `daemon-connection-channel-catalog` 的声明式拓扑，并复用既有 Phase 0 gate。 |
 | T2/T3/T4/T5 | 受影响的 config、transport、session/snapshot、buffer/input 基础与共享消费者回归已通过。 |
 | T6/T7 | 正式 `main.ts` 已接线；CLI 169 个 Vitest、11 个 Node 测试通过，1 个需 live fixture 的测试在常规套件中跳过；构建和本地 pack 可用。 |
 | T8 | 三平台真实 native、CLI 安装、升级和 daemon 安装通过；Windows 外部 RTC 尚待当前候选真实连接验收。 |
 | T9 | 进行中。尚待 Windows 远程连接、整体独立 Review、main 集成和资源收口。公开 npm 尚未发布，本轮不执行公开发布。 |
+
+本次导航改动是 CLI 0.1.3 候选，不改变上表已验收的 0.1.2 事实。候选安装后验收前，
+0.1.3 不进入 PASS；文档不宣称源码集成、三平台安装或交付已完成。
 
 静态图存在或校验通过只证明拓扑和语法。没有真实入口行为、安装态和适用设备证据时，结论
 保持 `UNVERIFIED` 或 `INCOMPLETE`。不得用 health、socket open、component test 或配置

@@ -31,6 +31,7 @@ import {
   type SlotConnection,
   type SlotConnectionFactory,
   type SlotConnectionFactoryOptions,
+  type SlotSessionTarget,
   type SlotSetOptions,
 } from './slots.js';
 
@@ -108,7 +109,29 @@ function directory(relayBaseUrl = SERVER): RelayAccountDirectory {
   };
 }
 
-async function startAccountFixture() {
+function twoServerDirectory(relayBaseUrl = SERVER): RelayAccountDirectory {
+  const base = directory(relayBaseUrl);
+  const primary = base.devices[0];
+  if (!primary?.daemon) throw new Error('test directory is missing its primary daemon');
+  return {
+    ...base,
+    devices: [
+      primary,
+      {
+        ...primary,
+        deviceId: 'device-2',
+        deviceName: 'MacBook Air',
+        daemon: {
+          ...primary.daemon,
+          hostId: 'daemon-2',
+        },
+      },
+      ...base.devices.slice(1),
+    ],
+  };
+}
+
+async function startAccountFixture(relayDirectory: RelayAccountDirectory = directory()) {
   let requestCount = 0;
   const baseUrl = SERVER;
   const fetchImpl: AccountClientFetch = async (input) => {
@@ -117,7 +140,7 @@ async function startAccountFixture() {
     if (url.pathname === '/zterm/api/auth/me') {
       return new Response(JSON.stringify({
         user: USER,
-        directory: directory(baseUrl),
+        directory: relayDirectory,
       }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -126,7 +149,7 @@ async function startAccountFixture() {
     if (url.pathname === '/zterm/api/directory') {
       return new Response(JSON.stringify({
         user: USER,
-        directory: directory(baseUrl),
+        directory: relayDirectory,
       }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -170,7 +193,7 @@ class ControlledPrompts implements PromptPort {
 
   constructor(
     private readonly values: {
-      select?: number[];
+      select?: Array<number | Error>;
       confirm?: Array<boolean | Error>;
     } = {},
   ) {}
@@ -191,8 +214,9 @@ class ControlledPrompts implements PromptPort {
       labels: choices.map((choice) => choice.label),
       values: choices.map((choice) => choice.value),
     });
-    const index = this.values.select?.shift() ?? 0;
-    const choice = choices[index];
+    const answer = this.values.select?.shift() ?? 0;
+    if (answer instanceof Error) throw answer;
+    const choice = choices[answer];
     if (!choice) throw new Error(`missing select answer for ${message}`);
     return choice.value;
   }
@@ -483,8 +507,8 @@ describe('CLI slot set command', () => {
     };
     const renderPreview = vi.fn(async () => undefined);
     const prompts = new ControlledPrompts({
-      select: [0, 0],
-      confirm: [true, true],
+      select: [0, 0, 0],
+      confirm: [true],
     });
 
     const result = await slotSetCommand(slotSetOptions(store, prompts, factory, {
@@ -545,8 +569,15 @@ describe('CLI slot set command', () => {
     expect(prompts.selections[0].labels.join('\n')).not.toContain('daemon-endpoint-secret');
     expect(prompts.selections[0].labels.join('\n')).toContain('Mac Studio');
     expect(prompts.selections[0].labels.join('\n')).not.toContain('Phone only');
-    expect(prompts.selections[1].labels.join('\n')).toContain('tmux-stable-1');
+    expect(prompts.selections[1].labels).toEqual(['work · tmux']);
     expect(prompts.selections[1].labels).toHaveLength(1);
+    expect(prompts.selections[2].labels).toEqual([
+      '保存到槽位 1',
+      '重新选择 session',
+      '返回服务器选择',
+      '退出配置',
+    ]);
+    expect(prompts.selections[2].values).toEqual(['save', 'sessions', 'servers', 'exit']);
     expect(JSON.stringify(result)).not.toContain('account-access-secret');
     expect(JSON.stringify(result)).not.toContain('daemon-endpoint-secret');
   });
@@ -563,8 +594,8 @@ describe('CLI slot set command', () => {
     });
     const ownConnection = connection();
     const prompts = new ControlledPrompts({
-      select: [0, 0],
-      confirm: [false, true],
+      select: [0, 0, 0],
+      confirm: [false],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -608,8 +639,8 @@ describe('CLI slot set command', () => {
     });
     const ownConnection = connection();
     const prompts = new ControlledPrompts({
-      select: [0, 0],
-      confirm: [false, true],
+      select: [0, 0, 0],
+      confirm: [false],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -661,8 +692,8 @@ describe('CLI slot set command', () => {
     });
     const renderPreview = vi.fn(async () => undefined);
     const prompts = new ControlledPrompts({
-      select: [0, 0],
-      confirm: [true, true],
+      select: [0, 0, 0],
+      confirm: [true],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -686,7 +717,7 @@ describe('CLI slot set command', () => {
     expect(ownConnection.close).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the original slot and unknown fields when confirmation is cancelled', async () => {
+  it('keeps the original slot and unknown fields when the action menu exits', async () => {
     const fixture = await startAccountFixture();
     const original = binding('original', 'original-id');
     const { homeDir, store } = await createStore({
@@ -702,7 +733,7 @@ describe('CLI slot set command', () => {
     });
     const ownConnection = connection();
     const prompts = new ControlledPrompts({
-      select: [0, 0],
+      select: [0, 0, 3],
       confirm: [false],
     });
 
@@ -714,7 +745,7 @@ describe('CLI slot set command', () => {
     ));
     const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
 
-    expect(result).toMatchObject({ kind: 'cancelled', stage: 'confirm' });
+    expect(result).toMatchObject({ kind: 'cancelled', stage: 'exit' });
     expect(config.zterm.cli.slots['1']).toEqual(original);
     expect(config.zterm.cli.unknownCliField).toEqual({ keep: true });
     expect(config.daemonUnknown).toEqual({ keep: true });
@@ -790,8 +821,8 @@ describe('CLI slot set command', () => {
       return ownConnection;
     };
     const prompts = new ControlledPrompts({
-      select: [0, 0],
-      confirm: [false, true],
+      select: [0, 0, 0],
+      confirm: [false],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -880,5 +911,518 @@ describe('CLI slot set command', () => {
     expect(config.zterm.cli.auth).toEqual(AUTH);
     expect(config.zterm.cli.slots['1']).toEqual(original);
     expect(config.zterm.cli.unknownCliField).toEqual({ keep: true });
+  });
+
+  it('readable session labels preserve exact selected identity', async () => {
+    const fixture = await startAccountFixture();
+    const duplicateName = '工作会话';
+    const firstStableId = 'tmux-工作会话-1a2b3c4d%2B5e6f';
+    const secondStableId = 'tmux-工作会话-9f8e7d6c%2B1a2b';
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: fixture.baseUrl },
+          auth: AUTH,
+          slots: { '1': binding('original', 'original-id') },
+        },
+      },
+    });
+    const ownConnection = connection({
+      listSessions: vi.fn(async (): Promise<TerminalSessionCatalog> => ({
+        sessionNames: [duplicateName, duplicateName],
+        sessionCatalog: [
+          {
+            name: duplicateName,
+            backend: 'tmux',
+            stableId: firstStableId,
+            cwd: '/work',
+          },
+          {
+            name: duplicateName,
+            backend: 'tmux',
+            stableId: secondStableId,
+            cwd: '/other',
+          },
+        ],
+      })),
+      readSnapshot: vi.fn(
+        async (target: SlotSessionTarget): Promise<TerminalSnapshotResultPayload> => ({
+          status: 'available',
+          backend: target.backend,
+          stableId: target.stableId,
+          head: {
+            sessionId: 'session-2',
+            revision: 11,
+            latestEndIndex: 1,
+          },
+          body: {
+            revision: 11,
+            startIndex: 0,
+            endIndex: 1,
+            cols: 20,
+            rows: 1,
+            cursorKeysApp: true,
+            lines: [{ i: 0, t: 'hello' }],
+          },
+        }),
+      ),
+    });
+    const renderPreview = vi.fn(async () => undefined);
+    const prompts = new ControlledPrompts({
+      select: [0, 1, 0],
+      confirm: [true],
+    });
+
+    const result = await slotSetCommand(slotSetOptions(
+      store,
+      prompts,
+      async () => ownConnection,
+      { account: fixture.account, renderPreview },
+    ));
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+    const sessionSelection = prompts.selections[1];
+
+    expect(sessionSelection.labels).toEqual([
+      `${duplicateName} · tmux`,
+      `${duplicateName} · tmux`,
+    ]);
+    expect(sessionSelection.values).toEqual([0, 1]);
+    expect(sessionSelection.labels.join('\n')).not.toContain(firstStableId);
+    expect(sessionSelection.labels.join('\n')).not.toContain(secondStableId);
+    expect(ownConnection.readSnapshot).toHaveBeenCalledTimes(1);
+    expect(ownConnection.readSnapshot).toHaveBeenCalledWith(
+      {
+        backend: 'tmux',
+        stableId: secondStableId,
+        name: duplicateName,
+      },
+      80,
+    );
+    expect(renderPreview).toHaveBeenCalledTimes(1);
+    expect(renderPreview).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'available', stableId: secondStableId }),
+      {
+        backend: 'tmux',
+        stableId: secondStableId,
+        name: duplicateName,
+      },
+    );
+    expect(result).toMatchObject({
+      kind: 'ok',
+      value: {
+        slot: 1,
+        binding: {
+          session: {
+            backend: 'tmux',
+            stableId: secondStableId,
+            name: duplicateName,
+          },
+        },
+      },
+    });
+    expect(config.zterm.cli.slots['1'].session).toEqual({
+      backend: 'tmux',
+      stableId: secondStableId,
+      name: duplicateName,
+    });
+  });
+
+  it('refreshes sessions on the same connection and saves only the final previewed identity', async () => {
+    const fixture = await startAccountFixture();
+    const original = binding('original', 'original-id');
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: fixture.baseUrl },
+          auth: AUTH,
+          slots: { '1': original },
+        },
+      },
+    });
+    const duplicateName = '工作会话';
+    const firstStableId = 'tmux-工作会话-1a2b3c4d%2B5e6f';
+    const secondStableId = 'tmux-工作会话-9f8e7d6c%2B1a2b';
+    const refreshedFirstStableId = 'tmux-工作会话-aa11bb22%2Bcc33dd44';
+    const refreshedSecondStableId = 'tmux-工作会话-ee55ff66%2B0011aa22';
+    const catalog = (stableIds: readonly string[]): TerminalSessionCatalog => ({
+      sessionNames: [duplicateName, duplicateName],
+      sessionCatalog: stableIds.map((stableId) => ({
+        name: duplicateName,
+        backend: 'tmux' as TerminalBackendKind,
+        stableId,
+      })),
+    });
+    const ownConnection = connection({
+      listSessions: vi.fn()
+        .mockResolvedValueOnce(catalog([firstStableId, secondStableId]))
+        .mockResolvedValueOnce(catalog([refreshedFirstStableId, refreshedSecondStableId])),
+      readSnapshot: vi.fn(
+        async (target: SlotSessionTarget): Promise<TerminalSnapshotResultPayload> => ({
+          status: 'available',
+          backend: target.backend,
+          stableId: target.stableId,
+          head: {
+            sessionId: 'session-1',
+            revision: 1,
+            latestEndIndex: 1,
+          },
+          body: {
+            revision: 1,
+            startIndex: 0,
+            endIndex: 1,
+            cols: 20,
+            rows: 1,
+            cursorKeysApp: true,
+            lines: [{ i: 0, t: target.stableId }],
+          },
+        }),
+      ),
+    });
+    const factory = vi.fn(async () => ownConnection);
+    const renderPreview = vi.fn(async () => undefined);
+    const prompts = new ControlledPrompts({
+      select: [0, 1, 1, 0, 0],
+      confirm: [true, true],
+    });
+    const updates = vi.spyOn(store, 'update');
+
+    const result = await slotSetCommand(slotSetOptions(store, prompts, factory, {
+      account: fixture.account,
+      renderPreview,
+    }));
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+    expect(ownConnection.listSessions).toHaveBeenCalledTimes(2);
+    expect(ownConnection.readSnapshot).toHaveBeenNthCalledWith(1, {
+      backend: 'tmux',
+      stableId: secondStableId,
+      name: duplicateName,
+    }, 80);
+    expect(ownConnection.readSnapshot).toHaveBeenNthCalledWith(2, {
+      backend: 'tmux',
+      stableId: refreshedFirstStableId,
+      name: duplicateName,
+    }, 80);
+    expect(renderPreview).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ stableId: secondStableId }),
+      expect.objectContaining({ stableId: secondStableId }),
+    );
+    expect(renderPreview).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ stableId: refreshedFirstStableId }),
+      expect.objectContaining({ stableId: refreshedFirstStableId }),
+    );
+    expect(prompts.selections[2].labels).toEqual([
+      '保存到槽位 1',
+      '重新选择 session',
+      '返回服务器选择',
+      '退出配置',
+    ]);
+    expect(prompts.selections[2].values).toEqual(['save', 'sessions', 'servers', 'exit']);
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(ownConnection.close).toHaveBeenCalledTimes(1);
+    expect(updates).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      kind: 'ok',
+      value: {
+        slot: 1,
+        binding: {
+          session: {
+            backend: 'tmux',
+            stableId: refreshedFirstStableId,
+            name: duplicateName,
+          },
+        },
+      },
+    });
+    expect(config.zterm.cli.slots['1'].session.stableId).toBe(refreshedFirstStableId);
+    expect(JSON.stringify(config.zterm.cli.slots['1'])).not.toContain(secondStableId);
+  });
+
+  it('closes the current connection before showing servers again and reconnects only after selection', async () => {
+    const fixture = await startAccountFixture(twoServerDirectory());
+    const original = binding('original', 'original-id');
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: fixture.baseUrl },
+          auth: AUTH,
+          slots: { '1': original },
+        },
+      },
+    });
+    const order: string[] = [];
+    const firstConnection = connection({
+      listSessions: vi.fn(async (): Promise<TerminalSessionCatalog> => ({
+        sessionNames: ['first'],
+        sessionCatalog: [{
+          name: 'first',
+          backend: 'tmux',
+          stableId: 'tmux-first',
+        }],
+      })),
+      close: vi.fn(async () => {
+        order.push('close:A');
+      }),
+    });
+    const secondConnection = connection({
+      listSessions: vi.fn(async (): Promise<TerminalSessionCatalog> => ({
+        sessionNames: ['second'],
+        sessionCatalog: [{
+          name: 'second',
+          backend: 'tmux',
+          stableId: 'tmux-second',
+        }],
+      })),
+      close: vi.fn(async () => {
+        order.push('close:B');
+      }),
+    });
+    const factory: SlotConnectionFactory = async (options) => {
+      order.push(`connect:${options.server.deviceId}`);
+      return options.server.deviceId === 'device-1' ? firstConnection : secondConnection;
+    };
+    const prompts = new ControlledPrompts({
+      select: [0, 0, 2, 1, 0, 0],
+      confirm: [false, false],
+    });
+
+    const result = await slotSetCommand(slotSetOptions(store, prompts, factory, {
+      account: fixture.account,
+    }));
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+    expect(order).toEqual([
+      'connect:device-1',
+      'close:A',
+      'connect:device-2',
+      'close:B',
+    ]);
+    expect(firstConnection.close).toHaveBeenCalledTimes(1);
+    expect(secondConnection.close).toHaveBeenCalledTimes(1);
+    expect(fixture.requestCount()).toBe(2);
+    expect(result).toMatchObject({
+      kind: 'ok',
+      value: {
+        slot: 1,
+        binding: {
+          server: {
+            deviceId: 'device-2',
+            daemonHostId: 'daemon-2',
+          },
+          session: {
+            backend: 'tmux',
+            stableId: 'tmux-second',
+            name: 'second',
+          },
+        },
+      },
+    });
+    expect(config.zterm.cli.slots['1'].server.deviceId).toBe('device-2');
+    expect(config.zterm.cli.slots['1'].session.stableId).toBe('tmux-second');
+  });
+
+  it('stops without another connection or write when closing before server return fails', async () => {
+    const fixture = await startAccountFixture(twoServerDirectory());
+    const original = binding('original', 'original-id');
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: fixture.baseUrl },
+          auth: AUTH,
+          slots: { '1': original },
+        },
+      },
+    });
+    const ownConnection = connection({
+      close: vi.fn(async () => {
+        throw new Error('close failed');
+      }),
+    });
+    let factoryCalls = 0;
+    const factory: SlotConnectionFactory = async () => {
+      factoryCalls += 1;
+      return ownConnection;
+    };
+    const prompts = new ControlledPrompts({
+      select: [0, 0, 2],
+      confirm: [false],
+    });
+
+    const result = await slotSetCommand(slotSetOptions(store, prompts, factory, {
+      account: fixture.account,
+    }));
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+    expect(factoryCalls).toBe(1);
+    expect(ownConnection.close).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      kind: 'failed',
+      stage: 'cleanup',
+      error: { code: 'connection_close_failed' },
+    });
+    expect('cleanupErrors' in result && result.cleanupErrors).toEqual([
+      expect.objectContaining({ code: 'connection_close_failed' }),
+    ]);
+    expect(config.zterm.cli.slots['1']).toEqual(original);
+  });
+
+  it('exits after navigation without writing and closes the current connection once', async () => {
+    const fixture = await startAccountFixture();
+    const original = binding('original', 'original-id');
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: fixture.baseUrl },
+          auth: AUTH,
+          slots: { '1': original },
+        },
+      },
+    });
+    const ownConnection = connection();
+    const prompts = new ControlledPrompts({
+      select: [0, 0, 3],
+      confirm: [false],
+    });
+
+    const result = await slotSetCommand(slotSetOptions(store, prompts, async () => ownConnection, {
+      account: fixture.account,
+    }));
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+    expect(result).toMatchObject({ kind: 'cancelled', stage: 'exit' });
+    expect(ownConnection.close).toHaveBeenCalledTimes(1);
+    expect(config.zterm.cli.slots['1']).toEqual(original);
+  });
+
+  it.each(['ctrl-c', 'eof'] as const)(
+    'cancels at the server prompt after returning (%s) without writing',
+    async (mode) => {
+      const fixture = await startAccountFixture(twoServerDirectory());
+      const original = binding('original', 'original-id');
+      const { homeDir, store } = await createStore({
+        zterm: {
+          cli: {
+            server: { relayBaseUrl: fixture.baseUrl },
+            auth: AUTH,
+            slots: { '1': original },
+          },
+        },
+      });
+      const ownConnection = connection();
+      const cancellation = mode === 'ctrl-c'
+        ? new PromptCancelledError('server')
+        : Object.assign(new Error('readline closed'), { name: 'AbortError' });
+      const prompts = new ControlledPrompts({
+        select: [0, 0, 2, cancellation],
+        confirm: [false],
+      });
+
+      const result = await slotSetCommand(slotSetOptions(
+        store,
+        prompts,
+        async () => ownConnection,
+        { account: fixture.account },
+      ));
+      const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+      expect(result).toMatchObject({ kind: 'cancelled', stage: 'server' });
+      expect(ownConnection.close).toHaveBeenCalledTimes(1);
+      expect(config.zterm.cli.slots['1']).toEqual(original);
+    },
+  );
+
+  it('opens the action menu after a declined preview without requesting a snapshot', async () => {
+    const fixture = await startAccountFixture();
+    const original = binding('original', 'original-id');
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: fixture.baseUrl },
+          auth: AUTH,
+          slots: { '1': original },
+        },
+      },
+    });
+    const ownConnection = connection();
+    const renderPreview = vi.fn(async () => undefined);
+    const prompts = new ControlledPrompts({
+      select: [0, 0, 0],
+      confirm: [false],
+    });
+
+    const result = await slotSetCommand(slotSetOptions(
+      store,
+      prompts,
+      async () => ownConnection,
+      { account: fixture.account, renderPreview },
+    ));
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+    expect(ownConnection.readSnapshot).not.toHaveBeenCalled();
+    expect(renderPreview).not.toHaveBeenCalled();
+    expect(prompts.confirms).toEqual(['预览 snapshot？']);
+    expect(prompts.selections[2].labels).toEqual([
+      '保存到槽位 1',
+      '重新选择 session',
+      '返回服务器选择',
+      '退出配置',
+    ]);
+    expect(result).toMatchObject({
+      kind: 'ok',
+      value: { slot: 1, binding: { session: { stableId: 'tmux-stable-1' } } },
+    });
+    expect(config.zterm.cli.slots['1'].session.stableId).toBe('tmux-stable-1');
+  });
+
+  it('keeps the saved binding when closing after save fails', async () => {
+    const fixture = await startAccountFixture();
+    const original = binding('original', 'original-id');
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: fixture.baseUrl },
+          auth: AUTH,
+          slots: { '1': original },
+        },
+      },
+    });
+    const ownConnection = connection({
+      close: vi.fn(async () => {
+        throw new Error('close failed');
+      }),
+    });
+    const prompts = new ControlledPrompts({
+      select: [0, 0, 0],
+      confirm: [false],
+    });
+
+    const result = await slotSetCommand(slotSetOptions(
+      store,
+      prompts,
+      async () => ownConnection,
+      { account: fixture.account },
+    ));
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+    expect(ownConnection.close).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      kind: 'ok',
+      value: {
+        slot: 1,
+        binding: {
+          session: {
+            backend: 'tmux',
+            stableId: 'tmux-stable-1',
+            name: 'work',
+          },
+        },
+      },
+    });
+    expect('cleanupErrors' in result && result.cleanupErrors).toEqual([
+      expect.objectContaining({ code: 'connection_close_failed' }),
+    ]);
+    expect(config.zterm.cli.slots['1'].session.stableId).toBe('tmux-stable-1');
   });
 });

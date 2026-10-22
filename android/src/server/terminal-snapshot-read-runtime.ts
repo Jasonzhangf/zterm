@@ -11,16 +11,16 @@ import type {
 import type {
   ResolvedTerminalSession,
   TerminalSessionIdentityResolution,
+  TerminalSourceMirrorSnapshot,
 } from './terminal-source-adapter';
-import type { SessionMirror } from './terminal-runtime-types';
 
 export interface TerminalSnapshotReadRuntimeDeps {
   resolveExistingSession: (
     request: TerminalSnapshotRequestPayload,
   ) => TerminalSessionIdentityResolution;
-  readExistingMirror: (
+  captureSessionSnapshot: (
     session: ResolvedTerminalSession,
-  ) => SessionMirror | undefined;
+  ) => Promise<TerminalSourceMirrorSnapshot>;
   buildBufferHeadPayload: typeof buildBufferHeadPayload;
   buildRequestedRangeBufferPayload: typeof buildRequestedRangeBufferPayload;
   sendSnapshotResult: (result: TerminalSnapshotResultPayload) => void;
@@ -29,7 +29,7 @@ export interface TerminalSnapshotReadRuntimeDeps {
 export interface TerminalSnapshotReadRuntime {
   handleRequest: (
     request: TerminalSnapshotRequestPayload,
-  ) => TerminalSnapshotResultPayload;
+  ) => Promise<TerminalSnapshotResultPayload>;
 }
 
 function clampMaxLines(value: number): number {
@@ -42,16 +42,16 @@ function clampMaxLines(value: number): number {
   );
 }
 
-function copyMirrorSnapshot(mirror: SessionMirror): BufferSyncMirrorSnapshot {
+function copySnapshot(snapshot: TerminalSourceMirrorSnapshot): BufferSyncMirrorSnapshot {
   return {
-    revision: mirror.revision,
-    bufferStartIndex: mirror.bufferStartIndex,
-    bufferLines: mirror.bufferLines.map((line) =>
+    revision: snapshot.revision,
+    bufferStartIndex: snapshot.bufferStartIndex,
+    bufferLines: snapshot.bufferLines.map((line) =>
       line.map((cell) => ({ ...cell }))),
-    cols: mirror.cols,
-    rows: mirror.rows,
-    cursorKeysApp: mirror.cursorKeysApp,
-    cursor: mirror.cursor ? { ...mirror.cursor } : mirror.cursor,
+    cols: snapshot.cols,
+    rows: snapshot.rows,
+    cursorKeysApp: snapshot.cursorKeysApp,
+    cursor: snapshot.cursor ? { ...snapshot.cursor } : snapshot.cursor,
   };
 }
 
@@ -79,7 +79,7 @@ export function createTerminalSnapshotReadRuntime(
   deps: TerminalSnapshotReadRuntimeDeps,
 ): TerminalSnapshotReadRuntime {
   return {
-    handleRequest(request) {
+    async handleRequest(request) {
       const resolution = deps.resolveExistingSession(request);
       if (!resolution.ok) {
         return sendResult(deps, {
@@ -88,35 +88,25 @@ export function createTerminalSnapshotReadRuntime(
         });
       }
 
-      const mirror = deps.readExistingMirror(resolution.session);
-      if (!mirror) {
+      const session = resolution.session;
+      const snapshot = copySnapshot(await deps.captureSessionSnapshot(session));
+      const postCaptureResolution = deps.resolveExistingSession(request);
+      if (!postCaptureResolution.ok) {
         return sendResult(deps, {
-          status: 'unavailable',
-          reason: 'mirror_not_present',
+          status: 'failed',
+          code: postCaptureResolution.code,
         });
       }
-      if (mirror.lifecycle !== 'ready') {
-        return sendResult(deps, {
-          status: 'unavailable',
-          reason: 'mirror_not_ready',
-        });
-      }
-      const resolvedStableId = resolution.session.identity.stableId;
-      const mirrorStableId = mirror.sessionIdentity;
-      const mirrorTargetStableId = mirror.sessionTarget?.stableId;
       if (
-        !mirrorStableId
-        || mirrorStableId !== resolvedStableId
-        || mirrorTargetStableId !== mirrorStableId
+        postCaptureResolution.session.identity.stableId !== session.identity.stableId
+        || postCaptureResolution.session.identity.backend !== session.identity.backend
       ) {
-        // No mirror with matching established native provenance is present.
         return sendResult(deps, {
-          status: 'unavailable',
-          reason: 'mirror_not_present',
+          status: 'failed',
+          code: 'session_identity_mismatch',
         });
       }
 
-      const snapshot = copyMirrorSnapshot(mirror);
       const availableStartIndex = Math.max(
         0,
         Math.floor(snapshot.bufferStartIndex || 0),
@@ -139,7 +129,7 @@ export function createTerminalSnapshotReadRuntime(
         targetHeadRevision: snapshot.revision,
       };
 
-      const identity = resolution.session.identity;
+      const identity = session.identity;
       const head = deps.buildBufferHeadPayload(identity.stableId, snapshot);
       const body = deps.buildRequestedRangeBufferPayload(snapshot, bodyRequest);
       return sendResult(deps, {

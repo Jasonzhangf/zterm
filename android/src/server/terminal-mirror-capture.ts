@@ -22,8 +22,10 @@ import {
 import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
 import type { SessionMirror, TmuxCursorState, TmuxPaneMetrics } from './terminal-runtime-types';
 import type {
+  ResolvedTerminalSession,
   TerminalSourceAdapter,
   TerminalSourceMirrorSnapshot,
+  TmuxTerminalSessionTarget,
 } from './terminal-source-adapter';
 
 export interface TerminalMirrorCaptureDeps {
@@ -31,6 +33,10 @@ export interface TerminalMirrorCaptureDeps {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runTmuxForSession: (args: string[], sessionName: string) => { ok: true; stdout: string };
   runTmuxAsyncForSession: (args: string[], sessionName: string) => Promise<{ ok: true; stdout: string }>;
+  runTmuxAsyncForTarget?: (
+    args: string[],
+    target: TmuxTerminalSessionTarget,
+  ) => Promise<{ ok: true; stdout: string }>;
   buildExactTmuxPaneTarget: (sessionName: string) => string;
   logTimePrefix: () => string;
   wezTermBackend?: TerminalSourceAdapter | null;
@@ -44,6 +50,9 @@ export interface TerminalMirrorCaptureRuntime {
   readTmuxPaneMetrics: (sessionName: string, backend?: 'tmux' | 'herdr') => TmuxPaneMetrics;
   readTmuxPaneCurrentPath: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
+  captureResolvedSessionSnapshot: (
+    session: ResolvedTerminalSession,
+  ) => Promise<TerminalSourceMirrorSnapshot>;
 }
 
 type MirrorCanonicalLines = TerminalCell[][];
@@ -384,14 +393,28 @@ export function createTerminalMirrorCaptureRuntime(
     return currentPath;
   }
 
-  async function readTmuxCursorStateAsync(sessionName: string, target: string): Promise<TmuxCursorState> {
-    const result = await deps.runTmuxAsyncForSession([
+  type TmuxCaptureRoute = string | TmuxTerminalSessionTarget;
+  type TmuxAsyncRunner = (args: string[]) => Promise<{ ok: true; stdout: string }>;
+
+  function resolveAsyncTmuxRunner(route: TmuxCaptureRoute): TmuxAsyncRunner {
+    if (typeof route === 'string') {
+      return (args) => deps.runTmuxAsyncForSession(args, route);
+    }
+    const runAsyncForTarget = deps.runTmuxAsyncForTarget;
+    if (!runAsyncForTarget) {
+      throw new Error('terminal snapshot preview exact-target capture is unavailable');
+    }
+    return (args) => runAsyncForTarget(args, route);
+  }
+
+  async function readTmuxCursorStateAsync(route: TmuxCaptureRoute, paneTarget: string): Promise<TmuxCursorState> {
+    const result = await resolveAsyncTmuxRunner(route)([
       'display-message',
       '-p',
       '-t',
-      target,
+      paneTarget,
       '#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}',
-    ], sessionName);
+    ]);
     const [colRaw = '0', rowRaw = '0', visibleRaw = '0', cursorKeysAppRaw = '0'] = result.stdout.trim().split(/\s+/u);
     return {
       col: Math.max(0, Number.parseInt(colRaw, 10) || 0),
@@ -402,8 +425,8 @@ export function createTerminalMirrorCaptureRuntime(
   }
 
   async function captureTmuxMirrorLinesAsync(
-    sessionName: string,
-    target: string,
+    route: TmuxCaptureRoute,
+    paneTarget: string,
     options: {
       paneRows: number;
       maxLines: number;
@@ -412,18 +435,18 @@ export function createTerminalMirrorCaptureRuntime(
   ) {
     const safePaneRows = Math.max(1, Math.floor(options.paneRows));
     const safeMaxLines = Math.max(1, Math.floor(options.maxLines));
-    const captureResult = await deps.runTmuxAsyncForSession([
+    const captureResult = await resolveAsyncTmuxRunner(route)([
       'capture-pane',
       '-p',
       '-e',
       '-N',
       '-t',
-      target,
+      paneTarget,
       '-S',
       `-${safeMaxLines}`,
       '-E',
       `${Math.max(0, safePaneRows - 1)}`,
-    ], sessionName);
+    ]);
 
     const normalizedLines = normalizeMirrorCaptureLines(captureResult.stdout, {
       paneRows: safePaneRows,
@@ -435,31 +458,112 @@ export function createTerminalMirrorCaptureRuntime(
     return normalizedLines.slice(-safeMaxLines);
   }
 
-  async function readTmuxPaneMetricsAsync(sessionName: string): Promise<TmuxPaneMetrics> {
-    const result = await deps.runTmuxAsyncForSession([
+  async function readTmuxPaneMetricsAsync(route: TmuxCaptureRoute): Promise<TmuxPaneMetrics> {
+    const isLiveSessionRoute = typeof route === 'string';
+    const sessionLabel = isLiveSessionRoute ? route : route.sessionId;
+    const paneSelector = isLiveSessionRoute ? deps.buildExactTmuxPaneTarget(route) : `${route.sessionId}:.{top-left}`;
+    const result = await resolveAsyncTmuxRunner(route)([
       'display-message',
       '-p',
       '-t',
-      deps.buildExactTmuxPaneTarget(sessionName),
+      paneSelector,
       '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}',
-    ], sessionName);
+    ]);
     const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split('\t');
+    const paneId = paneIdRaw?.trim() || '';
     const paneRows = Number.parseInt(rowsRaw ?? '', 10);
     const paneCols = Number.parseInt(colsRaw ?? '', 10);
+    if (!isLiveSessionRoute && !paneId) {
+      throw new Error(`tmux returned an empty pane id for ${sessionLabel}`);
+    }
     if (!Number.isFinite(paneRows) || paneRows <= 0 || !Number.isFinite(paneCols) || paneCols <= 0) {
-      throw new Error(`tmux returned invalid pane metrics for ${sessionName}: rows=${rowsRaw ?? ''} cols=${colsRaw ?? ''}`);
+      throw new Error(`tmux returned invalid pane metrics for ${sessionLabel}: rows=${rowsRaw ?? ''} cols=${colsRaw ?? ''}`);
     }
     if (paneDeadRaw === '1') {
-      throw new Error(`tmux returned invalid pane metrics for ${sessionName}: pane is dead`);
+      throw new Error(`tmux returned invalid pane metrics for ${sessionLabel}: pane is dead`);
     }
     const historySize = Math.max(0, Number.parseInt(tmuxHistorySizeRaw ?? '', 10) || 0);
     const alternateOn = alternateOnRaw === '1';
     return {
-      paneId: paneIdRaw?.trim() || sessionName,
+      paneId: isLiveSessionRoute ? paneId || sessionLabel : paneId,
       tmuxAvailableLineCountHint: historySize + paneRows,
       paneRows,
       paneCols,
       alternateOn,
+    };
+  }
+
+  interface TmuxCaptureScratchState {
+    scratchBridge: SessionMirror['scratchBridge'];
+  }
+
+  async function finalizeTmuxMirrorCapture(options: {
+    metrics: TmuxPaneMetrics;
+    cursor: TmuxCursorState;
+    capturedLines: string[];
+    previousAvailableEndIndex: number;
+    scratchState: TmuxCaptureScratchState;
+    captureStartedAt: number;
+    captureDoneAt: number;
+  }): Promise<ResolvedMirrorCaptureSnapshot> {
+    const scratchBridge = options.scratchState.scratchBridge ?? await loadSharedScratchBridge();
+    options.scratchState.scratchBridge = scratchBridge;
+    const canonicalizeStartedAt = Date.now();
+    const nextBufferLines = await canonicalizeCapturedMirrorLines(
+      options.capturedLines,
+      options.metrics.paneCols,
+      scratchBridge,
+    );
+    const canonicalizeDoneAt = Date.now();
+
+    const resolvedAvailableLineCount = resolveCanonicalAvailableLineCount({
+      paneRows: options.metrics.paneRows,
+      tmuxAvailableLineCountHint: options.metrics.tmuxAvailableLineCountHint,
+      capturedLineCount: options.capturedLines.length,
+      scratchLineCount: nextBufferLines.length,
+    });
+    // Fresh source geometry is authoritative. Do not let the previous mirror
+    // cache floor the tail after clear-history or other source-side shrink.
+    const totalAvailableLines = options.metrics.alternateOn
+      ? Math.max(resolvedAvailableLineCount, options.previousAvailableEndIndex)
+      : resolvedAvailableLineCount;
+    const computedStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
+    const authoritativeWindow = resolveAuthoritativeMirrorCaptureWindow({
+      nextLines: nextBufferLines,
+      computedStartIndex,
+    });
+
+    const trimmed = trimCanonicalBufferWindow(
+      authoritativeWindow.startIndex,
+      authoritativeWindow.lines,
+      deps.resolveMirrorCacheLines(options.metrics.paneRows),
+    );
+    const availableEndIndex = trimmed.startIndex + trimmed.lines.length;
+    const normalizedCursor = normalizeMirrorCursor({
+      bufferStartIndex: trimmed.startIndex,
+      availableEndIndex,
+      paneRows: options.metrics.paneRows,
+      cursor: options.cursor,
+    });
+    const visibleTopIndex = Math.max(trimmed.startIndex, availableEndIndex - options.metrics.paneRows);
+
+    return {
+      rows: options.metrics.paneRows,
+      cols: options.metrics.paneCols,
+      cursorKeysApp: options.cursor.cursorKeysApp,
+      lastScrollbackCount: Math.max(0, authoritativeWindow.lines.length - options.metrics.paneRows),
+      bufferStartIndex: trimmed.startIndex,
+      bufferLines: trimmed.lines,
+      cursor: normalizedCursor,
+      capturedLineCount: options.capturedLines.length,
+      canonicalLineCount: nextBufferLines.length,
+      totalAvailableLines,
+      visibleTopIndex,
+      captureDurationMs: Math.max(0, options.captureDoneAt - options.captureStartedAt),
+      canonicalizeDurationMs: Math.max(0, canonicalizeDoneAt - canonicalizeStartedAt),
+      captureStartedAt: options.captureStartedAt,
+      captureDoneAt: options.captureDoneAt,
+      canonicalizeDoneAt,
     };
   }
 
@@ -474,62 +578,55 @@ export function createTerminalMirrorCaptureRuntime(
       alternateOn: metrics.alternateOn,
     });
     const captureDoneAt = Date.now();
-
-    const scratchBridge = mirror.scratchBridge ?? await loadSharedScratchBridge();
-    mirror.scratchBridge = scratchBridge;
-    const canonicalizeStartedAt = Date.now();
-    const nextBufferLines = await canonicalizeCapturedMirrorLines(capturedLines, metrics.paneCols, scratchBridge);
-    const canonicalizeDoneAt = Date.now();
-
-    const resolvedAvailableLineCount = resolveCanonicalAvailableLineCount({
-      paneRows: metrics.paneRows,
-      tmuxAvailableLineCountHint: metrics.tmuxAvailableLineCountHint,
-      capturedLineCount: capturedLines.length,
-      scratchLineCount: nextBufferLines.length,
-    });
-    // Fresh source geometry is authoritative. Do not let the previous mirror
-    // cache floor the tail after clear-history or other source-side shrink.
-    const totalAvailableLines = metrics.alternateOn
-      ? Math.max(resolvedAvailableLineCount, getMirrorAvailableEndIndex(mirror))
-      : resolvedAvailableLineCount;
-    const computedStartIndex = Math.max(0, totalAvailableLines - nextBufferLines.length);
-    const authoritativeWindow = resolveAuthoritativeMirrorCaptureWindow({
-      nextLines: nextBufferLines,
-      computedStartIndex,
-    });
-
-    const trimmed = trimCanonicalBufferWindow(
-      authoritativeWindow.startIndex,
-      authoritativeWindow.lines,
-      deps.resolveMirrorCacheLines(metrics.paneRows),
-    );
-    const availableEndIndex = trimmed.startIndex + trimmed.lines.length;
-    const normalizedCursor = normalizeMirrorCursor({
-      bufferStartIndex: trimmed.startIndex,
-      availableEndIndex,
-      paneRows: metrics.paneRows,
+    return finalizeTmuxMirrorCapture({
+      metrics,
       cursor,
-    });
-    const visibleTopIndex = Math.max(trimmed.startIndex, availableEndIndex - metrics.paneRows);
-
-    return {
-      rows: metrics.paneRows,
-      cols: metrics.paneCols,
-      cursorKeysApp: cursor.cursorKeysApp,
-      lastScrollbackCount: Math.max(0, authoritativeWindow.lines.length - metrics.paneRows),
-      bufferStartIndex: trimmed.startIndex,
-      bufferLines: trimmed.lines,
-      cursor: normalizedCursor,
-      capturedLineCount: capturedLines.length,
-      canonicalLineCount: nextBufferLines.length,
-      totalAvailableLines,
-      visibleTopIndex,
-      captureDurationMs: Math.max(0, captureDoneAt - captureStartedAt),
-      canonicalizeDurationMs: Math.max(0, canonicalizeDoneAt - canonicalizeStartedAt),
+      capturedLines,
+      previousAvailableEndIndex: getMirrorAvailableEndIndex(mirror),
+      scratchState: mirror,
       captureStartedAt,
       captureDoneAt,
-      canonicalizeDoneAt,
-    };
+    });
+  }
+
+  async function captureResolvedSessionSnapshot(
+    session: ResolvedTerminalSession,
+  ): Promise<TerminalSourceMirrorSnapshot> {
+    if (session.target.backend !== 'tmux') {
+      throw new Error(
+        `terminal snapshot preview exact-target capture is unsupported for backend ${session.target.backend}`,
+      );
+    }
+    const target = session.target;
+    const scratchState: TmuxCaptureScratchState = { scratchBridge: null };
+    try {
+      const captureStartedAt = Date.now();
+      const metrics = await readTmuxPaneMetricsAsync(target);
+      const cursor = await readTmuxCursorStateAsync(target, metrics.paneId);
+      const maxLines = deps.resolveMirrorCacheLines(metrics.paneRows);
+      const capturedLines = await captureTmuxMirrorLinesAsync(target, metrics.paneId, {
+        paneRows: metrics.paneRows,
+        maxLines,
+        alternateOn: metrics.alternateOn,
+      });
+      const captureDoneAt = Date.now();
+      const snapshot = await finalizeTmuxMirrorCapture({
+        metrics,
+        cursor,
+        capturedLines,
+        previousAvailableEndIndex: 0,
+        scratchState,
+        captureStartedAt,
+        captureDoneAt,
+      });
+      return {
+        ...snapshot,
+        revision: 0,
+        source: 'tmux',
+      };
+    } finally {
+      scratchState.scratchBridge = null;
+    }
   }
 
   function createTmuxMirrorSourceAdapter(mirror: SessionMirror): TerminalSourceAdapter {
@@ -596,5 +693,6 @@ export function createTerminalMirrorCaptureRuntime(
     readTmuxPaneMetrics,
     readTmuxPaneCurrentPath,
     captureMirrorAuthoritativeBufferFromTmux,
+    captureResolvedSessionSnapshot,
   };
 }
