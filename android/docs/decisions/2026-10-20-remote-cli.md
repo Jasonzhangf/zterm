@@ -1,6 +1,6 @@
 # 2026-10-20 Remote daemon CLI design
-状态：`DESIGN_PASS`；三平台 CLI、原生包及 daemon 安装 gate 已 PASS。当前 Windows
-外部 RTC 连接仍超时，整体独立 Review、main 集成及资源收口待完成。本文是已审设计与
+状态：`DESIGN_PASS`；三平台 CLI、原生包及 daemon 安装 gate 已 PASS。Windows
+外部 RTC 已通过真实连接验收；独立 Review 的两项 session 身份问题正在修复，main 集成及资源收口待完成。本文是已审设计与
 当前实现边界的项目入口；平台安装通过不能替代远程连接验收。
 
 | 当前项 | 事实 |
@@ -8,7 +8,7 @@
 | 正式入口 | `packages/cli/src/main.ts` 已落地并接通 argv、登录、槽位、终端、升级和 daemon 管理。 |
 | 构建产物 | `packages/cli/dist/main.mjs` 由正式入口构建；本地 tarball 可隔离安装。 |
 | npm 发布 | `@jsonstudio/zterm-cli` 尚未发布到公开 npm；隔离 tarball 不是公开渠道证据。 |
-| 平台验证 | Windows x64、macOS arm64、Linux x64 的构建、安装、升级和适用用户链通过；Windows 外部 RTC 当前仍为 UNVERIFIED。 |
+| 平台验证 | Windows x64、macOS arm64、Linux x64 的构建、安装、升级和适用用户链通过；Windows 外部 RTC 在 CI 39707241211 通过原始 2500ms 期限和实际 relay/relay 断言。此前超时记录保留；一次通过不证明所有网络下的延迟可靠性。 |
 
 ## 1. 范围与命令
 交付全局命令 `zterm`。它使用持久账号登录态、账号设备目录和 1～20 槽位，连接现有

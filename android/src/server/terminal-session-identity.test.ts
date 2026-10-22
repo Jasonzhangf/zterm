@@ -285,6 +285,93 @@ describe('terminal session stable identity', () => {
     ]);
   });
 
+  function mockSuccessfulSpawn() {
+    childProcessMocks.spawn.mockImplementation(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+        stderr: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      };
+      child.stdout = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      child.stderr = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      child.stdout.setEncoding = vi.fn();
+      child.stderr.setEncoding = vi.fn();
+      queueMicrotask(() => child.emit('close', 0));
+      return child;
+    });
+  }
+
+  it('routes a bound later-discovered same-name socket after a public catalog refresh', async () => {
+    rowsBySocket.set(socketA, ['work\t$1\t100\t900'].join('\n'));
+    rowsBySocket.set(socketB, ['work\t$3\t102\t901'].join('\n'));
+    const runtime = createRuntime();
+    const stableB = buildTmuxSessionStableId({
+      socketPath: socketB,
+      serverPid: '901',
+      sessionId: '$3',
+      createdAt: 102,
+    });
+    const resolvedB = runtime.resolveExistingSession(stableB, 'tmux', 'work');
+    if (!resolvedB.ok) {
+      throw new Error(resolvedB.message);
+    }
+    runtime.bindResolvedSession(resolvedB.session);
+
+    // The public catalog refresh rebuilds the discovery cache from the first
+    // same-name entry it sees (socket A). It must not steal the pinned route.
+    expect(runtime.listTerminalSessionCatalog().filter((entry) => entry.name === 'work')).toHaveLength(2);
+
+    mockSuccessfulSpawn();
+    await runtime.writeBackendInputGroup('work', 'echo later-b', false, 'tmux');
+    await runtime.runTmuxAsyncForSession([
+      'capture-pane',
+      '-p',
+      '-t',
+      '=work:.{top-left}',
+    ], 'work');
+
+    expect(childProcessMocks.spawn.mock.calls.map((call) => call[1])).toEqual([
+      ['-S', socketB, 'send-keys', '-t', '$3:.{top-left}', '-l', '--', 'echo later-b'],
+      ['-S', socketB, 'capture-pane', '-p', '-t', '$3:.{top-left}'],
+    ]);
+  });
+
+  it('keeps a pinned default-socket binding off a discovered socket after a public catalog refresh', async () => {
+    rowsBySocket.set(socketA, ['work\t$1\t100\t900'].join('\n'));
+    const runtime = createRuntime();
+    const stableId = buildTmuxSessionStableId({
+      serverPid: '888',
+      sessionId: '$5',
+      createdAt: 50,
+    });
+    runtime.bindResolvedSession({
+      identity: { backend: 'tmux', sessionName: 'work', stableId },
+      target: {
+        backend: 'tmux',
+        sessionName: 'work',
+        stableId,
+        serverPid: '888',
+        sessionId: '$5',
+        createdAt: 50,
+      },
+    });
+
+    expect(runtime.listTerminalSessionCatalog().some((entry) => entry.name === 'work')).toBe(true);
+
+    mockSuccessfulSpawn();
+    await runtime.writeBackendInputGroup('work', 'echo default-socket', false, 'tmux');
+    await runtime.runTmuxAsyncForSession([
+      'capture-pane',
+      '-p',
+      '-t',
+      '=work:.{top-left}',
+    ], 'work');
+
+    expect(childProcessMocks.spawn.mock.calls.map((call) => call[1])).toEqual([
+      ['send-keys', '-t', '$5:.{top-left}', '-l', '--', 'echo default-socket'],
+      ['capture-pane', '-p', '-t', '$5:.{top-left}'],
+    ]);
+  });
+
   it('publishes each distinct native target for a duplicated display name', () => {
     rowsBySocket.set(socketA, ['work\t$1\t100\t900'].join('\n'));
     rowsBySocket.set(socketB, ['work\t$3\t102\t901'].join('\n'));

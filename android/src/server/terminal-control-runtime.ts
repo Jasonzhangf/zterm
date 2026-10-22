@@ -182,6 +182,12 @@ export function createTerminalControlRuntime(
   }
 
   function resolveSessionSocketPath(sessionName: string) {
+    // A pinned native target owns its route. A DEFAULT-socket binding has no
+    // socketPath, and that undefined is authoritative: listTmuxSessions keeps
+    // rebuilding the discovery cache from the first same-name entry, so it must
+    // never override a pinned route.
+    const pinned = sessionNativeTargets.get(sessionName);
+    if (pinned) return pinned.socketPath;
     return sessionSocketPaths.get(sessionName);
   }
 

@@ -358,6 +358,70 @@ describe('daemon session catalog runtime', () => {
     ]);
   });
 
+  it('omits observations for ambiguous same-name tmux targets while sampling unique names and retaining Herdr', async () => {
+    const staleObservation = {
+      observedAt: 1,
+      foregroundProcess: 'stale-process',
+      recentOutput: false,
+      oscTitleSeen: false,
+      oscProgressSeen: false,
+      status: 'unknown' as const,
+      statusReason: 'insufficient-evidence' as const,
+    };
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-panes') {
+        return {
+          ok: true as const,
+          stdout: [
+            'shared\t1111\tcodex',
+            'shared\t2222\tclaude',
+            'unique-a\t3333\tcodex',
+            'herdr-shared\t4444\therdr',
+          ].join('\n'),
+        };
+      }
+      return { ok: true as const, stdout: 'thinking' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [
+        { name: 'shared', backend: 'tmux', stableId: 'tmux-a', observation: staleObservation },
+        { name: 'shared', backend: 'tmux', stableId: 'tmux-b' },
+        { name: 'unique-a', backend: 'tmux', stableId: 'tmux-unique' },
+        { name: 'herdr-shared', backend: 'herdr', stableId: 'herdr-a' },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args, _sessionName) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+    });
+
+    const sampled = await runtime.refresh();
+    const sharedEntries = sampled.filter((entry) => entry.name === 'shared');
+    expect(sharedEntries).toHaveLength(2);
+    expect(sharedEntries.map((entry) => entry.stableId)).toEqual(['tmux-a', 'tmux-b']);
+    // Neither same-name target may inherit the other's sampled facts, and the
+    // stale observation carried on the input entry must be stripped.
+    expect(sharedEntries[0]).not.toHaveProperty('observation');
+    expect(sharedEntries[1]).not.toHaveProperty('observation');
+
+    expect(sampled.find((entry) => entry.name === 'unique-a')?.observation).toMatchObject({
+      foregroundProcess: 'codex',
+      status: 'unknown',
+      statusReason: 'insufficient-evidence',
+    });
+    expect(sampled.find((entry) => entry.name === 'herdr-shared')).toEqual({
+      name: 'herdr-shared',
+      backend: 'herdr',
+      stableId: 'herdr-a',
+    });
+
+    // The ambiguous display name must never be captured by name; only the
+    // unique tmux target is sampled.
+    expect(runTmuxAsync.mock.calls.filter(([args]) => args[0] === 'capture-pane')).toEqual([
+      [['capture-pane', '-p', '-e', '-t', 'unique-a', '-S', '-20']],
+    ]);
+  });
+
   it('keeps the last complete snapshot while a cadence refresh is in flight', async () => {
     let releaseCapture: (() => void) | undefined;
     const runTmuxAsync = vi.fn(async (args: string[]) => {

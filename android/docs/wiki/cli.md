@@ -51,8 +51,11 @@ return to follow, or send a literal prefix.
 - macOS arm64 full user path passed from an isolated npm tarball.
 - npm isolation upgrade passed 8/8.
 - Public npm publication is pending.
-- Windows and Linux real native and installed-CLI gates are pending CI or a
-  target host. They are not implied by the macOS result.
+- Windows x64 and Linux x64 native payload, installed CLI, and daemon installation
+  gates passed in CI. Windows remote acceptance passed in run 39707241211 with
+  actual RTC relay/relay statistics and the original 2500 ms connection budget.
+- Main integration awaits closure of two independent-review findings concerning
+  pinned native socket routing and ambiguous same-name session observations.
 
 ## Daemon Distribution
 

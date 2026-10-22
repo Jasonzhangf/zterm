@@ -48,6 +48,37 @@ export interface DaemonSessionCatalogRuntimeDeps extends DaemonSessionCatalogDep
   ) => void;
 }
 
+function findAmbiguousTmuxNames(entries: readonly TerminalSessionCatalogEntry[]) {
+  const counts = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.backend !== 'tmux') continue;
+    counts.set(entry.name, (counts.get(entry.name) ?? 0) + 1);
+  }
+  const ambiguous = new Set<string>();
+  for (const [name, count] of counts) {
+    if (count > 1) ambiguous.add(name);
+  }
+  return ambiguous;
+}
+
+function withoutObservation(entry: TerminalSessionCatalogEntry): TerminalSessionCatalogEntry {
+  if (!entry.observation) {
+    return { ...entry };
+  }
+  const clone = { ...entry };
+  delete clone.observation;
+  return clone;
+}
+
+function stripAmbiguousObservations(entries: readonly TerminalSessionCatalogEntry[]) {
+  const ambiguous = findAmbiguousTmuxNames(entries);
+  return entries.map((entry) => (
+    entry.backend === 'tmux' && ambiguous.has(entry.name)
+      ? withoutObservation(entry)
+      : { ...entry }
+  ));
+}
+
 export function createDaemonSessionCatalogRuntime(
   deps: DaemonSessionCatalogDeps,
 ): DaemonSessionCatalogRuntime {
@@ -65,8 +96,9 @@ export function createDaemonSessionCatalogRuntime(
   }
 
   async function sampleObservations(entries: TerminalSessionCatalogEntry[]) {
+    const ambiguousTmuxNames = findAmbiguousTmuxNames(entries);
     if (!deps.runTmuxAsyncForSession && !deps.runTmuxAsyncAcrossSockets) {
-      return entries.map((entry) => ({ ...entry }));
+      return stripAmbiguousObservations(entries);
     }
     if (!deps.runTmuxAsyncForSession) {
       throw new Error('daemon session catalog sampling requires runTmuxAsyncForSession so session-scoped tmux reads resolve the owning socket');
@@ -74,7 +106,17 @@ export function createDaemonSessionCatalogRuntime(
     if (!deps.runTmuxAsyncAcrossSockets) {
       throw new Error('daemon session catalog sampling requires runTmuxAsyncAcrossSockets so global pane reads span every live tmux socket');
     }
-    const tmuxEntries = entries.filter((entry) => entry.backend === 'tmux');
+    // The observation sampler is keyed by tmux session name. When the catalog
+    // exposes multiple stable targets with the same display name, a name-keyed
+    // observation cannot prove which target it belongs to, so omit it rather
+    // than stamping one target's facts onto its sibling.
+    const sampleNames = [
+      ...new Set(
+        entries
+          .filter((entry) => entry.backend === 'tmux' && !ambiguousTmuxNames.has(entry.name))
+          .map((entry) => entry.name),
+      ),
+    ];
     const observations = await readDaemonSessionObservations(
       {
         runTmuxAsyncAcrossSockets: deps.runTmuxAsyncAcrossSockets,
@@ -82,12 +124,18 @@ export function createDaemonSessionCatalogRuntime(
         history: deps.observationHistory,
         readProcessGroup: deps.readProcessGroup,
       },
-      tmuxEntries.map((entry) => entry.name),
+      sampleNames,
       Date.now(),
     );
     return entries.map((entry) => {
-      const observation = entry.backend === 'tmux' ? observations.get(entry.name) : undefined;
-      return observation ? { ...entry, observation } : { ...entry };
+      if (entry.backend !== 'tmux') {
+        return { ...entry };
+      }
+      if (ambiguousTmuxNames.has(entry.name)) {
+        return withoutObservation(entry);
+      }
+      const observation = observations.get(entry.name);
+      return observation ? { ...withoutObservation(entry), observation } : withoutObservation(entry);
     });
   }
 
@@ -115,7 +163,7 @@ export function createDaemonSessionCatalogRuntime(
         // Cold start: there is no last complete snapshot to preserve, so the
         // real enumerated session list is published immediately and the
         // sampled candidate replaces it when sampling commits.
-        snapshot = entries.map((entry) => ({ ...entry }));
+        snapshot = stripAmbiguousObservations(entries);
       }
       let candidate: TerminalSessionCatalogEntry[];
       try {
@@ -131,7 +179,7 @@ export function createDaemonSessionCatalogRuntime(
             error instanceof Error ? error.message : String(error)
           }`,
         );
-        candidate = entries.map((entry) => ({ ...entry }));
+        candidate = stripAmbiguousObservations(entries);
       }
       // Publish only after the candidate is complete so an in-flight cadence
       // refresh keeps serving the last complete snapshot. The cold-start

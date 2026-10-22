@@ -22,10 +22,12 @@ import type { SessionMirror } from '../src/server/terminal-runtime-types';
 
 const ARTIFACT_DIR = process.env.ZTERM_IDENTITY_R2_ART
   || '/Volumes/extension/codex/projects/g-p-6a82ba0c561881919039d12d78708a8e/artifacts/daemon-cli-20261020';
-const RESULT_PATH = join(ARTIFACT_DIR, 'identity-r2-native-result.json');
+const RESULT_PATH = process.env.ZTERM_IDENTITY_RESULT
+  || join(ARTIFACT_DIR, 'r30-routing-native-result.json');
 const TMUX_BINARY = process.env.TMUX_BINARY || 'tmux';
 const SHARED_NAME = 'zterm_identity_r2_shared';
 const MARKER = 'ZTERM_IDENTITY_R2_MARKER';
+const LATER_B_MARKER = 'ZTERM_IDENTITY_R30_LATER_B';
 const FIXTURE_ROOT = join(tmpdir(), `zterm-identity-r2-${process.pid}-${Date.now().toString(36)}`);
 const SOCKET_A = join(FIXTURE_ROOT, 'a', 'default');
 const SOCKET_B = join(FIXTURE_ROOT, 'b', 'default');
@@ -315,7 +317,7 @@ async function main() {
       b: identityB,
     });
 
-    const control = createTerminalControlRuntime({
+    const createControl = () => createTerminalControlRuntime({
       tmuxBinary: TMUX_BINARY,
       defaultSessionName: SHARED_NAME,
       hiddenTmuxSessions: new Set<string>(),
@@ -323,6 +325,7 @@ async function main() {
       sanitizeSessionName: (input?: string) => input?.trim() || SHARED_NAME,
       defaultBackend: 'tmux',
     });
+    const control = createControl();
 
     const sharedCatalog = control.listTerminalSessionCatalog()
       .filter((entry) => entry.backend === 'tmux' && entry.name === SHARED_NAME);
@@ -469,6 +472,70 @@ async function main() {
       },
     );
 
+    // Fresh runtime: discovery always sees A first, then B. Binding the
+    // later-discovered B and refreshing the public catalog must not let A's
+    // discovery route capture the pinned B native target.
+    const laterControl = createControl();
+    const resolvedLaterB = laterControl.resolveExistingSession(identityB.stableId, 'tmux', SHARED_NAME);
+    if (!resolvedLaterB.ok) {
+      throw new Error(`fresh runtime rejected B: ${resolvedLaterB.code}: ${resolvedLaterB.message}`);
+    }
+    laterControl.bindResolvedSession(resolvedLaterB.session);
+
+    const refreshedCatalog = laterControl.listTerminalSessionCatalog()
+      .filter((entry) => entry.backend === 'tmux' && entry.name === SHARED_NAME);
+    record(
+      'fresh_runtime_binds_later_discovered_b_across_catalog_refresh',
+      refreshedCatalog.some((entry) => entry.stableId === identityB.stableId),
+      {
+        entryCount: refreshedCatalog.length,
+        stableIds: refreshedCatalog.map((entry) => entry.stableId),
+      },
+    );
+
+    await laterControl.writeBackendInputGroup(SHARED_NAME, LATER_B_MARKER, true, 'tmux');
+    await delay(300);
+    const routedCaptureB = await laterControl.runTmuxAsyncForSession([
+      'capture-pane',
+      '-p',
+      '-t',
+      `=${SHARED_NAME}:.{top-left}`,
+    ], SHARED_NAME);
+    const laterCaptureA = runNativeTmux(SOCKET_A, [
+      'capture-pane',
+      '-p',
+      '-t',
+      `=${SHARED_NAME}:.{top-left}`,
+    ]);
+    const laterCaptureB = runNativeTmux(SOCKET_B, [
+      'capture-pane',
+      '-p',
+      '-t',
+      `=${SHARED_NAME}:.{top-left}`,
+    ]);
+    record(
+      'fresh_binding_routes_later_input_to_b_only',
+      laterCaptureA.ok
+        && laterCaptureB.ok
+        && laterCaptureB.stdout.includes(LATER_B_MARKER)
+        && !laterCaptureA.stdout.includes(LATER_B_MARKER)
+        && laterCaptureA.stdout.includes(MARKER),
+      {
+        aHasLaterMarker: laterCaptureA.stdout.includes(LATER_B_MARKER),
+        bHasLaterMarker: laterCaptureB.stdout.includes(LATER_B_MARKER),
+        aHasFirstMarker: laterCaptureA.stdout.includes(MARKER),
+      },
+    );
+    record(
+      'fresh_binding_capture_reads_b_native_target',
+      routedCaptureB.stdout.includes(LATER_B_MARKER)
+        && !routedCaptureB.stdout.includes(MARKER),
+      {
+        routedCapture: routedCaptureB.stdout,
+        bCapture: laterCaptureB.stdout,
+      },
+    );
+
     status = checks.every((check) => check.ok) ? 'PASS' : 'FAIL';
   } catch (error) {
     rawErrors.push(error instanceof Error ? (error.stack || error.message) : String(error));
@@ -485,7 +552,7 @@ async function main() {
   const result = {
     status,
     generatedAt: new Date().toISOString(),
-    scope: 'native tmux sessions through declared public runtime consumers',
+    scope: 'native tmux fixtures through public runtime/library consumers; not whole network daemon acceptance',
     fixture: {
       sharedName: SHARED_NAME,
       marker: MARKER,
@@ -499,6 +566,7 @@ async function main() {
       'TerminalControlRuntime.bindResolvedSession',
       'TerminalControlRuntime.readSessionIdentity',
       'TerminalControlRuntime.writeBackendInputGroup',
+      'TerminalControlRuntime.runTmuxAsyncForSession',
       'terminal-snapshot-read-runtime:createTerminalSnapshotReadRuntime',
     ],
     native: { a: nativeA, b: nativeB, captures },
