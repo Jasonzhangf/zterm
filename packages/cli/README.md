@@ -17,10 +17,12 @@ mirror delivery.
 `@jsonstudio/zterm-cli` is not published to the public npm registry. Windows
 x64, Linux x64 and macOS arm64 have passed native builds, installed CLI checks,
 isolated npm upgrade checks and the native daemon installation matrix.
-The Windows external RTC user path remains under validation: the current
-candidate reaches TURN candidate exchange but times out before the DataChannel
-opens. Complete remote acceptance, independent review and main integration
-are still pending. See the PR checks for current acceptance results.
+The installed Windows remote user path has also passed login reuse, exact slot
+selection and snapshot, initial mirror, remote input, resize, local exit with
+terminal restoration, and logout. The separate public RTC API consumer checks
+the actual TURN relay/relay route and the original connection deadline. Its
+per-run results remain separate from installed CLI behavior; see the PR checks
+and their evidence artifacts for the acceptance result of each candidate.
 
 ## Platforms and requirements
 

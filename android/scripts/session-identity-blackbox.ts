@@ -244,10 +244,12 @@ async function closeOwnedFixture() {
       socketGone: false,
     });
   }
-  for (const socketPath of [SOCKET_A, SOCKET_B]) {
-    rmSync(dirname(socketPath), { recursive: true, force: true });
+  if (sockets.every((socket) => socket.serverGone)) {
+    for (const socketPath of [SOCKET_A, SOCKET_B]) {
+      rmSync(dirname(socketPath), { recursive: true, force: true });
+    }
+    rmSync(FIXTURE_ROOT, { recursive: true, force: true });
   }
-  rmSync(FIXTURE_ROOT, { recursive: true, force: true });
   for (const socket of sockets) {
     socket.socketGone = !existsSync(socket.socketPath);
   }
