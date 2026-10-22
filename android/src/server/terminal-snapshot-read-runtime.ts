@@ -101,6 +101,20 @@ export function createTerminalSnapshotReadRuntime(
           reason: 'mirror_not_ready',
         });
       }
+      const resolvedStableId = resolution.session.identity.stableId;
+      const mirrorStableId = mirror.sessionIdentity;
+      const mirrorTargetStableId = mirror.sessionTarget?.stableId;
+      if (
+        !mirrorStableId
+        || mirrorStableId !== resolvedStableId
+        || mirrorTargetStableId !== mirrorStableId
+      ) {
+        // No mirror with matching established native provenance is present.
+        return sendResult(deps, {
+          status: 'unavailable',
+          reason: 'mirror_not_present',
+        });
+      }
 
       const snapshot = copyMirrorSnapshot(mirror);
       const availableStartIndex = Math.max(

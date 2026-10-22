@@ -618,15 +618,34 @@ export function createTerminalControlRuntime(
           // Session names remain authoritative when pane metadata is unavailable.
         }
       }
+      const targetsBySession = new Map<string, TmuxTerminalSessionTarget[]>();
+      for (const target of tmuxTargets) {
+        const targets = targetsBySession.get(target.sessionName);
+        if (targets) {
+          targets.push(target);
+        } else {
+          targetsBySession.set(target.sessionName, [target]);
+        }
+      }
       for (const sessionName of listTmuxSessions('tmux')) {
         const cwd = cwdBySession.get(sessionName);
-        const stableId = tmuxTargets.find((target) => target.sessionName === sessionName)?.stableId;
-        entries.push({
-          name: sessionName,
-          backend: 'tmux',
-          ...(stableId ? { stableId } : {}),
-          ...(cwd ? { cwd } : {}),
-        });
+        const targets = targetsBySession.get(sessionName) || [];
+        if (targets.length === 0) {
+          entries.push({
+            name: sessionName,
+            backend: 'tmux',
+            ...(cwd ? { cwd } : {}),
+          });
+          continue;
+        }
+        for (const target of targets) {
+          entries.push({
+            name: sessionName,
+            backend: 'tmux',
+            stableId: target.stableId,
+            ...(targets.length === 1 && cwd ? { cwd } : {}),
+          });
+        }
       }
     }
     if (deps.backendRuntimes?.herdr || deps.defaultBackend === 'herdr') {
@@ -644,7 +663,10 @@ export function createTerminalControlRuntime(
     }
     return entries.sort((left, right) => {
       const nameOrder = left.name.localeCompare(right.name);
-      return nameOrder || left.backend.localeCompare(right.backend);
+      const backendOrder = left.backend.localeCompare(right.backend);
+      return nameOrder
+        || backendOrder
+        || (left.stableId || '').localeCompare(right.stableId || '');
     });
   }
 
@@ -779,6 +801,17 @@ export function createTerminalControlRuntime(
     if (session.target.backend === 'herdr') {
       deps.backendRuntimes?.herdr?.bindResolvedSession?.(session);
       return;
+    }
+    const existing = sessionNativeTargets.get(session.target.sessionName);
+    if (existing && existing.stableId !== session.target.stableId) {
+      const existingStillLive = readTmuxSessionTargets().some((entry) =>
+        entry.stableId === existing.stableId
+        && entry.socketPath === existing.socketPath);
+      if (existingStillLive) {
+        throw new Error(
+          `session name ${session.target.sessionName} is already bound to a different live tmux identity`,
+        );
+      }
     }
     sessionNativeTargets.set(session.target.sessionName, session.target);
     sessionSocketPaths.set(session.target.sessionName, session.target.socketPath);

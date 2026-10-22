@@ -566,6 +566,9 @@ describe('terminal message runtime explicit error truth', () => {
 
   it('serves an existing mirror after mux list with the exact snapshot request id and no write side effects', async () => {
     const mirror = createReadyMirror();
+    const provenance = resolvedSnapshotSession();
+    mirror.sessionIdentity = provenance.identity.stableId;
+    mirror.sessionTarget = provenance.target;
     mirror.revision = 9;
     mirror.bufferStartIndex = 20;
     mirror.bufferLines = [snapshotRow('zero'), snapshotRow('one')];

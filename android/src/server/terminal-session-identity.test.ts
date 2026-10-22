@@ -200,4 +200,125 @@ describe('terminal session stable identity', () => {
       ['-S', socketA, 'capture-pane', '-p', '-t', '$1:.{top-left}'],
     ]);
   });
+
+  it('rejects rebinding a live native target to a different stable identity with the same display name', async () => {
+    const runtime = createRuntime();
+    const identityA = runtime.readSessionIdentity({ backend: 'tmux', sessionName: 'work' })!;
+    const resolvedA = runtime.resolveExistingSession(identityA.stableId, 'tmux', 'work');
+    if (!resolvedA.ok) {
+      throw new Error(resolvedA.message);
+    }
+    runtime.bindResolvedSession(resolvedA.session);
+
+    rowsBySocket.set(socketB, ['work\t$3\t102\t901'].join('\n'));
+    const stableB = buildTmuxSessionStableId({
+      socketPath: socketB,
+      serverPid: '901',
+      sessionId: '$3',
+      createdAt: 102,
+    });
+    const resolvedB = runtime.resolveExistingSession(stableB, 'tmux', 'work');
+    if (!resolvedB.ok) {
+      throw new Error(resolvedB.message);
+    }
+
+    expect(() => runtime.bindResolvedSession(resolvedB.session)).toThrow(/live|different|bound/u);
+
+    childProcessMocks.spawn.mockImplementation(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+        stderr: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      };
+      child.stdout = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      child.stderr = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      child.stdout.setEncoding = vi.fn();
+      child.stderr.setEncoding = vi.fn();
+      queueMicrotask(() => child.emit('close', 0));
+      return child;
+    });
+    await runtime.writeBackendInputGroup('work', 'echo exact', false, 'tmux');
+
+    expect(childProcessMocks.spawn.mock.calls.map((call) => call[1])).toEqual([
+      ['-S', socketA, 'send-keys', '-t', '$1:.{top-left}', '-l', '--', 'echo exact'],
+    ]);
+  });
+
+  it('replaces a dead native binding when the same display name is recreated', async () => {
+    const runtime = createRuntime();
+    const identityA = runtime.readSessionIdentity({ backend: 'tmux', sessionName: 'work' })!;
+    const resolvedA = runtime.resolveExistingSession(identityA.stableId, 'tmux', 'work');
+    if (!resolvedA.ok) {
+      throw new Error(resolvedA.message);
+    }
+    runtime.bindResolvedSession(resolvedA.session);
+
+    rowsBySocket.set(socketA, ['work\t$9\t200\t900', 'other\t$2\t101\t900'].join('\n'));
+    const stableB = buildTmuxSessionStableId({
+      socketPath: socketA,
+      serverPid: '900',
+      sessionId: '$9',
+      createdAt: 200,
+    });
+    const resolvedB = runtime.resolveExistingSession(stableB, 'tmux', 'work');
+    if (!resolvedB.ok) {
+      throw new Error(resolvedB.message);
+    }
+
+    expect(() => runtime.bindResolvedSession(resolvedB.session)).not.toThrow();
+
+    childProcessMocks.spawn.mockImplementation(() => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+        stderr: EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      };
+      child.stdout = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      child.stderr = new EventEmitter() as EventEmitter & { setEncoding: ReturnType<typeof vi.fn> };
+      child.stdout.setEncoding = vi.fn();
+      child.stderr.setEncoding = vi.fn();
+      queueMicrotask(() => child.emit('close', 0));
+      return child;
+    });
+    await runtime.writeBackendInputGroup('work', 'echo exact', false, 'tmux');
+
+    expect(childProcessMocks.spawn.mock.calls.map((call) => call[1])).toEqual([
+      ['-S', socketA, 'send-keys', '-t', '$9:.{top-left}', '-l', '--', 'echo exact'],
+    ]);
+  });
+
+  it('publishes each distinct native target for a duplicated display name', () => {
+    rowsBySocket.set(socketA, ['work\t$1\t100\t900'].join('\n'));
+    rowsBySocket.set(socketB, ['work\t$3\t102\t901'].join('\n'));
+    const runtime = createRuntime();
+
+    const catalog = runtime.listTerminalSessionCatalog();
+    const workEntries = catalog.filter((entry) => entry.name === 'work');
+    const stableA = buildTmuxSessionStableId({
+      socketPath: socketA,
+      serverPid: '900',
+      sessionId: '$1',
+      createdAt: 100,
+    });
+    const stableB = buildTmuxSessionStableId({
+      socketPath: socketB,
+      serverPid: '901',
+      sessionId: '$3',
+      createdAt: 102,
+    });
+
+    expect(workEntries).toHaveLength(2);
+    expect(workEntries.map((entry) => entry.stableId).sort()).toEqual([stableA, stableB].sort());
+    expect(workEntries.every((entry) => entry.cwd === undefined)).toBe(true);
+    expect(runtime.listTerminalSessions()).toEqual(['work']);
+
+    rowsBySocket.set(socketB, [
+      'work\t$3\t102\t901',
+      'legacy\t$4\tnot-a-number\t901',
+    ].join('\n'));
+    const catalogWithLegacyEntry = runtime.listTerminalSessionCatalog();
+    const legacyEntry = catalogWithLegacyEntry.find((entry) => entry.name === 'legacy');
+
+    expect(legacyEntry).toMatchObject({ name: 'legacy', backend: 'tmux' });
+    expect(legacyEntry).not.toHaveProperty('stableId');
+    expect(runtime.listTerminalSessions()).toEqual(['legacy', 'work']);
+  });
 });

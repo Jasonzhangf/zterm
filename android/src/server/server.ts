@@ -313,6 +313,27 @@ const terminalRuntime = createTerminalRuntime({
   buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
   sanitizeSessionName,
   getMirrorKey,
+  resolveMirrorSessionProvenance: (sessionName, backend) => {
+    try {
+      const identity = terminalControlRuntime.readSessionIdentity({ backend, sessionName });
+      if (!identity) {
+        return null;
+      }
+      const resolution = terminalControlRuntime.resolveExistingSession(
+        identity.stableId,
+        backend,
+        sessionName,
+      );
+      return resolution.ok ? resolution.session : null;
+    } catch (error) {
+      console.warn(
+        `[server] mirror session provenance unavailable for ${sessionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  },
   normalizeTerminalCols,
   normalizeTerminalRows,
   resolveAttachGeometry,

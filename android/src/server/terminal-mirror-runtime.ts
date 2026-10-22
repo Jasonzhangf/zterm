@@ -22,6 +22,7 @@ import type {
   TerminalGeometry,
   TmuxPaneMetrics,
 } from './terminal-runtime-types';
+import type { ResolvedTerminalSession } from './terminal-source-adapter';
 
 export interface TerminalMirrorRuntimeDeps {
   defaultViewport: { cols: number; rows: number };
@@ -45,6 +46,10 @@ export interface TerminalMirrorRuntimeDeps {
   ) => Extract<ServerMessage, { type: 'buffer-sync' }>['payload'] | null;
   sanitizeSessionName: (input?: string) => string;
   getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  resolveMirrorSessionProvenance?: (
+    sessionName: string,
+    backend: 'tmux' | 'herdr',
+  ) => ResolvedTerminalSession | null;
   normalizeTerminalCols: (cols: number | undefined) => number;
   normalizeTerminalRows: (rows: number | undefined) => number;
   resolveAttachGeometry: (options: {
@@ -1210,6 +1215,28 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
   }
 
+  function assertMirrorIdentityCompatible(
+    mirror: SessionMirror | null,
+    resolved: ResolvedTerminalSession | null,
+    sessionName: string,
+  ): void {
+    if (!mirror || !resolved) {
+      return;
+    }
+    const nextStableId = resolved.identity.stableId;
+    if (mirror.sessionIdentity) {
+      if (mirror.sessionIdentity !== nextStableId) {
+        throw new Error(
+          `session name ${sessionName} is already bound to a different live stable identity; refusing to rebind`,
+        );
+      }
+      return;
+    }
+    throw new Error(
+      `session name ${sessionName} has a mirror without established stable identity; refusing to adopt a new identity`,
+    );
+  }
+
   async function attachTmux(session: TerminalSession, payload: TerminalAttachPayload) {
     const resolvedSession = payload.resolvedSession;
     if (
@@ -1234,17 +1261,21 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       throw new Error(`session backend changed after channel allocation: ${session.backend} -> ${requestedBackend}`);
     }
     const nextMirrorKey = deps.getMirrorKey(nextSessionName, requestedBackend);
+    const existingMirror = mirrors.get(nextMirrorKey) || null;
+    if (existingMirror && existingMirror.backend !== requestedBackend) {
+      throw new Error(`session name ${nextSessionName} is already owned by ${existingMirror.backend}`);
+    }
+    const resolvedProvenance = resolvedSession
+      || deps.resolveMirrorSessionProvenance?.(nextSessionName, requestedBackend)
+      || null;
+    assertMirrorIdentityCompatible(existingMirror, resolvedProvenance, nextSessionName);
     if (!attemptPendingAdaptiveWidthCleanup(nextMirrorKey)) {
       throw new Error(`adaptive width cleanup pending for ${nextSessionName}; refusing to attach until cleanup succeeds`);
     }
     session.backend = requestedBackend;
-    if (resolvedSession) {
-      session.sessionIdentity = resolvedSession.identity.stableId;
-      session.sessionTarget = resolvedSession.target;
-    }
-    const existingMirror = mirrors.get(nextMirrorKey) || null;
-    if (existingMirror && existingMirror.backend !== requestedBackend) {
-      throw new Error(`session name ${nextSessionName} is already owned by ${existingMirror.backend}`);
+    if (resolvedProvenance) {
+      session.sessionIdentity = resolvedProvenance.identity.stableId;
+      session.sessionTarget = resolvedProvenance.target;
     }
     const existingTmuxGeometry = existingMirror
       ? null
@@ -1309,9 +1340,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!mirror) {
       mirror = createMirror(nextSessionName, session.backend);
     }
-    if (resolvedSession) {
-      mirror.sessionIdentity = resolvedSession.identity.stableId;
-      mirror.sessionTarget = resolvedSession.target;
+    if (resolvedProvenance) {
+      mirror.sessionIdentity ??= resolvedProvenance.identity.stableId;
+      mirror.sessionTarget ??= resolvedProvenance.target;
     }
     mirror.subscribers.add(session.id);
     if (payload.widthMode === 'adaptive-phone') {

@@ -50,6 +50,7 @@ import type {
   TerminalFileTransferClientMessage,
   TerminalFileTransferMessageRuntime,
 } from './terminal-file-transfer-message-runtime';
+import type { ResolvedTerminalSession } from './terminal-source-adapter';
 
 const TERMINAL_FILE_TRANSFER_MESSAGE_TYPES = new Set<TerminalFileTransferClientMessage['type']>([
   'paste-image-start',
@@ -119,6 +120,29 @@ export interface TerminalMessageRuntime {
   closeConnection: (connection: TerminalTransportConnection) => Promise<void>;
 }
 
+export function createGuardedBindResolvedSession(deps: {
+  mirrors: ReadonlyMap<string, SessionMirror>;
+  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  bindResolvedSession: (session: ResolvedTerminalSession) => void;
+}): (session: ResolvedTerminalSession) => void {
+  return (session) => {
+    const mirror = deps.mirrors.get(
+      deps.getMirrorKey(session.identity.sessionName, session.identity.backend),
+    );
+    if (mirror?.sessionIdentity && mirror.sessionIdentity !== session.identity.stableId) {
+      throw new Error(
+        `session name ${session.identity.sessionName} is already bound to a different live stable identity; refusing to rebind`,
+      );
+    }
+    if (mirror && !mirror.sessionIdentity) {
+      throw new Error(
+        `session name ${session.identity.sessionName} has a mirror without established stable identity; refusing to adopt a new identity`,
+      );
+    }
+    deps.bindResolvedSession(session);
+  };
+}
+
 export function createTerminalMessageRuntime(
   deps: TerminalMessageRuntimeDeps,
 ): TerminalMessageRuntime {
@@ -162,6 +186,13 @@ export function createTerminalMessageRuntime(
     }
   }
 
+  const guardedBindResolvedSession = deps.controlRuntimeDeps.bindResolvedSession
+    ? createGuardedBindResolvedSession({
+        mirrors: deps.controlRuntimeDeps.mirrors,
+        getMirrorKey: deps.controlRuntimeDeps.getMirrorKey,
+        bindResolvedSession: deps.controlRuntimeDeps.bindResolvedSession,
+      })
+    : undefined;
   const muxRuntime = createTerminalMuxChannelRuntime({
     sessions: deps.sessions,
     mirrors: deps.controlRuntimeDeps.mirrors,
@@ -171,7 +202,7 @@ export function createTerminalMessageRuntime(
     releaseMuxChannelSubscriber: deps.channelMuxRuntime.releaseMuxChannelSubscriber,
     sanitizeSessionName: (input) => deps.controlRuntimeDeps.sanitizeSessionName(input),
     resolveExistingSession: deps.controlRuntimeDeps.resolveExistingSession,
-    bindResolvedSession: deps.controlRuntimeDeps.bindResolvedSession,
+    bindResolvedSession: guardedBindResolvedSession,
     attachTmux: (subscriber, payload) => deps.controlRuntimeDeps.attachTmux(subscriber, payload),
     closeSession: deps.closeSession,
     handleMessage: (connection, raw, isBinary) => handleMessage(connection, raw, isBinary),

@@ -35,6 +35,8 @@ function createMirror(overrides: Partial<SessionMirror> = {}): SessionMirror {
     key: 'tmux:work',
     sessionName: 'work',
     backend: 'tmux',
+    sessionIdentity: STABLE_ID,
+    sessionTarget: resolvedSession().target,
     scratchBridge: null,
     lifecycle: 'ready',
     cols: 80,
@@ -262,6 +264,62 @@ describe('createTerminalSnapshotReadRuntime', () => {
     expect(buildHead).not.toHaveBeenCalled();
     expect(buildBody).not.toHaveBeenCalled();
     expectNoWriteCalls(writeSpies);
+  });
+
+  it('returns unavailable instead of relabeling a ready mirror with a different stable identity', () => {
+    const otherStableId = 'tmux:v1:opaque-other-id';
+    const mirror = createMirror({
+      sessionIdentity: otherStableId,
+      sessionTarget: {
+        ...resolvedSession().target,
+        stableId: otherStableId,
+      },
+    });
+    const buildHead = vi.fn(buildBufferHeadPayload);
+    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
+    const sent: TerminalSnapshotResultPayload[] = [];
+    const runtime = createTerminalSnapshotReadRuntime({
+      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
+      readExistingMirror: () => mirror,
+      buildBufferHeadPayload: buildHead,
+      buildRequestedRangeBufferPayload: buildBody,
+      sendSnapshotResult: (result) => {
+        sent.push(result);
+      },
+    });
+
+    const result = runtime.handleRequest(request());
+
+    expect(result).toEqual({ status: 'unavailable', reason: 'mirror_not_present' });
+    expect(sent).toEqual([result]);
+    expect(buildHead).not.toHaveBeenCalled();
+    expect(buildBody).not.toHaveBeenCalled();
+  });
+
+  it('returns unavailable when a ready mirror has no established native provenance', () => {
+    const mirror = createMirror({
+      sessionIdentity: undefined,
+      sessionTarget: undefined,
+    });
+    const buildHead = vi.fn(buildBufferHeadPayload);
+    const buildBody = vi.fn(buildRequestedRangeBufferPayload);
+    const sent: TerminalSnapshotResultPayload[] = [];
+    const runtime = createTerminalSnapshotReadRuntime({
+      resolveExistingSession: () => ({ ok: true, session: resolvedSession() }),
+      readExistingMirror: () => mirror,
+      buildBufferHeadPayload: buildHead,
+      buildRequestedRangeBufferPayload: buildBody,
+      sendSnapshotResult: (result) => {
+        sent.push(result);
+      },
+    });
+
+    const result = runtime.handleRequest(request());
+
+    expect(result).toEqual({ status: 'unavailable', reason: 'mirror_not_present' });
+    expect(sent).toEqual([result]);
+    expect(buildHead).not.toHaveBeenCalled();
+    expect(buildBody).not.toHaveBeenCalled();
   });
 
   it.each([
