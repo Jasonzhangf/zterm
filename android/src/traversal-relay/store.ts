@@ -1,4 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
 import { dirname } from 'path';
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import {
@@ -52,6 +62,22 @@ export interface TraversalRelayStoreData {
   devices: TraversalRelayDeviceRecord[];
 }
 
+export class DeviceCleanupRejectedError extends Error {
+  public readonly rejected: Array<{
+    deviceId: string;
+    reason: 'online' | 'not_owned' | 'not_daemon';
+  }>;
+
+  public constructor(rejected: Array<{
+    deviceId: string;
+    reason: 'online' | 'not_owned' | 'not_daemon';
+  }>) {
+    super('device cleanup rejected');
+    this.name = 'DeviceCleanupRejectedError';
+    this.rejected = rejected.map((entry) => ({ ...entry }));
+  }
+}
+
 export interface TraversalRelayPublicUser {
   id: string;
   username: string;
@@ -84,6 +110,18 @@ function createEmptyStore(): TraversalRelayStoreData {
     users: [],
     tokens: [],
     devices: [],
+  };
+}
+
+function cloneStoreData(data: TraversalRelayStoreData): TraversalRelayStoreData {
+  return {
+    users: data.users.map((user) => ({ ...user })),
+    tokens: data.tokens.map((token) => ({ ...token })),
+    devices: data.devices.map((device) => ({
+      ...device,
+      daemonEndpoints: device.daemonEndpoints.map((endpoint) => ({ ...endpoint })),
+      daemonSessions: device.daemonSessions.map((session) => ({ ...session })),
+    })),
   };
 }
 
@@ -131,6 +169,9 @@ function asStoredDevice(record: Partial<TraversalRelayDeviceRecord>): TraversalR
     createdAt,
     updatedAt,
     lastSeenAt,
+    // Connection flags describe the process that wrote this file. A restarted
+    // relay has no live sockets yet, so loading them as online would create
+    // permanent ghost devices. Sockets re-establish presence after startup.
     clientConnected: false,
     clientLastSeenAt,
     daemonConnected: false,
@@ -184,8 +225,8 @@ function toDirectoryDevice(record: TraversalRelayDeviceRecord): RelayDirectoryDe
           connected: daemonConnected,
           lastSeenAt: record.daemonLastSeenAt,
         },
-        endpoints: daemonConnected ? record.daemonEndpoints : [],
-        sessions: daemonConnected ? record.daemonSessions : [],
+        endpoints: daemonConnected ? record.daemonEndpoints.map((endpoint) => ({ ...endpoint })) : [],
+        sessions: daemonConnected ? record.daemonSessions.map((session) => ({ ...session })) : [],
         lastPublishedAt: record.daemonDirectoryPublishedAt || record.daemonLastSeenAt,
       }
     : null;
@@ -229,27 +270,61 @@ export class TraversalRelayStore {
     };
   }
 
-  private persist() {
+  private persist(data: TraversalRelayStoreData) {
     ensureStoreDir(this.path);
     const tempPath = `${this.path}.tmp`;
-    writeFileSync(tempPath, JSON.stringify(this.data, null, 2));
-    renameSync(tempPath, this.path);
+    let descriptor: number | undefined;
+    try {
+      descriptor = openSync(tempPath, 'w');
+      writeFileSync(descriptor, JSON.stringify(data, null, 2));
+      fsyncSync(descriptor);
+      closeSync(descriptor);
+      descriptor = undefined;
+      renameSync(tempPath, this.path);
+    } catch (error) {
+      if (descriptor !== undefined) {
+        try {
+          closeSync(descriptor);
+        } catch {
+          // Keep the original persistence error.
+        }
+      }
+      try {
+        unlinkSync(tempPath);
+      } catch {
+        // Keep the original persistence error.
+      }
+      throw error;
+    }
   }
 
-  private requireUserById(userId: string) {
-    const user = this.data.users.find((entry) => entry.id === userId);
+  private commitCandidate<T>(
+    mutate: (candidate: TraversalRelayStoreData) => { result: T; commit: boolean },
+  ) {
+    const candidate = cloneStoreData(this.data);
+    const { result, commit } = mutate(candidate);
+    if (!commit) {
+      return result;
+    }
+    this.persist(candidate);
+    this.data = candidate;
+    return result;
+  }
+
+  private requireUserById(data: TraversalRelayStoreData, userId: string) {
+    const user = data.users.find((entry) => entry.id === userId);
     if (!user) {
       throw new Error(`user ${userId} not found`);
     }
     return user;
   }
 
-  private getOrCreateDevice(userId: string, deviceId: string) {
+  private getOrCreateDevice(data: TraversalRelayStoreData, userId: string, deviceId: string) {
     const normalizedDeviceId = normalizeDeviceId(deviceId);
     if (!normalizedDeviceId) {
       throw new Error('deviceId is required');
     }
-    let device = this.data.devices.find((entry) => entry.userId === userId && entry.deviceId === normalizedDeviceId);
+    let device = data.devices.find((entry) => entry.userId === userId && entry.deviceId === normalizedDeviceId);
     if (device) {
       return device;
     }
@@ -273,7 +348,7 @@ export class TraversalRelayStore {
       daemonEndpoints: [],
       daemonSessions: [],
     };
-    this.data.devices.push(device);
+    data.devices.push(device);
     return device;
   }
 
@@ -319,9 +394,10 @@ export class TraversalRelayStore {
       passwordHash: hashPassword(password, salt),
       createdAt: now,
     };
-    this.data.users.push(record);
-    this.persist();
-    return toPublicUser(record);
+    return this.commitCandidate((candidate) => {
+      candidate.users.push({ ...record });
+      return { result: toPublicUser(record), commit: true };
+    });
   }
 
   public login(username: string, password: string) {
@@ -342,12 +418,16 @@ export class TraversalRelayStore {
       createdAt: now,
       lastUsedAt: now,
     };
-    this.data.tokens.push(tokenRecord);
-    this.persist();
-    return {
-      token: tokenRecord.token,
-      user: toPublicUser(user),
-    };
+    return this.commitCandidate((candidate) => {
+      candidate.tokens.push({ ...tokenRecord });
+      return {
+        result: {
+          token: tokenRecord.token,
+          user: toPublicUser(user),
+        },
+        commit: true,
+      };
+    });
   }
 
   public authenticate(token: string) {
@@ -359,9 +439,15 @@ export class TraversalRelayStore {
     if (!user) {
       return null;
     }
-    record.lastUsedAt = stableNow();
-    this.persist();
-    return toPublicUser(user);
+    const lastUsedAt = stableNow();
+    return this.commitCandidate((candidate) => {
+      const candidateRecord = candidate.tokens.find((entry) => entry.token === record.token);
+      if (!candidateRecord) {
+        throw new Error(`token ${record.token} not found`);
+      }
+      candidateRecord.lastUsedAt = lastUsedAt;
+      return { result: toPublicUser(user), commit: true };
+    });
   }
 
   public setClientConnected(options: {
@@ -372,16 +458,17 @@ export class TraversalRelayStore {
     appVersion?: string;
     connected: boolean;
   }) {
-    this.requireUserById(options.userId);
-    const device = this.getOrCreateDevice(options.userId, options.deviceId);
-    this.patchDeviceIdentity(device, options);
     const now = stableNow();
-    device.clientConnected = options.connected;
-    device.updatedAt = now;
-    device.lastSeenAt = now;
-    device.clientLastSeenAt = now;
-    this.persist();
-    return toDeviceSnapshot(device);
+    return this.commitCandidate((candidate) => {
+      this.requireUserById(candidate, options.userId);
+      const device = this.getOrCreateDevice(candidate, options.userId, options.deviceId);
+      this.patchDeviceIdentity(device, options);
+      device.clientConnected = options.connected;
+      device.updatedAt = now;
+      device.lastSeenAt = now;
+      device.clientLastSeenAt = now;
+      return { result: toDeviceSnapshot(device), commit: true };
+    });
   }
 
   public publishDaemonDirectory(options: {
@@ -396,28 +483,31 @@ export class TraversalRelayStore {
     sessions?: RelayTmuxSessionSnapshot[];
     publishedAt?: string;
   }) {
-    this.requireUserById(options.userId);
     const hostId = options.hostId.trim();
-    if (!hostId) {
-      throw new Error('hostId is required');
-    }
-    const device = this.getOrCreateDevice(options.userId, options.deviceId);
-    this.patchDeviceIdentity(device, options);
     const now = stableNow();
     const publishedAt = options.publishedAt?.trim() || now;
-    device.daemonConnected = true;
-    device.daemonHostId = hostId;
-    device.daemonLastSeenAt = now;
-    device.daemonDirectoryPublishedAt = publishedAt;
-    device.updatedAt = now;
-    device.lastSeenAt = now;
-    if (typeof options.daemonVersion === 'string' && options.daemonVersion.trim()) {
-      device.daemonVersion = options.daemonVersion.trim();
-    }
-    device.daemonEndpoints = normalizeRelayEndpointCandidates(options.endpoints, publishedAt);
-    device.daemonSessions = normalizeRelayTmuxSessionSnapshots(options.sessions, publishedAt);
-    this.persist();
-    return toDirectoryDevice(device);
+    return this.commitCandidate((candidate) => {
+      this.requireUserById(candidate, options.userId);
+      if (!hostId) {
+        throw new Error('hostId is required');
+      }
+      const device = this.getOrCreateDevice(candidate, options.userId, options.deviceId);
+      this.patchDeviceIdentity(device, options);
+      device.daemonConnected = true;
+      device.daemonHostId = hostId;
+      device.daemonLastSeenAt = now;
+      device.daemonDirectoryPublishedAt = publishedAt;
+      device.updatedAt = now;
+      device.lastSeenAt = now;
+      if (typeof options.daemonVersion === 'string' && options.daemonVersion.trim()) {
+        device.daemonVersion = options.daemonVersion.trim();
+      }
+      device.daemonEndpoints = normalizeRelayEndpointCandidates(options.endpoints, publishedAt)
+        .map((endpoint) => ({ ...endpoint }));
+      device.daemonSessions = normalizeRelayTmuxSessionSnapshots(options.sessions, publishedAt)
+        .map((session) => ({ ...session }));
+      return { result: toDirectoryDevice(device), commit: true };
+    });
   }
 
   public setDaemonConnected(options: {
@@ -430,24 +520,25 @@ export class TraversalRelayStore {
     daemonVersion?: string;
     connected: boolean;
   }) {
-    this.requireUserById(options.userId);
     const hostId = options.hostId.trim();
-    if (!hostId) {
-      throw new Error('hostId is required');
-    }
-    const device = this.getOrCreateDevice(options.userId, options.deviceId);
-    this.patchDeviceIdentity(device, options);
     const now = stableNow();
-    device.daemonConnected = options.connected;
-    device.daemonHostId = hostId;
-    device.daemonLastSeenAt = now;
-    device.updatedAt = now;
-    device.lastSeenAt = now;
-    if (typeof options.daemonVersion === 'string' && options.daemonVersion.trim()) {
-      device.daemonVersion = options.daemonVersion.trim();
-    }
-    this.persist();
-    return toDeviceSnapshot(device);
+    return this.commitCandidate((candidate) => {
+      this.requireUserById(candidate, options.userId);
+      if (!hostId) {
+        throw new Error('hostId is required');
+      }
+      const device = this.getOrCreateDevice(candidate, options.userId, options.deviceId);
+      this.patchDeviceIdentity(device, options);
+      device.daemonConnected = options.connected;
+      device.daemonHostId = hostId;
+      device.daemonLastSeenAt = now;
+      device.updatedAt = now;
+      device.lastSeenAt = now;
+      if (typeof options.daemonVersion === 'string' && options.daemonVersion.trim()) {
+        device.daemonVersion = options.daemonVersion.trim();
+      }
+      return { result: toDeviceSnapshot(device), commit: true };
+    });
   }
 
   public clearOtherDaemonHostBindings(options: {
@@ -455,42 +546,136 @@ export class TraversalRelayStore {
     deviceId: string;
     hostId: string;
   }) {
-    this.requireUserById(options.userId);
     const deviceId = normalizeDeviceId(options.deviceId);
     const hostId = options.hostId.trim();
-    if (!deviceId || !hostId) {
-      return false;
-    }
     const now = stableNow();
-    let changed = false;
-    for (const device of this.data.devices) {
+    return this.commitCandidate((candidate) => {
+      this.requireUserById(candidate, options.userId);
+      if (!deviceId || !hostId) {
+        return { result: false, commit: false };
+      }
+      let changed = false;
+      for (const device of candidate.devices) {
+        if (
+          device.userId !== options.userId
+          || device.deviceId === deviceId
+          || device.daemonHostId !== hostId
+          || !device.daemonConnected
+        ) {
+          continue;
+        }
+        device.daemonConnected = false;
+        device.daemonLastSeenAt = '';
+        device.daemonHostId = '';
+        device.daemonVersion = '';
+        device.daemonDirectoryPublishedAt = '';
+        device.daemonEndpoints = [];
+        device.daemonSessions = [];
+        device.updatedAt = now;
+        device.lastSeenAt = now;
+        changed = true;
+      }
+      return { result: changed, commit: changed };
+    });
+  }
+
+  public cleanupOfflineDevices(
+    userId: string,
+    deviceIds: readonly string[],
+    isPhysicallyConnected: (deviceId: string, daemonHostId: string) => boolean,
+  ): { removedDeviceIds: string[]; absentDeviceIds: string[] } {
+    this.requireUserById(this.data, userId);
+    if (!Array.isArray(deviceIds) || deviceIds.length < 1 || deviceIds.length > 100) {
+      throw new Error('deviceIds must contain between 1 and 100 unique exact IDs');
+    }
+
+    const requestedDeviceIds = Array.from(deviceIds);
+    const requested = new Set<string>();
+    for (const deviceId of requestedDeviceIds) {
       if (
-        device.userId !== options.userId
-        || device.deviceId === deviceId
-        || device.daemonHostId !== hostId
-        || !device.daemonConnected
+        typeof deviceId !== 'string'
+        || deviceId.length === 0
+        || deviceId.trim() !== deviceId
+        || requested.has(deviceId)
       ) {
+        throw new Error('deviceIds must contain between 1 and 100 unique exact IDs');
+      }
+      requested.add(deviceId);
+    }
+
+    const ownedRowsByDeviceId = new Map<string, TraversalRelayDeviceRecord[]>();
+    const foreignDeviceIds = new Set<string>();
+    for (const device of this.data.devices) {
+      if (!requested.has(device.deviceId)) {
         continue;
       }
-      device.daemonConnected = false;
-      device.daemonLastSeenAt = '';
-      device.daemonHostId = '';
-      device.daemonVersion = '';
-      device.daemonDirectoryPublishedAt = '';
-      device.daemonEndpoints = [];
-      device.daemonSessions = [];
-      device.updatedAt = now;
-      device.lastSeenAt = now;
-      changed = true;
+      if (device.userId === userId) {
+        const rows = ownedRowsByDeviceId.get(device.deviceId) ?? [];
+        rows.push(device);
+        ownedRowsByDeviceId.set(device.deviceId, rows);
+      } else {
+        foreignDeviceIds.add(device.deviceId);
+      }
     }
-    if (changed) {
-      this.persist();
+
+    const removedDeviceIds: string[] = [];
+    const absentDeviceIds: string[] = [];
+    const rejected: Array<{
+      deviceId: string;
+      reason: 'online' | 'not_owned' | 'not_daemon';
+    }> = [];
+    for (const deviceId of requestedDeviceIds) {
+      const ownedRows = ownedRowsByDeviceId.get(deviceId);
+      if (!ownedRows || ownedRows.length === 0) {
+        if (foreignDeviceIds.has(deviceId)) {
+          rejected.push({ deviceId, reason: 'not_owned' });
+        } else {
+          absentDeviceIds.push(deviceId);
+        }
+        continue;
+      }
+      if (ownedRows.some((device) => device.clientConnected || device.daemonConnected)) {
+        rejected.push({ deviceId, reason: 'online' });
+        continue;
+      }
+      if (ownedRows.some((device) => !device.daemonHostId)) {
+        rejected.push({ deviceId, reason: 'not_daemon' });
+        continue;
+      }
+      if (ownedRows.some((device) => isPhysicallyConnected(deviceId, device.daemonHostId))) {
+        rejected.push({ deviceId, reason: 'online' });
+        continue;
+      }
+      removedDeviceIds.push(deviceId);
     }
-    return changed;
+
+    if (rejected.length > 0) {
+      throw new DeviceCleanupRejectedError(rejected);
+    }
+    if (removedDeviceIds.length === 0) {
+      return {
+        removedDeviceIds: [],
+        absentDeviceIds: absentDeviceIds.slice(),
+      };
+    }
+
+    const removed = new Set(removedDeviceIds);
+    return this.commitCandidate((candidate) => {
+      candidate.devices = candidate.devices.filter(
+        (device) => device.userId !== userId || !removed.has(device.deviceId),
+      );
+      return {
+        result: {
+          removedDeviceIds: removedDeviceIds.slice(),
+          absentDeviceIds: absentDeviceIds.slice(),
+        },
+        commit: true,
+      };
+    });
   }
 
   public listDevices(userId: string) {
-    this.requireUserById(userId);
+    this.requireUserById(this.data, userId);
     return this.data.devices
       .filter((entry) => entry.userId === userId)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.deviceId.localeCompare(right.deviceId))
@@ -498,7 +683,7 @@ export class TraversalRelayStore {
   }
 
   public getAccountDirectory(userId: string): RelayAccountDirectory {
-    const user = this.requireUserById(userId);
+    const user = this.requireUserById(this.data, userId);
     const devices = this.data.devices
       .filter((entry) => entry.userId === userId)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.deviceId.localeCompare(right.deviceId))

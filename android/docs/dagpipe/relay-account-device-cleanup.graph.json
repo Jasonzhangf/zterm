@@ -1,0 +1,57 @@
+{
+  "id": "relay.account_device_cleanup",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "extract_cleanup_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": ["arc.request"],
+      "output": { "id": "arc.cleanup_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "validate_cleanup_request",
+      "operator": "relay.account_device_cleanup.validate",
+      "operator_version": "0.1",
+      "inputs": ["arc.cleanup_request"],
+      "output": { "id": "arc.validated_cleanup", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "apply_device_cleanup",
+      "operator": "relay.account_device_cleanup.apply",
+      "operator_version": "0.1",
+      "inputs": ["arc.validated_cleanup"],
+      "output": { "id": "arc.cleanup_outcome", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_cleanup_result",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": ["arc.cleanup_request", "arc.validated_cleanup", "arc.cleanup_outcome"],
+      "output": { "id": "arc.result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "extract_cleanup_request", "to": "validate_cleanup_request", "arc_id": "arc.cleanup_request" },
+    { "from": "validate_cleanup_request", "to": "apply_device_cleanup", "arc_id": "arc.validated_cleanup" },
+    { "from": "extract_cleanup_request", "to": "collect_cleanup_result", "arc_id": "arc.cleanup_request" },
+    { "from": "validate_cleanup_request", "to": "collect_cleanup_result", "arc_id": "arc.validated_cleanup" },
+    { "from": "apply_device_cleanup", "to": "collect_cleanup_result", "arc_id": "arc.cleanup_outcome" }
+  ],
+  "outputs": ["arc.result"]
+}

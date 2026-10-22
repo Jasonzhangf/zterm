@@ -62,7 +62,7 @@ function cliObject(config: JsonObject, path: string) {
   return cli;
 }
 
-function safeGeneration(value: unknown) {
+export function safeAuthGeneration(value: unknown) {
   if (value === undefined || value === null) {
     return 0;
   }
@@ -106,7 +106,7 @@ export class AccountState {
   }, signal?: AbortSignal): Promise<LoginBeginResult> {
     return this.store.update<LoginBeginResult>((latest) => {
       const cli = cliObject(latest, this.store.path);
-      const currentGeneration = safeGeneration(cli.authGeneration);
+      const currentGeneration = safeAuthGeneration(cli.authGeneration);
       if (currentGeneration === undefined || currentGeneration === Number.MAX_SAFE_INTEGER) {
         throw new ConfigStoreError(
           'invalid_config',
@@ -151,7 +151,7 @@ export class AccountState {
   ): Promise<LoginCommitResult> {
     return this.store.update<LoginCommitResult>((latest) => {
       const cli = cliObject(latest, this.store.path);
-      const currentGeneration = safeGeneration(cli.authGeneration);
+      const currentGeneration = safeAuthGeneration(cli.authGeneration);
       if (currentGeneration === undefined) {
         throw new ConfigStoreError(
           'invalid_config',
@@ -186,7 +186,7 @@ export class AccountState {
   async logout(signal?: AbortSignal): Promise<LogoutResult> {
     return this.store.update((latest) => {
       const cli = cliObject(latest, this.store.path);
-      const currentGeneration = safeGeneration(cli.authGeneration);
+      const currentGeneration = safeAuthGeneration(cli.authGeneration);
       if (currentGeneration === undefined || currentGeneration === Number.MAX_SAFE_INTEGER) {
         throw new ConfigStoreError(
           'invalid_config',

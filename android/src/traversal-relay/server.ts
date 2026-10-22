@@ -9,8 +9,26 @@ import {
   type RelayEndpointCandidate,
   type RelayTmuxSessionSnapshot,
 } from '@zterm/shared/relay-directory';
+import {
+  CLI_SLOT_CONFIG_SCHEMA_VERSION,
+  SlotConfigValidationError,
+  parseSyncedSlot,
+  parseSyncedSlotBinding,
+  parseSyncedSlots,
+  type CloudSlotState,
+  type SyncedSlotBinding,
+} from '@zterm/shared/connection/cli-slot-config';
 import { TraversalRelayClientDebugStore } from './client-debug-store';
-import { TraversalRelayStore, type TraversalRelayPublicUser } from './store';
+import {
+  DeviceCleanupRejectedError,
+  TraversalRelayStore,
+  type TraversalRelayPublicUser,
+} from './store';
+import {
+  RelaySlotConfigStore,
+  SlotConfigPersistenceError,
+  SlotConfigUnavailableError,
+} from './slot-config-store';
 import {
   asString,
   clientPeerLeaseKey,
@@ -456,6 +474,9 @@ const RELAY_CLIENT_PEER_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 mkdirSync(dirname(STORE_PATH), { recursive: true });
 mkdirSync(UPDATES_DIR, { recursive: true });
 const store = new TraversalRelayStore(STORE_PATH);
+const slotConfigStore = new RelaySlotConfigStore(
+  join(dirname(STORE_PATH), 'cli-slot-config.json'),
+);
 const hosts = new Map<string, RelayHostConnection>();
 const clients = new Map<string, RelayClientConnection>();
 const idleClients = new Map<string, RelayClientConnection>();
@@ -579,8 +600,260 @@ function broadcastDevices(userId: string) {
   }
 }
 
+const MAX_CLOUD_REQUEST_BYTES = 128 * 1024;
+
+class ApiRouteError extends Error {
+  public constructor(
+    public readonly statusCode: number,
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ApiRouteError';
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function rejectUnknownBodyKeys(
+  body: Record<string, unknown>,
+  allowedKeys: readonly string[],
+  code: string,
+): void {
+  const allowed = new Set(allowedKeys);
+  for (const key of Object.keys(body)) {
+    if (!allowed.has(key)) {
+      throw new ApiRouteError(400, code, `${key}: unknown field`);
+    }
+  }
+}
+
+function extractBearerAccessToken(request: IncomingMessage): string {
+  const authorization = asString(request.headers.authorization);
+  if (!authorization.toLowerCase().startsWith('bearer ')) {
+    return '';
+  }
+  return authorization.slice(7).trim();
+}
+
+function authenticateBearerRequest(request: IncomingMessage): TraversalRelayPublicUser {
+  const accessToken = extractBearerAccessToken(request);
+  if (!accessToken) {
+    throw new ApiRouteError(401, 'auth_invalid', 'bearer authentication is required');
+  }
+  const user = store.authenticate(accessToken);
+  if (!user) {
+    throw new ApiRouteError(401, 'auth_invalid', 'invalid access token');
+  }
+  return user;
+}
+
+async function readLimitedJsonBody(
+  request: IncomingMessage,
+  errorCode: string,
+): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  let totalBytes = 0;
+  let tooLarge = false;
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > MAX_CLOUD_REQUEST_BYTES) {
+      tooLarge = true;
+      chunks.length = 0;
+      continue;
+    }
+    if (!tooLarge) {
+      chunks.push(buffer);
+    }
+  }
+  if (tooLarge) {
+    throw new ApiRouteError(413, 'request_too_large', 'request body exceeds 128 KiB');
+  }
+  const raw = Buffer.concat(chunks).toString('utf-8');
+  if (!raw.trim()) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    throw new ApiRouteError(400, errorCode, 'request body must be valid JSON');
+  }
+}
+
+async function readBoundedJsonObject(
+  request: IncomingMessage,
+  errorCode: string,
+): Promise<Record<string, unknown>> {
+  const parsed = await readLimitedJsonBody(request, errorCode);
+  if (parsed === undefined) {
+    throw new ApiRouteError(400, errorCode, 'request body is required');
+  }
+  if (!isRecord(parsed)) {
+    throw new ApiRouteError(400, errorCode, 'request body must be a JSON object');
+  }
+  return parsed;
+}
+
+function sendSlotConfigSuccess(
+  response: ServerResponse,
+  user: TraversalRelayPublicUser,
+  config: CloudSlotState,
+): void {
+  serveJson(response, {
+    ok: true,
+    schemaVersion: CLI_SLOT_CONFIG_SCHEMA_VERSION,
+    user: { id: user.id },
+    config,
+  });
+}
+
+function handleApiRouteError(response: ServerResponse, error: unknown): void {
+  if (error instanceof ApiRouteError) {
+    serveJson(response, {
+      ok: false,
+      error: { code: error.code, message: error.message },
+    }, error.statusCode);
+    return;
+  }
+  if (error instanceof SlotConfigValidationError) {
+    serveJson(response, {
+      ok: false,
+      error: { code: 'invalid_slot_config', message: error.message },
+    }, 400);
+    return;
+  }
+  if (error instanceof SlotConfigUnavailableError) {
+    serveJson(response, {
+      ok: false,
+      error: { code: 'slot_config_unavailable', message: 'slot config is unavailable' },
+    }, 503);
+    return;
+  }
+  if (error instanceof SlotConfigPersistenceError) {
+    serveJson(response, {
+      ok: false,
+      error: { code: 'persistence_failed', message: 'slot config persistence failed' },
+    }, 503);
+    return;
+  }
+  if (error instanceof DeviceCleanupRejectedError) {
+    serveJson(response, {
+      ok: false,
+      error: { code: 'device_cleanup_rejected', message: 'device cleanup rejected' },
+    }, 409);
+    return;
+  }
+  console.error('relay api request failed', error);
+  serveJson(response, {
+    ok: false,
+    error: { code: 'persistence_failed', message: 'relay persistence failed' },
+  }, 503);
+}
+
+function parseSlotNumberFromPath(raw: string): number {
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    throw new SlotConfigValidationError('slot', 'must be an integer from 1 to 20');
+  }
+  return Number.parseInt(raw, 10);
+}
+
+// Preserve exact opaque identities, but reject values that are only whitespace.
+function assertSlotBindingIdentities(binding: SyncedSlotBinding): void {
+  const identities: Array<[string, string]> = [
+    ['server.deviceId', binding.server.deviceId],
+    ['server.daemonHostId', binding.server.daemonHostId],
+    ['session.stableId', binding.session.stableId],
+  ];
+  for (const [field, value] of identities) {
+    if (value.trim().length === 0) {
+      throw new SlotConfigValidationError(field, 'must not be blank');
+    }
+  }
+}
+
+function validateCleanupDeviceIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 100) {
+    throw new ApiRouteError(
+      400,
+      'invalid_device_set',
+      'deviceIds must contain between 1 and 100 unique exact IDs',
+    );
+  }
+  const deviceIds: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of value) {
+    if (
+      typeof entry !== 'string'
+      || entry.length === 0
+      || entry.trim() !== entry
+      || seen.has(entry)
+    ) {
+      throw new ApiRouteError(
+        400,
+        'invalid_device_set',
+        'deviceIds must contain between 1 and 100 unique exact IDs',
+      );
+    }
+    seen.add(entry);
+    deviceIds.push(entry);
+  }
+  return deviceIds;
+}
+
+function isTrackedSocketPresent(socket: WebSocket): boolean {
+  return socket.readyState !== WebSocket.CLOSED;
+}
+
+function isDevicePhysicallyConnected(
+  userId: string,
+  deviceId: string,
+  daemonHostId: string,
+): boolean {
+  for (const host of hosts.values()) {
+    if (
+      host.userId === userId
+      && (host.deviceId === deviceId || host.hostId === daemonHostId)
+      && isTrackedSocketPresent(host.socket)
+    ) {
+      return true;
+    }
+  }
+  for (const client of clients.values()) {
+    if (
+      client.userId === userId
+      && (client.deviceId === deviceId || client.hostId === daemonHostId)
+      && isTrackedSocketPresent(client.socket)
+    ) {
+      return true;
+    }
+  }
+  for (const client of idleClients.values()) {
+    if (
+      client.userId === userId
+      && (client.deviceId === deviceId || client.hostId === daemonHostId)
+      && isTrackedSocketPresent(client.socket)
+    ) {
+      return true;
+    }
+  }
+  for (const connection of deviceStreams.values()) {
+    if (
+      connection.userId === userId
+      && connection.deviceId === deviceId
+      && isTrackedSocketPresent(connection.socket)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
   writeCorsHeaders(response);
+  response.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,PUT,OPTIONS');
   if (request.method === 'OPTIONS') {
     response.statusCode = 204;
     response.end();
@@ -688,6 +961,101 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
       user,
       devices: store.listDevices(user.id),
     });
+    return;
+  }
+
+  if (request.method === 'GET' && pathname === routePath('/api/cli/slots')) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const config = slotConfigStore.read(user.id);
+      sendSlotConfigSuccess(response, user, config);
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === 'PUT' && pathname === routePath('/api/cli/slots')) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const body = await readBoundedJsonObject(request, 'invalid_request');
+      rejectUnknownBodyKeys(body, ['schemaVersion', 'slots'], 'invalid_request');
+      if (body.schemaVersion !== CLI_SLOT_CONFIG_SCHEMA_VERSION) {
+        throw new SlotConfigValidationError(
+          'schemaVersion',
+          `must be ${CLI_SLOT_CONFIG_SCHEMA_VERSION}`,
+        );
+      }
+      const slots = parseSyncedSlots(body.slots);
+      for (const slot of slots) {
+        assertSlotBindingIdentities(slot);
+      }
+      const config = slotConfigStore.replaceAll(user.id, slots);
+      sendSlotConfigSuccess(response, user, config);
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
+    return;
+  }
+
+  const singleSlotPrefix = routePath('/api/cli/slots/');
+  if (request.method === 'PUT' && pathname.startsWith(singleSlotPrefix)) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const slot = parseSlotNumberFromPath(pathname.slice(singleSlotPrefix.length));
+      const body = await readBoundedJsonObject(request, 'invalid_request');
+      rejectUnknownBodyKeys(body, ['schemaVersion', 'binding'], 'invalid_request');
+      if (body.schemaVersion !== CLI_SLOT_CONFIG_SCHEMA_VERSION) {
+        throw new SlotConfigValidationError(
+          'schemaVersion',
+          `must be ${CLI_SLOT_CONFIG_SCHEMA_VERSION}`,
+        );
+      }
+      const binding = parseSyncedSlotBinding(body.binding);
+      assertSlotBindingIdentities(binding);
+      parseSyncedSlot({ ...binding, slot });
+      const config = slotConfigStore.replaceSlot(user.id, slot, binding);
+      sendSlotConfigSuccess(response, user, config);
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && pathname === routePath('/api/devices/cleanup')) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const body = await readBoundedJsonObject(request, 'invalid_device_set');
+      rejectUnknownBodyKeys(body, ['deviceIds'], 'invalid_device_set');
+      const deviceIds = validateCleanupDeviceIds(body.deviceIds);
+      const result = store.cleanupOfflineDevices(
+        user.id,
+        deviceIds,
+        (deviceId, daemonHostId) => isDevicePhysicallyConnected(
+          user.id,
+          deviceId,
+          daemonHostId,
+        ),
+      );
+      if (result.removedDeviceIds.length > 0) {
+        try {
+          broadcastDevices(user.id);
+        } catch (error) {
+          console.warn(
+            'device cleanup committed but directory notification failed',
+            error,
+          );
+        }
+      }
+      serveJson(response, {
+        ok: true,
+        user: { id: user.id },
+        removedDeviceIds: result.removedDeviceIds,
+        absentDeviceIds: result.absentDeviceIds,
+      });
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
     return;
   }
 

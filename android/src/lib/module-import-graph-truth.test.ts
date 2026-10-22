@@ -41,6 +41,7 @@ function read(relativePath: string) {
 }
 
 const SHARED_V2_SOURCE_FILES = [
+  'packages/shared/src/connection/cli-slot-config.ts',
   'packages/shared/src/terminal/control-contract.ts',
   'packages/shared/src/terminal/node-contract.ts',
   'packages/shared/src/terminal/debug-contract.ts',

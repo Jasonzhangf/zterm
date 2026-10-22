@@ -9,7 +9,14 @@ import type {
   RelayDirectoryDaemon,
   RelayEndpointCandidate,
 } from '../../../shared/src/connection/relay-directory.js';
-import type { SharedConfigStore } from '../../../shared/src/node/shared-config.js';
+import {
+  normalizeSlotAlias,
+  SlotConfigValidationError,
+} from '../../../shared/src/connection/cli-slot-config.js';
+import {
+  ConfigStoreError,
+  type SharedConfigStore,
+} from '../../../shared/src/node/shared-config.js';
 import {
   PromptCancelledError,
   type PromptPort,
@@ -78,6 +85,24 @@ export type SlotListCommandResult =
   | { kind: 'ok'; value: { slots: SlotListEntry[] } }
   | CommandCancelled
   | CommandFailed;
+
+export interface SlotRenameCommandOptions {
+  store: SharedConfigStore;
+  slot: number;
+  name: string;
+  signal?: AbortSignal;
+}
+
+export type SlotRenameCommandResult =
+  | {
+      kind: 'ok';
+      value: {
+        slot: number;
+        binding: CliSlotBinding;
+      };
+    }
+  | CommandCancelled
+  | (CommandFailed & { current?: CliSlotBinding });
 
 export interface SelectSlotCommandOptions {
   store: SharedConfigStore;
@@ -166,6 +191,7 @@ function noSlotsFailure(): CommandFailed {
 
 function isCancellation(error: unknown) {
   return error instanceof PromptCancelledError
+    || (error instanceof ConfigStoreError && error.code === 'config_aborted')
     || (error instanceof Error && error.name === 'AbortError');
 }
 
@@ -218,6 +244,21 @@ function sessionLabel(session: SlotSessionTarget) {
   return `${session.name} · ${session.backend} · ${session.stableId}`;
 }
 
+export function slotDisplayLabel(entry: SlotListEntry): string {
+  const alias = entry.binding.alias?.trim();
+  const identity = alias
+    ? alias
+    : `${entry.binding.server.displayName} / ${entry.binding.session.name}`;
+  return [
+    `槽位 ${entry.slot}`,
+    identity,
+    entry.binding.server.displayName,
+    entry.binding.session.name,
+    entry.binding.session.backend,
+    entry.binding.widthMode,
+  ].join(' · ');
+}
+
 function mapFailure(stage: string, error: unknown, code: string, message: string): CommandFailed {
   return {
     kind: 'failed',
@@ -235,6 +276,87 @@ export async function slotListCommand(
   } catch (error) {
     if (isCancellation(error)) return { kind: 'cancelled', stage: 'list' };
     return mapFailure('list', error, 'slot_list_failed', '无法读取本地槽位。');
+  }
+}
+
+export async function slotRenameCommand(
+  options: SlotRenameCommandOptions,
+): Promise<SlotRenameCommandResult> {
+  if (!Number.isInteger(options.slot) || options.slot < 1 || options.slot > 20) {
+    return invalidSlot(options.slot);
+  }
+
+  try {
+    normalizeSlotAlias(options.name);
+  } catch (error) {
+    if (error instanceof SlotConfigValidationError) {
+      return {
+        kind: 'failed',
+        stage: 'validate',
+        error: {
+          code: 'invalid_alias',
+          message: '槽位别名无效。',
+          action: '请使用 1 到 80 个字符，且不要包含控制字符。',
+        },
+      };
+    }
+    return mapFailure('validate', error, 'invalid_alias', '槽位别名无效。');
+  }
+
+  const slotStore = new SlotStore(options.store);
+  let original: CliSlotBinding | undefined;
+  try {
+    original = await slotStore.read(options.slot, options.signal);
+  } catch (error) {
+    if (isCancellation(error)) return { kind: 'cancelled', stage: 'read' };
+    return mapFailure('read', error, 'slot_read_failed', '无法读取槽位。');
+  }
+  if (!original) {
+    return {
+      kind: 'failed',
+      stage: 'rename',
+      error: {
+        code: 'slot_not_found',
+        message: `槽位 ${options.slot} 未配置。`,
+        action: '请先运行 zterm slot set <1..20>。',
+      },
+    };
+  }
+
+  try {
+    const result = await slotStore.renameIfUnchanged({
+      slot: options.slot,
+      expectedOriginal: original,
+      alias: options.name,
+      signal: options.signal,
+    });
+    if (result.kind === 'slot_missing') {
+      return {
+        kind: 'failed',
+        stage: 'rename',
+        error: {
+          code: 'slot_not_found',
+          message: `槽位 ${options.slot} 未配置。`,
+          action: '请先运行 zterm slot set <1..20>。',
+        },
+      };
+    }
+    if (result.kind === 'slot_changed') {
+      return {
+        kind: 'failed',
+        stage: 'save',
+        error: {
+          code: 'slot_changed',
+          message: '槽位已被其他进程修改，本次别名未覆盖。',
+          action: '请重新运行 zterm slot rename。',
+        },
+        current: result.current,
+      };
+    }
+    return { kind: 'ok', value: { slot: result.slot, binding: result.binding } };
+  } catch (error) {
+    if (isCancellation(error)) return { kind: 'cancelled', stage: 'save' };
+    return mapFailure('save', error, 'slot_rename_failed', '无法保存槽位别名。');
   }
 }
 
@@ -256,7 +378,7 @@ export async function selectSlotCommand(
     selectedSlot = await options.prompts.select(
       '选择槽位',
       slots.map((entry) => ({
-        label: `槽位 ${entry.slot} · ${entry.binding.session.name}`,
+        label: slotDisplayLabel(entry),
         value: entry.slot,
       })),
     );
@@ -539,6 +661,7 @@ export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetRe
     }
 
     const binding: CliSlotBinding = {
+      ...(original?.alias === undefined ? {} : { alias: original.alias }),
       account: {
         relayBaseUrl: auth.relayBaseUrl,
         userId: auth.userId,

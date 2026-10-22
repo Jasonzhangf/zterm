@@ -18,8 +18,11 @@ import {
   type PromptPort,
 } from '../prompts.js';
 import {
+  CommandContractError,
   loginCommand,
   logoutCommand,
+  projectCliAuthBaseline,
+  readStoredCliAuth,
   type LoginCommandOptions,
 } from './auth.js';
 
@@ -177,6 +180,17 @@ function loginOptions(
     createLoginId: () => 'login-new',
     now: () => '2026-10-20T00:10:00.000Z',
   };
+}
+
+function expectInvalidConfig(run: () => unknown) {
+  try {
+    run();
+  } catch (error) {
+    expect(error).toBeInstanceOf(CommandContractError);
+    expect(error).toMatchObject({ code: 'invalid_config' });
+    return;
+  }
+  throw new Error('expected CommandContractError invalid_config');
 }
 
 describe('CLI auth commands', () => {
@@ -489,5 +503,220 @@ describe('CLI auth commands', () => {
     expect(config.zterm.cli.authGeneration).toBe(10);
     expect(config.zterm.cli.auth).toBeUndefined();
     expect(config.zterm.cli.slots).toEqual({ '1': { session: { name: 'keep' } } });
+  });
+});
+
+describe('CLI auth baseline projection', () => {
+  it('projects the same stored auth and generation from one real config snapshot', async () => {
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          authGeneration: 3,
+          server: { relayBaseUrl: SERVER },
+          auth: OLD_AUTH,
+          unknownCliField: { keep: true },
+        },
+      },
+      unknownRoot: ['keep'],
+    });
+
+    const snapshot = await store.read();
+    const fileBefore = readFileSync(getSharedConfigPath(homeDir), 'utf8');
+    const stored = await readStoredCliAuth(store);
+    const baseline = projectCliAuthBaseline(snapshot.config);
+    const fileAfter = readFileSync(getSharedConfigPath(homeDir), 'utf8');
+
+    expect(stored).toEqual({ relayBaseUrl: SERVER, ...OLD_AUTH });
+    expect(baseline).toEqual({ authGeneration: 3, auth: stored });
+    expect(fileAfter).toBe(fileBefore);
+    expect(snapshot.config.zterm).toMatchObject({
+      cli: {
+        authGeneration: 3,
+        server: { relayBaseUrl: SERVER },
+        auth: OLD_AUTH,
+        unknownCliField: { keep: true },
+      },
+    });
+  });
+
+  it('defaults authGeneration to the existing account-state default', async () => {
+    const { store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: SERVER },
+          auth: OLD_AUTH,
+        },
+      },
+    });
+
+    const baseline = projectCliAuthBaseline((await store.read()).config);
+    expect(baseline?.authGeneration).toBe(0);
+  });
+
+  it('makes a logout generation change visible through the projected baseline', async () => {
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          authGeneration: 4,
+          server: { relayBaseUrl: SERVER },
+          auth: OLD_AUTH,
+        },
+      },
+    });
+
+    const before = projectCliAuthBaseline((await store.read()).config);
+    const result = await logoutCommand({ store });
+    const afterConfig = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+    const after = projectCliAuthBaseline(afterConfig);
+
+    expect(before).toMatchObject({ authGeneration: 4 });
+    expect(result).toMatchObject({ kind: 'ok', value: { generation: 5 } });
+    expect(after).toBeUndefined();
+    expect(afterConfig.zterm.cli.authGeneration).toBe(5);
+    expect(afterConfig.zterm.cli.auth).toBeUndefined();
+  });
+
+  it('makes an interactive login replacement visible through the projected baseline', async () => {
+    const { store } = await createStore({
+      zterm: {
+        cli: {
+          authGeneration: 6,
+          server: { relayBaseUrl: SERVER },
+          auth: OLD_AUTH,
+        },
+      },
+    });
+    const fetchImpl = relayFetch(() =>
+      jsonResponse(loginPayload(SERVER, 'replacement-access-secret')),
+    );
+    const prompts = new ControlledPrompts({
+      text: ['jason'],
+      password: ['interactive-password-secret'],
+    });
+
+    const result = await loginCommand(
+      loginOptions(store, new AccountClient(fetchImpl), prompts),
+    );
+    const baseline = projectCliAuthBaseline((await store.read()).config);
+
+    expect(result).toMatchObject({ kind: 'ok', value: { generation: 7 } });
+    expect(baseline).toEqual({
+      authGeneration: 7,
+      auth: {
+        relayBaseUrl: SERVER,
+        loginId: 'login-new',
+        userId: USER.id,
+        username: USER.username,
+        accessToken: 'replacement-access-secret',
+        authenticatedAt: '2026-10-20T00:10:00.000Z',
+      },
+    });
+  });
+
+  it('returns undefined when no stored auth exists', async () => {
+    const { store } = await createStore({
+      zterm: {
+        cli: {
+          authGeneration: 9,
+          server: { relayBaseUrl: SERVER },
+        },
+      },
+    });
+
+    const baseline = projectCliAuthBaseline((await store.read()).config);
+    expect(baseline).toBeUndefined();
+  });
+
+  it('preserves explicit invalid_config errors for malformed generation and stored auth', async () => {
+    const malformedGeneration = await createStore({
+      zterm: {
+        cli: {
+          authGeneration: -1,
+          server: { relayBaseUrl: SERVER },
+          auth: OLD_AUTH,
+        },
+      },
+    });
+    const malformedSnapshot = await malformedGeneration.store.read();
+    expectInvalidConfig(() => projectCliAuthBaseline(malformedSnapshot.config));
+
+    const authWithoutToken = {
+      loginId: OLD_AUTH.loginId,
+      userId: OLD_AUTH.userId,
+      username: OLD_AUTH.username,
+      authenticatedAt: OLD_AUTH.authenticatedAt,
+    };
+    const missingToken = await createStore({
+      zterm: {
+        cli: {
+          authGeneration: 2,
+          server: { relayBaseUrl: SERVER },
+          auth: authWithoutToken,
+        },
+      },
+    });
+    await expect(readStoredCliAuth(missingToken.store)).rejects.toMatchObject({
+      name: 'CommandContractError',
+      code: 'invalid_config',
+    });
+    const missingTokenSnapshot = await missingToken.store.read();
+    expectInvalidConfig(() => projectCliAuthBaseline(missingTokenSnapshot.config));
+
+    const missingServer = await createStore({
+      zterm: {
+        cli: {
+          authGeneration: 2,
+          auth: OLD_AUTH,
+        },
+      },
+    });
+    await expect(readStoredCliAuth(missingServer.store)).rejects.toMatchObject({
+      name: 'CommandContractError',
+      code: 'invalid_config',
+    });
+    const missingServerSnapshot = await missingServer.store.read();
+    expectInvalidConfig(() => projectCliAuthBaseline(missingServerSnapshot.config));
+
+    const nonObjectAuth = await createStore({
+      zterm: {
+        cli: {
+          authGeneration: 2,
+          server: { relayBaseUrl: SERVER },
+          auth: 'not-an-object',
+        },
+      },
+    });
+    await expect(readStoredCliAuth(nonObjectAuth.store)).rejects.toMatchObject({
+      name: 'CommandContractError',
+      code: 'invalid_config',
+    });
+    const nonObjectSnapshot = await nonObjectAuth.store.read();
+    expectInvalidConfig(() => projectCliAuthBaseline(nonObjectSnapshot.config));
+  });
+
+  it('projects copies without mutating the supplied config document', () => {
+    const config = {
+      zterm: {
+        cli: {
+          authGeneration: 3,
+          server: { relayBaseUrl: SERVER },
+          auth: { ...OLD_AUTH },
+          unknownCliField: { keep: true },
+        },
+      },
+      unknownRoot: ['keep'],
+    };
+    const before = JSON.stringify(config);
+
+    const baseline = projectCliAuthBaseline(config);
+
+    expect(baseline).toEqual({
+      authGeneration: 3,
+      auth: { relayBaseUrl: SERVER, ...OLD_AUTH },
+    });
+    expect(JSON.stringify(config)).toBe(before);
+    expect(baseline?.auth).not.toBe(config.zterm.cli.auth);
+    baseline!.auth.username = 'changed';
+    expect(config.zterm.cli.auth.username).toBe(USER.username);
   });
 });

@@ -10,8 +10,10 @@ import {
   statSync,
   writeFileSync,
 } from 'fs';
+import { createRequire } from 'module';
 import { dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { resolveNpmInvocation } from '../../packages/cli/scripts/process-entry.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDir, '..');
@@ -23,6 +25,7 @@ const npmPackageName = process.env.ZTERM_RELAY_SERVER_NPM_NAME || '@jsonstudio/z
 const npmRoot = resolve(releaseDistDir, 'relay-server-npm');
 const npmPackageDir = resolve(npmRoot, npmPackageName.replace('/', '__'));
 const runtimeDir = resolve(npmPackageDir, 'runtime');
+const cliRequire = createRequire(resolve(workspaceRoot, 'packages/cli/package.json'));
 
 function sha256(filePath) {
   const hash = createHash('sha256');
@@ -41,40 +44,19 @@ function requirePath(path, message) {
   }
 }
 
-function resolveEsbuildBin() {
-  const candidates = execFileSync(
-    'bash',
-    [
-      '-lc',
-      `{
-        ls "${projectRoot}"/node_modules/.pnpm/esbuild@*/node_modules/esbuild/bin/esbuild 2>/dev/null || true
-        ls "${workspaceRoot}"/node_modules/.pnpm/esbuild@*/node_modules/esbuild/bin/esbuild 2>/dev/null || true
-      } | sort -V | tail -n 1`,
-    ],
-    { encoding: 'utf8' },
-  ).trim();
-  if (!candidates) {
-    throw new Error(`missing esbuild under ${projectRoot}/node_modules/.pnpm or ${workspaceRoot}/node_modules/.pnpm`);
-  }
-  return candidates;
-}
-
-const esbuildBin = resolveEsbuildBin();
-
 rmSync(npmPackageDir, { recursive: true, force: true });
 mkdirSync(resolve(npmPackageDir, 'bin'), { recursive: true });
 mkdirSync(runtimeDir, { recursive: true });
 
-execFileSync(esbuildBin, [
-  resolve(projectRoot, 'src/traversal-relay/server.ts'),
-  '--bundle',
-  '--platform=node',
-  '--format=cjs',
-  '--target=node20',
-  '--outfile=' + resolve(runtimeDir, 'server.cjs'),
-  '--external:bufferutil',
-  '--external:utf-8-validate',
-], { stdio: 'inherit' });
+cliRequire('esbuild').buildSync({
+  entryPoints: [resolve(projectRoot, 'src/traversal-relay/server.ts')],
+  bundle: true,
+  platform: 'node',
+  format: 'cjs',
+  target: 'node20',
+  outfile: resolve(runtimeDir, 'server.cjs'),
+  external: ['bufferutil', 'utf-8-validate'],
+});
 
 writeFileSync(resolve(runtimeDir, 'smoke.cjs'), `#!/usr/bin/env node
 'use strict';
@@ -272,9 +254,11 @@ requirePath(resolve(runtimeDir, 'server.cjs'), 'missing runtime/server.cjs');
 requirePath(resolve(runtimeDir, 'smoke.cjs'), 'missing runtime/smoke.cjs');
 requirePath(resolve(npmPackageDir, 'bin/zterm-relay-server'), 'missing bin/zterm-relay-server');
 
-const packOutput = execFileSync('npm', ['pack', npmPackageDir, '--pack-destination', releaseDistDir], {
+const packInvocation = resolveNpmInvocation(['pack', npmPackageDir, '--pack-destination', releaseDistDir]);
+const packOutput = execFileSync(packInvocation.command, packInvocation.args, {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'inherit'],
+  windowsHide: true,
 }).trim();
 const tgzName = packOutput.split('\n').filter(Boolean).at(-1);
 const tgzPath = resolve(releaseDistDir, tgzName);

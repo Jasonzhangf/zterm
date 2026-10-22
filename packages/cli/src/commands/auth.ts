@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { AccountClientError, type AccountClient } from '../account-client.js';
 import {
   AccountState,
+  safeAuthGeneration,
   type LoginAttempt,
   type NewAuthSession,
 } from '../account-state.js';
@@ -45,6 +46,22 @@ export interface StoredCliAuth {
   username: string;
   accessToken: string;
   authenticatedAt: string;
+}
+
+export interface CliAuthBaseline {
+  authGeneration: number;
+  auth: StoredCliAuth;
+}
+
+export function projectCliAuthBaseline(config: JsonObject): CliAuthBaseline | undefined {
+  const cli = cliSection(config);
+  const authGeneration = safeAuthGeneration(cli?.authGeneration);
+  if (authGeneration === undefined) {
+    throw new CommandContractError('invalid_config', 'zterm.cli.authGeneration is invalid');
+  }
+  const auth = parseStoredCliAuth(config);
+  if (!auth) return undefined;
+  return { authGeneration, auth };
 }
 
 export interface LoginCommandOptions {
@@ -134,13 +151,8 @@ export async function readCliServer(
   return { relayBaseUrl: requiredString(cli.server, 'relayBaseUrl', 'relayBaseUrl') };
 }
 
-export async function readStoredCliAuth(
-  store: SharedConfigStore,
-  signal?: AbortSignal,
-): Promise<StoredCliAuth | undefined> {
-  signal?.throwIfAborted();
-  const snapshot = await store.read();
-  const cli = cliSection(snapshot.config);
+function parseStoredCliAuth(config: JsonObject): StoredCliAuth | undefined {
+  const cli = cliSection(config);
   if (!cli || cli.auth === undefined) return undefined;
   if (!isJsonObject(cli.auth)) {
     throw new CommandContractError('invalid_config', 'zterm.cli.auth must be an object');
@@ -163,6 +175,15 @@ export async function readStoredCliAuth(
       'auth.authenticatedAt',
     ),
   };
+}
+
+export async function readStoredCliAuth(
+  store: SharedConfigStore,
+  signal?: AbortSignal,
+): Promise<StoredCliAuth | undefined> {
+  signal?.throwIfAborted();
+  const snapshot = await store.read();
+  return parseStoredCliAuth(snapshot.config);
 }
 
 export function toCommandError(

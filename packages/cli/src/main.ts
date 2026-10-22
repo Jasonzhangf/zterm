@@ -18,13 +18,19 @@ import {
 import {
   resolveSlotCommand,
   selectSlotCommand,
+  slotDisplayLabel,
   slotListCommand,
+  slotRenameCommand,
   slotSetCommand,
   type SlotConnection,
   type SlotConnectionFactory,
   type SlotPreviewRenderer,
   type SlotSessionTarget,
 } from './commands/slots.js';
+import {
+  slotSyncCommand,
+  type SlotSyncCommandResult,
+} from './commands/slot-sync.js';
 import {
   getDaemonConfig,
   getDaemonStatus,
@@ -33,7 +39,11 @@ import {
 import { createNodePrompts, type PromptPort } from './prompts.js';
 import { createRendererWindow } from './renderer-window.js';
 import { upgradeCli } from './release.js';
-import type { CliSlotBinding, SlotListEntry } from './slot-store.js';
+import type {
+  CliSlotBinding,
+  SlotListEntry,
+  SlotSyncScope,
+} from './slot-store.js';
 import { runTerminalSession } from './terminal-session.js';
 import type {
   TerminalSessionCatalog,
@@ -54,6 +64,11 @@ const HELP = `用法：
   zterm login [--from-config]
   zterm logout
   zterm slot list
+  zterm slot rename <1..20> <name>
+  zterm slot pull <1..20>
+  zterm slot pull --all
+  zterm slot push <1..20>
+  zterm slot push --all
   zterm slot set <1..20> [--width-mode adaptive-phone|mirror-fixed]
   zterm upgrade [--registry <url>]
   zterm daemon install [--version <version>] [--registry <url>]
@@ -63,9 +78,64 @@ const HELP = `用法：
   zterm --version
 `;
 
+const SLOT_HELP = `用法：
+  zterm slot list
+  zterm slot rename <1..20> <name>
+  zterm slot pull <1..20>
+  zterm slot pull --all
+  zterm slot push <1..20>
+  zterm slot push --all
+  zterm slot set <1..20> [--width-mode adaptive-phone|mirror-fixed]
+  zterm slot --help
+`;
+
+const SLOT_LIST_HELP = `用法：
+  zterm slot list
+
+列出本地已配置的槽位。别名、机器、session、backend 和宽度会分别显示。
+`;
+
+const SLOT_RENAME_HELP = `用法：
+  zterm slot rename <1..20> <name>
+
+只修改本地槽位别名，不修改绑定的机器或 session，也不需要登录。
+名称包含空格时请使用引号，例如：zterm slot rename 1 "工作台"。
+`;
+
+const SLOT_PULL_HELP = `用法：
+  zterm slot pull <1..20>
+  zterm slot pull --all
+
+pull <1..20>  用云端槽位 N 替换本地槽位 N。
+pull --all    用当前账号的云端配置替换该账号的本地槽位；
+              删除该账号在云端不存在的本地槽位。
+              已配置的空云端列表会清空该账号的本地槽位。
+尚未配置云端列表时，pull 不修改本地配置。
+同步只复制别名、绑定和宽度设置，不复制登录信息，也不连接或创建 session。
+`;
+
+const SLOT_PUSH_HELP = `用法：
+  zterm slot push <1..20>
+  zterm slot push --all
+
+push <1..20>  用本地槽位 N 替换当前账号的云端槽位 N，保留其他云端槽位。
+push --all    用当前账号的本地槽位替换该账号全部云端槽位；
+              空本地列表会清空该账号的云端槽位。
+同步只复制别名、绑定和宽度设置，不复制登录信息，也不连接或创建 session。
+`;
+
+export type MainAccountClient =
+  & Pick<AccountClient, 'login' | 'me' | 'directory'>
+  & Partial<Pick<AccountClient, 'readSlotConfig' | 'replaceSlotConfig' | 'replaceSlot'>>;
+
+type CloudSlotAccountClient = Pick<
+  AccountClient,
+  'readSlotConfig' | 'replaceSlotConfig' | 'replaceSlot'
+>;
+
 export interface MainOptions {
   store?: SharedConfigStore;
-  accountClient?: Pick<AccountClient, 'login' | 'me' | 'directory'>;
+  accountClient?: MainAccountClient;
   prompts?: PromptPort;
   stdin?: Readable;
   stdout?: Writable;
@@ -81,7 +151,7 @@ export interface MainOptions {
 
 interface MainContext {
   store: SharedConfigStore;
-  accountClient: Pick<AccountClient, 'login' | 'me' | 'directory'>;
+  accountClient: MainAccountClient;
   prompts: PromptPort;
   stdout: Writable;
   stderr: Writable;
@@ -481,21 +551,155 @@ function printSlotList(
 ) {
   if (slots.length === 0) {
     writeLine(stdout, '没有已配置的槽位。');
+    writeLine(stdout, '请运行 zterm slot set <1..20> 配置槽位。');
     return;
   }
   for (const entry of slots) {
-    writeLine(
-      stdout,
-      `槽位 ${entry.slot} · ${entry.binding.server.displayName} · `
-        + `${entry.binding.session.name} · ${entry.binding.session.backend} · `
-        + entry.binding.widthMode,
-    );
+    writeLine(stdout, slotDisplayLabel(entry));
   }
 }
 
+function hasHelp(args: readonly string[]): boolean {
+  return args.length === 1 && args[0] === '--help';
+}
+
+function syncScopeFromArgs(
+  direction: 'pull' | 'push',
+  args: readonly string[],
+): SlotSyncScope | UsageError {
+  const usageMessage = direction === 'pull'
+    ? 'zterm slot pull <1..20> 或 zterm slot pull --all'
+    : 'zterm slot push <1..20> 或 zterm slot push --all';
+  if (args.length === 1 && args[0] === '--all') return { kind: 'all' };
+  if (args.length !== 1) return usageFailure(usageMessage);
+  const slot = parseSlot(args[0]);
+  if (slot === undefined || slot < 1 || slot > 20) {
+    return usageFailure('槽位编号必须是 1 到 20 的整数。');
+  }
+  return { kind: 'one', slot };
+}
+
+function cloudSlotAccount(
+  accountClient: MainAccountClient,
+): CloudSlotAccountClient {
+  if (
+    typeof accountClient.readSlotConfig !== 'function'
+    || typeof accountClient.replaceSlotConfig !== 'function'
+    || typeof accountClient.replaceSlot !== 'function'
+  ) {
+    throw new MainCommandError(
+      'cloud_sync_unsupported',
+      '当前 CLI 账号客户端不支持云端槽位同步。',
+      '请升级 zterm 或使用完整安装版本后重试。',
+    );
+  }
+  const client = accountClient as CloudSlotAccountClient;
+  return {
+    readSlotConfig: (auth, signal) => client.readSlotConfig(auth, signal),
+    replaceSlotConfig: (auth, slots, signal) =>
+      client.replaceSlotConfig(auth, slots, signal),
+    replaceSlot: (auth, slot, binding, signal) =>
+      client.replaceSlot(auth, slot, binding, signal),
+  };
+}
+
+function slotSyncSuccessMessage(
+  result: Extract<SlotSyncCommandResult, { kind: 'ok' }>,
+): string {
+  const { direction, scope, count } = result;
+  if (scope.kind === 'one') {
+    return direction === 'pull'
+      ? `已用云端槽位 ${scope.slot} 覆盖本地槽位 ${scope.slot}。`
+      : `已用本地槽位 ${scope.slot} 覆盖当前账号的云端槽位 ${scope.slot}。`;
+  }
+  if (direction === 'pull') {
+    return count === 0
+      ? '已清空当前账号的本地槽位（共 0 个）：云端配置为空。'
+      : `已用当前账号的云端配置覆盖本地槽位：共 ${count} 个。`;
+  }
+  return count === 0
+    ? '已清空当前账号的云端槽位（共 0 个）：本地没有该账号的槽位。'
+    : `已用当前账号的本地槽位覆盖云端槽位：共 ${count} 个。`;
+}
+
+async function runSlotSync(
+  direction: 'pull' | 'push',
+  scope: SlotSyncScope,
+  context: MainContext,
+): Promise<number> {
+  const result = await slotSyncCommand({
+    store: context.store,
+    account: cloudSlotAccount(context.accountClient),
+    direction,
+    scope,
+    signal: context.signal,
+  });
+  if (result.kind === 'ok') {
+    writeLine(context.stdout, slotSyncSuccessMessage(result));
+    return 0;
+  }
+  if (result.kind === 'cancelled') {
+    writeLine(
+      context.stderr,
+      direction === 'pull' ? '槽位拉取已取消。' : '槽位推送已取消。',
+    );
+    return 130;
+  }
+  printCommandFailure(result, context.stderr);
+  return commandExitCode(result);
+}
+
+async function runSlotRename(
+  args: readonly string[],
+  context: MainContext,
+): Promise<number> {
+  const slot = parseSlot(args[0]);
+  if (slot === undefined || slot < 1 || slot > 20) {
+    return usage(context.stderr, 'zterm slot rename <1..20> <name>');
+  }
+  if (args.length !== 2) {
+    return usage(context.stderr, 'zterm slot rename <1..20> <name>');
+  }
+  const result = await slotRenameCommand({
+    store: context.store,
+    slot,
+    name: args[1]!,
+    signal: context.signal,
+  });
+  if (result.kind === 'ok') {
+    writeLine(
+      context.stdout,
+      `已保存槽位 ${result.value.slot} 的别名：`
+        + `${result.value.binding.alias ?? args[1]!}`,
+    );
+    return 0;
+  }
+  if (result.kind === 'cancelled') {
+    writeLine(context.stderr, '槽位别名保存已取消。');
+    return 130;
+  }
+  printCommandFailure(result, context.stderr);
+  return commandExitCode(result);
+}
+
 async function runSlot(args: string[], context: MainContext): Promise<number> {
-  if (args[0] === 'list') {
-    if (args.length !== 1) return usage(context.stderr, 'zterm slot list');
+  const [subcommand, ...rest] = args;
+  if (subcommand === undefined) {
+    writeLine(context.stderr, '用法错误：zterm slot list|rename|pull|push|set');
+    writeLine(context.stderr, '运行 zterm slot --help 查看槽位命令。');
+    return 2;
+  }
+  if (subcommand === '--help') {
+    write(context.stdout, SLOT_HELP);
+    return 0;
+  }
+
+  if (subcommand === 'list') {
+    if (hasHelp(rest)) {
+      write(context.stdout, SLOT_LIST_HELP);
+      return 0;
+    }
+    if (rest.length !== 0) return usage(context.stderr, 'zterm slot list');
     const result = await slotListCommand({
       store: context.store,
       signal: context.signal,
@@ -512,14 +716,35 @@ async function runSlot(args: string[], context: MainContext): Promise<number> {
     return commandExitCode(result);
   }
 
-  if (args[0] !== 'set') {
-    return usage(context.stderr, 'zterm slot set <1..20> [--width-mode adaptive-phone|mirror-fixed]');
+  if (subcommand === 'rename') {
+    if (hasHelp(rest)) {
+      write(context.stdout, SLOT_RENAME_HELP);
+      return 0;
+    }
+    return runSlotRename(rest, context);
   }
-  const slot = parseSlot(args[1]);
+
+  if (subcommand === 'pull' || subcommand === 'push') {
+    if (hasHelp(rest)) {
+      write(
+        context.stdout,
+        subcommand === 'pull' ? SLOT_PULL_HELP : SLOT_PUSH_HELP,
+      );
+      return 0;
+    }
+    const scope = syncScopeFromArgs(subcommand, rest);
+    if (isUsageError(scope)) return usage(context.stderr, scope.usageMessage);
+    return runSlotSync(subcommand, scope, context);
+  }
+
+  if (subcommand !== 'set') {
+    return usage(context.stderr, 'zterm slot list|rename|pull|push|set');
+  }
+  const slot = parseSlot(rest[0]);
   if (slot === undefined) {
     return usage(context.stderr, '槽位编号必须是 1 到 20 的整数。');
   }
-  const widthValue = optionValue(args.slice(2), '--width-mode');
+  const widthValue = optionValue(rest.slice(1), '--width-mode');
   if (isUsageError(widthValue)) {
     return usage(context.stderr, widthValue.usageMessage);
   }
@@ -530,7 +755,7 @@ async function runSlot(args: string[], context: MainContext): Promise<number> {
   ) {
     return usage(context.stderr, '--width-mode 仅支持 adaptive-phone 或 mirror-fixed。');
   }
-  const optionArgs = args.slice(2);
+  const optionArgs = rest.slice(1);
   if (optionArgs.length !== (widthValue === undefined ? 0 : 2)) {
     return usage(context.stderr, 'zterm slot set <1..20> [--width-mode adaptive-phone|mirror-fixed]');
   }

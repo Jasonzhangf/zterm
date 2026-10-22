@@ -5,11 +5,18 @@ import {
   type AuthenticatedAccount,
 } from './account-client.js';
 import type { RelayAccountDirectory } from '../../shared/src/connection/relay-directory.js';
+import type {
+  CloudSlotResponse,
+  SyncedSlot,
+  SyncedSlotBinding,
+} from '../../shared/src/connection/cli-slot-config.js';
 
 interface CapturedRequest {
   method: string;
   url: string;
   authorization: string;
+  accept: string;
+  contentType: string;
   body: string;
   signal: AbortSignal | null;
 }
@@ -72,6 +79,8 @@ function createContractFetch(handler: FetchHandler) {
       method: init?.method || 'GET',
       url: String(input),
       authorization: headers.get('authorization') || '',
+      accept: headers.get('accept') || '',
+      contentType: headers.get('content-type') || '',
       body: typeof init?.body === 'string' ? init.body : '',
       signal: init?.signal || null,
     };
@@ -93,6 +102,42 @@ function plainText(body: string, status = 200) {
     status,
     headers: { 'content-type': 'text/plain' },
   });
+}
+
+const syncedSlot: SyncedSlot = {
+  slot: 3,
+  alias: ' build ',
+  server: {
+    deviceId: 'device-1',
+    daemonHostId: 'daemon-1',
+    displayName: 'Mac Studio',
+  },
+  session: {
+    backend: 'tmux',
+    stableId: '%1',
+    name: 'work',
+  },
+  widthMode: 'adaptive-phone',
+};
+
+const syncedBinding: SyncedSlotBinding = {
+  alias: ' build ',
+  server: syncedSlot.server,
+  session: syncedSlot.session,
+  widthMode: syncedSlot.widthMode,
+};
+
+function cloudEnvelope(
+  config: CloudSlotResponse['config'],
+  extra: Record<string, unknown> = {},
+) {
+  return {
+    ok: true,
+    schemaVersion: 1,
+    user: { id: 'user-1' },
+    config,
+    ...extra,
+  };
 }
 
 describe('AccountClient', () => {
@@ -397,5 +442,413 @@ describe('AccountClient', () => {
       code: 'network_failure',
     });
     expect((failure as AccountClientError).cause).toBeInstanceOf(TypeError);
+  });
+
+  it('reads missing and configured-empty slot state through the authenticated cloud API', async () => {
+    const baseUrl = 'http://relay.example.test/custom/relay/';
+    const responses = [
+      cloudEnvelope({ configured: false }, {
+        accessToken: 'response-token-must-not-leak',
+        relayBaseUrl: 'http://wrong.example.test/',
+      }),
+      cloudEnvelope({ configured: true, slots: [] }),
+    ];
+    const { fetchImpl, requests } = createContractFetch(() => json(responses.shift()));
+    const client = new AccountClient(fetchImpl);
+    const auth = {
+      relayBaseUrl: baseUrl,
+      accessToken: 'account-access-token',
+    };
+
+    const missing = await client.readSlotConfig(auth, new AbortController().signal);
+    const empty = await client.readSlotConfig(auth, new AbortController().signal);
+
+    expect(missing).toEqual({
+      userId: 'user-1',
+      config: { configured: false },
+    });
+    expect(empty).toEqual({
+      userId: 'user-1',
+      config: { configured: true, slots: [] },
+    });
+    expect(requests).toHaveLength(2);
+    for (const request of requests) {
+      expect(request).toMatchObject({
+        method: 'GET',
+        url: `${baseUrl}api/cli/slots`,
+        authorization: 'Bearer account-access-token',
+        accept: 'application/json',
+        body: '',
+      });
+      expect(new URL(request.url).search).toBe('');
+    }
+  });
+
+  it('replaces all slots with one validated cloud request and returns only the accepted state', async () => {
+    const baseUrl = 'http://relay.example.test/custom/relay/';
+    const { fetchImpl, requests } = createContractFetch(() => json(cloudEnvelope({
+      configured: true,
+      slots: [syncedSlot],
+    }, {
+      token: 'response-token-must-not-leak',
+    })));
+    const client = new AccountClient(fetchImpl);
+
+    const result = await client.replaceSlotConfig({
+      relayBaseUrl: baseUrl,
+      accessToken: 'account-access-token',
+    }, [syncedSlot], new AbortController().signal);
+
+    expect(result).toEqual({
+      userId: 'user-1',
+      config: {
+        configured: true,
+        slots: [{ ...syncedSlot, alias: 'build' }],
+      },
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      method: 'PUT',
+      url: `${baseUrl}api/cli/slots`,
+      authorization: 'Bearer account-access-token',
+      accept: 'application/json',
+      contentType: 'application/json',
+    });
+    expect(JSON.parse(requests[0]!.body)).toEqual({
+      schemaVersion: 1,
+      slots: [{ ...syncedSlot, alias: 'build' }],
+    });
+  });
+
+  it('replaces one slot without embedding the slot number in the binding', async () => {
+    const baseUrl = 'http://relay.example.test/custom/relay/';
+    const { fetchImpl, requests } = createContractFetch(() => json(cloudEnvelope({
+      configured: true,
+      slots: [{ ...syncedSlot, alias: 'build' }],
+    })));
+    const client = new AccountClient(fetchImpl);
+
+    const result = await client.replaceSlot({
+      relayBaseUrl: baseUrl,
+      accessToken: 'account-access-token',
+    }, 3, syncedBinding, new AbortController().signal);
+
+    expect(result).toEqual({
+      userId: 'user-1',
+      config: {
+        configured: true,
+        slots: [{ ...syncedSlot, alias: 'build' }],
+      },
+    });
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({
+      method: 'PUT',
+      url: `${baseUrl}api/cli/slots/3`,
+      authorization: 'Bearer account-access-token',
+      accept: 'application/json',
+      contentType: 'application/json',
+    });
+    const body = JSON.parse(requests[0]!.body);
+    expect(body).toEqual({
+      schemaVersion: 1,
+      binding: { ...syncedBinding, alias: 'build' },
+    });
+    expect(body.binding).not.toHaveProperty('slot');
+  });
+
+  it('rejects invalid outbound slot records before dispatch', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return json({});
+    }) as typeof fetch;
+    const client = new AccountClient(fetchImpl);
+    const auth = {
+      relayBaseUrl: 'http://relay.example.test/custom/relay/',
+      accessToken: 'account-access-token',
+    };
+
+    const invalidBinding = {
+      ...syncedBinding,
+      alias: 'unsafe\u0000alias',
+    };
+    const invalidSlots = [{
+      ...syncedSlot,
+      relayBaseUrl: auth.relayBaseUrl,
+    }];
+
+    await expect(client.replaceSlot(
+      auth,
+      3,
+      invalidBinding,
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      name: 'AccountClientError',
+      stage: 'slot-write',
+      code: 'invalid_request',
+      requestDispatched: false,
+    });
+    await expect(client.replaceSlotConfig(
+      auth,
+      invalidSlots as unknown as SyncedSlot[],
+      new AbortController().signal,
+    )).rejects.toMatchObject({
+      name: 'AccountClientError',
+      stage: 'slot-write',
+      code: 'invalid_request',
+      requestDispatched: false,
+    });
+    expect(calls).toBe(0);
+  });
+
+  it.each([
+    ['wrong schema', {
+      ...cloudEnvelope({ configured: false }),
+      schemaVersion: 2,
+    }],
+    ['empty user id', {
+      ...cloudEnvelope({ configured: false }),
+      user: { id: '' },
+    }],
+  ])('rejects a %s cloud response as invalid', async (_label, payload) => {
+    const { fetchImpl } = createContractFetch(() => json(payload));
+    const client = new AccountClient(fetchImpl);
+
+    await expect(client.readSlotConfig({
+      relayBaseUrl: 'http://relay.example.test/custom/relay/',
+      accessToken: 'account-access-token',
+    }, new AbortController().signal)).rejects.toMatchObject({
+      name: 'AccountClientError',
+      stage: 'slot-read',
+      code: 'response_invalid',
+      requestDispatched: true,
+    });
+  });
+
+  it('rejects unknown nested cloud fields while ignoring extra envelope fields', async () => {
+    const { fetchImpl } = createContractFetch(() => json(cloudEnvelope({
+      configured: true,
+      slots: [{
+        ...syncedSlot,
+        bindingToken: 'must-not-be-coerced',
+      }],
+    } as unknown as CloudSlotResponse['config'], {
+      ignored: 'top-level-extra',
+    })));
+    const client = new AccountClient(fetchImpl);
+
+    await expect(client.readSlotConfig({
+      relayBaseUrl: 'http://relay.example.test/custom/relay/',
+      accessToken: 'account-access-token',
+    }, new AbortController().signal)).rejects.toMatchObject({
+      name: 'AccountClientError',
+      stage: 'slot-read',
+      code: 'response_invalid',
+      requestDispatched: true,
+    });
+  });
+
+  it('maps a new-route 404 to cloud sync unsupported without trying another route', async () => {
+    const baseUrl = 'http://relay.example.test/custom/relay/';
+    const { fetchImpl, requests } = createContractFetch(() => json({
+      ok: false,
+      error: {
+        code: 'not_found',
+        message: 'route missing',
+      },
+    }, 404));
+    const client = new AccountClient(fetchImpl);
+
+    const failure = await client.replaceSlotConfig({
+      relayBaseUrl: baseUrl,
+      accessToken: 'account-access-token',
+    }, [syncedSlot], new AbortController().signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AccountClientError);
+    expect(failure).toMatchObject({
+      stage: 'slot-write',
+      code: 'cloud_sync_unsupported',
+      status: 404,
+      requestDispatched: true,
+      definitiveRejection: false,
+    });
+    expect((failure as AccountClientError).action).toContain('升级 relay');
+    expect(requests).toHaveLength(1);
+    expect(requests[0]!.url).toBe(`${baseUrl}api/cli/slots`);
+  });
+
+  it.each([
+    [400, 'invalid_request', 'invalid_request'],
+    [400, 'invalid_slot_config', 'invalid_slot_config'],
+    [400, 'invalid_device_set', 'invalid_device_set'],
+    [401, 'auth_invalid', 'auth_invalid'],
+    [409, 'device_cleanup_rejected', 'device_cleanup_rejected'],
+    [413, 'request_too_large', 'request_too_large'],
+    [503, 'slot_config_unavailable', 'slot_config_unavailable'],
+    [503, 'persistence_failed', 'persistence_failed'],
+  ] as const)(
+    'preserves cloud API status and error code for HTTP %s %s',
+    async (status, serverCode, expectedCode) => {
+      const { fetchImpl } = createContractFetch(() => json({
+        ok: false,
+        error: {
+          code: serverCode,
+          message: 'account-access-token must not be logged',
+        },
+      }, status));
+      const client = new AccountClient(fetchImpl);
+
+      const failure = await client.replaceSlotConfig({
+        relayBaseUrl: 'http://relay.example.test/custom/relay/',
+        accessToken: 'account-access-token',
+      }, [syncedSlot], new AbortController().signal).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(AccountClientError);
+      expect(failure).toMatchObject({
+        stage: 'slot-write',
+        code: expectedCode,
+        status,
+        requestDispatched: true,
+        definitiveRejection: true,
+      });
+      expect((failure as Error).message).not.toContain('account-access-token');
+    },
+  );
+
+  it.each([
+    [400, 'persistence_failed'],
+    [401, 'slot_config_unavailable'],
+    [409, 'request_too_large'],
+    [413, 'invalid_request'],
+    [502, 'persistence_failed'],
+    [504, 'gateway_timeout'],
+  ])(
+    'does not treat HTTP %s %s as a definite Relay rejection',
+    async (status, serverCode) => {
+      const { fetchImpl } = createContractFetch(() => json({
+        ok: false,
+        error: {
+          code: serverCode,
+          message: 'untrusted gateway response',
+        },
+      }, status));
+      const client = new AccountClient(fetchImpl);
+
+      const failure = await client.replaceSlotConfig({
+        relayBaseUrl: 'http://relay.example.test/custom/relay/',
+        accessToken: 'account-access-token',
+      }, [syncedSlot], new AbortController().signal).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(AccountClientError);
+      expect(failure).toMatchObject({
+        stage: 'slot-write',
+        code: 'http_failure',
+        status,
+        requestDispatched: true,
+        definitiveRejection: false,
+      });
+      expect((failure as AccountClientError).action).not.toContain('稍后重试');
+    },
+  );
+
+  it('does not dispatch a pre-aborted cloud read and keeps dispatch metadata false', async () => {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return json(cloudEnvelope({ configured: false }));
+    }) as typeof fetch;
+    const client = new AccountClient(fetchImpl);
+    const controller = new AbortController();
+    const reason = new Error('already cancelled');
+    controller.abort(reason);
+
+    const failure = await client.readSlotConfig({
+      relayBaseUrl: 'http://relay.example.test/custom/relay/',
+      accessToken: 'account-access-token',
+    }, controller.signal).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AccountClientError);
+    expect(failure).toMatchObject({
+      stage: 'slot-read',
+      code: 'cancelled',
+      requestDispatched: false,
+    });
+    expect((failure as AccountClientError).cause).toBe(reason);
+    expect(calls).toBe(0);
+  });
+
+  it('marks an actual write fetch rejection as dispatched', async () => {
+    const fetchImpl = (async () => {
+      throw new TypeError('network unavailable');
+    }) as typeof fetch;
+    const client = new AccountClient(fetchImpl);
+
+    await expect(client.replaceSlotConfig({
+      relayBaseUrl: 'http://relay.example.test/custom/relay/',
+      accessToken: 'account-access-token',
+    }, [syncedSlot], new AbortController().signal)).rejects.toMatchObject({
+      name: 'AccountClientError',
+      stage: 'slot-write',
+      code: 'network_failure',
+      requestDispatched: true,
+    });
+  });
+
+  it('marks an abort after write dispatch as dispatched and uncertain', async () => {
+    const { fetchImpl, requests } = createContractFetch(async (request) => {
+      await new Promise<never>((_resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('request did not abort')), 1_000);
+        request.signal?.addEventListener('abort', () => {
+          clearTimeout(timer);
+          reject(request.signal?.reason);
+        }, { once: true });
+      });
+      return json(cloudEnvelope({ configured: true, slots: [syncedSlot] }));
+    });
+    const client = new AccountClient(fetchImpl);
+    const controller = new AbortController();
+    const reason = new Error('deadline exceeded');
+    const pending = client.replaceSlotConfig({
+      relayBaseUrl: 'http://relay.example.test/custom/relay/',
+      accessToken: 'account-access-token',
+    }, [syncedSlot], controller.signal);
+    controller.abort(reason);
+
+    const failure = await pending.catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AccountClientError);
+    expect(failure).toMatchObject({
+      stage: 'slot-write',
+      code: 'cancelled',
+      requestDispatched: true,
+    });
+    expect((failure as AccountClientError).cause).toBe(reason);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('marks an invalid write response as dispatched', async () => {
+    const { fetchImpl } = createContractFetch(() => json({
+      ok: true,
+      schemaVersion: 1,
+      user: { id: 'user-1' },
+      config: {
+        configured: true,
+        slots: [{
+          ...syncedSlot,
+          endpointToken: 'must-not-be-coerced',
+        }],
+      },
+    }));
+    const client = new AccountClient(fetchImpl);
+
+    await expect(client.replaceSlotConfig({
+      relayBaseUrl: 'http://relay.example.test/custom/relay/',
+      accessToken: 'account-access-token',
+    }, [syncedSlot], new AbortController().signal)).rejects.toMatchObject({
+      name: 'AccountClientError',
+      stage: 'slot-write',
+      code: 'response_invalid',
+      requestDispatched: true,
+    });
   });
 });
