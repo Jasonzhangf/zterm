@@ -2973,6 +2973,7 @@
         "packages/shared/src/connection/bridge-settings.ts",
         "packages/shared/src/connection/mobile-config.ts",
         "packages/shared/src/connection/relay-directory.ts",
+        "packages/shared/src/connection/cli-slot-config.ts",
         "packages/shared/src/connection/traversal/",
         "src/lib/bridge-settings.ts",
         "src/lib/bridge-url.ts",
@@ -3062,7 +3063,8 @@
       ],
       "consumed_resources": [
         "resource.transport_target",
-        "resource.debug_channel"
+        "resource.debug_channel",
+        "resource.relay_account_slot_config"
       ],
       "pending_resources": [],
       "public_interfaces": [
@@ -3085,12 +3087,57 @@
         "src/lib/module-registry-truth.test.ts",
         "packages/shared/src/connection/relay-directory.test.ts",
         "src/traversal-relay/server.test.ts",
-        "src/lib/relay-account-directory.test.ts"
+        "src/lib/relay-account-directory.test.ts",
+        "src/traversal-relay/slot-config-api.test.ts"
       ],
       "status": "active",
       "owned_paths": [
         "src/traversal-relay/"
       ]
+    },
+    {
+      "module_id": "relay.account_slot_config",
+      "runtime_side": "relay",
+      "level": 1,
+      "parent_module_id": "relay.runtime",
+      "owner_feature": "relay.account_directory",
+      "responsibility": "Own the account-scoped CLI slot configuration store at dirname(actual STORE_PATH)/cli-slot-config.json; authenticated account identity comes from relay.account_directory, and legacy account/token/device truth is not mirrored.",
+      "owned_resources": [
+        "resource.relay_account_slot_config"
+      ],
+      "consumed_resources": [
+        "resource.shared_connection_types"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/traversal-relay/slot-config-store.ts"
+      ],
+      "forbidden_resources": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-10-21-cli-slot-cloud.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/traversal-relay/slot-config-store.test.ts",
+        "src/traversal-relay/slot-config-api.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/traversal-relay/slot-config-store.ts"
+      ],
+      "owned_paths_note": "Exact file ownership overrides relay.account_directory's src/traversal-relay/ folder prefix in the import-graph owner gate."
     },
     {
       "module_id": "relay.peer_lease",

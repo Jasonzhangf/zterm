@@ -29,6 +29,9 @@ user CLI. `zterm-daemon` runs or manages a daemon installation.
 | `zterm login --from-config` | account/auth owner | consumes one-shot login password before authentication | account-state and config transaction tests |
 | `zterm logout` | account/auth owner | advances local auth generation and removes CLI auth; preserves slots, daemon config, and unrelated fields | stale-identity and logout tests |
 | `zterm slot list` | slot owner | reads local slot bindings only | slot-store tests |
+| `zterm slot rename <1..20> <name>` | slot owner | changes only the local alias, including while logged out | slot-store and slot command tests |
+| `zterm slot pull <1..20>\|--all` | sync coordinator and slot owner | atomically replaces the selected local account scope from cloud; rejects foreign-number collisions | sync coordinator and installed cloud blackbox |
+| `zterm slot push <1..20>\|--all` | sync coordinator and Relay account slot owner | explicitly overwrites the selected cloud account scope with saved bindings | real HTTP API and installed cloud blackbox |
 | `zterm slot set <1..20> [--width-mode ...]` | slot owner | resolves exact server and stable session, optionally previews, then commits the slot | slot, catalog, and snapshot tests |
 | `zterm <1..20>` | CLI connection owner | connects the exact saved binding and renders the canonical mirror | installed blackbox path |
 | `zterm` | slot selector and CLI connection owner | selects one existing slot; it does not refresh the server catalog | no-slot and selection tests |
@@ -39,6 +42,19 @@ user CLI. `zterm-daemon` runs or manages a daemon installation.
 
 The only normal configuration path is `~/.zterm/config.json`. CLI and daemon
 own different typed sections. Read-only commands do not migrate `~/.wterm`.
+
+Slot names travel with the saved binding. Sync excludes credentials and daemon
+configuration. A full pull replaces only the active account's local slots;
+a full push replaces its complete cloud set. Empty is an intentional clear.
+An account with no saved cloud configuration fails pull without local changes.
+Bare pull/push and mixed single/all scopes are usage errors. See
+`packages/cli/README.md` for the overwrite and cancellation behavior.
+
+Relay cloud state has one owner, `RelaySlotConfigStore`, at
+`dirname(actual STORE_PATH)/cli-slot-config.json`. The legacy users/tokens/devices
+store does not mirror it. The authenticated exact-batch device cleanup route
+checks current stored presence and physical connection maps before its atomic
+commit. It does not revoke tokens or close sockets.
 
 `Ctrl+] q` disconnects only the local CLI and restores terminal state. It does
 not delete or stop the remote session. Other `Ctrl+]` sequences scroll, pan,

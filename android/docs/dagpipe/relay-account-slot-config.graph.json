@@ -1,0 +1,57 @@
+{
+  "id": "relay.account_slot_config",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "extract_account_slot_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": ["arc.request"],
+      "output": { "id": "arc.account_slot_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "authorize_account_slot_request",
+      "operator": "relay.account_slot_config.authorize",
+      "operator_version": "0.1",
+      "inputs": ["arc.account_slot_request"],
+      "output": { "id": "arc.authorized_slot_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "apply_account_slot_config",
+      "operator": "relay.account_slot_config.apply",
+      "operator_version": "0.1",
+      "inputs": ["arc.authorized_slot_request"],
+      "output": { "id": "arc.cloud_slot_outcome", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_account_slot_result",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": ["arc.account_slot_request", "arc.authorized_slot_request", "arc.cloud_slot_outcome"],
+      "output": { "id": "arc.result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "extract_account_slot_request", "to": "authorize_account_slot_request", "arc_id": "arc.account_slot_request" },
+    { "from": "authorize_account_slot_request", "to": "apply_account_slot_config", "arc_id": "arc.authorized_slot_request" },
+    { "from": "extract_account_slot_request", "to": "collect_account_slot_result", "arc_id": "arc.account_slot_request" },
+    { "from": "authorize_account_slot_request", "to": "collect_account_slot_result", "arc_id": "arc.authorized_slot_request" },
+    { "from": "apply_account_slot_config", "to": "collect_account_slot_result", "arc_id": "arc.cloud_slot_outcome" }
+  ],
+  "outputs": ["arc.result"]
+}

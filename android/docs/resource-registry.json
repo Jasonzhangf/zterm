@@ -3699,12 +3699,14 @@
         "publish_daemon_directory",
         "read_account_directory",
         "project_endpoint_candidates",
-        "serve_public_update_assets"
+        "serve_public_update_assets",
+        "delete_account_offline_devices_exact_batch"
       ],
       "direct_relations": [
         "resource.relay_control_connection",
         "resource.transport_target",
         "resource.relay_peer_lease",
+        "resource.relay_account_slot_config",
         "resource.debug_channel",
         "resource.relay_account_directory"
       ],
@@ -3736,6 +3738,43 @@
         "docs/function-map.md",
         "docs/testing/relay-account-directory-test-design.md",
         "docs/testing/control-chain-transport-separation-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.relay_account_slot_config",
+      "resource_type": "relay_business_store",
+      "identity": "Account-scoped CLI slot alias, stable binding, and width metadata persisted in the Relay data directory cloud file, separate from legacy users/tokens/devices",
+      "owner_feature": "relay.account_directory",
+      "truth_store": "src/traversal-relay/slot-config-store.ts and dirname(actual STORE_PATH)/cli-slot-config.json",
+      "allowed_operations": [
+        "read_account_slot_config",
+        "replace_single_account_slot",
+        "replace_all_account_slots",
+        "persist_account_slot_config"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/traversal-relay/slot-config-store.test.ts",
+        "src/traversal-relay/slot-config-api.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-10-21-cli-slot-cloud.md"
       ]
     },
     {

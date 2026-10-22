@@ -164,11 +164,13 @@ Shared contract boundary:
 | module_id | owns | forbidden |
 | --- | --- | --- |
 | `relay.account_directory` | account directory facts, daemon endpoint snapshots, public update route | open tabs, active session, mirror, UI |
+| `relay.account_slot_config` | account-scoped CLI slot alias/binding/width metadata in `dirname(actual STORE_PATH)/cli-slot-config.json`; authenticated account identity comes from `relay.account_directory` | accounts, tokens, devices, physical presence, terminal, mirror, UI |
 | `relay.peer_lease` | bounded peer/signaling lease keyed by account + daemon target + concrete client device | terminal channel, subscriber, tmux, mirror, UI |
 
 Relay boundary:
 
 - Relay is route/signaling/account-directory truth only.
+- `relay.account_slot_config` is the only authority for the cloud slot configuration file; legacy account JSON does not mirror cloud slot data.
 - Relay peer lease must not store terminal channel, subscriber, tmux, mirror, active tab, viewport, or UI truth.
 - Tailscale/direct routes remain independent and must not depend on Relay success.
 
@@ -360,6 +362,7 @@ Shared design rules:
 | module_id | input | output | owns | rejects |
 | --- | --- | --- | --- | --- |
 | `relay.account_directory` | daemon registration, account auth, endpoint/session directory updates | account-scoped daemon/device/endpoint/session directory, public update route | relay directory truth | open tabs, UI current session, mirror rows |
+| `relay.account_slot_config` | authenticated account identity plus validated slot alias/binding/width payload | account-scoped cloud slot configuration read, single/all replace, and atomic persistence | independent cloud slot metadata file | accounts/tokens/devices/presence, credentials, terminal, mirror, UI truth |
 | `relay.peer_lease` | concrete client device id, daemon target id, route/signaling peer state | idle-timeout bounded reusable peer/signaling lease | route/signaling lease | terminal channel, subscriber, tmux, mirror, active tab, UI truth |
 
 Relay design rules:

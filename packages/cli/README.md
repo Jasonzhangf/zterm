@@ -212,6 +212,46 @@ not refresh the account directory.
 `zterm 1` resolves the exact saved binding for slot 1. It does not ask for a
 server or session again and does not rebind by display name.
 
+### Name and synchronize slots
+
+```sh
+zterm slot rename 1 "Studio · server-1"
+zterm slot list
+zterm slot push 1
+zterm slot pull 1
+zterm slot push --all
+zterm slot pull --all
+```
+
+Names are optional. The list shows the name alongside the saved machine,
+session, backend, and width mode. Without a name, it uses the machine and
+session names. Rename works while logged out and changes only the local name.
+Configuring an existing slot preserves its name.
+
+Cloud sync requires login and a Relay server with the slot configuration API.
+Another computer logged in to the same account can pull the saved bindings.
+Sync includes slot numbers, names, stable server/session identities, display
+names, and width modes. Login tokens, passwords, endpoint secrets, and daemon
+configuration stay local. Pull does not connect to or create a session.
+
+Every pull or push requires a slot number or `--all`. A single-slot pull
+replaces only that local slot; a single-slot push replaces only that cloud
+slot. A missing cloud slot fails without changing local configuration.
+
+`push --all` replaces the account's complete cloud slot set with its local
+slots. An empty local set intentionally clears the cloud set. `pull --all`
+replaces the local slots owned by the logged-in account, including removal of
+local-only slots for that account. It preserves other accounts' slots and
+fails atomically if an incoming number belongs to another account locally.
+A cloud account that has never saved slots fails pull without local changes.
+An explicitly saved empty cloud set clears the current account's local slots
+when pulled with `--all`.
+
+Sync is explicit. There is no automatic merge or background sync. The latest
+accepted push replaces the selected cloud scope. If the connection fails after
+a push was dispatched, the command reports that the remote result is unknown.
+Read back the cloud configuration before deciding whether to push again.
+
 ### Configure a slot
 
 ```sh

@@ -1,0 +1,58 @@
+{
+  "id": "cli.slot_rename",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "extract_rename_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": ["arc.request"],
+      "output": { "id": "arc.rename_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "read_rename_slot_context",
+      "operator": "cli.slot_store.read_context",
+      "operator_version": "0.1",
+      "inputs": ["arc.rename_request"],
+      "output": { "id": "arc.rename_slot_context", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "commit_rename_alias",
+      "operator": "cli.slot_store.rename",
+      "operator_version": "0.1",
+      "inputs": ["arc.rename_request", "arc.rename_slot_context"],
+      "output": { "id": "arc.renamed_slot", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_rename_result",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": ["arc.rename_request", "arc.rename_slot_context", "arc.renamed_slot"],
+      "output": { "id": "arc.result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "extract_rename_request", "to": "read_rename_slot_context", "arc_id": "arc.rename_request" },
+    { "from": "extract_rename_request", "to": "commit_rename_alias", "arc_id": "arc.rename_request" },
+    { "from": "read_rename_slot_context", "to": "commit_rename_alias", "arc_id": "arc.rename_slot_context" },
+    { "from": "extract_rename_request", "to": "collect_rename_result", "arc_id": "arc.rename_request" },
+    { "from": "read_rename_slot_context", "to": "collect_rename_result", "arc_id": "arc.rename_slot_context" },
+    { "from": "commit_rename_alias", "to": "collect_rename_result", "arc_id": "arc.renamed_slot" }
+  ],
+  "outputs": ["arc.result"]
+}

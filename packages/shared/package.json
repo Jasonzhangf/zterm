@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./connection/traversal": "./src/connection/traversal/index.ts",
     "./connection/traversal/*": "./src/connection/traversal/*.ts",
+    "./connection/cli-slot-config": "./src/connection/cli-slot-config.ts",
     "./terminal-buffer": "./src/connection/terminal-buffer.ts",
     "./terminal/buffer-frame-assembly": "./src/terminal/buffer-frame-assembly/session-buffer-frame-assembly.ts",
     "./terminal/buffer-frame-assembly/*": "./src/terminal/buffer-frame-assembly/*.ts",

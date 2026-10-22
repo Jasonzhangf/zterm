@@ -6,6 +6,16 @@ import type {
   RelayPresence,
   RelayTmuxSessionSnapshot,
 } from '../../shared/src/connection/relay-directory.js';
+import {
+  CLI_SLOT_CONFIG_SCHEMA_VERSION,
+  SlotConfigValidationError,
+  parseCloudSlotState,
+  parseSyncedSlotBinding,
+  parseSyncedSlots,
+  type CloudSlotResponse,
+  type SyncedSlot,
+  type SyncedSlotBinding,
+} from '../../shared/src/connection/cli-slot-config.js';
 
 export interface LoginInput {
   relayBaseUrl: string;
@@ -42,7 +52,7 @@ export interface AuthenticatedAccount {
 
 export type AuthSession = Pick<AuthenticatedAccount, 'relayBaseUrl' | 'accessToken'>;
 
-export type AccountClientStage = 'login' | 'me' | 'directory';
+export type AccountClientStage = 'login' | 'me' | 'directory' | 'slot-read' | 'slot-write';
 
 export type AccountClientFetch = (input: string, init: RequestInit) => Promise<Response>;
 
@@ -53,7 +63,14 @@ export type AccountClientErrorCode =
   | 'http_failure'
   | 'auth_invalid'
   | 'response_invalid_json'
-  | 'response_invalid';
+  | 'response_invalid'
+  | 'cloud_sync_unsupported'
+  | 'invalid_slot_config'
+  | 'invalid_device_set'
+  | 'device_cleanup_rejected'
+  | 'request_too_large'
+  | 'slot_config_unavailable'
+  | 'persistence_failed';
 
 const ENDPOINT_KINDS = new Set([
   'lan',
@@ -64,11 +81,166 @@ const ENDPOINT_KINDS = new Set([
   'relay-rtc',
 ]);
 
+const SLOT_STATUS_ACTIONS: Partial<Record<number, string>> = {
+  400: '请检查本地槽位数据后修正。',
+  409: '请刷新后重试，避免删除仍被引用的设备。',
+  413: '槽位数据过大，请减少数量或体积后重试。',
+  503: '请稍后重试或检查 relay 服务。',
+};
+
+const SLOT_SERVER_ERROR_STATUS = new Map<AccountClientErrorCode, number>([
+  ['invalid_request', 400],
+  ['invalid_slot_config', 400],
+  ['invalid_device_set', 400],
+  ['auth_invalid', 401],
+  ['device_cleanup_rejected', 409],
+  ['request_too_large', 413],
+  ['slot_config_unavailable', 503],
+  ['persistence_failed', 503],
+]);
+
+function isSlotStage(stage: AccountClientStage): boolean {
+  return stage === 'slot-read' || stage === 'slot-write';
+}
+
+function slotHttpAction(
+  stage: AccountClientStage,
+  status: number,
+  definitiveRejection: boolean,
+): string {
+  if (stage === 'slot-write' && !definitiveRejection) {
+    return '请先重新读取云端槽位确认当前内容，再决定是否再次推送。';
+  }
+  if (status === 401) {
+    return '请运行 zterm login。';
+  }
+  if (stage === 'slot-read' && status === 503) {
+    return '请稍后重试或检查 relay 服务。';
+  }
+  return SLOT_STATUS_ACTIONS[status] ?? '请稍后重试或检查 relay 服务。';
+}
+
+function slotServerErrorCode(value: unknown): AccountClientErrorCode | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  return SLOT_SERVER_ERROR_STATUS.has(value as AccountClientErrorCode)
+    ? value as AccountClientErrorCode
+    : undefined;
+}
+
+function validateOutboundSlots(slots: readonly SyncedSlot[]): SyncedSlot[] {
+  if (!Array.isArray(slots)) {
+    throw invalidRequestError('slot-write', '槽位集合必须是数组。', false);
+  }
+  try {
+    return parseSyncedSlots(slots as unknown[]);
+  } catch (error) {
+    throw outboundSlotError('槽位数据未通过共享校验。', error);
+  }
+}
+
+function validateOutboundBinding(binding: SyncedSlotBinding): SyncedSlotBinding {
+  try {
+    return parseSyncedSlotBinding(binding);
+  } catch (error) {
+    throw outboundSlotError('槽位绑定未通过共享校验。', error);
+  }
+}
+
+function requireSlotNumber(slot: number): number {
+  if (!Number.isInteger(slot) || slot < 1 || slot > 20) {
+    throw invalidRequestError('slot-write', '槽位号必须是 1 到 20 的整数。', false);
+  }
+  return slot;
+}
+
+function outboundSlotError(message: string, cause: unknown): AccountClientError {
+  return new AccountClientError(message, {
+    stage: 'slot-write',
+    code: 'invalid_request',
+    action: '请修正本地槽位数据后重试。',
+    requestDispatched: false,
+    cause,
+  });
+}
+
+function parseCloudSlotResponse(
+  stage: AccountClientStage,
+  payload: Record<string, unknown>,
+  requestDispatched: boolean,
+): CloudSlotResponse {
+  if (payload.ok !== true) {
+    throw responseInvalidError(stage, '云槽响应 ok 必须为 true。', requestDispatched);
+  }
+  if (payload.schemaVersion !== CLI_SLOT_CONFIG_SCHEMA_VERSION) {
+    throw responseInvalidError(stage, `云槽 schemaVersion 必须为 ${CLI_SLOT_CONFIG_SCHEMA_VERSION}。`, requestDispatched);
+  }
+  const user = requireRecord(payload.user, stage, 'user', requestDispatched);
+  const userId = requireString(user.id, stage, 'user.id', requestDispatched);
+  let config: CloudSlotResponse['config'];
+  try {
+    config = parseCloudSlotState(payload.config);
+  } catch (error) {
+    throw new AccountClientError(`云槽配置未通过共享校验：${describeSlotCause(error)}`, {
+      stage,
+      code: 'response_invalid',
+      action: '请检查 relay 服务版本或稍后重试。',
+      requestDispatched,
+      cause: error,
+    });
+  }
+  return { userId, config };
+}
+
+function describeSlotCause(error: unknown): string {
+  if (error instanceof SlotConfigValidationError) {
+    return error.field;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return 'unknown';
+}
+
+async function readSlotApiError(
+  response: Response,
+): Promise<{ code: AccountClientErrorCode; definitiveRejection: true } | undefined> {
+  const contentType = response.headers.get('content-type') ?? '';
+  if (!contentType.includes('json')) {
+    return undefined;
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return undefined;
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return undefined;
+  }
+  const envelope = payload as Record<string, unknown>;
+  if (envelope.ok !== false) {
+    return undefined;
+  }
+  const error = envelope.error;
+  if (!error || typeof error !== 'object' || Array.isArray(error)) {
+    return undefined;
+  }
+  const code = slotServerErrorCode((error as Record<string, unknown>).code);
+  if (code === undefined || SLOT_SERVER_ERROR_STATUS.get(code) !== response.status) {
+    return undefined;
+  }
+  return { code, definitiveRejection: true };
+}
+
 export class AccountClientError extends Error {
   readonly stage: AccountClientStage;
   readonly code: AccountClientErrorCode;
   readonly status?: number;
   readonly action: string;
+  readonly requestDispatched?: boolean;
+  readonly definitiveRejection: boolean;
 
   constructor(
     message: string,
@@ -77,6 +249,8 @@ export class AccountClientError extends Error {
       code: AccountClientErrorCode;
       status?: number;
       action: string;
+      requestDispatched?: boolean;
+      definitiveRejection?: boolean;
       cause?: unknown;
     },
   ) {
@@ -86,6 +260,8 @@ export class AccountClientError extends Error {
     this.code = options.code;
     this.status = options.status;
     this.action = options.action;
+    this.requestDispatched = options.requestDispatched;
+    this.definitiveRejection = options.definitiveRejection ?? false;
   }
 }
 
@@ -157,6 +333,82 @@ export class AccountClient {
     return directory;
   }
 
+  async readSlotConfig(auth: AuthSession, signal: AbortSignal): Promise<CloudSlotResponse> {
+    const normalized = normalizeAuthSession(auth, 'slot-read', false);
+    const url = buildEndpointUrl(normalized.relayBaseUrl, '/api/cli/slots');
+    const payload = await this.requestJson(
+      'slot-read',
+      url,
+      {
+        method: 'GET',
+        headers: {
+          accept: 'application/json',
+          authorization: bearer(normalized.accessToken),
+        },
+      },
+      signal,
+    );
+    return parseCloudSlotResponse('slot-read', payload, true);
+  }
+
+  async replaceSlotConfig(
+    auth: AuthSession,
+    slots: readonly SyncedSlot[],
+    signal: AbortSignal,
+  ): Promise<CloudSlotResponse> {
+    const normalized = normalizeAuthSession(auth, 'slot-write', false);
+    const validatedSlots = validateOutboundSlots(slots);
+    const url = buildEndpointUrl(normalized.relayBaseUrl, '/api/cli/slots');
+    const payload = await this.requestJson(
+      'slot-write',
+      url,
+      {
+        method: 'PUT',
+        headers: {
+          accept: 'application/json',
+          authorization: bearer(normalized.accessToken),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          schemaVersion: CLI_SLOT_CONFIG_SCHEMA_VERSION,
+          slots: validatedSlots,
+        }),
+      },
+      signal,
+    );
+    return parseCloudSlotResponse('slot-write', payload, true);
+  }
+
+  async replaceSlot(
+    auth: AuthSession,
+    slot: number,
+    binding: SyncedSlotBinding,
+    signal: AbortSignal,
+  ): Promise<CloudSlotResponse> {
+    const normalized = normalizeAuthSession(auth, 'slot-write', false);
+    const validatedSlot = requireSlotNumber(slot);
+    const validatedBinding = validateOutboundBinding(binding);
+    const url = buildEndpointUrl(normalized.relayBaseUrl, `/api/cli/slots/${validatedSlot}`);
+    const payload = await this.requestJson(
+      'slot-write',
+      url,
+      {
+        method: 'PUT',
+        headers: {
+          accept: 'application/json',
+          authorization: bearer(normalized.accessToken),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          schemaVersion: CLI_SLOT_CONFIG_SCHEMA_VERSION,
+          binding: validatedBinding,
+        }),
+      },
+      signal,
+    );
+    return parseCloudSlotResponse('slot-write', payload, true);
+  }
+
   private async requestJson(
     stage: AccountClientStage,
     url: string,
@@ -164,15 +416,17 @@ export class AccountClient {
     signal: AbortSignal,
   ): Promise<Record<string, unknown>> {
     if (signal.aborted) {
-      throw cancelledError(stage, signal.reason);
+      throw cancelledError(stage, signal.reason, false);
     }
 
+    let requestDispatched = false;
     let response: Response;
     try {
+      requestDispatched = true;
       response = await this.fetchImpl(url, { ...init, signal });
     } catch (error) {
       if (signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
-        throw cancelledError(stage, signal.reason);
+        throw cancelledError(stage, signal.reason, requestDispatched);
       }
       throw new AccountClientError(
         `${publicStage(stage)}网络请求失败。`,
@@ -180,12 +434,13 @@ export class AccountClient {
           stage,
           code: 'network_failure',
           action: '请检查网络和 relay 地址后重试。',
+          requestDispatched,
           cause: error,
         },
       );
     }
 
-    if (response.status === 401 || response.status === 403) {
+    if (!isSlotStage(stage) && (response.status === 401 || response.status === 403)) {
       response.body?.cancel().catch(() => undefined);
       throw new AccountClientError(
         stage === 'login'
@@ -196,19 +451,47 @@ export class AccountClient {
           code: 'auth_invalid',
           status: response.status,
           action: stage === 'login' ? '请检查账号和密码后重试。' : '请运行 zterm login。',
+          requestDispatched,
+        },
+      );
+    }
+
+    if (isSlotStage(stage) && response.status === 404) {
+      response.body?.cancel().catch(() => undefined);
+      throw new AccountClientError(
+        '云槽同步接口不可用（HTTP 404）。',
+        {
+          stage,
+          code: 'cloud_sync_unsupported',
+          status: response.status,
+          action: '请升级 relay 服务或联系管理员启用云槽同步。',
+          requestDispatched,
         },
       );
     }
 
     if (!response.ok) {
-      response.body?.cancel().catch(() => undefined);
+      const serverError = isSlotStage(stage)
+        ? await readSlotApiError(response)
+        : undefined;
+      if (signal.aborted) {
+        throw cancelledError(stage, signal.reason, requestDispatched);
+      }
+      if (serverError === undefined) {
+        response.body?.cancel().catch(() => undefined);
+      }
+      const definitiveRejection = serverError?.definitiveRejection ?? false;
       throw new AccountClientError(
         `${publicStage(stage)}请求失败（HTTP ${response.status}）。`,
         {
           stage,
-          code: 'http_failure',
+          code: serverError?.code ?? 'http_failure',
           status: response.status,
-          action: '请稍后重试或检查 relay 服务。',
+          action: isSlotStage(stage)
+            ? slotHttpAction(stage, response.status, definitiveRejection)
+            : '请稍后重试或检查 relay 服务。',
+          requestDispatched,
+          definitiveRejection,
         },
       );
     }
@@ -218,7 +501,7 @@ export class AccountClient {
       payload = await response.json();
     } catch (error) {
       if (signal.aborted) {
-        throw cancelledError(stage, signal.reason);
+        throw cancelledError(stage, signal.reason, requestDispatched);
       }
       throw new AccountClientError(
         `${publicStage(stage)}返回了非 JSON 响应。`,
@@ -226,11 +509,12 @@ export class AccountClient {
           stage,
           code: 'response_invalid_json',
           action: '请检查 relay 服务版本或稍后重试。',
+          requestDispatched,
           cause: error,
         },
       );
     }
-    return requireRecord(payload, stage, 'response');
+    return requireRecord(payload, stage, 'response', requestDispatched);
   }
 
   private authenticatedFromPayload(
@@ -275,44 +559,64 @@ function publicStage(stage: AccountClientStage) {
   if (stage === 'me') {
     return '账号校验';
   }
-  return '目录读取';
+  if (stage === 'directory') {
+    return '目录读取';
+  }
+  if (stage === 'slot-read') {
+    return '云槽读取';
+  }
+  return '云槽写入';
 }
 
-function cancelledError(stage: AccountClientStage, reason: unknown) {
+function cancelledError(
+  stage: AccountClientStage,
+  reason: unknown,
+  requestDispatched?: boolean,
+) {
   return new AccountClientError(
     `${publicStage(stage)}请求已取消。`,
     {
       stage,
       code: 'cancelled',
       action: '请重试。',
+      requestDispatched,
       cause: reason,
     },
   );
 }
 
-function responseInvalidError(stage: AccountClientStage, message: string) {
+function responseInvalidError(
+  stage: AccountClientStage,
+  message: string,
+  requestDispatched?: boolean,
+) {
   return new AccountClientError(message, {
     stage,
     code: 'response_invalid',
     action: '请检查 relay 服务版本或稍后重试。',
+    requestDispatched,
   });
 }
 
-function normalizeRelayBaseUrl(input: string, stage: AccountClientStage) {
+function normalizeRelayBaseUrl(
+  input: string,
+  stage: AccountClientStage,
+  requestDispatched?: boolean,
+) {
   if (typeof input !== 'string' || input.trim().length === 0) {
-    throw invalidRequestError(stage, '缺少 relay 地址。');
+    throw invalidRequestError(stage, '缺少 relay 地址。', requestDispatched);
   }
   let parsed: URL;
   try {
     parsed = new URL(input.trim());
   } catch {
-    throw invalidRequestError(stage, 'relay 地址不是有效 URL。');
+    throw invalidRequestError(stage, 'relay 地址不是有效 URL。', requestDispatched);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw invalidRequestError(stage, 'relay 地址只支持 http 或 https。');
+    throw invalidRequestError(stage, 'relay 地址只支持 http 或 https。', requestDispatched);
   }
   if (parsed.search.length > 0 || parsed.hash.length > 0) {
-    throw invalidRequestError(stage, 'relay 地址不能带查询参数或 fragment。');
+    throw invalidRequestError(stage, 'relay 地址不能带查询参数或 fragment。', requestDispatched);
   }
   if (!parsed.pathname.endsWith('/')) {
     parsed.pathname = `${parsed.pathname}/`;
@@ -338,21 +642,31 @@ function requireLoginPassword(value: unknown) {
   return value;
 }
 
-function invalidRequestError(stage: AccountClientStage, message: string) {
+function invalidRequestError(
+  stage: AccountClientStage,
+  message: string,
+  requestDispatched?: boolean,
+) {
   return new AccountClientError(message, {
     stage,
     code: 'invalid_request',
     action: stage === 'login' ? '请修正 relay 地址和登录输入后重试。' : '请运行 zterm login。',
+    requestDispatched,
   });
 }
 
-function normalizeAuthSession(auth: AuthSession, stage: AccountClientStage): AuthSession {
-  const relayBaseUrl = normalizeRelayBaseUrl(auth.relayBaseUrl, stage);
+function normalizeAuthSession(
+  auth: AuthSession,
+  stage: AccountClientStage,
+  requestDispatched?: boolean,
+): AuthSession {
+  const relayBaseUrl = normalizeRelayBaseUrl(auth.relayBaseUrl, stage, requestDispatched);
   if (!isUsableAccessToken(auth.accessToken)) {
     throw new AccountClientError('缺少有效账号访问令牌。', {
       stage,
       code: 'invalid_request',
       action: '请运行 zterm login。',
+      requestDispatched,
     });
   }
   return {
@@ -371,16 +685,26 @@ function isUsableAccessToken(value: unknown): value is string {
     && !/[\r\n]/.test(value);
 }
 
-function requireRecord(value: unknown, stage: AccountClientStage, label: string): Record<string, unknown> {
+function requireRecord(
+  value: unknown,
+  stage: AccountClientStage,
+  label: string,
+  requestDispatched?: boolean,
+): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw responseInvalidError(stage, `认证响应中的 ${label} 必须是对象。`);
+    throw responseInvalidError(stage, `认证响应中的 ${label} 必须是对象。`, requestDispatched);
   }
   return value as Record<string, unknown>;
 }
 
-function requireString(value: unknown, stage: AccountClientStage, label: string) {
+function requireString(
+  value: unknown,
+  stage: AccountClientStage,
+  label: string,
+  requestDispatched?: boolean,
+) {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw responseInvalidError(stage, `认证响应缺少有效 ${label} 字段。`);
+    throw responseInvalidError(stage, `认证响应缺少有效 ${label} 字段。`, requestDispatched);
   }
   return value;
 }

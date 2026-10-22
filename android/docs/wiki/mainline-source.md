@@ -362,6 +362,7 @@ flowchart TD
 ```mermaid
 flowchart TD
   DevCLI["packages/cli/src/main.ts + pnpm run daemon:*"] --> Shell["scripts/zterm-daemon.sh"]
+  RelayAccountSlotApi["账号槽位云配置 API（src/traversal-relay/server.ts，Bearer 认证）"] --> RelayAccountSlotStore["账号槽位云配置存储（src/traversal-relay/slot-config-store.ts，输出 cli-slot-config.json）"]
   Shell --> Launchd["~/Library/LaunchAgents/com.zterm.android.zterm-daemon.plist"]
   Shell --> Direct["~/.zterm/run/zterm-daemon.pid"]
   Shell --> Runtime["installed payload runtime/server.cjs"]
@@ -379,6 +380,11 @@ flowchart TD
   Npm --> WinShell
   GitProtectionSetup["scripts/setup/enable-local-protection.sh"] --> GitProtectionVerify["appsdk verify-git-main-protection ."]
 ```
+
+The account slot configuration edge is statically bound from the authenticated
+server route to its independent store. Real HTTP and filesystem tests exercise
+this implementation. Production rollout and installed CLI acceptance remain
+separate delivery evidence.
 
 The remote CLI is `packages/cli/src/main.ts`, built to the `zterm` package bin.
 It uses `~/.zterm/config.json`, supports `Ctrl+] q`, and exposes `zterm upgrade`

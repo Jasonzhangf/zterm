@@ -1654,6 +1654,46 @@
       "status": "active"
     },
     {
+      "edge_id": "edge.relay_account_directory_to_relay_account_slot_config",
+      "from_module": "relay.account_directory",
+      "to_module": "relay.account_slot_config",
+      "resource_from": "resource.relay_account_directory",
+      "resource_to": "resource.relay_account_slot_config",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "relay.account_directory",
+      "allowed_callers": [
+        "src/traversal-relay/server.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts"
+      ],
+      "request_chain": [
+        "RelayAccountSlotIn01AuthenticatedRequest",
+        "RelayAccountSlotIn02ValidatedScope"
+      ],
+      "response_chain": [
+        "RelayAccountSlotOut01CommittedConfig"
+      ],
+      "error_chain": [
+        "RelayAccountSlotError01AuthInvalid",
+        "RelayAccountSlotError02InvalidConfig",
+        "RelayAccountSlotError03PersistenceFailed"
+      ],
+      "mainline_call_ids": [
+        "cli_mainline:RelayAccountSlotApi->RelayAccountSlotStore"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/traversal-relay/slot-config-store.test.ts",
+        "src/traversal-relay/slot-config-api.test.ts"
+      ],
+      "status": "pending"
+    },
+    {
       "edge_id": "edge.daemon_connection_gateway_to_transport_subscriber",
       "from_module": "daemon.connection_gateway",
       "to_module": "daemon.transport_subscriber",
@@ -4618,6 +4658,21 @@
     {
       "from_module": "relay.account_directory",
       "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "relay.account_directory",
+      "to_module": "relay.account_slot_config",
+      "status": "active"
+    },
+    {
+      "from_module": "relay.account_directory",
+      "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "relay.account_slot_config",
+      "to_module": "shared.connection_types",
       "status": "active"
     },
     {

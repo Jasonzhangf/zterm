@@ -24,7 +24,9 @@ import type {
 import {
   resolveSlotCommand,
   selectSlotCommand,
+  slotDisplayLabel,
   slotListCommand,
+  slotRenameCommand,
   slotSetCommand,
   type SlotConnection,
   type SlotConnectionFactory,
@@ -292,6 +294,10 @@ describe('CLI slot read and selection commands', () => {
       value: { slot: 5, binding: binding('other') },
     });
     expect(prompts.selections).toHaveLength(1);
+    expect(prompts.selections[0].labels).toEqual([
+      '槽位 2 · Mac Studio / selected · Mac Studio · selected · tmux · adaptive-phone',
+      '槽位 5 · Mac Studio / other · Mac Studio · other · tmux · adaptive-phone',
+    ]);
     expect(prompts.textMessages).toHaveLength(0);
     expect(prompts.passwordMessages).toHaveLength(0);
   });
@@ -334,6 +340,101 @@ describe('CLI slot read and selection commands', () => {
       stage: 'resolve',
       error: { code: 'slot_not_found' },
     });
+  });
+});
+
+describe('CLI slot rename command and label projection', () => {
+  it('renames only the alias while logged out and preserves identity and width', async () => {
+    const original = {
+      ...binding('project-shell', 'stable-project-shell'),
+      widthMode: 'mirror-fixed' as const,
+    };
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          slots: { '1': original },
+          unknownCliField: { keep: true },
+        },
+      },
+      unknownRoot: { keep: true },
+    });
+
+    const result = await slotRenameCommand({
+      store,
+      slot: 1,
+      name: '  工作台  ',
+    });
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+    expect(result).toEqual({
+      kind: 'ok',
+      value: {
+        slot: 1,
+        binding: { ...original, alias: '工作台' },
+      },
+    });
+    expect(config.zterm.cli.slots['1']).toEqual({ ...original, alias: '工作台' });
+    expect(config.zterm.cli.auth).toBeUndefined();
+    expect(config.zterm.cli.unknownCliField).toEqual({ keep: true });
+    expect(config.unknownRoot).toEqual({ keep: true });
+  });
+
+  it('reports invalid names and missing slots without writing', async () => {
+    const { homeDir, store } = await createStore({
+      zterm: { cli: { slots: { '1': binding('one') } } },
+    });
+    const before = readFileSync(getSharedConfigPath(homeDir), 'utf8');
+
+    await expect(slotRenameCommand({
+      store,
+      slot: 1,
+      name: 'bad\u0000name',
+    })).resolves.toMatchObject({
+      kind: 'failed',
+      stage: 'validate',
+      error: { code: 'invalid_alias' },
+    });
+    expect(readFileSync(getSharedConfigPath(homeDir), 'utf8')).toBe(before);
+
+    await expect(slotRenameCommand({
+      store,
+      slot: 9,
+      name: 'missing',
+    })).resolves.toMatchObject({
+      kind: 'failed',
+      stage: 'rename',
+      error: { code: 'slot_not_found' },
+    });
+    expect(readFileSync(getSharedConfigPath(homeDir), 'utf8')).toBe(before);
+  });
+
+  it('projects named and unnamed slots with stable visible identity fields', () => {
+    const named = {
+      slot: 1,
+      binding: {
+        ...binding('project-shell'),
+        alias: '工作台',
+      },
+    };
+    const unnamed = {
+      slot: 2,
+      binding: {
+        ...binding('build-shell'),
+        server: {
+          deviceId: 'device-2',
+          daemonHostId: 'daemon-2',
+          displayName: 'MacBook Air',
+        },
+        widthMode: 'mirror-fixed' as const,
+      },
+    };
+
+    expect(slotDisplayLabel(named)).toBe(
+      '槽位 1 · 工作台 · Mac Studio · project-shell · tmux · adaptive-phone',
+    );
+    expect(slotDisplayLabel(unnamed)).toBe(
+      '槽位 2 · MacBook Air / build-shell · MacBook Air · build-shell · tmux · mirror-fixed',
+    );
   });
 });
 
@@ -487,6 +588,55 @@ describe('CLI slot set command', () => {
     expect(config.zterm.cli.slots['1'].widthMode).toBe('mirror-fixed');
     expect(ownConnection.readSnapshot).not.toHaveBeenCalled();
     expect(ownConnection.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves an existing alias when the same slot is rebound', async () => {
+    const fixture = await startAccountFixture();
+    const original = {
+      ...binding('original', 'original-id'),
+      alias: '工作台',
+      widthMode: 'mirror-fixed' as const,
+    };
+    const { homeDir, store } = await createStore({
+      zterm: {
+        cli: {
+          server: { relayBaseUrl: fixture.baseUrl },
+          auth: AUTH,
+          slots: { '1': original },
+        },
+      },
+    });
+    const ownConnection = connection();
+    const prompts = new ControlledPrompts({
+      select: [0, 0],
+      confirm: [false, true],
+    });
+
+    const result = await slotSetCommand(slotSetOptions(
+      store,
+      prompts,
+      async () => ownConnection,
+      { account: fixture.account },
+    ));
+    const config = JSON.parse(readFileSync(getSharedConfigPath(homeDir), 'utf8'));
+
+    expect(result).toMatchObject({
+      kind: 'ok',
+      value: {
+        slot: 1,
+        binding: {
+          alias: '工作台',
+          session: {
+            backend: 'tmux',
+            stableId: 'tmux-stable-1',
+            name: 'work',
+          },
+          widthMode: 'mirror-fixed',
+        },
+      },
+    });
+    expect(config.zterm.cli.slots['1'].alias).toBe('工作台');
+    expect(config.zterm.cli.slots['1'].widthMode).toBe('mirror-fixed');
   });
 
   it('allows an explicitly confirmed save when no ready mirror exists', async () => {

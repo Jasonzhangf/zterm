@@ -5418,6 +5418,14 @@
         {
           "id": "PackageBin",
           "label": "package/bin/zterm-daemon"
+        },
+        {
+          "id": "RelayAccountSlotApi",
+          "label": "账号槽位云配置 API（src/traversal-relay/server.ts，Bearer 认证）"
+        },
+        {
+          "id": "RelayAccountSlotStore",
+          "label": "账号槽位云配置存储（src/traversal-relay/slot-config-store.ts，输出 cli-slot-config.json）"
         }
       ],
       "edges": [
@@ -5626,6 +5634,19 @@
           "edge_id": "cli_mainline:Npm->WinShell",
           "resource_from": "resource.release_update_artifact",
           "resource_to": "resource.daemon_runtime_artifact",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RelayAccountSlotApi",
+          "to": "RelayAccountSlotStore",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "已验证账号令牌的账号身份、显式操作范围和完整槽位载荷",
+          "semantic_output": "该账号在 relay 数据目录 cli-slot-config.json 中的槽位映射读取或持久化结果",
+          "status": "anchored",
+          "edge_id": "cli_mainline:RelayAccountSlotApi->RelayAccountSlotStore",
+          "resource_from": "resource.relay_account_directory",
+          "resource_to": "resource.relay_account_slot_config",
           "via_resources": [],
           "relation_status": "direct"
         }

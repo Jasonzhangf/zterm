@@ -240,6 +240,15 @@ jobs:
           pnpm --dir android exec tsx ./scripts/cli-blackbox.ts \
             2>&1 | tee "$ZTERM_PLATFORM_EVIDENCE/full-user-path/run.log"
 
+      - name: Run installed CLI slot cloud blackbox
+        shell: bash
+        env:
+          CLI_TARBALL: ${{ runner.temp }}/zterm-platform-evidence/platform-smoke/zterm-cli-platform-smoke.tgz
+        run: |
+          set -euo pipefail
+          node packages/cli/scripts/slot-sync-blackbox.mjs \
+            --evidence-dir "$ZTERM_PLATFORM_EVIDENCE/slot-sync-blackbox"
+
       - name: Redact uploaded evidence text
         if: always()
         shell: bash
@@ -259,6 +268,7 @@ jobs:
             ${{ runner.temp }}/zterm-platform-evidence/npm-blackbox
             ${{ runner.temp }}/zterm-platform-evidence/full-user-path
             ${{ runner.temp }}/zterm-platform-evidence/console-observation
+            ${{ runner.temp }}/zterm-platform-evidence/slot-sync-blackbox
           if-no-files-found: warn
           retention-days: 14
 

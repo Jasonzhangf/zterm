@@ -1,0 +1,72 @@
+{
+  "id": "cli.slot_sync",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "extract_sync_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": ["arc.request"],
+      "output": { "id": "arc.sync_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "read_local_sync_snapshot",
+      "operator": "shared.config.read",
+      "operator_version": "0.1",
+      "inputs": ["arc.sync_request"],
+      "output": { "id": "arc.sync_local_snapshot", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "coordinate_explicit_sync",
+      "operator": "cli.slot_sync.coordinate",
+      "operator_version": "0.1",
+      "inputs": ["arc.sync_request", "arc.sync_local_snapshot"],
+      "output": { "id": "arc.remote_sync_outcome", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "commit_pull_scope",
+      "operator": "cli.slot_store.commit",
+      "operator_version": "0.1",
+      "inputs": ["arc.sync_request", "arc.sync_local_snapshot", "arc.remote_sync_outcome"],
+      "output": { "id": "arc.local_commit_outcome", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "collect_sync_result",
+      "operator": "dagpipe.result.collect",
+      "operator_version": "0.1",
+      "inputs": ["arc.sync_request", "arc.sync_local_snapshot", "arc.remote_sync_outcome", "arc.local_commit_outcome"],
+      "output": { "id": "arc.result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "extract_sync_request", "to": "read_local_sync_snapshot", "arc_id": "arc.sync_request" },
+    { "from": "extract_sync_request", "to": "coordinate_explicit_sync", "arc_id": "arc.sync_request" },
+    { "from": "read_local_sync_snapshot", "to": "coordinate_explicit_sync", "arc_id": "arc.sync_local_snapshot" },
+    { "from": "extract_sync_request", "to": "commit_pull_scope", "arc_id": "arc.sync_request" },
+    { "from": "read_local_sync_snapshot", "to": "commit_pull_scope", "arc_id": "arc.sync_local_snapshot" },
+    { "from": "coordinate_explicit_sync", "to": "commit_pull_scope", "arc_id": "arc.remote_sync_outcome" },
+    { "from": "extract_sync_request", "to": "collect_sync_result", "arc_id": "arc.sync_request" },
+    { "from": "read_local_sync_snapshot", "to": "collect_sync_result", "arc_id": "arc.sync_local_snapshot" },
+    { "from": "coordinate_explicit_sync", "to": "collect_sync_result", "arc_id": "arc.remote_sync_outcome" },
+    { "from": "commit_pull_scope", "to": "collect_sync_result", "arc_id": "arc.local_commit_outcome" }
+  ],
+  "outputs": ["arc.result"]
+}

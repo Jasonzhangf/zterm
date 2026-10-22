@@ -1032,11 +1032,12 @@
     },
     {
       "feature_id": "relay.account_directory",
-      "title": "Relay multi-device account authentication, machine, endpoint, and session directory",
+      "title": "Relay multi-device account authentication, machine, endpoint, session directory, and cloud CLI slot configuration",
       "domain": "relay",
       "owners": [
         "src/traversal-relay/store.ts",
         "src/traversal-relay/server.ts",
+        "src/traversal-relay/slot-config-store.ts",
         "src/server/relay-client.ts",
         "src/server/daemon-connection-endpoint-runtime.ts",
         "src/lib/relay-account-directory.ts",
@@ -1045,6 +1046,9 @@
       "allowed_paths": [
         "src/traversal-relay/store.ts",
         "src/traversal-relay/server.ts",
+        "src/traversal-relay/slot-config-store.ts",
+        "src/traversal-relay/slot-config-store.test.ts",
+        "src/traversal-relay/slot-config-api.test.ts",
         "src/traversal-relay/store.test.ts",
         "src/traversal-relay/server.test.ts",
         "src/traversal-relay/relay-server-release-package.test.ts",
@@ -1060,8 +1064,11 @@
         "src/lib/traversal-relay-client.test.ts",
         "scripts/traversal-relay-local-smoke.ts",
         "scripts/prepare-relay-server-npm-package.mjs",
+        "scripts/prepare-relay-server-npm-package.test.mjs",
         "scripts/verify-relay-server-package.mjs",
-        "packages/shared/src/connection/relay-directory.ts"
+        "packages/shared/src/connection/relay-directory.ts",
+        "packages/shared/src/connection/cli-slot-config.ts",
+        "packages/shared/src/connection/cli-slot-config.test.ts"
       ],
       "forbidden_paths": [
         "src/components/TerminalView.tsx",
@@ -1071,6 +1078,9 @@
       "required_gates": [
         "src/traversal-relay/store.test.ts",
         "src/traversal-relay/server.test.ts",
+        "src/traversal-relay/slot-config-store.test.ts",
+        "src/traversal-relay/slot-config-api.test.ts",
+        "packages/shared/src/connection/cli-slot-config.test.ts",
         "src/traversal-relay/relay-server-release-package.test.ts",
         "src/server/relay-client.test.ts",
         "src/server/daemon-connection-endpoint-runtime.test.ts",
@@ -1080,6 +1090,7 @@
         "src/lib/traversal/socket.test.ts"
       ],
       "truth_sources": [
+        "docs/decisions/2026-10-21-cli-slot-cloud.md",
         "docs/goals/relay-account-directory-and-route-plan.md",
         "docs/testing/relay-account-directory-test-design.md",
         "docs/architecture.md",
@@ -1692,6 +1703,7 @@
     {
       "feature_id": "mainline_source.cli",
       "owners": [
+        "packages/shared/src/connection/cli-slot-config.ts",
         "packages/cli/bin/",
         "packages/cli/src/",
         "packages/shared/src/node/",
@@ -1705,6 +1717,9 @@
         "packages/cli/package.json",
         "packages/cli/scripts/",
         "packages/cli/src/",
+        "packages/shared/package.json",
+        "packages/shared/src/connection/cli-slot-config.ts",
+        "packages/shared/src/connection/cli-slot-config.test.ts",
         "packages/shared/src/node/",
         "scripts/zterm-daemon.sh",
         "scripts/install-global-daemon-cli.sh",
