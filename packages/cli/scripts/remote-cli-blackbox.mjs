@@ -14,7 +14,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   REMOTE_CLI_RESULT_FILE,
@@ -395,6 +395,15 @@ async function executeHarness({
   const isolated = createIsolatedEnvironment(state.tempRoot);
   isolated.env.ZTERM_REMOTE_NODE = process.execPath;
   isolated.env.ZTERM_REMOTE_CLI = cliBin;
+  const nativeTimingDir = join(options.evidenceDir, 'native-timing');
+  mkdirSync(nativeTimingDir, { recursive: true, mode: 0o700 });
+  isolated.env.ZTERM_NATIVE_TIMING_DIR = nativeTimingDir;
+  const timingPreloadUrl = pathToFileURL(
+    join(dirname(fileURLToPath(import.meta.url)), 'rtc-cli-timing-preload.mjs'),
+  ).href;
+  isolated.env.NODE_OPTIONS = [isolated.env.NODE_OPTIONS, `--import=${timingPreloadUrl}`]
+    .filter(Boolean)
+    .join(' ');
   writeIsolatedLoginConfig(isolated.configPath, receipt);
   chmodSync(isolated.configPath, 0o600);
   state.isolated = isolated;

@@ -828,7 +828,8 @@ export function collectTimingEvidence(value, output = []) {
 
 export function collectBridgeTimingEvidence(text) {
   const events = new Set(['tcp.accept', 'wss.construct', 'wss.open',
-    'native.first-bytes', 'wss.first-bytes', 'tcp.close', 'wss.close', 'health']);
+    'native.first-bytes', 'wss.first-bytes', 'tcp.close', 'wss.close', 'health',
+    'reservation.ready', 'reservation.claim', 'reservation.failed']);
   const keys = new Set(['ms', 'event', 'connection', 'bytes', 'sequence']);
   const output = [];
   for (const line of text.split(/\r?\n/u)) {
@@ -1240,6 +1241,7 @@ export async function runCiRemoteCli({
           commandRunner,
         });
         if (bridge) await bridge.assertHealthy();
+        if (bridge) await bridge.prepareNextConnection();
         stages[1] = runRtcConsumerStage({
           privateReceiptPath,
           evidenceDir: options.evidenceDir,

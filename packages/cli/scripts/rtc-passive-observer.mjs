@@ -1,18 +1,20 @@
 import { createRequire } from 'node:module';
 import { performance } from 'node:perf_hooks';
 
-const require = createRequire(import.meta.url);
-const wsModule = require('ws');
-const wrtc = require('@roamhq/wrtc');
-const NativeWebSocket = wsModule.WebSocket;
-const NativePeer = wrtc.RTCPeerConnection;
-
 const signalTypes = new Set([
   'rtc-init', 'rtc-offer', 'rtc-answer', 'rtc-candidate', 'rtc-error',
   'hello', 'mux-hello', 'ping', 'pong',
+  'mux-ready', 'mux-target-message', 'mux-channel-open', 'mux-channel-opened',
+  'mux-channel-message', 'mux-channel-binary', 'mux-channel-close',
+  'mux-channel-closed', 'mux-ping', 'mux-pong', 'mux-error',
 ]);
 
-export function installNativeTimingObserver({ emit }) {
+export function installNativeTimingObserver({ emit, resolveFrom }) {
+  const require = createRequire(resolveFrom ?? import.meta.url);
+  const wsModule = require('ws');
+  const wrtc = require('@roamhq/wrtc');
+  const NativeWebSocket = wsModule.WebSocket;
+  const NativePeer = wrtc.RTCPeerConnection;
   const start = performance.now();
   let wsCount = 0;
   let peerCount = 0;

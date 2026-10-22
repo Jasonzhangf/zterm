@@ -285,9 +285,13 @@ test('keeps the fixed runner arguments and external RTC environment separate', (
   });
 });
 
-for (const bridgeMode of ['plain', 'bridge', 'bridge-close-failure']) {
-test(`actual CI orchestration owns receipt and sidecar lifecycle: ${bridgeMode}`, async () => {
-  await withTempDirectoryAsync(async (root) => {
+async function runFakeRemoteCliCase({
+  bridgeMode = 'bridge',
+  userPathOutcome = 'PASSED',
+  prepare = 'resolve',
+  onPrepareStarted,
+} = {}) {
+  return withTempDirectoryAsync(async (root) => {
     const evidenceDir = join(root, 'evidence');
     const privateReceiptDir = join(root, 'private');
     const cliTarball = join(root, 'zterm-cli.tgz');
@@ -299,6 +303,8 @@ test(`actual CI orchestration owns receipt and sidecar lifecycle: ${bridgeMode}`
     let userPathReceipt = '';
     let rtcReceipt = '';
     let rtcEvidenceDir = '';
+    let prepareCalls = 0;
+    let rtcInvocations = 0;
     const lifecycle = [];
     const inputReceipt = receipt();
     if (bridgeMode !== 'plain') inputReceipt.fixtureTransport = {
@@ -346,6 +352,17 @@ test(`actual CI orchestration owns receipt and sidecar lifecycle: ${bridgeMode}`
         assert(!logPath.startsWith(evidenceDir));
         return { pid: 123, ready: Promise.resolve(),
           assertHealthy: async () => lifecycle.push('healthy'),
+          prepareNextConnection: async () => {
+            prepareCalls += 1;
+            lifecycle.push('prep');
+            if (onPrepareStarted) {
+              await onPrepareStarted({ lifecycle, prepareCalls, rtcInvocations });
+            }
+            if (prepare === 'fail') {
+              throw new Error('fixture reservation failed');
+            }
+            if (typeof prepare === 'function') await prepare();
+          },
           close: async () => {
             assert(existsSync(controlPath), 'control must remain until bridge closes');
             assert(existsSync(materializedReceiptPath));
@@ -392,14 +409,15 @@ test(`actual CI orchestration owns receipt and sidecar lifecycle: ${bridgeMode}`
             join(stageDir, 'remote-cli-result.json'),
             JSON.stringify({
               coverage: 'remote-cli-user-path',
-              outcome: { state: 'PASSED' },
+              outcome: { state: userPathOutcome },
               client: { os: 'win32' },
             }),
           );
           return resultFor(command, args);
         }
         if (args.some((arg) => arg.endsWith('application-liveconsumer.test.ts'))) {
-          if (bridgeMode !== 'plain') assert.equal(lifecycle.at(-1), 'healthy');
+          rtcInvocations += 1;
+          if (bridgeMode !== 'plain') assert.equal(lifecycle.at(-1), 'prep');
           lifecycle.push('rtc');
           rtcReceipt = options.env.ZTERM_RTC_FIXTURE_RECEIPT;
           rtcEvidenceDir = options.env.ZTERM_RTC_FIXTURE_EVIDENCE_DIR;
@@ -432,23 +450,85 @@ test(`actual CI orchestration owns receipt and sidecar lifecycle: ${bridgeMode}`
     });
 
     process.exitCode = previousExitCode;
-    assert.equal(exitCode, bridgeMode === 'bridge-close-failure' ? 1 : 0);
-    assert.equal(userPathReceipt, materializedReceiptPath);
-    assert.equal(rtcReceipt, materializedReceiptPath);
-    assert.equal(
-      rtcEvidenceDir,
-      join(evidenceDir, 'rtc-consumer'),
-    );
     const result = JSON.parse(
       readFileSync(join(evidenceDir, CI_REMOTE_RESULT_FILE), 'utf8'),
     );
-    assert.equal(result.outcome.state, bridgeMode === 'bridge-close-failure' ? 'FAILED' : 'PASSED');
-    assert.doesNotMatch(JSON.stringify(result), /private-sidecar-token/);
-    if (bridgeMode !== 'plain') assert.deepEqual(lifecycle, ['spawn', 'healthy', 'user', 'healthy', 'rtc', 'healthy', 'close']);
-    assert.equal(existsSync(materializedReceiptPath), bridgeMode === 'bridge-close-failure');
-    assert.equal(result.stages[0].status, 'passed');
-    assert.equal(result.stages[1].status, 'passed');
+    return {
+      exitCode,
+      result,
+      lifecycle,
+      prepareCalls,
+      rtcInvocations,
+      userPathReceipt,
+      rtcReceipt,
+      rtcEvidenceDir,
+      materializedReceiptPath,
+      receiptExists: existsSync(materializedReceiptPath),
+      evidenceDir,
+    };
   });
+}
+
+for (const bridgeMode of ['plain', 'bridge', 'bridge-close-failure']) {
+test(`actual CI orchestration owns receipt and sidecar lifecycle: ${bridgeMode}`, async () => {
+  const captured = await runFakeRemoteCliCase({ bridgeMode });
+  assert.equal(captured.exitCode, bridgeMode === 'bridge-close-failure' ? 1 : 0);
+  assert.equal(captured.userPathReceipt, captured.materializedReceiptPath);
+  assert.equal(captured.rtcReceipt, captured.materializedReceiptPath);
+  assert.equal(
+    captured.rtcEvidenceDir,
+    join(captured.evidenceDir, 'rtc-consumer'),
+  );
+  assert.equal(captured.result.outcome.state, bridgeMode === 'bridge-close-failure' ? 'FAILED' : 'PASSED');
+  assert.doesNotMatch(JSON.stringify(captured.result), /private-sidecar-token/);
+  if (bridgeMode !== 'plain') {
+    assert.deepEqual(captured.lifecycle, ['spawn', 'healthy', 'user', 'healthy', 'prep', 'rtc', 'healthy', 'close']);
+    assert.equal(captured.prepareCalls, 1);
+  }
+  assert.equal(captured.receiptExists, bridgeMode === 'bridge-close-failure');
+  assert.equal(captured.result.stages[0].status, 'passed');
+  assert.equal(captured.result.stages[1].status, 'passed');
+});
+}
+
+test('awaited fixture preparation blocks the strict API stage until it resolves', async () => {
+  let releasePreparation;
+  const preparation = new Promise((resolve) => { releasePreparation = resolve; });
+  const captured = await runFakeRemoteCliCase({
+    bridgeMode: 'bridge',
+    prepare: () => preparation,
+    onPrepareStarted: async ({ lifecycle, rtcInvocations }) => {
+      assert.equal(rtcInvocations, 0);
+      assert.equal(lifecycle.includes('rtc'), false);
+      assert.equal(lifecycle.at(-1), 'prep');
+      releasePreparation();
+    },
+  });
+  assert.equal(captured.exitCode, 0);
+  assert.deepEqual(captured.lifecycle, ['spawn', 'healthy', 'user', 'healthy', 'prep', 'rtc', 'healthy', 'close']);
+  assert.equal(captured.prepareCalls, 1);
+});
+
+for (const userPathOutcome of ['PASSED', 'FAILED']) {
+test(`fixture preparation failure prevents API and keeps the ${userPathOutcome} user-path record`, async () => {
+  const captured = await runFakeRemoteCliCase({
+    bridgeMode: 'bridge',
+    userPathOutcome,
+    prepare: 'fail',
+  });
+  assert.equal(captured.exitCode, 1);
+  assert.equal(captured.prepareCalls, 1);
+  assert.equal(captured.rtcInvocations, 0);
+  assert.deepEqual(captured.lifecycle, ['spawn', 'healthy', 'user', 'healthy', 'prep', 'close']);
+  assert.equal(captured.result.outcome.state, 'FAILED');
+  assert.equal(captured.result.setup.error, 'fixture reservation failed');
+  assert.equal(captured.result.setup.errorCode, 'ci_remote_cli_error');
+  assert.equal(
+    captured.result.stages[0].status,
+    userPathOutcome === 'PASSED' ? 'passed' : 'failed',
+  );
+  assert.equal(captured.result.stages[1].status, 'not-run');
+  assert.equal(captured.receiptExists, false);
 });
 }
 

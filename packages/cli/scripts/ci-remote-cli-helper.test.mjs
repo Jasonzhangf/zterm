@@ -23,6 +23,21 @@ test('keeps only bounded anonymous bridge timings before private cleanup', () =>
   assert.equal(collectBridgeTimingEvidence(`${lines}\n`.repeat(600)).length, 512);
 });
 
+test('accepts fixed reservation bridge timings without widening the schema', () => {
+  const safe = [
+    { ms: 10, event: 'reservation.ready', connection: 0, sequence: 1 },
+    { ms: 20, event: 'reservation.claim', connection: 1, sequence: 2 },
+    { ms: 30, event: 'reservation.failed', connection: 1, sequence: 3 },
+  ];
+  const lines = [
+    ...safe,
+    { ms: 31, event: 'reservation.failed', connection: 1, token: 'secret' },
+    { ms: 32, event: 'reservation.other', connection: 1 },
+    { ms: 33, event: 'reservation.failed', connection: 1, note: 'not-fixed' },
+  ].map(value => `rtc-bridge-timing: ${JSON.stringify(value)}`).join('\n');
+  assert.deepEqual(collectBridgeTimingEvidence(lines), safe);
+});
+
 const SAFE_TIMING_LINES = [
   'rtc-timing-evidence: {"event":"ws.construct","ms":3,"ws":1}',
   'rtc-timing-evidence: {"event":"network.secureConnect","ms":2102,"ws":1}',

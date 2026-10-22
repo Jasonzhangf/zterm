@@ -120,10 +120,32 @@ export async function startFixtureTurnClient({ listenHost, listenPort, bridgeUrl
   const sockets = ownedSockets();
   const webSockets = new Set();
   let nextConnection = 0;
+  let shuttingDown = false;
+  let reservation = emptyReservation();
+  function emptyReservation() {
+    return { state: 'empty', connection: null, ws: null, stream: null, error: null,
+      onError: null, onClose: null, onStreamError: null, cancel: null };
+  }
+  function releaseReservation(entry) {
+    entry.ws = null;
+    entry.stream = null;
+    entry.onError = null;
+    entry.onClose = null;
+    entry.onStreamError = null;
+    entry.cancel = null;
+  }
   const emit = (event, connection, extra) => {
     const timing = { ms: Math.floor(performance.now() - startMs), event, connection };
     if (extra) Object.assign(timing, extra);
     onTiming(timing);
+  };
+  const safeErrorMessage = error => {
+    const message = error?.message ? String(error.message) : 'reservation admission failed';
+    return token ? message.split(token).join('[redacted]') : message;
+  };
+  const admissionError = error => {
+    const safe = error instanceof Error ? error : new Error(String(error ?? 'reservation admission failed'));
+    return new Error(`reservation admission failed: ${safeErrorMessage(safe)}`);
   };
   function open(connection) {
     emit('wss.construct', connection);
@@ -137,24 +159,144 @@ export async function startFixtureTurnClient({ listenHost, listenPort, bridgeUrl
     webSockets.add(ws);
     ws.once('open', () => emit('wss.open', connection));
     ws.once('close', () => { webSockets.delete(ws); emit('wss.close', connection); });
+    ws.once('message', chunk => emit('wss.first-bytes', connection, { bytes: Buffer.byteLength(chunk) }));
     return ws;
   }
+  function prepareNextConnection() {
+    if (shuttingDown) return Promise.reject(new Error('bridge is closing'));
+    if (reservation.state === 'preparing') return Promise.reject(new Error('reservation already preparing'));
+    if (reservation.state === 'ready') return Promise.reject(new Error('reservation already ready'));
+    const connection = ++nextConnection;
+    const entry = { ...emptyReservation(), state: 'preparing', connection };
+    reservation = entry;
+    let ws;
+    let stream;
+    try {
+      ws = open(connection);
+      entry.ws = ws;
+      stream = createWebSocketStream(ws);
+      entry.stream = stream;
+    } catch (error) {
+      entry.state = 'failed';
+      entry.error = error;
+      emit('reservation.failed', connection);
+      if (ws) ws.terminate();
+      releaseReservation(entry);
+      return Promise.reject(admissionError(error));
+    }
+    return new Promise((resolve, rejectReady) => {
+      let admissionSettled = false;
+      const fail = error => {
+        const safeError = error instanceof Error ? error : new Error(String(error ?? 'reservation admission failed'));
+        if (entry.state === 'failed' || entry.state === 'claimed') return;
+        if (shuttingDown) {
+          if (entry.state === 'preparing' && !admissionSettled) {
+            admissionSettled = true;
+            entry.state = 'failed';
+            entry.error = safeError;
+            rejectReady(admissionError(safeError));
+          }
+          if (entry.state === 'ready') entry.state = 'empty';
+          ws.terminate();
+          if (!stream.destroyed) stream.destroy();
+          releaseReservation(entry);
+          return;
+        }
+        const wasPreparing = entry.state === 'preparing';
+        entry.state = 'failed';
+        entry.error = safeError;
+        emit('reservation.failed', connection);
+        if (wasPreparing && !admissionSettled) {
+          admissionSettled = true;
+          rejectReady(admissionError(safeError));
+        }
+        ws.terminate();
+        if (!stream.destroyed) stream.destroy();
+        releaseReservation(entry);
+      };
+      const onOpen = () => {
+        if (entry.state !== 'preparing') {
+          fail(new Error('reservation closed before claim'));
+          return;
+        }
+        entry.state = 'ready';
+        admissionSettled = true;
+        emit('reservation.ready', connection);
+        resolve();
+      };
+      const onError = error => fail(error ?? new Error('reservation admission failed'));
+      const onClose = () => fail(new Error('reservation closed before claim'));
+      const onStreamError = error => fail(error ?? new Error('reservation stream failed'));
+      entry.onError = onError;
+      entry.onClose = onClose;
+      entry.onStreamError = onStreamError;
+      entry.cancel = error => {
+        if (entry.state !== 'preparing' || admissionSettled) return;
+        entry.state = 'failed';
+        entry.error = error;
+        admissionSettled = true;
+        rejectReady(admissionError(error));
+        ws.terminate();
+        if (!stream.destroyed) stream.destroy();
+        releaseReservation(entry);
+      };
+      ws.once('open', onOpen);
+      ws.once('error', onError);
+      ws.once('close', onClose);
+      stream.once('error', onStreamError);
+    });
+  }
   const server = tcpServer(socket => {
+    if (shuttingDown) {
+      socket.once('error', () => {});
+      socket.destroy();
+      return;
+    }
     socket.setNoDelay(true);
     sockets.add(socket);
+    if (reservation.state === 'ready') {
+      const reserved = reservation;
+      reservation = { ...emptyReservation(), state: 'claimed', connection: reserved.connection };
+      const connection = reserved.connection;
+      emit('tcp.accept', connection);
+      emit('reservation.claim', connection);
+      socket.once('data', chunk => emit('native.first-bytes', connection, { bytes: Buffer.byteLength(chunk) }));
+      socket.once('close', () => emit('tcp.close', connection));
+      reserved.ws.off('error', reserved.onError);
+      reserved.ws.off('close', reserved.onClose);
+      reserved.stream.off('error', reserved.onStreamError);
+      pair(socket, reserved.stream);
+      return;
+    }
+    if (reservation.state === 'failed') {
+      const failed = reservation;
+      reservation = emptyReservation();
+      const connection = failed.connection;
+      emit('tcp.accept', connection);
+      socket.once('error', () => {});
+      socket.once('close', () => emit('tcp.close', connection));
+      socket.destroy();
+      return;
+    }
     const connection = ++nextConnection;
     emit('tcp.accept', connection);
     socket.once('data', chunk => emit('native.first-bytes', connection, { bytes: Buffer.byteLength(chunk) }));
     socket.once('close', () => emit('tcp.close', connection));
     const ws = open(connection);
     const stream = createWebSocketStream(ws);
-    stream.once('data', chunk => emit('wss.first-bytes', connection, { bytes: Buffer.byteLength(chunk) }));
     pair(socket, stream);
   });
   const listeningPort = await listen(server, listenHost, listenPort);
-  const close = closeOwner(server, sockets, () => {
+  const closeBase = closeOwner(server, sockets, () => {
     for (const ws of webSockets) ws.terminate();
   });
+  const close = () => {
+    shuttingDown = true;
+    if (reservation.state === 'preparing' && reservation.cancel) {
+      reservation.cancel(new Error('bridge closed during reservation preparation'));
+    }
+    return closeBase();
+  };
   try {
     await new Promise((resolve, rejectReady) => {
       const probe = open(0);
@@ -163,7 +305,12 @@ export async function startFixtureTurnClient({ listenHost, listenPort, bridgeUrl
       probe.once('close', code => code === 1005 || code === 1000 ? resolve() : rejectReady(new Error('bridge probe closed abnormally')));
     });
   } catch (error) { await close(); throw error; }
-  return { listeningPort, close, recordHealth: sequence => emit('health', 0, { sequence }) };
+  return { listeningPort, close, prepareNextConnection,
+    recordHealth: sequence => {
+      emit('health', 0, { sequence });
+      return reservation.state === 'failed'
+        ? `reservation failed: ${safeErrorMessage(reservation.error)}` : undefined;
+    } };
 }
 
 export function spawnOwnedFixtureBridge({ role, controlPath, logPath }) {
@@ -202,19 +349,61 @@ export function spawnOwnedFixtureBridge({ role, controlPath, logPath }) {
         clearTimeout(timer);
         child.off('message', message);
         child.off('exit', gone);
+        child.off('disconnect', gone);
         if (error) rejectHealth(error); else resolve();
       };
-      const message = value => { if (value.type === 'health' && value.id === id) finish(); };
+      const message = value => {
+        if (value.type !== 'health' || value.id !== id) return;
+        finish(value.error ? new Error(value.error) : undefined);
+      };
       const gone = () => finish(new Error('bridge child exited during health check'));
       const timer = setTimeout(() => finish(new Error('bridge child health timeout')), 3000);
       child.on('message', message);
       child.once('exit', gone);
-      child.send({ type: 'health', id }, error => { if (error) finish(error); });
+      child.once('disconnect', gone);
+      try {
+        child.send({ type: 'health', id }, error => { if (error) finish(error); });
+      } catch (error) {
+        finish(error);
+      }
+    });
+  };
+  let prepareId = 0;
+  handle.prepareNextConnection = async () => {
+    await handle.ready;
+    if (startupError || exited || !child.connected) {
+      throw startupError ?? new Error('bridge child exited during reservation preparation');
+    }
+    const id = ++prepareId;
+    await new Promise((resolve, rejectPrepare) => {
+      const finish = error => {
+        clearTimeout(timer);
+        child.off('message', message);
+        child.off('exit', gone);
+        child.off('disconnect', gone);
+        if (error) rejectPrepare(error); else resolve();
+      };
+      const message = value => {
+        if (value.type !== 'prepared' || value.id !== id) return;
+        finish(value.ok ? undefined : new Error(value.error || 'reservation preparation failed'));
+      };
+      const gone = () => finish(new Error('bridge child exited during reservation preparation'));
+      const timer = setTimeout(() => finish(new Error('bridge child reservation preparation timeout')), 15000);
+      child.on('message', message);
+      child.once('exit', gone);
+      child.once('disconnect', gone);
+      try {
+        child.send({ type: 'prepare', id }, error => { if (error) finish(error); });
+      } catch (error) {
+        finish(error);
+      }
     });
   };
   let closing;
   handle.close = () => closing ??= (async () => {
-    if (!exited && child.connected) child.send({ type: 'close' });
+    if (!exited && child.connected) {
+      try { child.send({ type: 'close' }); } catch { /* the exit receipt below reports cleanup */ }
+    }
     return await exit;
   })();
   return handle;
@@ -224,16 +413,32 @@ async function childMain() {
   const control = JSON.parse(readFileSync(process.argv[2], 'utf8'));
   let owner;
   let closing;
+  const send = (message, callback) => {
+    if (!process.connected) return false;
+    try { return process.send(message, callback); } catch { return false; }
+  };
   const close = () => closing ??= (async () => {
     const result = owner ? await owner.close() : { closed: true, errors: [] };
-    if (process.connected) process.send({ type: 'closed', result }, () => process.disconnect());
+    if (!send({ type: 'closed', result }, () => process.disconnect()) && process.connected) process.disconnect();
     process.exitCode = result.closed ? 0 : 1;
   })();
   process.on('message', message => {
     if (message.type === 'close') void close();
     if (message.type === 'health' && owner && !closing) {
-      if (owner.recordHealth) owner.recordHealth(message.id);
-      process.send({ type: 'health', id: message.id });
+      const reservationError = owner.recordHealth ? owner.recordHealth(message.id) : undefined;
+      send({ type: 'health', id: message.id, ...(reservationError ? { error: reservationError } : {}) });
+    }
+    if (message.type === 'prepare') {
+      const { id } = message;
+      if (!owner || !owner.prepareNextConnection || closing) {
+        send({ type: 'prepared', id, ok: false, error: 'bridge not ready' });
+        return;
+      }
+      Promise.resolve().then(() => owner.prepareNextConnection()).then(
+        () => { if (!closing) send({ type: 'prepared', id, ok: true }); },
+        error => { if (!closing) send({ type: 'prepared', id, ok: false,
+          error: error?.message ?? 'reservation preparation failed' }); },
+      );
     }
   });
   process.on('disconnect', () => { void close(); });
@@ -245,10 +450,10 @@ async function childMain() {
     });
     else throw new Error('unknown fixture bridge role');
     if (!process.connected) { await owner.close(); return; }
-    process.send({ type: 'ready', value: control.role === 'frontend'
+    send({ type: 'ready', value: control.role === 'frontend'
       ? { origin: owner.origin } : { listeningPort: owner.listeningPort } });
   } catch (error) {
-    if (process.connected) process.send({ type: 'error', error: error.message });
+    send({ type: 'error', error: error.message });
     await close();
     process.exitCode = 1;
   }

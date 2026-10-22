@@ -11,6 +11,7 @@ import { spawnOwnedFixtureBridge } from './fixture-turn-bridge.mjs';
 
 const index = process.argv.indexOf('--evidence-dir');
 if (index < 0 || !process.argv[index + 1]) throw new Error('--evidence-dir is required');
+const prepareNextConnection = process.argv.includes('--prepare-next-connection');
 const evidenceDir = resolve(process.argv[index + 1]);
 mkdirSync(evidenceDir, { recursive: true });
 const root = mkdtempSync(join(tmpdir(), 'zterm-turn-foundation-'));
@@ -23,7 +24,8 @@ let frontend;
 let client;
 let tunnel;
 let error;
-const result = { coverage: 'real-turn-rtc-foundation', physicalPath: 'TURN/TCP over loopback WebSocket', nativePublicUdpProved: false, ok: false, cleanup: {} };
+const result = { coverage: 'real-turn-rtc-foundation', physicalPath: 'TURN/TCP over loopback WebSocket',
+  nativePublicUdpProved: false, prepareNextConnection, ok: false, cleanup: {} };
 
 function resolvePublicIpv4(host) {
   const lookup = spawnSync('curl', ['--fail', '--silent', '--show-error', '--max-time', '15',
@@ -125,6 +127,10 @@ try {
   const config = { iceTransportPolicy: 'relay', iceServers: [{
     urls: `turn:127.0.0.1:${client.listeningPort}?transport=tcp`, username: turn.username, credential: turn.credential,
   }] };
+  if (prepareNextConnection) {
+    await client.prepareNextConnection();
+    result.prepareNextConnectionReady = true;
+  }
   const first = new wrtc.RTCPeerConnection(config);
   const second = new wrtc.RTCPeerConnection(config);
   peers.push(first, second);
