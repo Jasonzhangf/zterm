@@ -4407,6 +4407,17 @@
     },
     {
       "from_module": "daemon.mirror_store",
+      "to_module": "daemon.source_adapter",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/terminal-mirror-runtime.ts"
+      ],
+      "allowed_callees": [
+        "src/server/terminal-source-adapter.ts"
+      ]
+    },
+    {
+      "from_module": "daemon.mirror_store",
       "to_module": "daemon.transport_subscriber",
       "status": "active",
       "allowed_callers": [
