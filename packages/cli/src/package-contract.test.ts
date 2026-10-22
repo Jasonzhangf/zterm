@@ -13,7 +13,8 @@ describe('zterm CLI package contract', () => {
     expect(manifest.private).not.toBe(true);
     expect(manifest.engines.node).toBe('>=22');
     expect(manifest.bin).toEqual({ zterm: './bin/zterm.mjs' });
-    expect(manifest.files).toEqual(expect.arrayContaining(['bin', 'dist', 'README.md']));
+    expect(manifest.files).toEqual(expect.arrayContaining(['bin', 'dist/main.mjs', 'README.md']));
+    expect(manifest.files).not.toContain('dist');
     expect(manifest.dependencies ?? {}).not.toHaveProperty('@zterm/shared');
     expect(manifest.dependencies ?? {}).not.toHaveProperty('@jsonstudio/wtermmod-core');
     expect(binSource).toMatch(/^#!\/usr\/bin\/env node\r?\n/);
