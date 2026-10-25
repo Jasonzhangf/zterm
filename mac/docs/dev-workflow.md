@@ -2,53 +2,16 @@
 
 ## 总原则
 
-- 先冻结真源，再改实现
+- 先确认受影响流程和唯一 owner，再改实现
 - Mac 只补平台壳，不另起 terminal 真相
 - 先切入口 ownership，再切 deeper runtime
 - 无运行态证据，不向 Jason 宣称“可以手测完整版”
 
-## 标准流程
+## 开发与验证
 
-```text
-Review truth
--> Freeze docs/task/cache
--> Cut minimal shell slice
--> type-check
--> build
--> packaged smoke（按需）
--> Evidence
-```
+通用流程沿全局 `coding-principals`。只更新本次改变的规格、owner 和验收契约；不为每个切片同步整组 spec、task、CACHE 和 workflow。历史 rewrite 的切片限制不作为后续所有任务的准入条件。
 
-## 本轮 rewrite 门禁
-
-### 1. 文档门禁
-
-先同步：
-
-- `mac/docs/spec.md`
-- `mac/docs/architecture.md`
-- `mac/docs/dev-workflow.md`
-- `mac/task.md`
-- `mac/CACHE.md`
-
-### 2. 代码门禁
-
-本轮只允许做：
-
-- App 入口切换
-- shell ownership 重建
-- launcher / editor / active tab 最小闭环
-- 与真实 runtime 的薄适配
-
-本轮不允许顺手做：
-
-- split closeout
-- local tmux closeout
-- runtime 协议大杂烩式补丁
-
-### 3. 验证门禁
-
-最低静态门槛：
+源码改动按影响选择测试与类型检查；编译或 bundle 行为改变时再运行构建：
 
 ```bash
 pnpm --filter @zterm/mac type-check
@@ -61,20 +24,8 @@ pnpm --filter @zterm/mac build
 pnpm --filter @zterm/mac package
 ```
 
-## 证据要求
+## 验收与反馈
 
-至少给出：
+Mac 专属 smoke 和安全操作见 `.agents/skills/zterm-mac-dev/SKILL.md`。用户主路径需对应真实客户端证据；只通过编译不能宣称 app 可用。文档修订不构建或重启 app。
 
-- 改动文件
-- type-check 输出
-- build 输出
-- 若未做 packaged smoke，必须明确写“本轮仅完成静态闭环”
-
-## 汇报要求
-
-本轮只能按真实范围汇报：
-
-- 已切掉旧入口没有
-- 新 app shell 是否接上真实 runtime
-- 还没切掉的旧 runtime / buffer worker 在哪
-- 下一刀准备切什么
+正文说明可用结果、使用入口和未验证范围；测试命令、截图和资源采样留在已有证据目录，不强制五项或六段汇报模板。

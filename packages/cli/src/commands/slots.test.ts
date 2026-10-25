@@ -319,8 +319,8 @@ describe('CLI slot read and selection commands', () => {
     });
     expect(prompts.selections).toHaveLength(1);
     expect(prompts.selections[0].labels).toEqual([
-      '槽位 2 · Mac Studio / selected · Mac Studio · selected · tmux · adaptive-phone',
-      '槽位 5 · Mac Studio / other · Mac Studio · other · tmux · adaptive-phone',
+      '槽位 2 · Mac Studio / selected',
+      '槽位 5 · Mac Studio / other',
     ]);
     expect(prompts.textMessages).toHaveLength(0);
     expect(prompts.passwordMessages).toHaveLength(0);
@@ -432,7 +432,7 @@ describe('CLI slot rename command and label projection', () => {
     expect(readFileSync(getSharedConfigPath(homeDir), 'utf8')).toBe(before);
   });
 
-  it('projects named and unnamed slots with stable visible identity fields', () => {
+  it('projects slot number, optional alias, and server / session once', () => {
     const named = {
       slot: 1,
       binding: {
@@ -454,10 +454,10 @@ describe('CLI slot rename command and label projection', () => {
     };
 
     expect(slotDisplayLabel(named)).toBe(
-      '槽位 1 · 工作台 · Mac Studio · project-shell · tmux · adaptive-phone',
+      '槽位 1 · 工作台 · Mac Studio / project-shell',
     );
     expect(slotDisplayLabel(unnamed)).toBe(
-      '槽位 2 · MacBook Air / build-shell · MacBook Air · build-shell · tmux · mirror-fixed',
+      '槽位 2 · MacBook Air / build-shell',
     );
   });
 });
@@ -507,8 +507,7 @@ describe('CLI slot set command', () => {
     };
     const renderPreview = vi.fn(async () => undefined);
     const prompts = new ControlledPrompts({
-      select: [0, 0, 0],
-      confirm: [true],
+      select: [0, 0, 1, 0],
     });
 
     const result = await slotSetCommand(slotSetOptions(store, prompts, factory, {
@@ -573,11 +572,18 @@ describe('CLI slot set command', () => {
     expect(prompts.selections[1].labels).toHaveLength(1);
     expect(prompts.selections[2].labels).toEqual([
       '保存到槽位 1',
+      '预览 snapshot',
       '重新选择 session',
       '返回服务器选择',
       '退出配置',
     ]);
-    expect(prompts.selections[2].values).toEqual(['save', 'sessions', 'servers', 'exit']);
+    expect(prompts.selections[2].values).toEqual([
+      'save',
+      'preview',
+      'sessions',
+      'servers',
+      'exit',
+    ]);
     expect(JSON.stringify(result)).not.toContain('account-access-secret');
     expect(JSON.stringify(result)).not.toContain('daemon-endpoint-secret');
   });
@@ -595,7 +601,6 @@ describe('CLI slot set command', () => {
     const ownConnection = connection();
     const prompts = new ControlledPrompts({
       select: [0, 0, 0],
-      confirm: [false],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -640,7 +645,6 @@ describe('CLI slot set command', () => {
     const ownConnection = connection();
     const prompts = new ControlledPrompts({
       select: [0, 0, 0],
-      confirm: [false],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -670,7 +674,7 @@ describe('CLI slot set command', () => {
     expect(config.zterm.cli.slots['1'].widthMode).toBe('mirror-fixed');
   });
 
-  it('allows an explicitly confirmed save when no ready mirror exists', async () => {
+  it('previews an unavailable mirror from the menu, then saves on the repeated menu', async () => {
     const fixture = await startAccountFixture();
     const original = binding('original', 'original-id');
     const { homeDir, store } = await createStore({
@@ -692,8 +696,7 @@ describe('CLI slot set command', () => {
     });
     const renderPreview = vi.fn(async () => undefined);
     const prompts = new ControlledPrompts({
-      select: [0, 0, 0],
-      confirm: [true],
+      select: [0, 0, 1, 0],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -713,6 +716,14 @@ describe('CLI slot set command', () => {
         name: 'work',
       },
     );
+    expect(prompts.selections).toHaveLength(4);
+    expect(prompts.selections[3].labels).toEqual([
+      '保存到槽位 1',
+      '预览 snapshot',
+      '重新选择 session',
+      '返回服务器选择',
+      '退出配置',
+    ]);
     expect(config.zterm.cli.slots['1'].session.stableId).toBe('tmux-stable-1');
     expect(ownConnection.close).toHaveBeenCalledTimes(1);
   });
@@ -733,8 +744,7 @@ describe('CLI slot set command', () => {
     });
     const ownConnection = connection();
     const prompts = new ControlledPrompts({
-      select: [0, 0, 3],
-      confirm: [false],
+      select: [0, 0, 4],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -773,8 +783,7 @@ describe('CLI slot set command', () => {
       ),
     });
     const prompts = new ControlledPrompts({
-      select: [0, 0],
-      confirm: [true],
+      select: [0, 0, 1],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -822,7 +831,6 @@ describe('CLI slot set command', () => {
     };
     const prompts = new ControlledPrompts({
       select: [0, 0, 0],
-      confirm: [false],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -969,8 +977,7 @@ describe('CLI slot set command', () => {
     });
     const renderPreview = vi.fn(async () => undefined);
     const prompts = new ControlledPrompts({
-      select: [0, 1, 0],
-      confirm: [true],
+      select: [0, 1, 1, 0],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -1081,8 +1088,7 @@ describe('CLI slot set command', () => {
     const factory = vi.fn(async () => ownConnection);
     const renderPreview = vi.fn(async () => undefined);
     const prompts = new ControlledPrompts({
-      select: [0, 1, 1, 0, 0],
-      confirm: [true, true],
+      select: [0, 1, 1, 2, 0, 1, 0],
     });
     const updates = vi.spyOn(store, 'update');
 
@@ -1113,13 +1119,24 @@ describe('CLI slot set command', () => {
       expect.objectContaining({ stableId: refreshedFirstStableId }),
       expect.objectContaining({ stableId: refreshedFirstStableId }),
     );
-    expect(prompts.selections[2].labels).toEqual([
+    const actionLabels = [
       '保存到槽位 1',
+      '预览 snapshot',
       '重新选择 session',
       '返回服务器选择',
       '退出配置',
-    ]);
-    expect(prompts.selections[2].values).toEqual(['save', 'sessions', 'servers', 'exit']);
+    ];
+    for (const index of [2, 3, 5, 6]) {
+      expect(prompts.selections[index].labels).toEqual(actionLabels);
+      expect(prompts.selections[index].values).toEqual([
+        'save',
+        'preview',
+        'sessions',
+        'servers',
+        'exit',
+      ]);
+    }
+    expect(prompts.selections).toHaveLength(7);
     expect(factory).toHaveBeenCalledTimes(1);
     expect(ownConnection.close).toHaveBeenCalledTimes(1);
     expect(updates).toHaveBeenCalledTimes(1);
@@ -1184,8 +1201,7 @@ describe('CLI slot set command', () => {
       return options.server.deviceId === 'device-1' ? firstConnection : secondConnection;
     };
     const prompts = new ControlledPrompts({
-      select: [0, 0, 2, 1, 0, 0],
-      confirm: [false, false],
+      select: [0, 0, 3, 1, 0, 0],
     });
 
     const result = await slotSetCommand(slotSetOptions(store, prompts, factory, {
@@ -1246,8 +1262,7 @@ describe('CLI slot set command', () => {
       return ownConnection;
     };
     const prompts = new ControlledPrompts({
-      select: [0, 0, 2],
-      confirm: [false],
+      select: [0, 0, 3],
     });
 
     const result = await slotSetCommand(slotSetOptions(store, prompts, factory, {
@@ -1282,8 +1297,7 @@ describe('CLI slot set command', () => {
     });
     const ownConnection = connection();
     const prompts = new ControlledPrompts({
-      select: [0, 0, 3],
-      confirm: [false],
+      select: [0, 0, 4],
     });
 
     const result = await slotSetCommand(slotSetOptions(store, prompts, async () => ownConnection, {
@@ -1315,8 +1329,7 @@ describe('CLI slot set command', () => {
         ? new PromptCancelledError('server')
         : Object.assign(new Error('readline closed'), { name: 'AbortError' });
       const prompts = new ControlledPrompts({
-        select: [0, 0, 2, cancellation],
-        confirm: [false],
+        select: [0, 0, 3, cancellation],
       });
 
       const result = await slotSetCommand(slotSetOptions(
@@ -1333,7 +1346,7 @@ describe('CLI slot set command', () => {
     },
   );
 
-  it('opens the action menu after a declined preview without requesting a snapshot', async () => {
+  it('opens the five-action menu directly and saves without requesting a snapshot', async () => {
     const fixture = await startAccountFixture();
     const original = binding('original', 'original-id');
     const { homeDir, store } = await createStore({
@@ -1349,7 +1362,6 @@ describe('CLI slot set command', () => {
     const renderPreview = vi.fn(async () => undefined);
     const prompts = new ControlledPrompts({
       select: [0, 0, 0],
-      confirm: [false],
     });
 
     const result = await slotSetCommand(slotSetOptions(
@@ -1362,9 +1374,10 @@ describe('CLI slot set command', () => {
 
     expect(ownConnection.readSnapshot).not.toHaveBeenCalled();
     expect(renderPreview).not.toHaveBeenCalled();
-    expect(prompts.confirms).toEqual(['预览 snapshot？']);
+    expect(prompts.confirms).toEqual([]);
     expect(prompts.selections[2].labels).toEqual([
       '保存到槽位 1',
+      '预览 snapshot',
       '重新选择 session',
       '返回服务器选择',
       '退出配置',
@@ -1395,7 +1408,6 @@ describe('CLI slot set command', () => {
     });
     const prompts = new ControlledPrompts({
       select: [0, 0, 0],
-      confirm: [false],
     });
 
     const result = await slotSetCommand(slotSetOptions(

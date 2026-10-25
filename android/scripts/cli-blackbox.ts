@@ -1784,17 +1784,18 @@ export async function runCliBlackboxHarness(
           timeoutMs,
         });
         cliShell!.sendLine('1');
-        await cliShell!.waitFor(/预览 snapshot/u, 'slot preview prompt', {
+        await cliShell!.waitFor(/选择 \[1-5\]:/u, 'slot action menu', {
           from: command.from,
           timeoutMs,
         });
-        cliShell!.sendLine('y');
+        const previewFrom = cliShell!.mark();
+        cliShell!.sendLine('2');
         await cliShell!.waitForVisibleText(marker, 'slot snapshot marker', {
-          from: command.from,
+          from: previewFrom,
           timeoutMs,
         });
-        await cliShell!.waitFor(/选择 \[1-4\]:/u, 'slot action menu', {
-          from: command.from,
+        await cliShell!.waitFor(/选择 \[1-5\]:/u, 'slot action menu after preview', {
+          from: previewFrom,
           timeoutMs,
         });
         cliShell!.sendLine('1');

@@ -66,6 +66,7 @@ export function WindowsSidebar({
   onCreateSession,
   onOpenSession,
   onCloseSession,
+  controlTargetKey,
 }: {
   store: ReturnType<typeof createWindowsProfileStore>;
   controlSnapshot: { status: 'idle' | 'loading' | 'error'; error: string; sessions: string[] };
@@ -79,10 +80,20 @@ export function WindowsSidebar({
   onCreateSession: () => void;
   onOpenSession: (sessionName: string) => void;
   onCloseSession: (sessionName: string) => void;
+  controlTargetKey: string;
 }) {
+  const [pendingCloseSession, setPendingCloseSession] = useState<string | null>(null);
   const visibleSessions = controlSnapshot.sessions.filter((sessionName) =>
     sessionName.toLowerCase().includes(filter.trim().toLowerCase()),
   );
+  useEffect(() => {
+    setPendingCloseSession(null);
+  }, [activeProfileId, controlTargetKey]);
+  useEffect(() => {
+    if (pendingCloseSession && !visibleSessions.includes(pendingCloseSession)) {
+      setPendingCloseSession(null);
+    }
+  }, [pendingCloseSession, visibleSessions]);
   return (
     <aside className="windows-sidebar" aria-label="连接与 Session" data-testid="windows-sidebar">
       <div className="sidebar-section">
@@ -114,10 +125,20 @@ export function WindowsSidebar({
         <div className="session-list" aria-label="Session 列表">
           {visibleSessions.length === 0 ? <div className="session-empty">{controlSnapshot.status === 'loading' ? '加载中' : '未加载'}</div> : null}
           {visibleSessions.map((sessionName) => (
-            <div className="session-row" key={sessionName}>
-              <button className="session-name" onClick={() => onOpenSession(sessionName)}>{sessionName}</button>
-              <button className="session-close" aria-label={`关闭 ${sessionName}`} onClick={() => onCloseSession(sessionName)}>×</button>
-            </div>
+            pendingCloseSession === sessionName ? (
+              <div className="file-browser-confirm session-close-confirm" key={sessionName} data-testid={`windows-session-close-confirm-${sessionName}`}>
+                <span>关闭远程 Session {sessionName}？</span>
+                <span className="workspace-toolbar-actions">
+                  <button type="button" className="secondary small" aria-label={`取消关闭 ${sessionName}`} onClick={() => setPendingCloseSession(null)}>取消</button>
+                  <button type="button" className="secondary small" aria-label={`确认关闭 ${sessionName}`} onClick={() => { setPendingCloseSession(null); onCloseSession(sessionName); }}>确认关闭</button>
+                </span>
+              </div>
+            ) : (
+              <div className="session-row" key={sessionName}>
+                <button className="session-name" onClick={() => onOpenSession(sessionName)}>{sessionName}</button>
+                <button className="session-close" aria-label={`关闭 ${sessionName}`} onClick={() => setPendingCloseSession(sessionName)}>×</button>
+              </div>
+            )
           ))}
         </div>
       </div>
@@ -398,22 +419,28 @@ export function WindowsDesktopApp() {
     setContextMenu(null);
   };
   const refreshSessions = () => {
-    if (controlTarget) void sessionControl.refresh(controlTarget);
+    if (controlTarget) void sessionControl.refresh(controlTarget).catch(() => undefined);
   };
   const createSession = () => {
     const sessionName = normalizeWindowsNewSessionName(newSessionName);
     if (!sessionName) return;
     if (!controlTarget || !activeProfile) return;
-    void sessionControl.create(controlTarget, sessionName).then(() => {
-      profileStore.saveProfile({ ...activeProfile, sessionName });
-      setNewSessionName('');
-    });
+    void sessionControl.create(controlTarget, sessionName).then(
+      () => {
+        profileStore.saveProfile({ ...activeProfile, sessionName });
+        setNewSessionName('');
+      },
+      () => undefined,
+    );
   };
   const closeSession = (sessionName: string) => {
     if (!controlTarget || !target) return;
-    void sessionControl.close(controlTarget, sessionName).then(() => {
-      setWorkspace((current) => closeWindowsWorkspaceTarget(current, { ...target, sessionName }));
-    });
+    void sessionControl.close(controlTarget, sessionName).then(
+      () => {
+        setWorkspace((current) => closeWindowsWorkspaceTarget(current, { ...target, sessionName }));
+      },
+      () => undefined,
+    );
   };
   return (
     <main className="windows-shell" data-platform={window.ztermWindows?.platform || 'browser'}>
@@ -439,6 +466,7 @@ export function WindowsDesktopApp() {
           onCreateSession={createSession}
           onOpenSession={openSessionInActivePane}
           onCloseSession={closeSession}
+          controlTargetKey={target ? `${target.bridgeHost}:${target.bridgePort}:${target.authToken ?? ''}` : 'none'}
         />
         <WindowsWorkspaceStage
         workspace={workspace}
@@ -481,7 +509,6 @@ export function WindowsDesktopApp() {
           profile={activeProfile}
           registry={registry}
           workspace={workspace}
-          controlError={controlSnapshot.error}
         />
       </div>
       <WindowsFileBrowserPanel open={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} />

@@ -92,7 +92,8 @@ const SLOT_HELP = `用法：
 const SLOT_LIST_HELP = `用法：
   zterm slot list
 
-列出本地已配置的槽位。别名、机器、session、backend 和宽度会分别显示。
+列出本地已配置的槽位。每行显示槽位号、可选别名，以及机器 / session。
+槽位号即为启动值，backend、宽度和精确身份保存在绑定中，不重复显示。
 `;
 
 const SLOT_RENAME_HELP = `用法：

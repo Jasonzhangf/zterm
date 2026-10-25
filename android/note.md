@@ -1,3 +1,9 @@
+# 2026-10-24 最小交互与流程审计
+
+项目 Skill/流程已删除无差别跨平台构建、重复证据模板和固定证据数量。CLI 0.1.4 改用五动作菜单和简洁槽位标签；Windows 保留一次远端关闭确认、合并控制错误显示；删除无消费者的 Android overlay hook。详见 [审计记录](docs/audits/2026-10-24-minimal-interaction-and-flow-audit.md)。
+
+适用验证：CLI 安装后完整用户路径和列表/选择器通过；真实 Windows 候选包通过确认、取消、错误与本地标签关闭；Android 删除通过边界、类型及活跃消费者测试。Android 活跃行为未改，不产生 APK/OTA。可配置 tmux socket 仍是独立待实现设计，不把本轮审计计为该能力交付。
+
 # 2026-08-19 升级链路 + Logo 替换
 
 # 2026-08-31 session rename reconnect race fix

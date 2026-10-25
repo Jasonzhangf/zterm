@@ -578,11 +578,22 @@ describe('zterm public main contract', () => {
       me: vi.fn(async () => accountWithBoundServer()),
       directory: vi.fn(async () => directory),
     } as unknown as Pick<AccountClient, 'login' | 'me' | 'directory'>;
+    let actionSelections = 0;
+    const select = vi.fn(async <T>(
+      message: string,
+      choices: readonly { label: string; value: T }[],
+    ): Promise<T> => {
+      if (message === '配置槽位 1') {
+        actionSelections += 1;
+        return choices[actionSelections === 1 ? 1 : 0]!.value;
+      }
+      return choices[0]!.value;
+    }) as PromptPort['select'];
     const prompts: PromptPort = {
       text: vi.fn(async () => ''),
       password: vi.fn(async () => ''),
-      select: vi.fn(async (_message, choices) => choices[0]!.value),
-      confirm: vi.fn(async () => true),
+      select,
+      confirm: vi.fn(async () => false),
     };
     const close = vi.fn();
     const channel = { close } as unknown as SessionChannel;
@@ -803,10 +814,10 @@ describe('zterm public main contract', () => {
 
     expect(listExit).toBe(0);
     expect(listStdout.read()).toContain(
-      '槽位 1 · 工作台 · Mac Studio · work · tmux · adaptive-phone',
+      '槽位 1 · 工作台 · Mac Studio / work',
     );
     expect(listStdout.read()).toContain(
-      '槽位 2 · MacBook Air / build · MacBook Air · build · tmux · adaptive-phone',
+      '槽位 2 · MacBook Air / build',
     );
 
     let labels: string[] = [];
@@ -833,8 +844,8 @@ describe('zterm public main contract', () => {
 
     expect(selectorExit).toBe(1);
     expect(labels).toEqual([
-      '槽位 1 · 工作台 · Mac Studio · work · tmux · adaptive-phone',
-      '槽位 2 · MacBook Air / build · MacBook Air · build · tmux · adaptive-phone',
+      '槽位 1 · 工作台 · Mac Studio / work',
+      '槽位 2 · MacBook Air / build',
     ]);
   });
 

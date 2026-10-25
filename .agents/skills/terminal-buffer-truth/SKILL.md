@@ -37,7 +37,7 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 - 哪些路径允许修改，哪些路径禁止修改
 - 正向测试和反向测试分别锁住什么风险
 - 若涉及 daemon / tmux / mirror / transport 主链，且本机可启动真实 daemon 与 tmux，必须跑真实闭环验证；只跑单测、typecheck、静态 gate 不得宣称完成。默认命令：`pnpm --dir android run daemon:mirror:close-loop`。
-- 若仓库内 Mac client 可用，还必须跑 Mac 客户端核心连接 gate，证明本地 client transport/runtime 能连；daemon-only probe 不能替代。默认最小命令：`pnpm --dir mac test -- --reporter dot` 与 `pnpm --dir mac run type-check`，其中必须覆盖 `bridge-transport`、`local-tmux-transport`、`terminal-runtime`、workbench active target。
+- 改动影响 Mac client 或其消费的共享契约时，运行受影响的客户端核心连接测试与类型检查；daemon-only probe 不能替代客户端验收。纯 CLI/daemon 修复且未改变 Mac consumer 契约时，不因仓库内存在 Mac client 就追加整套 Mac 回归。
 
 禁止事项：
 - 禁止先 grep 到命中点就直接 patch
@@ -112,12 +112,12 @@ terminal / daemon / client / renderer 相关任务完成前，先写清本轮影
 
 ### L5 packaged / device / real app smoke
 - 证明：真实 app 入口、打包产物、设备/桌面运行态按用户路径工作。
-- Android：每次影响 Android 真机行为且本次任务处于常规交付授权范围时，都必须构建可升级 APK 包并在适用 update channel 发布；默认命令 `pnpm --dir android run build:android`。汇报必须给出 `versionName`、`versionCode`、APK 路径、sha256；有 online ADB 设备时继续安装/启动/真机 smoke，没有设备时明确 L5 缺口。
+- Android：影响 Android 真机行为且处于交付授权范围时，构建可升级 APK 并更新适用通道；默认命令 `pnpm --dir android run build:android`。版本、安装与通道结果留在交付记录，正文给可用入口和验收范围；有 online ADB 设备时继续安装/启动/真机 smoke，没有设备时明确 L5 缺口。日常验证不额外生成 SHA 清单。
 - Mac：packaged `.app` 或唯一 dev Electron 实例，截图/DOM/进程证据，必要时资源采样。
 - 不证明：未覆盖的其它平台或远端网络路径。
 
-### 汇报规则
-- 汇报时必须按层级列出已跑 gate，并说明每个 gate 证明什么。
+### 汇报范围
+- 正文只说明用户结果、必要证据和未验证范围；详细 gate 结果留在现有记录中，不逐层重复罗列。
 - 若只跑到 L2，只能说 daemon/tmux 闭环通过，不能说本地客户端连接正常。
 - 若只跑到 L3，只能说 client 核心连接逻辑通过，不能说 packaged app / 真机 UI 已闭环。
 - 若任务本身影响 L4/L5，但无法在线或真实运行验证，必须明确剩余风险和缺口。

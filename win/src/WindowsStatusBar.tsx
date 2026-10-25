@@ -34,12 +34,10 @@ function statusFor(
 export function WindowsSessionStatus({
   registry,
   workspace,
-  controlError,
   profile,
 }: {
   registry: WindowsTerminalRegistry;
   workspace: WindowsWorkspaceState;
-  controlError: string;
   profile: WindowsConnectionProfile | null;
 }) {
   const activeTab = resolveActiveTab(workspace);
@@ -59,8 +57,8 @@ export function WindowsSessionStatus({
       <span className="statusbar-segment">{status.state}</span>
       <span className="statusbar-segment">{status.revision}</span>
       {status.geometry ? <span className="statusbar-segment">{status.geometry}</span> : null}
-      {status.error || controlError ? (
-        <span className="statusbar-segment statusbar-error">{status.error || controlError}</span>
+      {status.error ? (
+        <span className="statusbar-segment statusbar-error">{status.error}</span>
       ) : null}
     </footer>
   );
@@ -70,14 +68,12 @@ export function WindowsStatusBar({
   profile,
   registry,
   workspace,
-  controlError,
 }: {
   profile: WindowsConnectionProfile | null;
   registry: ReturnType<typeof import('./windows-terminal-registry').createWindowsTerminalRegistry>;
   workspace: WindowsWorkspaceState;
-  controlError: string;
 }) {
-  return <WindowsSessionStatus registry={registry} workspace={workspace} controlError={controlError} profile={profile} />;
+  return <WindowsSessionStatus registry={registry} workspace={workspace} profile={profile} />;
 }
 
 export function WindowsConnectionStateIndicator({

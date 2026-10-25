@@ -2,12 +2,12 @@
 
 ## 总原则
 
-- 先冻结真源，再写代码
+- 先确认受影响流程与唯一 owner，再写代码
 - 先审计节点笔记，再验证；已确认且未失效的证据直接复用，不重复确认同一事实
 - 先证据，再宣称完成
 - 先确认适用契约，再继续实现；长期记忆/规则写入遵守全局授权
 
-节点笔记是阶段状态唯一载体：每个流程/DAG 节点完成、失败或阻塞时立即落一条 `时间/节点｜结论或状态｜证据路径｜输入版本及必要环境｜下一步`。进入下游、重试、恢复或交接先读笔记，不凭聊天上下文重建事实；只有代码/输入/配置/依赖/产物/环境变化、证据缺失或冲突，或到达 main/远端/PID/runtime 等可变状态的动作边界，才重查受影响节点。
+任务事实记入现有 run notes；项目结论由 owner 汇总到 `android/note.md`。复用有效证据，只在输入变化、出现新错或具体动作边界补查受影响事实。通用执行、Review、交付和记录方法沿全局 `coding-principals`，不在此另建流程。
 
 ## 标准流程
 
@@ -17,14 +17,7 @@ Scope/Architecture -> Contract -> Implement -> Verify -> Review -> Authorized de
 
 ## 任务开始前
 
-必须写清楚：
-
-- 目标
-- 成功标准
-- 验证入口
-- 范围
-- 不在范围
-- 证据输出位置
+非平凡变更在现有计划中写清目标、范围、真实验收入口和未确认项。纯文档/Skill 修订直接修改并做针对性检查，不为此新建任务表或审批步骤。
 
 ## 开发阶段
 
@@ -33,7 +26,7 @@ Scope/Architecture -> Contract -> Implement -> Verify -> Review -> Authorized de
 - runtime 改动不凭编译通过结论收口
 - 页面级重构先按 `docs/ui-slices.md` 切片，不跨页混改
 - 改动前必须先按 `docs/feature-registry.json` 选定 `feature_id`，确认 owner、allowed paths、forbidden paths、required gates；找不到 feature registry 条目时，不得宣称功能闭环完成
-- 跨模块或长期 runtime 重构必须先查并同步：
+- 跨模块或长期 runtime 重构按受影响关系查阅以下真源；只更新实际改变的 owner、resource、edge 或公开契约，不要求每次同步整份索引：
   - `docs/resource-registry.json`
   - `docs/module-registry.json`
   - `docs/edge-registry.json`
@@ -113,80 +106,15 @@ Scope/Architecture -> Contract -> Implement -> Verify -> Review -> Authorized de
   - gap 策略是“先空白占位，再按行/区间 patch”
   - transport 是长期复用长链接，foreground/background/tab switch 不得 fresh recreate transport
 
-### Terminal 真回环门禁（新增硬规则）
+### Terminal 修复与真实验收
 
-任何 terminal 相关修复，顺序必须是：
+先核对受影响 DAG、owner 和契约，再取得失败证据、修改 owner、运行同入口回归。只更新实际改变的文档契约，不能用事后解释性测试或用户手试代替作者验证。
 
-```text
-先落测试真源文档 / skill
--> 再补测试
--> 再改代码
--> 再跑真实回环
-```
+选择与本次失败模式相关的自动用例；完整 Android terminal 交付的场景集见下方 L5，不在每次编译前重复执行整套流程。影响 Android 真机行为时仍必须完成 L5 安装态验收；纯 CLI/daemon 变更按其正式入口验收，不能强制收集未受影响的 Android buffer/renderer 日志或重建 APK。
 
-禁止反过来：
+故障跨越的层级需有对应证据。用已有时间线、oracle 和安装态结果回答问题，不要求每层另交一份日志或在用户报告中逐项复述。无法在真实入口复现并验证的线上问题，不宣称已修复。
 
-```text
-先改代码
--> 再补解释性测试
--> 最后靠用户手试
-```
-
-terminal 修复完成前，必须同时给出以下证据：
-
-1. tmux oracle
-2. daemon runtime logs
-3. client buffer worker logs
-4. renderer commit logs
-5. Android APK 真实安装态结果
-
-并按 `docs/terminal-test-loop-checklist.md` 回答：
-
-- 角色不变量有没有被违反
-- 当前问题属于哪一层
-- 本轮自动回归覆盖了哪些 case
-- 哪些 still manual / still missing
-
-缺任意一层都不允许宣称修复完成。
-
-### Terminal 自动回归门禁（新增硬规则）
-
-任何 terminal 相关改动，在重新 build APK 前必须先跑完**本地自动回归闭环**。
-
-固定顺序：
-
-```text
-先复现
--> 再写/补自动测试
--> 自动测试先失败
--> 再改代码
--> 自动测试转绿
--> 再跑 daemon/tmux 真回环
--> 最后才 build APK
-```
-
-禁止：
-
-- 先改代码，再补“解释性测试”
-- 只靠人工手机点点点判断是否修好
-- 自动测试没覆盖输入/刷新主链就直接发 APK
-
-每次编译前至少要自动验证：
-
-1. initial connect
-2. foreground resume
-3. cold start -> 进入单个 active tab -> 无输入等待首屏刷新
-4. 进入一个 tab 后切到另一个 tab -> 新 active tab 首屏刷新
-5. input -> head -> buffer-sync -> render commit
-6. reading 上滚与 gap repair
-7. input exits reading
-8. daemon restart recover
-
-如果某个线上问题不能被本地自动回归稳定复现，就不允许进入“已修复”口径。
-
-另外新增一条硬规则：
-
-- 若问题表现为“白屏 / 花屏 / 输入后再也不能输 / 语音转文字后不自动刷新 / 5MB 峰值”，必须同时补 `docs/terminal-test-loop-checklist.md` 里的专项检查项，不能只跑通用 regression。
+“白屏 / 花屏 / 输入后再也不能输 / 语音转文字后不自动刷新 / 5MB 峰值”还需执行 `docs/terminal-test-loop-checklist.md` 中受影响的专项检查，不能只用通用回归替代。
 
 ## 验证层级
 
@@ -255,44 +183,27 @@ pnpm --dir android test:android:terminal-real-device
 
 ## 证据要求
 
-- 截图
-- 命令输出
-- APK 路径
-- logcat / console
-- 证据默认落本地 `evidence/<date-task>/`
-- `evidence/` 不作为 GitHub 主线提交内容；Git 中只保留目录说明，分享时按需挑选/打包
+证据默认落本地 `evidence/<date-task>/`，不提交到 GitHub 主线。按受影响行为保留必要结果：界面用截图或 DOM，运行错误用日志，Android 安装交付记录 APK 与安装态；不为纯文档、CLI 或 daemon-only 变更生成无关 APK、截图和日志。用户反馈先说明可用结果、必要入口和剩余限制，详情链接到现有记录，不逐项重复 gate 清单。
 
-### 完成证据最低标准
+### Terminal 失败模式证据
 
-- 截图
-- 命令输出
-- APK 路径
-- 必要时 logcat
+buffer / render / input / foreground 修复按实际失败链选择时间线或结构化日志，不要求两者重复记录同一事实。受影响用例须排除对应反例：
 
-### Terminal 修复的额外最低标准
-
-若本轮改动涉及 terminal buffer / render / input / foreground：
-
-- 必须附 `timeline.txt` 或同等时间线证据
-- 必须附 client runtime 结构化日志
-- 必须证明没有：
   - `localEndIndex > daemon.availableEndIndex`
   - `requestStartIndex == requestEndIndex`
   - `buffer-head` 误当 pull ack
   - `buffer-sync-request` 因 head-only reply 卡住 in-flight pull
   - cold start / tab switch 后 `pullHz == 0 && renderHz == 0`
 
-## UI 结构变更的附加证据
+## UI 结构变更的证据
 
-- `Connections` 页截图
-- 终端页截图
-- 如涉及键盘/快捷栏，补一张展开态截图
+只采集受影响页面和状态；键盘/快捷栏问题包含展开态。未改变的 Connections 页或终端页不重复截图。
 
 ## 响应式布局变更的附加证据
 
 - phone 单 pane 截图
 - foldable / pad / split-screen 任一**单行多列**截图
-- 若涉及 future Mac 方案，补一张桌面窗口编排图或静态 stage 图
+- 若改变 Mac 布局，补对应桌面窗口的布局证据
 - 说明当前截图对应的 layout profile 名称，避免“看起来差不多”但真源不一致
 
 ## 记忆规则
@@ -303,13 +214,7 @@ pnpm --dir android test:android:terminal-real-device
 - `memory/index.md`：分层记忆入口；条目中的目标设计与实现证据分别判定
 - `SKILL.md`：跨任务门禁和反模式
 
-### 探索→沉淀工作流
-
-1. 每个节点完成、失败或阻塞时立即写入任务独占记录：`时间/节点｜结论或状态｜证据路径｜输入版本及必要环境｜下一步`；未证实的判断标假设，失败保留原错。
-2. 进入下一节点、重试、恢复或交接前，先读相关节点记录与证据，再决定动作；合并同一事实的重复检查。
-3. 复用仍有效证据；仅当代码、输入、配置、依赖、产物或必要环境变化，证据缺失/冲突/过期，或到达可变状态（main/远端/PID/runtime）的动作边界，才重查受影响节点。
-4. 有明确记忆写入授权后，先读目标和前序记录，再去重写入唯一 owner；无新知识允许零写入。
-5. 用户要求修复 skill/规则时，只修改已确认的冲突和相关执行入口。
+记录与复用方法沿全局 `coding-principals`。有明确记忆写入授权后，读目标及前序记录、去重，再写入唯一 owner；没有新知识则不写。用户要求修复 skill/规则时，只修改已确认的冲突和相关执行入口。
 
 ## skill 更新触发
 

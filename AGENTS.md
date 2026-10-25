@@ -30,18 +30,18 @@
 
 ## Workspace Layout
 - `android/`：当前 Android 客户端
-- `mac/`：未来 macOS 客户端骨架
+- `mac/`：macOS Electron 客户端壳；当前可用切片与未完成能力见 `mac/docs/spec.md`
 - `win/`：Windows remote-access 客户端 alpha；DAGPipe 真源为 `android/docs/dagpipe/windows-remote-access-client.graph.json`
 
 ## Hard Rules
 - 不在本仓库复制或内嵌 runtime 源码
 - runtime 问题改 `../wterm`，app 问题改 `zterm`
 - 先审计节点笔记，再验证；无证据不宣称完成。有效证据直接复用，不重复确认/验证；只有代码、输入、配置、依赖、产物或必要环境变化，或证据缺失/冲突/过期，才重查受影响节点。
-- 开发/修复/重构的每个流程节点完成、失败或阻塞时，立即在任务独占 run notes 记录：时间/节点｜结论/状态｜证据路径｜输入版本与必要环境｜下一步。假设明确标注，失败保留原错。
+- 任务记录沿全局 `coding-principals`，复用现有 run notes；保留关键结果、原错和下一动作，不在项目 Skill 和文档中复制记录模板。
 - 下游执行、重试、恢复、交接先读相关节点笔记与证据，不凭聊天上下文重建事实。
 - Android APK / terminal / renderer / IME / session transport / OTA 任一影响真机行为的改动，必须先跑 `.agents/skills/zterm-mobile-dev/SKILL.md` 的 Android L5 真机硬门禁；单测、`vitest`、`tsc`、`daemon:mirror:close-loop`、本机 `dev` 浏览器或 local daemon preview 都不能冒充真机交付。缺 emulator/15T 截图、logcat、buildNumber 或 OTA/安装态证据时，按 `UNVERIFIED`/`INCOMPLETE` 处理。
 - Windows、macOS、Linux 的 `packages/cli` 验收分别使用安装后正式 `zterm` 入口；Android L5 不是 CLI 的前置，CLI 通过也不能替代 Android 产品真机验收。
-- Claim 功能交付必须有真实黑盒行为证据：使用在线 Android emulator 或在线真机（例如 15T）从真实用户入口操作，并记录可观察结果、截图/UI dump 与 logcat/运行日志；白盒代码、单元测试、组件测试、TypeScript、源码结构或 mock 只能作为开发辅助，不能作为交付条件，也不能替代 emulator/真机证据。缺少适用的 emulator/真机黑盒证据时，claim 只能标记为 `UNVERIFIED` 或 `INCOMPLETE`，不得宣称已修复或已交付。
+- 功能交付必须有对应产品的真实入口证据。Android 真机行为按 mobile skill 完成 emulator/真机验收；Mac/Windows GUI 用对应真实客户端；CLI 用安装后的 `zterm`。白盒、mock、编译和静态图不能替代适用的黑盒验收。纯文档或未被调用代码的移除若不改变产品行为，只做针对性检查，不制造设备交付。
 - 每次开发 / 修复 / 重构先审计本任务节点笔记；已记录且未失效的事实不重复读取/推导，再读受影响架构真源，再读代码：
   - 先读 `android/docs/architecture.md`
   - 再读 `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`
