@@ -1,8 +1,7 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import type { TerminalCell } from '@zterm/shared/types';
 import type {
   TerminalSnapshotRequestPayload,
   TerminalSnapshotResultPayload,
@@ -11,14 +10,14 @@ import {
   buildBufferHeadPayload,
   buildRequestedRangeBufferPayload,
 } from '../src/server/buffer-sync-contract';
+import { createTerminalCoreSupport } from '../src/server/terminal-core-support';
 import { createTerminalControlRuntime } from '../src/server/terminal-control-runtime';
+import { createTerminalMirrorCaptureRuntime } from '../src/server/terminal-mirror-capture';
 import { createTerminalSnapshotReadRuntime } from '../src/server/terminal-snapshot-read-runtime';
 import {
   buildTmuxSessionStableId,
   parseTerminalSessionStableId,
 } from '../src/server/terminal-source-adapter';
-import type { ResolvedTerminalSession } from '../src/server/terminal-source-adapter';
-import type { SessionMirror } from '../src/server/terminal-runtime-types';
 
 const ARTIFACT_DIR = process.env.ZTERM_IDENTITY_R2_ART
   || '/Volumes/extension/codex/projects/g-p-6a82ba0c561881919039d12d78708a8e/artifacts/daemon-cli-20261020';
@@ -27,10 +26,12 @@ const RESULT_PATH = process.env.ZTERM_IDENTITY_RESULT
 const TMUX_BINARY = process.env.TMUX_BINARY || 'tmux';
 const SHARED_NAME = 'zterm_identity_r2_shared';
 const MARKER = 'ZTERM_IDENTITY_R2_MARKER';
+const MARKER_B = 'ZTERM_IDENTITY_R2_SOURCE_B';
 const LATER_B_MARKER = 'ZTERM_IDENTITY_R30_LATER_B';
 const FIXTURE_ROOT = join(tmpdir(), `zterm-identity-r2-${process.pid}-${Date.now().toString(36)}`);
 const SOCKET_A = join(FIXTURE_ROOT, 'a', 'default');
 const SOCKET_B = join(FIXTURE_ROOT, 'b', 'default');
+const SOCKET_ALIAS_A = join(FIXTURE_ROOT, 'alias-a', 'default');
 
 type NativeResult = {
   ok: boolean;
@@ -139,68 +140,6 @@ function nativeIdentity(socketPath: string): NativeIdentity {
   };
 }
 
-function cellsForLine(text: string): TerminalCell[] {
-  const cells = Array.from(text).map((character) => ({
-    char: character.codePointAt(0) || 32,
-    fg: 256,
-    bg: 256,
-    flags: 0,
-    width: 1,
-  }));
-  return cells.length > 0
-    ? cells
-    : [{ char: 32, fg: 256, bg: 256, flags: 0, width: 1 }];
-}
-
-function mirrorFromNativeCapture(
-  capture: string,
-  resolved: ResolvedTerminalSession,
-): SessionMirror {
-  const textLines = capture.replace(/\n$/u, '').split('\n');
-  const bufferLines = textLines.map(cellsForLine);
-  const lastLine = textLines[textLines.length - 1] || '';
-  return {
-    key: 'tmux:zterm-identity-r2-a',
-    sessionName: SHARED_NAME,
-    backend: 'tmux',
-    sessionIdentity: resolved.identity.stableId,
-    sessionTarget: resolved.target,
-    scratchBridge: null,
-    lifecycle: 'ready',
-    cols: 80,
-    rows: 24,
-    baselineCols: 80,
-    baselineRows: 24,
-    consecutiveFailures: 0,
-    cursorKeysApp: false,
-    revision: 1,
-    lastScrollbackCount: 0,
-    bufferStartIndex: 0,
-    bufferLines,
-    cursor: {
-      rowIndex: Math.max(0, bufferLines.length - 1),
-      col: Math.min(79, Array.from(lastLine).length),
-      visible: true,
-    },
-    lastFlushStartedAt: 0,
-    lastFlushCompletedAt: 0,
-    lastLiveActivityAt: 0,
-    lastHeadBroadcastAt: 0,
-    flushInFlight: false,
-    flushPromise: null,
-    quietFlushStreak: 0,
-    lastFlushHadContentChanges: false,
-    pendingStableCaptureSnapshot: null,
-    pendingPerformanceTraceCapture: null,
-    adaptiveWidthBaselineGeometry: null,
-    adaptiveWidthAppliedCols: null,
-    adaptiveWidthAppliedRows: null,
-    adaptiveWidthLeaseTimer: null,
-    liveSyncTimer: null,
-    subscribers: new Set(),
-  };
-}
-
 function snapshotText(result: AvailableSnapshot): string {
   return result.body.lines.map((line) => {
     const record = line as unknown as Record<string, unknown>;
@@ -266,6 +205,7 @@ async function main() {
   mkdirSync(ARTIFACT_DIR, { recursive: true });
   mkdirSync(dirname(SOCKET_A), { recursive: true });
   mkdirSync(dirname(SOCKET_B), { recursive: true });
+  mkdirSync(dirname(SOCKET_ALIAS_A), { recursive: true });
 
   const checks: Check[] = [];
   const rawErrors: string[] = [];
@@ -317,11 +257,13 @@ async function main() {
       b: identityB,
     });
 
+    symlinkSync(SOCKET_A, SOCKET_ALIAS_A);
+    const aliasIdentityA = nativeIdentity(SOCKET_ALIAS_A);
     const createControl = () => createTerminalControlRuntime({
       tmuxBinary: TMUX_BINARY,
       defaultSessionName: SHARED_NAME,
       hiddenTmuxSessions: new Set<string>(),
-      tmuxSocketPaths: () => [SOCKET_A, SOCKET_B],
+      tmuxSocketPaths: () => [SOCKET_A, SOCKET_ALIAS_A, SOCKET_B],
       sanitizeSessionName: (input?: string) => input?.trim() || SHARED_NAME,
       defaultBackend: 'tmux',
     });
@@ -329,6 +271,20 @@ async function main() {
 
     const sharedCatalog = control.listTerminalSessionCatalog()
       .filter((entry) => entry.backend === 'tmux' && entry.name === SHARED_NAME);
+    record('socket_alias_does_not_duplicate_native_catalog_entry',
+      sharedCatalog.length === 2
+        && sharedCatalog.some((entry) => entry.stableId === identityA.stableId)
+        && !sharedCatalog.some((entry) => entry.stableId === aliasIdentityA.stableId),
+      { entryCount: sharedCatalog.length, aliasStableId: aliasIdentityA.stableId });
+    const aliasBeforeRefresh = control.resolveExistingSession(aliasIdentityA.stableId, 'tmux', SHARED_NAME);
+    control.listTerminalSessionCatalog();
+    const aliasAfterRefresh = control.resolveExistingSession(aliasIdentityA.stableId, 'tmux', SHARED_NAME);
+    record('former_alias_identity_resolves_before_and_after_catalog_refresh',
+      aliasBeforeRefresh.ok && aliasAfterRefresh.ok
+        && aliasBeforeRefresh.session.identity.stableId === aliasIdentityA.stableId
+        && aliasAfterRefresh.session.target.backend === 'tmux'
+        && aliasAfterRefresh.session.target.socketPath === SOCKET_ALIAS_A,
+      { before: aliasBeforeRefresh.ok, after: aliasAfterRefresh.ok });
     catalog = sharedCatalog;
     const catalogStableIds = new Set(
       sharedCatalog
@@ -394,6 +350,16 @@ async function main() {
     );
 
     await control.writeBackendInputGroup(SHARED_NAME, MARKER, true, 'tmux');
+    const wroteSourceBMarker = runNativeTmux(SOCKET_B, [
+      'send-keys',
+      '-l',
+      '-t',
+      `=${SHARED_NAME}:.{top-left}`,
+      MARKER_B,
+    ]);
+    if (!wroteSourceBMarker.ok) {
+      throw new Error(`native source B marker write failed: ${wroteSourceBMarker.stderr.trim()}`);
+    }
     await delay(300);
     const capturedA = runNativeTmux(SOCKET_A, [
       'capture-pane',
@@ -410,8 +376,11 @@ async function main() {
     captures = {
       a: capturedA,
       b: capturedB,
+      wroteSourceBMarker,
       aHasMarker: capturedA.stdout.includes(MARKER),
       bHasMarker: capturedB.stdout.includes(MARKER),
+      aHasSourceBMarker: capturedA.stdout.includes(MARKER_B),
+      bHasSourceBMarker: capturedB.stdout.includes(MARKER_B),
     };
     record(
       'native_marker_reaches_only_bound_a',
@@ -424,13 +393,38 @@ async function main() {
         bHasMarker: capturedB.stdout.includes(MARKER),
       },
     );
+    record(
+      'native_source_b_marker_reaches_only_b',
+      capturedA.ok
+        && capturedB.ok
+        && capturedB.stdout.includes(MARKER_B)
+        && !capturedA.stdout.includes(MARKER_B),
+      {
+        aHasSourceBMarker: capturedA.stdout.includes(MARKER_B),
+        bHasSourceBMarker: capturedB.stdout.includes(MARKER_B),
+      },
+    );
 
-    const mirrorA = mirrorFromNativeCapture(capturedA.stdout, resolvedA.session);
     const snapshotResults: TerminalSnapshotResultPayload[] = [];
+    const coreSupport = createTerminalCoreSupport({
+      defaultSessionName: SHARED_NAME,
+      maxCapturedScrollbackLines: 500,
+    });
+    const mirrorCapture = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: coreSupport.resolveMirrorCacheLines,
+      runTmux: (args) => control.runTmux(args),
+      runTmuxForSession: (args, sessionName) => control.runTmuxForSession(args, sessionName),
+      runTmuxAsyncForSession: (args, sessionName) => control.runTmuxAsyncForSession(args, sessionName),
+      runTmuxAsyncForTarget: (args, target) => control.runTmuxAsyncForTarget(args, target),
+      buildExactTmuxPaneTarget: (sessionName) => control.buildExactTmuxPaneTarget(sessionName),
+      logTimePrefix: () => new Date().toISOString(),
+      terminalBackendKind: 'tmux',
+    });
     const snapshotRuntime = createTerminalSnapshotReadRuntime({
-      resolveExistingSession: (request: TerminalSnapshotRequestPayload) =>
+      resolveExistingSession: (request) =>
         control.resolveExistingSession(request.stableId, request.backend, SHARED_NAME),
-      readExistingMirror: () => mirrorA,
+      captureSessionSnapshot: (session) =>
+        mirrorCapture.captureResolvedSessionSnapshot(session),
       buildBufferHeadPayload,
       buildRequestedRangeBufferPayload,
       sendSnapshotResult: (result) => {
@@ -449,28 +443,33 @@ async function main() {
       stableId: identityB.stableId,
       maxLines: 500,
     };
-    const resultA = snapshotRuntime.handleRequest(requestA);
-    const resultB = snapshotRuntime.handleRequest(requestB);
+    const resultA = await snapshotRuntime.handleRequest(requestA);
+    const resultB = await snapshotRuntime.handleRequest(requestB);
     snapshot = { requestA, resultA, requestB, resultB, sentCount: snapshotResults.length };
 
     const aBodyText = resultA.status === 'available' ? snapshotText(resultA) : '';
+    const bBodyText = resultB.status === 'available' ? snapshotText(resultB) : '';
     const aReady = resultA.status === 'available'
       && resultA.stableId === identityA.stableId
       && resultA.head.sessionId === identityA.stableId
       && resultA.body.lines.length > 0
-      && (!capturedA.stdout.includes(MARKER) || aBodyText.includes(MARKER));
-    record('snapshot_matching_a_returns_ready_a_body', aReady, resultA);
+      && aBodyText.includes(MARKER)
+      && !aBodyText.includes(MARKER_B);
+    record('snapshot_a_returns_fresh_source_a_frame', aReady, {
+      resultA,
+      otherSourceMarkerPresent: aBodyText.includes(MARKER_B),
+    });
 
-    const bLeaksA = resultB.status === 'available';
-    record(
-      'snapshot_for_b_cannot_label_a_body_as_b',
-      !bLeaksA,
-      {
-        resultB,
-        injectedMirrorStableId: identityA.stableId,
-        leaked: bLeaksA,
-      },
-    );
+    const bReady = resultB.status === 'available'
+      && resultB.stableId === identityB.stableId
+      && resultB.head.sessionId === identityB.stableId
+      && resultB.body.lines.length > 0
+      && bBodyText.includes(MARKER_B)
+      && !bBodyText.includes(MARKER);
+    record('snapshot_b_returns_fresh_source_b_frame', bReady, {
+      resultB,
+      otherSourceMarkerPresent: bBodyText.includes(MARKER),
+    });
 
     // Fresh runtime: discovery always sees A first, then B. Binding the
     // later-discovered B and refreshing the public catalog must not let A's
@@ -567,6 +566,9 @@ async function main() {
       'TerminalControlRuntime.readSessionIdentity',
       'TerminalControlRuntime.writeBackendInputGroup',
       'TerminalControlRuntime.runTmuxAsyncForSession',
+      'TerminalControlRuntime.runTmuxAsyncForTarget',
+      'terminal-mirror-capture:createTerminalMirrorCaptureRuntime',
+      'TerminalMirrorCaptureRuntime.captureResolvedSessionSnapshot',
       'terminal-snapshot-read-runtime:createTerminalSnapshotReadRuntime',
     ],
     native: { a: nativeA, b: nativeB, captures },

@@ -78,6 +78,29 @@
       "iterator": "Whole"
     },
     {
+      "id": "dagpipe.extract.arc.tmux_socket_routes",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.tmux_socket_routes",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
       "id": "dagpipe.extract.arc.idle_facts_request",
       "operator": "dagpipe.request.extract",
       "operator_version": "0.1",
@@ -223,7 +246,8 @@
       "inputs": [
         "arc.channel_registry",
         "arc.body_subscription",
-        "arc.session_catalog_request"
+        "arc.session_catalog_request",
+        "arc.tmux_socket_routes"
       ],
       "output": {
         "id": "arc.session_catalog",
@@ -383,6 +407,11 @@
       "from": "dagpipe.extract.arc.session_catalog_request",
       "to": "build_session_catalog",
       "arc_id": "arc.session_catalog_request"
+    },
+    {
+      "from": "dagpipe.extract.arc.tmux_socket_routes",
+      "to": "build_session_catalog",
+      "arc_id": "arc.tmux_socket_routes"
     },
     {
       "from": "dagpipe.extract.arc.idle_facts_request",

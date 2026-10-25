@@ -6,6 +6,7 @@ import {
 } from './terminal-mirror-capture';
 import type { TerminalCell } from '../lib/types';
 import type { SessionMirror } from './terminal-runtime-types';
+import type { TmuxTerminalSessionTarget } from './terminal-source-adapter';
 
 function row(text: string) {
   return Array.from(text).map((char) => ({
@@ -603,5 +604,212 @@ describe('terminal mirror capture runtime', () => {
       bufferStartIndex: 102,
       bufferLines: [row('c')],
     });
+  });
+
+  it('captures a one-shot preview through the resolved native tmux target without name routing', async () => {
+    const target = {
+      backend: 'tmux' as const,
+      sessionName: 'demo',
+      stableId: 'tmux:v1:exact-target',
+      socketPath: '/tmp/zterm-owned-preview.sock',
+      serverPid: '42',
+      sessionId: '$9',
+      createdAt: 100,
+    };
+    const calls: Array<{ args: string[]; target: TmuxTerminalSessionTarget }> = [];
+    const runTmuxAsyncForTarget = vi.fn(async (args: string[], receivedTarget: TmuxTerminalSessionTarget) => {
+      calls.push({ args, target: receivedTarget });
+      if (args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+        return { ok: true as const, stdout: '%7\t0\t2\t80\t0\t0\n' };
+      }
+      if (args.includes('#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}')) {
+        return { ok: true as const, stdout: '0 1 1 0\n' };
+      }
+      if (args[0] === 'capture-pane') {
+        return { ok: true as const, stdout: 'preview-source-line\n' };
+      }
+      throw new Error(`unexpected tmux args: ${args.join(' ')}`);
+    });
+    const runTmuxForSession = vi.fn(() => {
+      throw new Error('one-shot preview must not use the live session-name route');
+    });
+    const runTmuxAsyncForSession = vi.fn(async () => {
+      throw new Error('one-shot preview must not use the live session-name route');
+    });
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
+      runTmux: () => {
+        throw new Error('one-shot preview must not use the latched global route');
+      },
+      runTmuxForSession,
+      runTmuxAsyncForSession,
+      runTmuxAsyncForTarget,
+      logTimePrefix: () => '2026-10-21 00:00:00',
+    });
+
+    const snapshot = await runtime.captureResolvedSessionSnapshot({
+      identity: {
+        backend: 'tmux',
+        sessionName: 'demo',
+        stableId: target.stableId,
+      },
+      target,
+    });
+
+    expect(snapshot.bufferLines.map(rowText)).toContain('preview-source-line');
+    expect(runTmuxForSession).not.toHaveBeenCalled();
+    expect(runTmuxAsyncForSession).not.toHaveBeenCalled();
+    expect(calls).toHaveLength(3);
+    expect(calls.every((call) => call.target === target)).toBe(true);
+    expect(calls[0]!.args).toEqual(expect.arrayContaining(['-t', '$9:.{top-left}']));
+    expect(calls[1]!.args).toEqual(expect.arrayContaining(['-t', '%7']));
+    expect(calls[2]!.args).toEqual(expect.arrayContaining(['-t', '%7']));
+    expect(calls.flatMap((call) => call.args)).not.toContain('=demo');
+  });
+
+  it('returns fresh one-shot content on repeated previews without mutating any live mirror registry or timer state', async () => {
+    const target = {
+      backend: 'tmux' as const,
+      sessionName: 'demo',
+      stableId: 'tmux:v1:repeated-target',
+      socketPath: '/tmp/zterm-owned-preview.sock',
+      serverPid: '42',
+      sessionId: '$9',
+      createdAt: 100,
+    };
+    let marker = 'preview-marker-old';
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
+      runTmux: () => {
+        throw new Error('one-shot preview must not use the latched global route');
+      },
+      runTmuxForSession: () => {
+        throw new Error('one-shot preview must not use the live session-name route');
+      },
+      runTmuxAsyncForSession: async () => {
+        throw new Error('one-shot preview must not use the live session-name route');
+      },
+      runTmuxAsyncForTarget: async (args) => {
+        if (args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+          return { ok: true as const, stdout: '%7\t0\t2\t80\t0\t0\n' };
+        }
+        if (args.includes('#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}')) {
+          return { ok: true as const, stdout: '0 1 1 0\n' };
+        }
+        if (args[0] === 'capture-pane') {
+          return { ok: true as const, stdout: `${marker}\n` };
+        }
+        throw new Error(`unexpected tmux args: ${args.join(' ')}`);
+      },
+      logTimePrefix: () => '2026-10-21 00:00:00',
+    });
+    const session = {
+      identity: {
+        backend: 'tmux' as const,
+        sessionName: 'demo',
+        stableId: target.stableId,
+      },
+      target,
+    };
+
+    const first = await runtime.captureResolvedSessionSnapshot(session);
+    marker = 'preview-marker-new';
+    const second = await runtime.captureResolvedSessionSnapshot(session);
+
+    expect(first.bufferLines.map(rowText)).toContain('preview-marker-old');
+    expect(second.bufferLines.map(rowText)).toContain('preview-marker-new');
+  });
+
+  it('fails explicitly when the resolved backend has no exact-target capture API', async () => {
+    const runTmuxAsyncForTarget = vi.fn();
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
+      runTmux: () => {
+        throw new Error('unsupported preview must not fall back to tmux');
+      },
+      runTmuxForSession: () => {
+        throw new Error('unsupported preview must not fall back to tmux');
+      },
+      runTmuxAsyncForSession: async () => {
+        throw new Error('unsupported preview must not fall back to tmux');
+      },
+      runTmuxAsyncForTarget,
+      logTimePrefix: () => '2026-10-21 00:00:00',
+    });
+
+    await expect(runtime.captureResolvedSessionSnapshot({
+      identity: {
+        backend: 'herdr',
+        sessionName: 'demo',
+        stableId: 'herdr:v1:exact-target',
+      },
+      target: {
+        backend: 'herdr',
+        sessionName: 'demo',
+        stableId: 'herdr:v1:exact-target',
+        terminalId: 'terminal-1',
+        paneId: 'pane-1',
+      },
+    })).rejects.toThrow('exact-target capture is unsupported for backend herdr');
+    expect(runTmuxAsyncForTarget).not.toHaveBeenCalled();
+  });
+
+  it('settles a failed one-shot capture and still serves the next request', async () => {
+    let captureAttempt = 0;
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
+      runTmux: () => {
+        throw new Error('one-shot preview must not use the latched global route');
+      },
+      runTmuxForSession: () => {
+        throw new Error('one-shot preview must not use the live session-name route');
+      },
+      runTmuxAsyncForSession: async () => {
+        throw new Error('one-shot preview must not use the live session-name route');
+      },
+      runTmuxAsyncForTarget: async (args) => {
+        captureAttempt += 1;
+        if (args.includes('#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}')) {
+          return { ok: true as const, stdout: '%7\t0\t2\t80\t0\t0\n' };
+        }
+        if (args.includes('#{cursor_x} #{cursor_y} #{cursor_flag} #{keypad_cursor_flag}')) {
+          return { ok: true as const, stdout: '0 1 1 0\n' };
+        }
+        if (args[0] === 'capture-pane') {
+          if (captureAttempt <= 3) {
+            throw new Error('tmux capture timed out after 5000ms');
+          }
+          return { ok: true as const, stdout: 'recovered-preview-line\n' };
+        }
+        throw new Error(`unexpected tmux args: ${args.join(' ')}`);
+      },
+      logTimePrefix: () => '2026-10-21 00:00:00',
+    });
+    const session = {
+      identity: {
+        backend: 'tmux' as const,
+        sessionName: 'demo',
+        stableId: 'tmux:v1:settled-target',
+      },
+      target: {
+        backend: 'tmux' as const,
+        sessionName: 'demo',
+        stableId: 'tmux:v1:settled-target',
+        socketPath: '/tmp/zterm-owned-preview.sock',
+        serverPid: '42',
+        sessionId: '$9',
+        createdAt: 100,
+      },
+    };
+
+    await expect(runtime.captureResolvedSessionSnapshot(session))
+      .rejects.toThrow('tmux capture timed out after 5000ms');
+    const recovered = await runtime.captureResolvedSessionSnapshot(session);
+
+    expect(recovered.bufferLines.map(rowText)).toContain('recovered-preview-line');
   });
 });
