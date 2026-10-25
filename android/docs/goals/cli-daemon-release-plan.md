@@ -13,7 +13,7 @@
 | 工作项 | owner | 依赖 | 验收与停止条件 |
 | --- | --- | --- | --- |
 | M1：双机重装与流程设计 | 当前编排者；独立 Planner 提供方案 | 已合并 CLI 0.1.4 | 重装、入口、配置保留通过；流程、计划和历史入口对齐。只修改文档，不执行公开发布。 |
-| M2：独立发布验证与 registry smoke | 后续执行 worker；编排者验收 | M1 | CLI/daemon 五个 tarball 可独立验证，无 Android APK 前置；registry 安装证明 home/prefix 隔离及三平台布局，错误不能投影成成功。 |
+| M2：独立发布验证与 registry smoke | 后续执行 worker；编排者验收 | M1 | 按单元验证：CLI 一个 tarball，daemon 四个 tarball；联合发布可验证全部五包，无 Android APK 前置。registry 安装证明 home/prefix 隔离及三平台布局，错误不能投影成成功。 |
 | M3：发布执行与渠道提升 | 获授权 release operator | M2，或完成等价的人工隔离验收；发布权限与兼容矩阵明确 | daemon payload→launcher；CLI 独立；next 验收后提升公开入口 latest。部分成功按单元记录，失败恢复实际 tag。 |
 
 M2 优先复用 `verify-release-assets.mjs` 中的 daemon 校验与现有 `daemon-install-blackbox.mjs`，增加独立 CLI/daemon 入口和公开 registry 测试模式；不复制一套 verifier。先用缺包、错版本、跨平台 native 不匹配、未隔离全局 prefix 等具体反例取得红测，再实现。发布 workflow 的版本与通道输入、tag 恢复和人工发布权限属于该阶段实现范围，不能把本文中的设计当成现成命令。
