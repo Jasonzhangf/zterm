@@ -21,6 +21,8 @@ Worker-readable CLI map. Generated diagram: `docs/wiki/generated/cli.html`.
 The remote CLI and daemon package are separate release surfaces. `zterm` is the
 user CLI. `zterm-daemon` runs or manages a daemon installation.
 
+Release ownership and next/latest policy: [CLI/daemon standard release process](../decisions/2026-10-24-cli-daemon-release-process.md). Current milestones and publication gaps: [release plan](../goals/cli-daemon-release-plan.md).
+
 ## Remote CLI Commands
 
 | command | owner | side effects | gate |

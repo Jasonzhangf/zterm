@@ -1,5 +1,7 @@
 # Daemon + Relay Global Release Plan
 
+历史记录：本文的 `~/.wterm`、单机 Mac 包和 CLI/daemon npm 发布假设已被 [CLI 与 daemon 标准 release 流程](../decisions/2026-10-24-cli-daemon-release-process.md) 取代。当前配置统一为 `~/.zterm/config.json`。以下双机 TURN / Relay 目标与历史证据保留，不能作为当前发布步骤。
+
 ## 目标与验收标准
 
 目标：把 Mac daemon 的 npm 全局安装、relay 配置、真实双机上线验证，以及 Claw relay server 的发行形态收敛成可重复发布流程。
