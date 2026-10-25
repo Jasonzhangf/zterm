@@ -83,21 +83,7 @@ description: "zterm Mac 客户端开发工作流 - Electron 壳、terminal rende
 通用开发、调试、验证、review 和资源回收生命周期按全局 `AGENTS.md` L1/L2 与 `coding-principals`；本节只定义 Mac 项目专属动作和证据门槛。
 
 ### 3.1 项目完成路径
-任何 Mac 改动，默认按下面项目动作闭环；**没走完，不要向 Jason 报“可以手测”**。
-
-```text
-读任务 run notes / 已有证据（有效则直接复用，只补失效缺口）
-  -> 改代码
-  -> 每个节点结束时写 run note（时间/节点/结论/证据/环境/下一步）
-  -> type-check
-  -> build
-  -> package（若影响 packaged 行为）
-  -> 退出旧 app
-  -> 启动新 app / 新包
-  -> 自己完成 smoke
-  -> 采集证据（命令输出 / 截图 / 资源快照）
-  -> 只有证据闭环后，才能汇报 Jason
-```
+按受影响行为选择下列验证，复用有效证据。纯文档/Skill 修改只检查文档；CLI 或 daemon-only 改动不因此触发 Mac `.app` 构建、安装和重启。声称 packaged app 可用时，必须完成对应真实入口 smoke。
 
 ### 3.2 触发 packaged smoke 的场景
 出现以下任一项，必须跑 packaged app smoke，而不只 dev server：
@@ -156,11 +142,7 @@ pnpm --filter @zterm/mac package
 - 若改的是资源/生命周期：补 `ps/top` 资源采样 + 退出态进程检查
 
 #### E. 证据门槛
-证据至少二选二：
-- 命令输出
-- app 截图
-- 进程 / RSS / CPU 快照
-- 必要时日志 / sample
+保留能证明本次行为的结果；界面问题保留截图或 DOM，资源问题保留对应进程采样。不按数量凑截图、日志和快照。
 
 证据落点：
 - `mac/evidence/<date>-<topic>/`
@@ -181,13 +163,6 @@ top -pid <renderer_pid> -stats pid,cpu,mem,threads,state,time -l 2
 - 再启动新实例
 - 不允许跳过这一步就汇报“没有孤儿进程”
 
-### 4.3 报告规则
-- 先给证据，再给结论
-- 若只完成编译、未完成运行态 smoke，只能报告“代码已编译，通过静态验证，未完成运行态闭环”
-- 若只完成 dev server、未完成 packaged smoke，不能向 Jason 说“可安装使用”
-
----
-
 ## 五、反模式
 - 编译过了就让 Jason 手测
 - daemon/tmux probe 绿了就宣称 Mac client 连接正常
@@ -198,19 +173,6 @@ top -pid <renderer_pid> -stats pid,cpu,mem,threads,state,time -l 2
 - 让 Jason 帮忙补你本该先完成的基础 smoke
 
 ---
-
-## 六、完成态汇报模板
-只在闭环完成后使用：
-
-```text
-Jason，已完成本轮自闭环：
-1. 改动：
-2. 静态验证：type-check/build/package 结果
-3. 运行态 smoke：做了哪些真实操作
-4. 证据：截图/命令输出/资源采样位置
-5. 结论：哪些已验证通过，哪些仍未覆盖
-6. 现在才轮到你手测的部分：
-```
 
 ### 3.4 本地 package 签名授权规则
 - 本地 `pnpm --filter @zterm/mac package` 必须默认跳过 macOS code signing：`CSC_IDENTITY_AUTO_DISCOVERY=false` + `build.mac.identity=null`。
@@ -250,19 +212,8 @@ Unsigned 本地 package 启动必须严格按下列顺序，禁止改换步骤�
 7. **重复启动前必须清理旧进程**：先 `ps -axo pid,comm,args | egrep 'ZTerm|remote-debugging-port=<port>'`，再按 PID kill；禁止叠多个 instance 污染端口和 evidence。
 
 ### 3.5 状态 / Alpha 汇报对账门禁
-- 触发：Jason 问“今天完成了什么”“Mac 版本状态”“离 alpha 多远”“能不能手测/alpha 测试”，或上下文压缩/恢复后需要汇报 Mac 进度。
-- 汇报前必须对账：
-  - `git log --oneline -- mac packages/shared .agents/skills/zterm-mac-dev`
-  - `git status --short`
-  - `mac/MEMORY.md`
-  - `mac/task.md`
-  - `mac/docs/function-map.md`
-  - `mac/docs/testing/mac-desktop-workspace-test-design.md`
-  - `mac/docs/alpha-readiness.md`（若不存在或过期，先补齐）
-  - `mac/evidence/<date>-*` 证据目录索引
-- 汇报必须按证据层级拆开：已提交代码、白盒测试、packaged smoke、真实 daemon/local tmux/live UI、未验证缺口。
-- 不得只根据最近 handoff、loop run、Android note 或当前聊天上下文汇报 Mac 状态；Mac 进度以 Mac docs/MEMORY/task/evidence/git 提交共同对账为准。
-- 如果发现 evidence 仍是 untracked，只能报告 retention/cleanup 待决策；未经授权不得删除、移动、stage 或提交。
+- 普通进度问题直接依据当前任务记录回答；只补查确实未知或失效的事实，不重新遍历 Git、任务板、记忆、设计和 evidence 目录。
+- 正式 alpha 可用性结论需对照 `mac/docs/alpha-readiness.md` 的适用验收与真实安装入口；已有有效结果直接引用，缺项明确说明，不为汇报新建第二份状态表。
 
 ## 六、Mac dev runtime 单实例验证规则（2026-06-02）
 - 调试 Electron dev app 时，同一轮只能保留一个 `--remote-debugging-port` 实例；新开前先用明确 PID/app-level quit 收掉旧实例，禁止多端口并发导致证据串线。

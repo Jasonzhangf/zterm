@@ -40,7 +40,7 @@ description: zterm Windows Electron 客户端与 WezTerm daemon 开发闭环，�
 - Windows file browser must keep provider IO in `win/electron/windows-file-system.ts`, UI projection in `win/src/WindowsFileBrowserPanel.tsx`, and preview/path policy in shared `FileBrowserCore`. Packaged proof opens a real Windows fixture, compares Markdown source-to-DOM, proves binary disabled, and confirms daemon session counts stay unchanged.
 - 生成物 `win/dist/`、`win/dist-electron/`、`win/out/`、evidence 不进 git/MemPalace。
 
-## 最小验证
+## 按变更选择验证
 
 ```bash
 pnpm --dir win run type-check
@@ -49,11 +49,11 @@ pnpm --dir win run build
 pnpm --dir win run package
 ```
 
-随后部署真实 Windows 包并跑 source-to-DOM marker gate；只完成本地命令不得宣称 packaged alpha 闭环。
+这些是可用入口，不是每次修改都全跑的固定序列。纯文档/Skill 修改只做针对性检查；源码运行时变更跑受影响测试和类型检查。影响 Electron main/preload、启动、打包或已安装行为时，构建并部署真实 Windows 包，运行对应 source-to-DOM gate；只完成本地命令不得宣称 packaged app 可用。
 
 ## iTerm2-style Remote Access Gate
 
 - 先更新 `android/docs/dagpipe/windows-remote-access-client.graph.json`，确认 host/profile、session catalog、sidebar projection、workspace projection、shared terminal rendering、statusbar projection 的入口、依赖、success/failure/cleanup 终点。
 - 当前静态 DAG 已通过 Phase 0；它只证明 Windows remote-access composition 的形状，不证明 profile/sidebar/statusbar 已实现，也不证明 shared renderer 内部 graph。
 - 再改 `win/src` / `win/electron` / `win/docs`。禁止在 Windows UI fork daemon session truth、transport、buffer、renderer、mirror 或 file preview policy。
-- Packaged smoke 必须证明：sidebar profile/session projection、workspace split/tab projection、terminal marker source-to-DOM、statusbar projection、file browser fixture、daemon session cleanup。
+- 完整 remote-access 功能交付的 packaged smoke 覆盖 sidebar、workspace、terminal、statusbar、file browser 和 session cleanup；局部修复只重验受影响行为，复用其余有效结果。

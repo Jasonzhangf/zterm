@@ -542,15 +542,15 @@ async function executeHarness({
     shell.sendLine(String(sessionIndex));
 
     await shell.waitForVisibleText(
-      /预览 snapshot？/u,
-      'snapshot preview prompt',
+      /选择 \[1-5\]:/u,
+      'slot action menu',
       {
         from: command.from,
         timeoutMs: CONNECTION_TIMEOUT_MS,
       },
     );
     const previewFrom = shell.mark();
-    shell.sendLine('y');
+    shell.sendLine('2');
     await shell.waitForVisibleText(
       receipt.runId,
       'managed session snapshot marker',
@@ -560,10 +560,10 @@ async function executeHarness({
       },
     );
     await shell.waitForVisibleText(
-      /选择 \[1-4\]:/u,
-      'slot action menu',
+      /选择 \[1-5\]:/u,
+      'slot action menu after preview',
       {
-        from: command.from,
+        from: previewFrom,
         timeoutMs: CONNECTION_TIMEOUT_MS,
       },
     );

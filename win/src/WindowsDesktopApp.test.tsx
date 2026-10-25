@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { createSessionBufferState } from '@zterm/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,11 +12,17 @@ const ensureMock = vi.fn();
 const retainMock = vi.fn();
 const disposeMock = vi.fn();
 const getMock = vi.fn(() => null);
-const controlSnapshot = {
-  status: 'idle' as const,
-  error: '',
-  sessions: ['alpha', 'beta'],
-};
+type ControlSnapshot = { status: 'idle' | 'loading' | 'error'; error: string; sessions: string[] };
+const createControlSnapshot = (): ControlSnapshot => ({ status: 'idle', error: '', sessions: ['alpha', 'beta'] });
+let controlSnapshot: ControlSnapshot = createControlSnapshot();
+const controlListeners = new Set<() => void>();
+function publishControlSnapshot(next: Partial<ControlSnapshot>) {
+  controlSnapshot = { ...controlSnapshot, ...next };
+  controlListeners.forEach((listener) => listener());
+}
+const refreshMock = vi.fn(async () => controlSnapshot.sessions);
+const createMock = vi.fn(async () => controlSnapshot.sessions);
+const closeMock = vi.fn(async () => controlSnapshot.sessions);
 
 vi.mock('./windows-terminal-registry', () => ({
   createWindowsTerminalRegistry: () => ({
@@ -34,10 +40,13 @@ vi.mock('./windows-terminal-session', async () => {
     ...actual,
     createWindowsSessionControl: () => ({
       getSnapshot: () => controlSnapshot,
-      subscribe: () => () => undefined,
-      refresh: vi.fn(async () => controlSnapshot.sessions),
-      create: vi.fn(async () => controlSnapshot.sessions),
-      close: vi.fn(async () => controlSnapshot.sessions),
+      subscribe: (listener: () => void) => {
+        controlListeners.add(listener);
+        return () => controlListeners.delete(listener);
+      },
+      refresh: refreshMock,
+      create: createMock,
+      close: closeMock,
     }),
   };
 });
@@ -50,6 +59,14 @@ beforeEach(() => {
   disposeMock.mockClear();
   getMock.mockReset();
   getMock.mockReturnValue(null);
+  controlSnapshot = createControlSnapshot();
+  controlListeners.clear();
+  refreshMock.mockReset();
+  refreshMock.mockImplementation(async () => controlSnapshot.sessions);
+  createMock.mockReset();
+  createMock.mockImplementation(async () => controlSnapshot.sessions);
+  closeMock.mockReset();
+  closeMock.mockImplementation(async () => controlSnapshot.sessions);
 });
 
 afterEach(() => {
@@ -280,6 +297,116 @@ describe('WindowsDesktopApp pane/session UX', () => {
     fireEvent.click(screen.getByRole('button', { name: 'beta' }));
 
     await waitFor(() => expect(ensureMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'beta' })));
+  });
+});
+
+describe('WindowsDesktopApp remote session close', () => {
+  it('asks for one inline confirmation and cancels without a control close', () => {
+    render(<WindowsDesktopApp />);
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 alpha' }));
+
+    expect(screen.getByTestId('windows-session-close-confirm-alpha')).toBeInTheDocument();
+    expect(closeMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '取消关闭 alpha' }));
+
+    expect(screen.queryByTestId('windows-session-close-confirm-alpha')).not.toBeInTheDocument();
+    expect(within(screen.getByTestId('windows-sidebar')).getByRole('button', { name: 'alpha' })).toBeInTheDocument();
+    expect(closeMock).not.toHaveBeenCalled();
+  });
+
+  it('confirms one exact remote close and closes every matching tab', async () => {
+    render(<WindowsDesktopApp />);
+    const sidebar = screen.getByTestId('windows-sidebar');
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'alpha' }));
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'alpha' }));
+    await waitFor(() => expect(
+      screen.getAllByTitle('Click: switch · Right-click: pane menu · Double-click: rename'),
+    ).toHaveLength(2));
+
+    fireEvent.click(within(sidebar).getByRole('button', { name: '关闭 alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认关闭 alpha' }));
+
+    await waitFor(() => expect(closeMock).toHaveBeenCalledTimes(1));
+    expect(closeMock).toHaveBeenCalledWith(
+      expect.objectContaining({ bridgeHost: '127.0.0.1', bridgePort: 3333 }),
+      'alpha',
+    );
+    await waitFor(() => expect(
+      screen.getAllByTitle('Click: switch · Right-click: pane menu · Double-click: rename').map((node) => node.textContent).join('\n'),
+    ).not.toContain('alpha'));
+    expect(screen.getByText('New terminal')).toBeInTheDocument();
+  });
+
+  it('consumes a controller close rejection and renders the control error once in the sidebar', async () => {
+    closeMock.mockImplementationOnce(async () => {
+      publishControlSnapshot({ status: 'error', error: 'kill failed' });
+      throw new Error('kill failed');
+    });
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', onUnhandledRejection);
+    try {
+      render(<WindowsDesktopApp />);
+      fireEvent.click(screen.getByRole('button', { name: '关闭 alpha' }));
+      fireEvent.click(screen.getByRole('button', { name: '确认关闭 alpha' }));
+
+      await waitFor(() => expect(screen.getByText('kill failed')).toBeInTheDocument());
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(unhandled).toHaveLength(0);
+      const errors = screen.getAllByText('kill failed');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.closest('.windows-sidebar')).not.toBeNull();
+      expect(screen.getByTestId('windows-statusbar').textContent).not.toContain('kill failed');
+      expect(closeMock).toHaveBeenCalledTimes(1);
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection);
+    }
+  });
+
+  it('renders session-control errors once in the sidebar, never in the status bar', async () => {
+    render(<WindowsDesktopApp />);
+
+    act(() => publishControlSnapshot({ status: 'error', error: 'refresh failed' }));
+
+    await waitFor(() => expect(screen.getAllByText('refresh failed')).toHaveLength(1));
+    expect(screen.getByText('refresh failed').closest('.windows-sidebar')).not.toBeNull();
+    expect(screen.getByTestId('windows-statusbar').textContent).not.toContain('refresh failed');
+  });
+
+  it('clears a pending confirmation when the profile or session catalog changes', async () => {
+    window.localStorage.setItem('zterm:windows:profiles.v1', JSON.stringify([
+      { id: 'a', name: 'Alpha host', bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'zterm' },
+      { id: 'b', name: 'Beta host', bridgeHost: '10.0.0.2', bridgePort: 4444, sessionName: 'zterm' },
+    ]));
+    window.localStorage.setItem('zterm:windows:active-profile.v1', 'a');
+    render(<WindowsDesktopApp />);
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 alpha' }));
+    expect(screen.getByTestId('windows-session-close-confirm-alpha')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole('radio')[1]!);
+    await waitFor(() => expect(screen.queryByTestId('windows-session-close-confirm-alpha')).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭 alpha' }));
+    expect(screen.getByTestId('windows-session-close-confirm-alpha')).toBeInTheDocument();
+    act(() => publishControlSnapshot({ sessions: ['beta'] }));
+    await waitFor(() => expect(screen.queryByTestId('windows-session-close-confirm-alpha')).not.toBeInTheDocument());
+    expect(closeMock).not.toHaveBeenCalled();
+  });
+
+  it('closes a local tab without a remote confirmation or control close', async () => {
+    const { container } = render(<WindowsDesktopApp />);
+    fireEvent.click(screen.getByRole('button', { name: 'alpha' }));
+    await waitFor(() => expect(ensureMock).toHaveBeenCalledWith(expect.objectContaining({ title: 'alpha' })));
+
+    fireEvent.click(container.querySelector('[data-testid^="pane-tab-close-"]')!);
+
+    await waitFor(() => expect(screen.getByText('New terminal')).toBeInTheDocument());
+    expect(screen.queryByTestId('windows-session-close-confirm-alpha')).not.toBeInTheDocument();
+    expect(closeMock).not.toHaveBeenCalled();
   });
 });
 

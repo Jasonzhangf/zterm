@@ -22,9 +22,6 @@ zterm login | zterm login --from-config | zterm logout
 zterm slot set <1..20> | zterm slot list | zterm <1..20> | zterm
 zterm upgrade [--registry <url>]
 zterm daemon install | zterm daemon status | zterm daemon config
-zterm daemon config tmux set <name> --socket <path>
-zterm daemon config tmux primary <name>
-zterm daemon config tmux remove <name>
 ```
 无参数 `zterm` 只列出已配置槽位并让用户选择；编号入口不重新询问服务器和 session。
 槽位失效、未登录或登录失效必须显式失败，不得切换目标、按名称重绑或创建同名 session。
@@ -50,7 +47,6 @@ zterm daemon config tmux remove <name>
 | 本地退出 | `Ctrl+]` 后按 `q` | 只断开本地连接，不删除或停止远端 session。 |
 | 登出 | `zterm logout` | 只清本地 CLI 登录态；不宣称撤销远端已经签发的 token。 |
 | 升级与管理 | `zterm upgrade`、`zterm daemon install/status/config` | upgrade 只升级 CLI；daemon install 不启动或重启服务。 |
-| 配置 tmux socket | `zterm daemon config tmux ...` | 直接读写本机共享配置；不需要登录、安装或运行 daemon。 |
 
 ## 2. 架构映射与十一图
 CLI 新增终端消费者，不复制 runtime 源码，不改变 daemon 的 tmux/mirror/transport 真源。
@@ -118,15 +114,16 @@ flowchart TD
 注册项。导航 owner 内部封装服务器和 session 循环；这些返回动作只记录为下面的独立状态机，
 不写成 DAG 回边，也不新增框架。
 
-每次导航尝试依次执行：选择服务器或复用当前连接 → 刷新/选择 session → 解析
-`{ backend, stableId }` 精确身份 → 可选的一次性源帧预览 → 选择动作。动作结果只有
-`save | sessions | servers | exit | failed`。`sessions` 和 `servers` 是导航内部继续动作；
-只有最终 `save` 到达受保护提交。导航 owner 最终只返回保存、取消或失败；其他结果原样进入
-单一结果汇总。
+每次导航尝试依次执行：选择服务器或复用当前连接 → 刷新/选择 session（携带
+`{ backend, stableId }` 精确身份）→ 选择配置动作。动作只有
+`save | preview | sessions | servers | exit | failed`。`preview` 是当前 session 的可选一次性
+源帧预览，完成后回到同一动作菜单；`sessions` 和 `servers` 是导航内部继续动作；只有最终
+`save` 到达受保护提交。导航 owner 最终只返回保存、取消或失败；其他结果原样进入单一结果汇总。
 
 | 动作 | 行为 |
 |---|---|
 | 保存到槽位 N | 用当前选择构造绑定，并以导航开始前的原始槽位基线执行锁内比较提交。 |
+| 预览 snapshot | 只对当前选择的精确 `{ backend, stableId }` 请求一次性源帧预览；完成后回到同一五动作菜单，可在同一连接和同一原始基线上再次预览或选择其他动作。捕获失败或身份不一致时最终失败，不写槽位。 |
 | 重新选择 session | 在当前连接上刷新 session 目录并形成新的选择 scope；丢弃旧选择和预览，不复用旧目录下标；cleanup scope 不变。 |
 | 返回服务器选择 | 展示保留的服务器目录前先关闭当前连接一次；下一次服务器选择后才建立新连接。 |
 | 退出配置 | 取消整个配置，不写槽位；当前连接关闭一次。 |
@@ -144,25 +141,21 @@ EOF 都取消整个命令，且不写槽位。槽位冲突返回 `slot_changed`�
 flowchart TD
   N0([导航 attempt 开始]):::boundary --> N1[选择服务器或复用当前连接]:::action
   N1 --> N2[刷新并选择 session]:::action
-  N2 --> N3[解析 backend 与 stableId 精确身份]:::action
-  N3 --> N4{预览}:::decision
-  N4 -->|是| N5[请求一次性源帧预览]:::action
-  N4 -->|否| N6{选择动作}:::decision
-  N5 -->|成功| N6
-  N5 -->|捕获失败| NF([最终失败，保留原错]):::failure
-  N6 -->|保存到槽位 N| NS([最终 save]):::success
-  N6 -->|重新选择 session| N2
-  N6 -->|返回服务器选择| N7[关闭当前连接一次]:::action
-  N7 -->|关闭成功| N1
-  N7 -->|关闭失败| NF
-  N6 -->|退出配置| NC([最终取消，不写槽位]):::failure
-  N6 -->|失败| NF
+  N2 --> N3{选择配置动作}:::decision
+  N3 -->|保存到槽位 N| NS([最终 save]):::success
+  N3 -->|预览 snapshot| N4[请求一次性源帧预览]:::action
+  N4 -->|预览完成| N3
+  N4 -->|捕获或身份失败| NF([最终失败，保留原错]):::failure
+  N3 -->|重新选择 session| N2
+  N3 -->|返回服务器选择| N5[关闭当前连接一次]:::action
+  N5 -->|关闭成功| N1
+  N5 -->|关闭失败| NF
+  N3 -->|退出配置| NC([最终取消，不写槽位]):::failure
+  N3 -->|选择失败| NF
   N1 -->|Ctrl+C 或 EOF| NC
   N2 -->|Ctrl+C 或 EOF| NC
   N3 -->|Ctrl+C 或 EOF| NC
   N4 -->|Ctrl+C 或 EOF| NC
-  N5 -->|Ctrl+C 或 EOF| NC
-  N6 -->|Ctrl+C 或 EOF| NC
   classDef boundary fill:#E9EEF5,stroke:#64748B,color:#0F172A,stroke-width:1.5px
   classDef action fill:#E8F1FF,stroke:#2563EB,color:#0F172A,stroke-width:1.5px
   classDef decision fill:#FFF4CC,stroke:#D97706,color:#0F172A,stroke-width:1.5px

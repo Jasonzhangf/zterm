@@ -2,6 +2,14 @@
 
 ## Ownership
 
+Interaction feedback is scoped by operation. Session discovery/create/close errors belong to the session-control surface; terminal transport failures belong to the terminal runtime surface. Render each exact error once in its visible scope. A persistent connection indicator and an actionable error may coexist, but the sidebar and status bar must not repeat the same control error text.
+
+Closing a local workspace tab releases its subscription and stays unprompted. Closing a remote tmux session terminates remote programs, so it requires exactly one inline confirmation in that session's sidebar row. Cancel sends no control request. Confirm sends one control close for the exact `{ bridgeHost, bridgePort, authToken, sessionName }` target, then closes matching workspace tabs once. The pending confirmation is local sidebar UI state; it clears when the active profile, resolved control target, or visible session list changes.
+
+The session-control controller publishes each refresh/create/close failure to `controlSnapshot.error` before it rejects. The Windows UI consumes that rejection at the controller call boundary with a direct rejection handler: a two-argument `then` failure arm for create/close and `catch` for refresh. No unhandled promise rejection escapes and no second UI error store appears. Errors thrown later by a local success continuation stay visible instead of being swallowed by a downstream `catch`.
+
+`WindowsSidebar` is the single visible owner of session-control catalog errors (`.control-error`). `WindowsStatusBar` projects only the active terminal transport state and `status.error`; it does not accept or render a control error. See `../../android/docs/audits/2026-10-24-minimal-interaction-and-flow-audit.md` for the audit scope.
+
 Windows is split into two layers:
 
 1. Daemon backend: `daemon.windows_wezterm_backend`
@@ -43,6 +51,8 @@ Windows backend completion requires:
 - Typecheck.
 
 Windows remote-access client completion requires packaged Windows app smoke for sidebar profile selection, session catalog projection, split/tab workspace behavior, terminal source-to-DOM marker, file browser fixture, status bar projection, explicit failure projection, and runtime cleanup. Current static DAG coverage does not by itself prove these packaged gates.
+
+The remote session close slice has unit coverage for inline confirm/cancel, one control close with matching tab cleanup, single-owner control error rendering, and unprompted local tab close. Installed Windows source-to-DOM acceptance of confirm, cancel, error-once, and unprompted local tab close remains a delivery gate; unit tests do not prove the packaged app.
 
 ## Desktop shell initialization
 

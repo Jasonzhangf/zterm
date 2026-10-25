@@ -137,7 +137,7 @@ description: "审计、开发和验证 zterm Android 客户端；按当前架构
 - Remote-window 视频刷新不能只看 `trackSeen=true` 或 `framesSent=1`。Live probe 必须使用动画 AppKit 目标窗口，并在 raw WebSocket、mux-channel、Tailscale mux 串行验证 `stopped.framesSent >= 3`；否则“连上但画面冻住”不会被测出来。ScreenCaptureKit app-window capture 的 queueDepth 当前锁为 `3`，禁止降回 `1`；单 buffer 加同步 RGBA 转换/pipe 写入会重演首帧后停刷。
 - Remote-window 普通滚动主线只接受实时 pixel scroll，不再生成或回放 release-time `gesture/swipe`。旧 swipe replay 只能在确认无消费者后物理删除，不得保留为隐式 fallback。AppKit live gate 必须在 pointer-move 阶段看到 scroll marker，并证明 pointerup 不追加滚动；只看 `remote-window-input-result accepted=true` 不算输入闭环。
 - Remote-window 截屏是 target-scoped capture，不是输入事件：浮窗和 fullscreen 的截图按钮必须把 selected target manifest 交给现有 `terminal.remote_screenshot` / file-download owner，daemon 只能按 macOS `windowId` 或已归一化 `cropRectTopLeftPx` capture，Android 收到原始分辨率 PNG 后自动保存到本地 Download/zterm；截图路径不得发送 `focus`、不得拉前台、不得读取本地 video/canvas surface、不得新增第二套截图/文件传输 pipeline，非法 target 必须显式 error，禁止 fallback 成全屏截图。UI 必须有非布局型 overlay 动画/进度与保存/失败提示，不能只在工具栏下方放一行弱状态。
-- macOS app-window 原始截图必须用 native daemon 的 `screencapture -x -o -l<windowId>`，否则 `-l` 默认会包含窗口阴影导致 PNG 大于 daemon manifest bounds。更新 packaged global daemon 时必须同时验证 `android/release-dist/.../support/zterm-daemon`、`~/.zterm/releases/.../support/zterm-daemon`、`~/.zterm/bin/zterm-daemon` 三者 sha 对齐；`~/.zterm/bin/zterm-daemon` 是 Node runtime 缺少 `ZTERM_DAEMON_NATIVE` 时的 fallback 路径，不能残留旧二进制。
+- macOS app-window 原始截图必须用 native daemon 的 `screencapture -x -o -l<windowId>`，否则阴影会使 PNG 大于 manifest bounds。通过正式 installer 更新 packaged daemon，保证 release support 和 `~/.zterm/bin/zterm-daemon` 的运行入口都更新，并从实际截图入口验证无阴影尺寸。日常更新不再重复计算三个路径的 SHA；旧 native 入口不得继续接管请求。
 - 相关改动最小 gate：`RemoteWindowOverlay.test.tsx`、`TerminalPage.remote-window-overlay.test.tsx`、`session-context-remote-window-runtime.test.ts`、`session-context-transfer-runtime.test.ts`、`terminal-file-transfer-binary-runtime.test.ts`、`remote-window-stream-daemon.test.ts`、`terminal-message-runtime.test.ts`、`remote-window-video-quality.test.ts`、`tsc --noEmit`、`test:feature-registry`。daemon 可用时追加 live WS 显式错误/成功 smoke。
 
 ### 2.3 旧文档处理
@@ -580,11 +580,7 @@ pnpm --dir android run build:android
    - `size`
 2. `release-dist/latest.json` 与 `update-dist/latest.json` 的 `versionCode/sha256/size` 一致。
 3. `update-dist/<apkUrl>` 文件存在，且 `sha256` 与 manifest 一致。
-4. 报告中必须给出：
-   - APK 绝对路径
-   - versionName/versionCode
-   - sha256
-   - 是否通过标准门禁（regression + type-check + gradle）
+4. 发布记录保留 APK、版本、manifest 与安装验证结果；用户反馈给使用位置、验收范围和真实缺口，不重复粘贴完整字段和 gate 清单。
 
 **禁止事项：**
 
@@ -592,21 +588,9 @@ pnpm --dir android run build:android
 - 禁止只说“构建成功”但不核对 `latest.json` 与实际 APK hash。
 - 禁止使用旧版本 APK 复用旧 manifest。
 
-### 3.4 证据记录模板
+### 3.4 证据记录
 
-每次验证后在 `android/evidence/<date-task>/` 保存：
-
-- 截图
-- 命令输出
-- APK 路径
-- 必要时 logcat / console
-
-#### 完成证据最低标准
-
-- 截图
-- 命令输出
-- APK 路径
-- 必要时 logcat
+复用 `android/evidence/<date-task>/` 中能回答本次问题的结果；Android 安装交付保留包与安装态，界面验收保留画面，故障诊断保留相关日志。类型检查或文档修订不因此生成 APK、截图或无关日志。完成反馈沿全局沟通规则，不另建模板。
 
 ### 3.5 项目提交与经验沉淀
 

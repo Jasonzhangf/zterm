@@ -246,17 +246,10 @@ function sessionLabel(session: SlotSessionTarget) {
 
 export function slotDisplayLabel(entry: SlotListEntry): string {
   const alias = entry.binding.alias?.trim();
-  const identity = alias
-    ? alias
-    : `${entry.binding.server.displayName} / ${entry.binding.session.name}`;
-  return [
-    `槽位 ${entry.slot}`,
-    identity,
-    entry.binding.server.displayName,
-    entry.binding.session.name,
-    entry.binding.session.backend,
-    entry.binding.widthMode,
-  ].join(' · ');
+  const target = `${entry.binding.server.displayName} / ${entry.binding.session.name}`;
+  return alias
+    ? `槽位 ${entry.slot} · ${alias} · ${target}`
+    : `槽位 ${entry.slot} · ${target}`;
 }
 
 function mapFailure(stage: string, error: unknown, code: string, message: string): CommandFailed {
@@ -572,7 +565,7 @@ export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetRe
     };
 
     try {
-      while (true) {
+      sessionLoop: while (true) {
         let sessions: SlotSessionTarget[];
         try {
           sessions = sessionChoices(await connection.listSessions());
@@ -621,139 +614,144 @@ export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetRe
           ));
         }
 
-        try {
-          const wantsPreview = await options.prompts.confirm('预览 snapshot？');
-          if (wantsPreview) {
-            const preview = await connection.readSnapshot(session, options.maxLines ?? 80);
-            if (preview.status === 'failed') {
-              return await finish({
-                kind: 'failed',
-                stage: 'preview',
-                error: {
-                  code: preview.code,
-                  message: preview.code === 'session_not_found'
-                    ? '预览时 session 已不存在。'
-                    : '预览时 session 身份已改变。',
-                  action: '请重新读取 session 列表后重试。',
-                },
-              });
+        while (true) {
+          let action: 'save' | 'preview' | 'sessions' | 'servers' | 'exit';
+          try {
+            action = await options.prompts.select<
+              'save' | 'preview' | 'sessions' | 'servers' | 'exit'
+            >(
+              `配置槽位 ${options.slot}`,
+              [
+                { label: `保存到槽位 ${options.slot}`, value: 'save' },
+                { label: '预览 snapshot', value: 'preview' },
+                { label: '重新选择 session', value: 'sessions' },
+                { label: '返回服务器选择', value: 'servers' },
+                { label: '退出配置', value: 'exit' },
+              ],
+            );
+          } catch (error) {
+            return await finish(
+              isCancellation(error)
+                ? { kind: 'cancelled', stage: 'action' }
+                : mapFailure('action', error, 'action_select_failed', '无法选择下一步操作。'),
+            );
+          }
+
+          if (action === 'preview') {
+            try {
+              const preview = await connection.readSnapshot(session, options.maxLines ?? 80);
+              if (preview.status === 'failed') {
+                return await finish({
+                  kind: 'failed',
+                  stage: 'preview',
+                  error: {
+                    code: preview.code,
+                    message: preview.code === 'session_not_found'
+                      ? '预览时 session 已不存在。'
+                      : '预览时 session 身份已改变。',
+                    action: '请重新读取 session 列表后重试。',
+                  },
+                });
+              }
+              if (
+                preview.status === 'available'
+                && (preview.backend !== session.backend || preview.stableId !== session.stableId)
+              ) {
+                return await finish({
+                  kind: 'failed',
+                  stage: 'preview',
+                  error: {
+                    code: 'snapshot_identity_mismatch',
+                    message: 'snapshot 身份与所选 session 不一致。',
+                    action: '请重新读取 session 列表后重试。',
+                  },
+                });
+              }
+              await options.renderPreview(preview, session);
+            } catch (error) {
+              return await finish(
+                isCancellation(error)
+                  ? { kind: 'cancelled', stage: 'preview' }
+                  : mapFailure('preview', error, 'preview_failed', '无法预览 snapshot。'),
+              );
             }
-            if (
-              preview.status === 'available'
-              && (preview.backend !== session.backend || preview.stableId !== session.stableId)
-            ) {
-              return await finish({
+            continue;
+          }
+
+          if (action === 'sessions') break;
+          if (action === 'servers') {
+            if (!await closeOnce()) {
+              return {
                 kind: 'failed',
-                stage: 'preview',
+                stage: 'cleanup',
                 error: {
-                  code: 'snapshot_identity_mismatch',
-                  message: 'snapshot 身份与所选 session 不一致。',
-                  action: '请重新读取 session 列表后重试。',
+                  code: 'connection_close_failed',
+                  message: '无法关闭本次连接。',
+                  action: '请检查连接状态后重试 zterm slot set。',
                 },
-              });
+                cleanupErrors: [...cleanupErrors],
+              };
             }
-            await options.renderPreview(preview, session);
+            break sessionLoop;
           }
-        } catch (error) {
-          return await finish(
-            isCancellation(error)
-              ? { kind: 'cancelled', stage: 'preview' }
-              : mapFailure('preview', error, 'preview_failed', '无法预览 snapshot。'),
-          );
-        }
-
-        let action: 'save' | 'sessions' | 'servers' | 'exit';
-        try {
-          action = await options.prompts.select<'save' | 'sessions' | 'servers' | 'exit'>(
-            `配置槽位 ${options.slot}`,
-            [
-              { label: `保存到槽位 ${options.slot}`, value: 'save' },
-              { label: '重新选择 session', value: 'sessions' },
-              { label: '返回服务器选择', value: 'servers' },
-              { label: '退出配置', value: 'exit' },
-            ],
-          );
-        } catch (error) {
-          return await finish(
-            isCancellation(error)
-              ? { kind: 'cancelled', stage: 'action' }
-              : mapFailure('action', error, 'action_select_failed', '无法选择下一步操作。'),
-          );
-        }
-
-        if (action === 'sessions') continue;
-        if (action === 'servers') {
-          if (!await closeOnce()) {
-            return {
-              kind: 'failed',
-              stage: 'cleanup',
-              error: {
-                code: 'connection_close_failed',
-                message: '无法关闭本次连接。',
-                action: '请检查连接状态后重试 zterm slot set。',
-              },
-              cleanupErrors: [...cleanupErrors],
-            };
+          if (action === 'exit') {
+            return await finish({ kind: 'cancelled', stage: 'exit' });
           }
-          break;
-        }
-        if (action === 'exit') {
-          return await finish({ kind: 'cancelled', stage: 'exit' });
-        }
 
-        const binding: CliSlotBinding = {
-          ...(original?.alias === undefined ? {} : { alias: original.alias }),
-          account: {
-            relayBaseUrl: auth.relayBaseUrl,
-            userId: auth.userId,
-          },
-          server: {
-            deviceId: server.deviceId,
-            daemonHostId: server.daemonHostId,
-            displayName: server.displayName,
-          },
-          session: {
-            backend: session.backend,
-            stableId: session.stableId,
-            name: session.name,
-          },
-          widthMode: options.widthMode ?? original?.widthMode ?? 'adaptive-phone',
-        };
+          const binding: CliSlotBinding = {
+            ...(original?.alias === undefined ? {} : { alias: original.alias }),
+            account: {
+              relayBaseUrl: auth.relayBaseUrl,
+              userId: auth.userId,
+            },
+            server: {
+              deviceId: server.deviceId,
+              daemonHostId: server.daemonHostId,
+              displayName: server.displayName,
+            },
+            session: {
+              backend: session.backend,
+              stableId: session.stableId,
+              name: session.name,
+            },
+            widthMode: options.widthMode ?? original?.widthMode ?? 'adaptive-phone',
+          };
 
-        let result: SlotSetResult;
-        try {
-          const saved = await slotStore.saveIfUnchanged({
-            slot: options.slot,
-            expected: original,
-            binding,
-            signal,
-          });
-          if (saved.kind === 'slot_changed') {
-            result = {
-              kind: 'failed',
-              stage: 'save',
-              error: {
-                code: 'slot_changed',
-                message: '槽位已被其他进程修改，本次草稿未覆盖。',
-                action: '请重新运行 zterm slot set 并确认最新绑定。',
-              },
-              current: saved.current,
-            };
-          } else {
-            result = {
-              kind: 'ok',
-              value: {
-                slot: options.slot,
-                binding: saved.binding,
-              },
-            };
+          let result: SlotSetResult;
+          try {
+            const saved = await slotStore.saveIfUnchanged({
+              slot: options.slot,
+              expected: original,
+              binding,
+              signal,
+            });
+            if (saved.kind === 'slot_changed') {
+              result = {
+                kind: 'failed',
+                stage: 'save',
+                error: {
+                  code: 'slot_changed',
+                  message: '槽位已被其他进程修改，本次草稿未覆盖。',
+                  action: '请重新运行 zterm slot set 并确认最新绑定。',
+                },
+                current: saved.current,
+              };
+            } else {
+              result = {
+                kind: 'ok',
+                value: {
+                  slot: options.slot,
+                  binding: saved.binding,
+                },
+              };
+            }
+          } catch (error) {
+            result = isCancellation(error)
+              ? { kind: 'cancelled', stage: 'save' }
+              : mapFailure('save', error, 'slot_save_failed', '无法保存槽位。');
           }
-        } catch (error) {
-          result = isCancellation(error)
-            ? { kind: 'cancelled', stage: 'save' }
-            : mapFailure('save', error, 'slot_save_failed', '无法保存槽位。');
+          return await finish(result);
         }
-        return await finish(result);
       }
     } catch (error) {
       return await finish(

@@ -10,6 +10,11 @@ installed macOS acceptance. The Air daemon also passed socket-alias catalog
 deduplication and exact snapshot retrieval with an existing saved slot. Source
 integration status is recorded in `android/note.md`.
 
+Version 0.1.4 projects concise slot labels and moves snapshot preview into a
+single five-action configure menu. It passed installed macOS full-user-path
+acceptance and matching list/selector labels. This does not claim acceptance on
+other platforms.
+
 The configurable tmux socket and local daemon configuration commands below are
 the Increment A candidate contract. They are not claimed as delivered until the
 built candidate passes installed CLI and native socket acceptance.
@@ -197,7 +202,7 @@ Field meaning:
 | `zterm.android.daemon.sessionName` | Default daemon session name. Omit it to use the current default. |
 | `zterm.android.daemon.terminalCacheLines` | Daemon mirror retention in lines. Omit it to use the current default. |
 
-### Configurable tmux sockets
+### Configurable tmux sockets (design only; not implemented)
 
 The canonical tmux socket block is:
 
@@ -304,9 +309,11 @@ zterm slot push --all
 zterm slot pull --all
 ```
 
-Names are optional. The list shows the name alongside the saved machine,
-session, backend, and width mode. Without a name, it uses the machine and
-session names. Rename works while logged out and changes only the local name.
+Names are optional. The list shows the slot number, the name when present, and
+the saved machine and session once. Backend, width mode, device ID, and stable
+session ID stay in the saved binding instead of the routine list. Without a
+name, the line uses the machine and session names. The slot number is the
+selection value. Rename works while logged out and changes only the local name.
 Configuring an existing slot preserves its name.
 
 Cloud sync requires login and a Relay server with the slot configuration API.
@@ -346,8 +353,8 @@ The interactive flow is:
 3. Choose one exact `deviceId + daemonHostId` server.
 4. Read the daemon session catalog.
 5. Choose a session with both `backend` and non-empty `stableId`.
-6. Optionally preview a one-shot snapshot of the exact selected target.
-7. Choose an action from the menu.
+6. Choose one action from the single five-choice menu: save, preview, reselect
+   session, return to servers, or exit.
 
 The catalog reads only the configured tmux socket routes. If two configured
 sockets have a session with the same name, both entries appear with distinct
@@ -374,15 +381,19 @@ Cancellation leaves the original slot unchanged. If another process changes
 the same slot before save, the command reports `slot_changed` and keeps the
 newer binding instead of overwriting it.
 
-Snapshot preview is read-only. It does not attach a terminal, create a mirror,
-start continuous capture, resize a terminal, or send input. Older daemons may
-still report a preview as unavailable when no mirror is ready; that does not
-itself create a mirror. After preview, or when you decline it, the action menu
-has four choices:
+Snapshot preview is opt-in and read-only. Choosing 预览 snapshot does not attach
+a terminal, create a mirror, start continuous capture, resize a terminal, or
+send input. Older daemons may still report a preview as unavailable when no
+mirror is ready; that does not itself create a mirror. A preview requests one
+detached frame for the exact selected target, then returns to the same menu on
+the same connection and the original slot baseline. A failed capture or an
+identity mismatch fails the command without writing the slot. The action menu
+has five choices:
 
 | Choice | Behavior |
 |---|---|
 | 保存到槽位 N | Build the binding from the current selection and save to slot N with the original slot baseline. |
+| 预览 snapshot | Request one detached frame for the exact selected target, then return to the same five-choice menu. Never saves by itself. |
 | 重新选择 session | Refresh the session catalog on the current connection, discard the current selection and preview, and choose again. |
 | 返回服务器选择 | Close the current connection once, show the retained server directory, and connect only after another server selection. |
 | 退出配置 | Cancel the whole command without writing the slot. |

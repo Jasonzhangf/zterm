@@ -87,4 +87,7 @@ button, input { font: inherit; letter-spacing: 0; }
 .file-browser-preview pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 Consolas, monospace; color: #e4e8ee; }
 .file-browser-error { padding: 9px; border: 1px solid #713d3d; background: #3b2325; color: #ffd9d9; font-size: 12px; }
 .file-browser-confirm { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: #aeb4be; font-size: 12px; }
+.session-close-confirm { flex-direction: column; align-items: stretch; gap: 8px; overflow-wrap: anywhere; }
+.session-close-confirm .workspace-toolbar-actions { justify-content: flex-end; }
+.session-close-confirm button { white-space: nowrap; flex-shrink: 0; }
 @media (max-width: 640px) { .connection-state { max-width: 170px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } }
