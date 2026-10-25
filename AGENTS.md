@@ -6,6 +6,7 @@
 - `../wterm` 是 fork runtime repo；移动端只依赖其发布后的 npm 包，不把 runtime 源码混入本仓库
 
 ## Truth Sources
+- `android/docs/decisions/2026-10-24-cli-daemon-release-process.md`：CLI/daemon 发布单元、跨平台验收、next/latest 提升与回滚；执行状态见 `android/docs/goals/cli-daemon-release-plan.md`
 - `packages/cli/README.md`：`zterm` 命令、共享配置、本地 tarball 安装和 CLI 当前验收状态
 - `android/docs/decisions/2026-10-20-remote-cli.md`：remote CLI 架构、命令边界和平台阶段真源
 - `android/docs/wiki/cli.md`：CLI、daemon launcher 与三 payload 分发的 worker-readable 入口
