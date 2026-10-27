@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "tsc -p tsconfig.build.json"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./connection/traversal": "./src/connection/traversal/index.ts",
@@ -20,7 +24,11 @@
     "./relay-directory": "./src/connection/relay-directory.ts",
     "./mobile-config": "./src/connection/mobile-config.ts",
     "./tmux-session-name": "./src/connection/tmux-session-name.ts",
-    "./terminal/tmux-socket-path": "./src/terminal/tmux-socket-path.ts",
+    "./terminal/tmux-socket-path": {
+      "types": "./src/terminal/tmux-socket-path.ts",
+      "import": "./dist/terminal/tmux-socket-path.js",
+      "default": "./dist/terminal/tmux-socket-path.js"
+    },
     "./schedule-types": "./src/schedule/types.ts",
     "./terminal/color": "./src/terminal/color.ts",
     "./terminal/theme": "./src/terminal/theme.ts",
@@ -51,7 +59,8 @@
     "react": "^19.0.0"
   },
   "devDependencies": {
-    "@types/react": "^19.0.0"
+    "@types/react": "^19.0.0",
+    "typescript": "^5.4.0"
   },
   "dependencies": {
     "@jsonstudio/wtermmod-react": "^0.1.9"

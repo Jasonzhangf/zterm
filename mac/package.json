@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5174 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5174 electron .\"",
     "build:renderer": "vite build",
-    "build:main": "pnpm --dir ../packages/runtime-contracts run build && pnpm --dir ../packages/desktop-gateway run build && tsc -p tsconfig.node.json",
+    "build:main": "pnpm --dir ../packages/runtime-contracts run build && pnpm --dir ../packages/desktop-gateway run build && pnpm --dir ../packages/shared run build && tsc -p tsconfig.node.json",
     "build": "pnpm run build:renderer && pnpm run build:main",
     "helper:dev": "pnpm run build:main && electron . --screenshot-helper",
     "helper:start": "./scripts/zterm-screenshot-helper.sh start",
@@ -70,6 +70,15 @@
         "from": "../packages/desktop-gateway",
         "to": "node_modules/@zterm/desktop-gateway",
         "filter": ["**/*"]
+      },
+      {
+        "from": "../packages/shared/dist",
+        "to": "node_modules/@zterm/shared/dist",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../packages/shared/package.json",
+        "to": "node_modules/@zterm/shared/package.json"
       }
     ],
     "mac": {

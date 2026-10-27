@@ -332,6 +332,9 @@ importers:
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.14
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
 
   packages/stream-boundary:
     dependencies:
