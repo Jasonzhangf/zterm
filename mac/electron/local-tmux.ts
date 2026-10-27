@@ -1,8 +1,9 @@
 import { BrowserWindow } from 'electron';
 import { execFile } from 'node:child_process';
 import { statSync } from 'node:fs';
-import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { resolveStandardTmuxSocketArgs } from './standard-tmux-socket.js';
+import { resolveStandardTmuxSocketPath } from '@zterm/shared/terminal/tmux-socket-path';
 
 const execFileAsync = promisify(execFile);
 const LOCAL_TMUX_EVENT = 'zterm:local-tmux-event';
@@ -384,23 +385,29 @@ function wrapAnsiLineToCellSegments(line: string, cols: number, cursorCol?: numb
 
 
 function resolveTmuxSocketArgs(): string[] {
-  // zterm standard host config keeps the tmux server at
-  // ~/.tmux/run/tmux-<uid>/default (TMUX_TMPDIR=$HOME/.tmux/run). Electron may
-  // be launched without that env, so target the standard socket explicitly and
-  // fall back to the tmux CLI default when no standard server socket exists.
-  if (process.platform !== 'darwin' && process.platform !== 'linux') {
-    return [];
+  // Delegates socket-path truth to the shared resolver (see
+  // electron/standard-tmux-socket.ts) and falls back to the tmux CLI default
+  // when no standard server socket exists.
+  let hasStandardSocket = false;
+  if (
+    (process.platform === 'darwin' || process.platform === 'linux')
+    && process.getuid
+    && process.env.HOME
+  ) {
+    try {
+      hasStandardSocket = statSync(
+        resolveStandardTmuxSocketPath(process.env.HOME, process.getuid()),
+      ).isSocket();
+    } catch {
+      hasStandardSocket = false;
+    }
   }
-  const uid = process.getuid?.();
-  if (uid === undefined || !process.env.HOME) {
-    return [];
-  }
-  const standardSocket = join(process.env.HOME, '.tmux', 'run', `tmux-${uid}`, 'default');
-  try {
-    return statSync(standardSocket).isSocket() ? ['-S', standardSocket] : [];
-  } catch {
-    return [];
-  }
+  return resolveStandardTmuxSocketArgs({
+    platform: process.platform,
+    homeDir: process.env.HOME,
+    uid: process.getuid?.(),
+    hasStandardSocket,
+  });
 }
 
 async function runTmux(args: string[]) {

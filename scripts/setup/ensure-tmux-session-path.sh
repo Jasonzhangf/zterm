@@ -62,7 +62,16 @@ try:
             if line.lstrip().startswith('#'):
                 continue
             if pattern.match(line):
-                value = line.split('=', 1)[1].strip().strip('"').strip("'")
+                value = line.split('=', 1)[1].strip()
+                # Read the quoted value first; an inline comment after the
+                # closing quote is not part of the declaration.
+                if value.startswith(('"', "'")):
+                    quote = value[0]
+                    end = value.find(quote, 1)
+                    if end != -1:
+                        value = value[1:end]
+                else:
+                    value = re.split(r'\s+#', value, maxsplit=1)[0].strip()
                 if value == '$HOME' or value.startswith('$HOME/'):
                     value = home + value[len('$HOME'):]
                 print(value)
@@ -93,7 +102,19 @@ for line in lines:
     if not line.lstrip().startswith('#') and pattern.match(line):
         indent = line[: len(line) - len(line.lstrip())]
         replacement = f'{indent}export TMUX_TMPDIR={literal}\n'
-        if replacement != line:
+        current = line
+        # A declaration whose value already equals the standard root is
+        # correct even with a trailing comment; keep such lines untouched.
+        if pattern.match(line):
+            raw = line.split('=', 1)[1].strip()
+            if raw.startswith(('"', "'")):
+                quote = raw[0]
+                end = raw.find(quote, 1)
+                if end != -1 and raw[1:end] == literal.strip('"'):
+                    replacement = line
+            elif raw == literal.strip('"'):
+                replacement = line
+        if replacement != current:
             changed = True
         rewritten.append(replacement)
     else:

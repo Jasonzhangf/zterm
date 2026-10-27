@@ -89,6 +89,17 @@ test("repoints an export declared in a secondary startup file", () => {
   assert.equal(run(home, ["--check"]).status, 0);
 });
 
+test("treats a correct declaration with a trailing comment as standard", () => {
+  const home = createHome(`${EXPORT_LINE}  # zterm standard\n`);
+  const apply = run(home);
+  assert.equal(apply.status, 0, apply.stderr);
+  assert.match(apply.stdout, /unchanged/);
+  assert.equal(readStartup(home), `${EXPORT_LINE}  # zterm standard\n`);
+  const check = run(home, ["--check"]);
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+  assert.ok(!check.stdout.includes("should be"), check.stdout);
+});
+
 test("check reports the failure of a missing export", () => {
   const home = createHome();
   const check = run(home, ["--check"]);
