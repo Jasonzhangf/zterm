@@ -1,5 +1,7 @@
 import { BrowserWindow } from 'electron';
 import { execFile } from 'node:child_process';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -381,8 +383,28 @@ function wrapAnsiLineToCellSegments(line: string, cols: number, cursorCol?: numb
 }
 
 
+function resolveTmuxSocketArgs(): string[] {
+  // zterm standard host config keeps the tmux server at
+  // ~/.tmux/run/tmux-<uid>/default (TMUX_TMPDIR=$HOME/.tmux/run). Electron may
+  // be launched without that env, so target the standard socket explicitly and
+  // fall back to the tmux CLI default when no standard server socket exists.
+  if (process.platform !== 'darwin' && process.platform !== 'linux') {
+    return [];
+  }
+  const uid = process.getuid?.();
+  if (uid === undefined || !process.env.HOME) {
+    return [];
+  }
+  const standardSocket = join(process.env.HOME, '.tmux', 'run', `tmux-${uid}`, 'default');
+  try {
+    return statSync(standardSocket).isSocket() ? ['-S', standardSocket] : [];
+  } catch {
+    return [];
+  }
+}
+
 async function runTmux(args: string[]) {
-  const { stdout } = await execFileAsync('tmux', args, {
+  const { stdout } = await execFileAsync('tmux', [...resolveTmuxSocketArgs(), ...args], {
     maxBuffer: 16 * 1024 * 1024,
   });
   return stdout;

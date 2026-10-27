@@ -7,6 +7,7 @@ import {
   TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
   TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
 } from '@zterm/shared/terminal/input-chunking';
+import { resolveStandardTmuxRunRoot } from '@zterm/shared/terminal/tmux-socket-path';
 import type {
   ResolvedTerminalSession,
   TerminalSourceAdapter,
@@ -52,11 +53,18 @@ export function discoverTmuxSocketPaths(options: {
   stableSocketDir?: string;
   cliDefaultRoot?: string;
   uid?: number;
+  standardRunRoot?: string;
 } = {}) {
   const uid = options.uid ?? process.getuid?.();
   const socketDirName = uid === undefined ? undefined : `tmux-${uid}`;
-  const roots = [process.env.TMUX_TMPDIR || tmpdir(), options.cliDefaultRoot ?? '/tmp', options.stableSocketDir]
-    .filter((root): root is string => Boolean(root));
+  const standardRunRoot = options.standardRunRoot
+    ?? (process.env.HOME ? resolveStandardTmuxRunRoot(process.env.HOME) : undefined);
+  const roots = [
+    process.env.TMUX_TMPDIR || tmpdir(),
+    options.cliDefaultRoot ?? '/tmp',
+    standardRunRoot,
+    options.stableSocketDir,
+  ].filter((root): root is string => Boolean(root));
   const paths = new Set<string>();
   for (const root of roots) {
     const directory = socketDirName ? join(root, socketDirName) : root;

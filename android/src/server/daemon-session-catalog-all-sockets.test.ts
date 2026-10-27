@@ -37,7 +37,7 @@ describe('daemon session catalog across tmux sockets', () => {
     expect(serverSource).toContain('terminalControlRuntime = createTerminalControlRuntime({');
     expect(serverSource).toContain("tmuxSocketDir: join(WTERM_HOME_DIR, 'tmux'),");
     expect(serverSource).toMatch(
-      /tmuxSocketPaths:\s*\(\)\s*=>\s*discoverTmuxSocketPaths\(\{\s*stableSocketDir:\s*join\(WTERM_HOME_DIR,\s*'tmux'\),?\s*\}\)/s,
+      /tmuxSocketPaths:\s*\(\)\s*=>\s*discoverTmuxSocketPaths\(\{\s*stableSocketDir:\s*join\(WTERM_HOME_DIR,\s*'tmux'\),\s*standardRunRoot:\s*resolveStandardTmuxRunRoot\(homedir\(\)\),\s*\}\)/s,
     );
   });
 

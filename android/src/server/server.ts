@@ -89,6 +89,7 @@ import {
   createRemoteWindowStreamDaemonRuntime,
 } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
+import { resolveStandardTmuxRunRoot } from '@zterm/shared/terminal/tmux-socket-path';
 import { createAdaptiveWidthOwnershipStore } from './adaptive-width-ownership-store';
 import {
   compileAllDagpipePhases,
@@ -473,7 +474,10 @@ terminalControlRuntime = createTerminalControlRuntime({
   defaultSessionName: DEFAULT_SESSION_NAME,
   hiddenTmuxSessions: HIDDEN_TMUX_SESSIONS,
   tmuxSocketDir: join(WTERM_HOME_DIR, 'tmux'),
-  tmuxSocketPaths: () => discoverTmuxSocketPaths({ stableSocketDir: join(WTERM_HOME_DIR, 'tmux') }),
+  tmuxSocketPaths: () => discoverTmuxSocketPaths({
+    stableSocketDir: join(WTERM_HOME_DIR, 'tmux'),
+    standardRunRoot: resolveStandardTmuxRunRoot(homedir()),
+  }),
   sanitizeSessionName,
   daemonRuntimeDebug,
   wezTermBackend: TERMINAL_BACKEND_RUNTIME,
