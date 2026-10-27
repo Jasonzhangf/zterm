@@ -59,7 +59,8 @@
     "react": "^19.0.0"
   },
   "devDependencies": {
-    "@types/react": "^19.0.0"
+    "@types/react": "^19.0.0",
+    "typescript": "^5.4.0"
   },
   "dependencies": {
     "@jsonstudio/wtermmod-react": "^0.1.9"
