@@ -1,3 +1,10 @@
+# 2026-10-27 standard tmux session path live deployment
+
+- The milestone code was already on main, but the running daemon still executed the published 0.1.3 bundle, so the new discovery never reached production. Root cause: launchd starts a fixed path `~/.zterm/releases/zterm-daemon/0.1.3/runtime/server.cjs`, and the daemon process environment has no `TMUX_TMPDIR`, so it kept falling back to the daemon-owned `~/.zterm/tmux` socket.
+- Action taken with explicit user authorization: rebuilt the running bundle from `android/src/server/server.ts` with esbuild (same flags as `prepare-global-daemon-release.sh`), verified the new bundle contains the standard-root resolver while the old one has none, then replaced the deployed `server.cjs` with the old file kept as `server.cjs.bak-before-standard-tmux-20261027`, and restarted through the official channel `zterm-daemon restart`. No tmux server was started, stopped or killed at any point.
+- Evidence: daemon restarted as PID 92953 and is healthy; the traversal relay publication moved from `sessions=1` before the restart to `sessions=15` after it, which matches the 14 live sessions on `~/.tmux/run/tmux-501/default` plus one session on the daemon stable socket, with the keepalive session still hidden. The legacy `~/.zterm/tmux` server and its two sessions remain alive and untouched.
+- Not delivered / next: this is an in-place bundle replacement, not a formal release. A real daemon release is blocked by the external wrtc stage manifest (`ZTERM_DAEMON_WRTC_INPUT_MANIFEST`), which is not present on this host, so the release must follow `android/docs/decisions/2026-10-24-cli-daemon-release-process.md`. The configurable `zterm.android.daemon.tmux` socket block (Socket Increment A) remains design-only.
+
 # 2026-10-24 最小交互与流程审计
 
 项目 Skill/流程已删除无差别跨平台构建、重复证据模板和固定证据数量。CLI 0.1.4 改用五动作菜单和简洁槽位标签；Windows 保留一次远端关闭确认、合并控制错误显示；删除无消费者的 Android overlay hook。详见 [审计记录](docs/audits/2026-10-24-minimal-interaction-and-flow-audit.md)。
