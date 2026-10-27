@@ -79,6 +79,16 @@ test("repoints an existing export to the standard root and stays idempotent", ()
   assert.equal(readStartup(home), content);
 });
 
+test("repoints an export declared in a secondary startup file", () => {
+  const home = createHome();
+  writeFileSync(join(home, ".zshrc"), "export TMUX_TMPDIR=/tmp/tmux-legacy\n", "utf8");
+  const apply = run(home);
+  assert.equal(apply.status, 0, apply.stderr);
+  assert.match(apply.stdout, /repointed/);
+  assert.equal(readStartup(home, ".zshrc"), EXPORT_LINE + "\n");
+  assert.equal(run(home, ["--check"]).status, 0);
+});
+
 test("check reports the failure of a missing export", () => {
   const home = createHome();
   const check = run(home, ["--check"]);
