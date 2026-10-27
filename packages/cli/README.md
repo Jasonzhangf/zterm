@@ -204,6 +204,13 @@ Field meaning:
 
 ### Configurable tmux sockets (design only; not implemented)
 
+The deployed daemon does not read this block yet. It discovers tmux sockets at
+the process `TMPDIR`, the CLI default `/tmp` root, the standard host root
+`~/.tmux/run` and its own stable `~/.zterm/tmux` directory, and it shares the
+standard path resolver in `packages/shared/src/terminal/tmux-socket-path.ts`.
+Configure a host with `scripts/setup/ensure-tmux-session-path.sh`, which adds a
+missing `TMUX_TMPDIR="$HOME/.tmux/run"` export or repoints an existing one.
+
 The canonical tmux socket block is:
 
 ```json

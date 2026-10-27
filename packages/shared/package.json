@@ -20,6 +20,7 @@
     "./relay-directory": "./src/connection/relay-directory.ts",
     "./mobile-config": "./src/connection/mobile-config.ts",
     "./tmux-session-name": "./src/connection/tmux-session-name.ts",
+    "./terminal/tmux-socket-path": "./src/terminal/tmux-socket-path.ts",
     "./schedule-types": "./src/schedule/types.ts",
     "./terminal/color": "./src/terminal/color.ts",
     "./terminal/theme": "./src/terminal/theme.ts",

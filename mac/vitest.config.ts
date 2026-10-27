@@ -13,6 +13,7 @@ export default defineConfig({
       // Force @zterm/shared to resolve from source so internal `export * from "./layout/profile"`
       // can be picked up by vite without needing explicit .ts extensions.
       { find: /^@zterm\/shared$/, replacement: path.join(sharedSrc, 'index.ts') },
+      { find: /^@zterm\/shared\/terminal\/tmux-socket-path$/, replacement: path.join(sharedSrc, 'terminal/tmux-socket-path.ts') },
     ],
   },
   test: {

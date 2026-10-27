@@ -12,6 +12,7 @@
 - `android/docs/wiki/cli.md`：CLI、daemon launcher 与三 payload 分发的 worker-readable 入口
 - `android/docs/spec.md`：产品范围与验收
 - `android/docs/architecture.md`：模块边界、数据流、ownership
+- `scripts/setup/ensure-tmux-session-path.sh`：宿主机 tmux session 标准路径（`~/.tmux/run`，即 `TMUX_TMPDIR`）的唯一配置脚本 owner；缺则声明、有则指向标准位置，不启动或关闭 tmux server
 - `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`：架构边界整改表；定义功能块 owner、允许/禁止职责、移除/分离/保留决策、防复发 gate
 - `android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal server / buffer manager / renderer / UI shell 唯一真源
 - `android/docs/decisions/2026-09-05-runtime-memory-truth.md`：代码核实的当前实现、用户确认的目标架构及待迁移差距；禁止把目标态冒充当前实现
