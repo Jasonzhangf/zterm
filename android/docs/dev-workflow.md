@@ -19,6 +19,8 @@ Scope/Architecture -> Contract -> Implement -> Verify -> Review -> Authorized de
 
 非平凡变更在现有计划中写清目标、范围、真实验收入口和未确认项。纯文档/Skill 修订直接修改并做针对性检查，不为此新建任务表或审批步骤。
 
+Android build/test 会解析 `@zterm/shared` 的部分出口到 `packages/shared/dist`。正常 `pnpm install` 会通过 shared 的 `prepare` 生成该产物；若跳过 install 或依赖已存在，先运行 `pnpm --dir packages/shared run build`。
+
 ## 开发阶段
 
 - 每次只做一个可验证切片

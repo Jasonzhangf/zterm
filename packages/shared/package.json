@@ -27,7 +27,7 @@
     "./terminal/tmux-socket-path": {
       "types": "./src/terminal/tmux-socket-path.ts",
       "import": "./dist/terminal/tmux-socket-path.js",
-      "default": "./src/terminal/tmux-socket-path.ts"
+      "default": "./dist/terminal/tmux-socket-path.js"
     },
     "./schedule-types": "./src/schedule/types.ts",
     "./terminal/color": "./src/terminal/color.ts",
