@@ -1,18 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 const MAC_ROOT = resolve(__dirname, '../..');
 const REPO_ROOT = resolve(MAC_ROOT, '..');
+const ELECTRON_DIR = resolve(MAC_ROOT, 'electron');
 
+/** Every TypeScript file compiled into the Electron main process bundle. */
 function readElectronSources() {
-  const electronDir = resolve(MAC_ROOT, 'electron');
-  return readFileSync(electronDir + '/main.ts', 'utf8').length > 0
-    ? ['main.ts', 'preload.ts', 'local-tmux.ts', 'standard-tmux-socket.ts'].map((name) => ({
-        name,
-        source: readFileSync(resolve(electronDir, name), 'utf8'),
-      }))
-    : [];
+  return readdirSync(ELECTRON_DIR)
+    .filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'))
+    .map((name) => ({ name, source: readFileSync(join(ELECTRON_DIR, name), 'utf8') }));
+}
+
+/**
+ * Static import, re-export, dynamic import() and type-only import forms, with
+ * either quote style. Type-only imports still need a resolvable `types`
+ * condition, so they are held to the same contract.
+ */
+function collectSharedSpecifiers(source: string) {
+  const patterns = [
+    /from\s+['"](@zterm\/shared(?:\/[^'"]*)?)['"]/gu,
+    /import\s*\(\s*['"](@zterm\/shared(?:\/[^'"]*)?)['"]\s*\)/gu,
+    /require\s*\(\s*['"](@zterm\/shared(?:\/[^'"]*)?)['"]\s*\)/gu,
+  ];
+  const found: string[] = [];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      found.push(match[1]);
+    }
+  }
+  return found;
 }
 
 describe('mac main process shared package consumption contract', () => {
@@ -22,8 +40,8 @@ describe('mac main process shared package consumption contract', () => {
     );
     const imported = new Set<string>();
     for (const { source } of readElectronSources()) {
-      for (const match of source.matchAll(/from '(@zterm\/shared\/[^']+)'/g)) {
-        imported.add(match[1]);
+      for (const specifier of collectSharedSpecifiers(source)) {
+        imported.add(specifier);
       }
     }
     expect(imported.size).toBeGreaterThan(0);

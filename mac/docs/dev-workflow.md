@@ -32,7 +32,7 @@ pnpm --filter @zterm/mac package
 - `package.json` 声明 `prepare` 脚本，fresh install 即产出 `dist`；
 - electron-builder `files` 显式把包与 `package.json` 带进 app（workspace 软链不被 builder 跟随）。
 
-当前满足该契约的主进程依赖：`@zterm/runtime-contracts`、`@zterm/desktop-gateway`、`@zterm/shared`（仅 `./terminal/tmux-socket-path` 子路径）。给主进程新增 shared 子路径导入时，先把该子路径加入 `packages/shared/tsconfig.build.json` 的 `include`，再在 `mac/src/lib/mac-architecture-truth.test.ts` 所覆盖的 gate 下验证。禁止主进程导入无 dist 条件的 shared 子路径。
+当前满足该契约的主进程依赖：`@zterm/runtime-contracts`、`@zterm/desktop-gateway`、`@zterm/shared`（仅 `./terminal/tmux-socket-path` 子路径）。给主进程新增 shared 子路径导入时，先把该子路径加入 `packages/shared/tsconfig.build.json` 的 `include`，再在 `mac/src/lib/mac-main-shared-contract.test.ts` 的 gate 下验证。禁止主进程导入无 dist 条件的 shared 子路径。
 
 ## 验收与反馈
 
