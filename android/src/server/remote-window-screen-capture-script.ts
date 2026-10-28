@@ -221,20 +221,20 @@ final class FrameOutput: NSObject, SCStreamOutput {
                 data: UnsafeMutableRawPointer(mutating: source),
                 height: vImagePixelCount(height),
                 width: vImagePixelCount(width),
-                rowBytes: bytesPerRow,
+                rowBytes: bytesPerRow
             )
             var destinationBuffer = vImage_Buffer(
                 data: destinationBase,
                 height: vImagePixelCount(height),
                 width: vImagePixelCount(width),
-                rowBytes: width * 4,
+                rowBytes: width * 4
             )
             var channelMap: [UInt8] = [2, 1, 0, 3]
             let result = vImagePermuteChannels_ARGB8888(
                 &sourceBuffer,
                 &destinationBuffer,
                 &channelMap,
-                vImage_Flags(kvImageNoFlags),
+                vImage_Flags(kvImageNoFlags)
             )
             if result != kvImageNoError {
                 for y in 0..<height {
