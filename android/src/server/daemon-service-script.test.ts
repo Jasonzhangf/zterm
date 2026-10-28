@@ -451,10 +451,15 @@ describe('zterm daemon service script truth gates', () => {
   it('keeps install-time native RTC dependencies inside the daemon npm package', () => {
     const script = readDaemonNpmPackageScript();
 
-    expect(script).toContain("'runtime/node_modules/node-pty'");
-    expect(script).toContain("'runtime/node_modules/@roamhq/wrtc'");
-    expect(script).toContain(
-      "`runtime/node_modules/@roamhq/wrtc-${spec.tuple}/wrtc.node`",
+    expect(script).toContain('platformRuntimeComponents');
+    const platformReleaseScript = readFileSync(
+      join(ANDROID_ROOT, 'scripts', 'prepare-daemon-platform-release.mjs'),
+      'utf8',
+    );
+    expect(platformReleaseScript).toContain("'runtime/node_modules/node-pty'");
+    expect(platformReleaseScript).toContain("'runtime/node_modules/@roamhq/wrtc'");
+    expect(platformReleaseScript).toContain(
+      '`runtime/node_modules/@roamhq/wrtc-${targetOs}-${targetArch}/wrtc.node`',
     );
   });
 
@@ -487,6 +492,10 @@ describe('zterm daemon service script truth gates', () => {
     ];
     mkdirSync(join(projectRoot, 'scripts'), { recursive: true });
     writeFileSync(scriptPath, readDaemonNpmPackageScript());
+    writeFileSync(
+      join(projectRoot, 'scripts', 'prepare-daemon-platform-release.mjs'),
+      readFileSync(join(ANDROID_ROOT, 'scripts', 'prepare-daemon-platform-release.mjs'), 'utf8'),
+    );
     writeFileSync(join(workspace, 'LICENSE'), 'fixture license\n');
     writeFileSync(join(projectRoot, 'package.json'), JSON.stringify({ version }));
 
@@ -497,6 +506,8 @@ describe('zterm daemon service script truth gates', () => {
         'runtime/dagpipe.node',
         'runtime/node_modules/node-pty/package.json',
         'runtime/node_modules/@roamhq/wrtc/package.json',
+        `runtime/node_modules/@roamhq/wrtc-${spec.tuple}/package.json`,
+        `runtime/node_modules/@roamhq/wrtc-${spec.tuple}/index.js`,
         `runtime/node_modules/@roamhq/wrtc-${spec.tuple}/wrtc.node`,
       ]) {
         const path = join(releaseDir, relativePath);
@@ -652,8 +663,8 @@ describe('zterm daemon service script truth gates', () => {
     const packageScript = readDaemonNpmPackageScript();
     const windowsScript = readWindowsDaemonScript();
 
-    expect(packageScript).toContain("if (spec.os === 'win32')");
-    expect(packageScript).toContain("files.push('support/windows/zterm-daemon.ps1')");
+    expect(packageScript).toContain("'support/windows/zterm-daemon.ps1'");
+    expect(packageScript).toContain('isWindows');
     expect(packageScript).toContain('ZTERM_PACKAGE_ROOT: payloadRoot');
     expect(packageScript).toContain("powershell.exe");
 
@@ -693,9 +704,9 @@ describe('zterm daemon service script truth gates', () => {
     const script = readReleaseVerifyScript();
 
     expect(script).toContain('listTarballEntries');
-    expect(script).toContain('package/runtime/node_modules/node-pty');
-    expect(script).toContain('package/runtime/node_modules/@roamhq/wrtc');
-    expect(script).toContain('package/runtime/node_modules/@roamhq/wrtc-darwin-arm64/wrtc.node');
+    expect(script).toContain('runtime/node_modules/node-pty');
+    expect(script).toContain('runtime/node_modules/@roamhq/wrtc');
+    expect(script).toContain('runtime/node_modules/@roamhq/wrtc-${tuple}/wrtc.node');
     expect(script).toContain('package/support/zterm-daemon.sh');
     expect(script).toContain('configure-relay');
   });
