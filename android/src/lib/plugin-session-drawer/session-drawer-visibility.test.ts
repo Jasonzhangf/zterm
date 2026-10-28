@@ -7,6 +7,7 @@ import {
   parseSessionDrawerFilterConfig,
   resolveSessionNameForVisibility,
   restoreAllHiddenSessions,
+  restoreHiddenSessionName,
   serializeSessionDrawerFilterConfig,
   sessionMatchesDrawerVisibility,
   type SessionDrawerFilterConfig,
@@ -14,33 +15,34 @@ import {
 
 function config(overrides: Partial<SessionDrawerFilterConfig> = {}): SessionDrawerFilterConfig {
   return normalizeSessionDrawerFilterConfig({
-    version: 1,
+    version: 2,
     mode: 'all',
-    masterNames: ['zterm-3'],
-    subagentNames: ['zterm-subagent-rw-ui-0906'],
+    hiddenSessionNames: [],
     ...overrides,
   });
 }
 
 describe('session drawer visibility', () => {
-  it('classifies only from explicit Settings name lists and keeps unknown unclassified', () => {
-    const lists = config();
-    expect(classifySessionDrawerVisibility('zterm-3', lists)).toBe('master');
-    expect(classifySessionDrawerVisibility('zterm-subagent-rw-ui-0906', lists)).toBe('subagent');
-    expect(classifySessionDrawerVisibility('OneStop-1', lists)).toBe('unclassified');
-    expect(classifySessionDrawerVisibility('master', lists)).toBe('unclassified');
-    expect(classifySessionDrawerVisibility('zterm-2', lists)).toBe('unclassified');
-    expect(classifySessionDrawerVisibility('dsh-plugins-3', lists)).toBe('unclassified');
-    expect(classifySessionDrawerVisibility('claude-subagent-1', lists)).toBe('unclassified');
-    expect(classifySessionDrawerVisibility('', lists)).toBe('unclassified');
+  it('classifies only from the Collab projection and keeps unknown unclassified', () => {
+    expect(classifySessionDrawerVisibility({ role: 'master', displayName: 'Jenny' })).toBe('master');
+    expect(classifySessionDrawerVisibility({ role: 'worker', displayName: 'Alice' })).toBe('worker');
+    expect(classifySessionDrawerVisibility(null)).toBe('unclassified');
+    expect(classifySessionDrawerVisibility(undefined)).toBe('unclassified');
+    expect(classifySessionDrawerVisibility({ role: 'worker', displayName: '' })).toBe('worker');
   });
 
-  it('never auto-promotes names that appear on both lists', () => {
-    const lists = config({
-      masterNames: ['shared-pane'],
-      subagentNames: ['shared-pane'],
-    });
-    expect(classifySessionDrawerVisibility('shared-pane', lists)).toBe('unclassified');
+  it('never infers a role from a session name', () => {
+    expect(filterSessionsByDrawerVisibility(
+      [
+        { id: 'master-named', sessionName: 'master' },
+        { id: 'agent-named', sessionName: 'zterm-3' },
+      ],
+      config({ mode: 'only-master' }),
+      (row) => row.sessionName,
+      () => undefined,
+    ).map((row) => row.id)).toEqual([]);
+    expect(config()).not.toHaveProperty('masterNames');
+    expect(config()).not.toHaveProperty('subagentNames');
   });
 
   it('uses exact trimmed sessionName identity and does not infer from title', () => {
@@ -49,112 +51,132 @@ describe('session drawer visibility', () => {
     expect(resolveSessionNameForVisibility({})).toBe('');
   });
 
-  it('only-master shows explicit master and hides subagent plus unclassified', () => {
+  it('only-master shows Collab master and hides worker plus unclassified', () => {
     expect(sessionMatchesDrawerVisibility('master', 'only-master')).toBe(true);
-    expect(sessionMatchesDrawerVisibility('subagent', 'only-master')).toBe(false);
+    expect(sessionMatchesDrawerVisibility('worker', 'only-master')).toBe(false);
     expect(sessionMatchesDrawerVisibility('unclassified', 'only-master')).toBe(false);
   });
 
-  it('hide-subagent hides explicit subagent and still shows unclassified', () => {
-    expect(sessionMatchesDrawerVisibility('master', 'hide-subagent')).toBe(true);
-    expect(sessionMatchesDrawerVisibility('unclassified', 'hide-subagent')).toBe(true);
-    expect(sessionMatchesDrawerVisibility('subagent', 'hide-subagent')).toBe(false);
+  it('hide-worker hides Collab worker and still shows master plus unclassified', () => {
+    expect(sessionMatchesDrawerVisibility('master', 'hide-worker')).toBe(true);
+    expect(sessionMatchesDrawerVisibility('unclassified', 'hide-worker')).toBe(true);
+    expect(sessionMatchesDrawerVisibility('worker', 'hide-worker')).toBe(false);
   });
 
-  it('filters rows by config without mutating source sessions or name lists', () => {
-    const masterNames = ['zterm-3'];
-    const subagentNames = ['zterm-subagent-rw-ui-0906'];
+  it('filters rows by projection without mutating source sessions', () => {
     const sessions = [
-      { id: 'm', sessionName: 'zterm-3' },
-      { id: 's', sessionName: 'zterm-subagent-rw-ui-0906' },
+      { id: 'm', sessionName: 'zterm-1', collab: { role: 'master' as const, displayName: 'Jenny' } },
+      { id: 'w', sessionName: 'zterm-2', collab: { role: 'worker' as const, displayName: 'Alice' } },
       { id: 'u', sessionName: 'OneStop-1' },
     ];
     const source = [...sessions];
-    const lists = config({ masterNames, subagentNames });
+    const resolveCollab = (row: typeof sessions[number]) => row.collab;
 
-    expect(filterSessionsByDrawerVisibility(sessions, lists, (row) => row.sessionName).map((row) => row.id))
-      .toEqual(['m', 's', 'u']);
+    expect(filterSessionsByDrawerVisibility(sessions, config(), (row) => row.sessionName, resolveCollab).map((row) => row.id))
+      .toEqual(['m', 'w', 'u']);
     expect(filterSessionsByDrawerVisibility(
       sessions,
-      config({ mode: 'only-master', masterNames, subagentNames }),
+      config({ mode: 'only-master' }),
       (row) => row.sessionName,
+      resolveCollab,
     ).map((row) => row.id)).toEqual(['m']);
     expect(filterSessionsByDrawerVisibility(
       sessions,
-      config({ mode: 'hide-subagent', masterNames, subagentNames }),
+      config({ mode: 'hide-worker' }),
       (row) => row.sessionName,
+      resolveCollab,
     ).map((row) => row.id)).toEqual(['m', 'u']);
 
     expect(sessions).toEqual(source);
-    masterNames.push('later-master');
-    subagentNames.push('later-subagent');
-    expect(classifySessionDrawerVisibility('later-master', lists)).toBe('unclassified');
-    expect(classifySessionDrawerVisibility('later-subagent', lists)).toBe('unclassified');
   });
 
-  it('hides exact session names and restores all hidden names', () => {
+  it('hides and restores exact session names without touching Collab projection', () => {
     const sessions = [
-      { id: 'exact', sessionName: 'zterm-3' },
-      { id: 'prefix', sessionName: 'zterm-30' },
+      { id: 'exact', sessionName: 'zterm-1', collab: { role: 'master' as const, displayName: 'Jenny' } },
+      { id: 'prefix', sessionName: 'zterm-10', collab: { role: 'worker' as const, displayName: 'Alice' } },
       { id: 'other', sessionName: 'OneStop-1' },
     ];
-    const hidden = hideSessionName(config(), ' zterm-3 ');
+    const hidden = hideSessionName(config(), ' zterm-1 ');
 
-    expect(hidden.hiddenSessionNames).toEqual(['zterm-3']);
-    expect(filterSessionsByDrawerVisibility(sessions, hidden, (row) => row.sessionName).map((row) => row.id))
+    expect(hidden.hiddenSessionNames).toEqual(['zterm-1']);
+    expect(filterSessionsByDrawerVisibility(sessions, hidden, (row) => row.sessionName, (row) => row.collab).map((row) => row.id))
       .toEqual(['prefix', 'other']);
 
-    const restored = restoreAllHiddenSessions(hidden);
-    expect(restored.hiddenSessionNames).toEqual([]);
-    expect(filterSessionsByDrawerVisibility(sessions, restored, (row) => row.sessionName).map((row) => row.id))
+    const restoredOne = restoreHiddenSessionName(hidden, 'zterm-1');
+    expect(restoredOne.hiddenSessionNames).toEqual([]);
+    expect(filterSessionsByDrawerVisibility(sessions, restoredOne, (row) => row.sessionName, (row) => row.collab).map((row) => row.id))
+      .toEqual(['exact', 'prefix', 'other']);
+
+    const hiddenTwo = hideSessionName(hideSessionName(config(), 'zterm-1'), 'OneStop-1');
+    const restoredAll = restoreAllHiddenSessions(hiddenTwo);
+    expect(restoredAll.hiddenSessionNames).toEqual([]);
+    expect(filterSessionsByDrawerVisibility(sessions, restoredAll, (row) => row.sessionName, (row) => row.collab).map((row) => row.id))
       .toEqual(['exact', 'prefix', 'other']);
   });
 
   it('normalizes and deduplicates hidden session names', () => {
     expect(normalizeSessionDrawerFilterConfig({
-      version: 1,
+      version: 2,
       mode: 'all',
-      masterNames: [],
-      subagentNames: [],
       hiddenSessionNames: [' zterm-3 ', 'zterm-3', '', 'OneStop-1'],
     })).toEqual({
-      version: 1,
+      version: 2,
       mode: 'all',
-      masterNames: [],
-      subagentNames: [],
       hiddenSessionNames: ['zterm-3', 'OneStop-1'],
     });
   });
 
-  it('round-trips Settings config JSON without promoting unknown names', () => {
-    const original = config({
+  it('migrates legacy v1 name-list config to v2 without keeping role lists', () => {
+    const legacy = {
+      version: 1,
       mode: 'hide-subagent',
-      masterNames: ['  zterm-3  ', 'zterm-3', ''],
-      subagentNames: ['zterm-subagent-rw-ui-0906', ' not-a-collab '],
+      masterNames: ['zterm-3'],
+      subagentNames: ['zterm-subagent-rw-ui-0906'],
+      hiddenSessionNames: ['OneStop-1'],
+    };
+    expect(normalizeSessionDrawerFilterConfig(legacy)).toEqual({
+      version: 2,
+      mode: 'hide-worker',
+      hiddenSessionNames: ['OneStop-1'],
+    });
+  });
+
+  it('round-trips config JSON without promoting unknown names', () => {
+    const original = config({
+      mode: 'hide-worker',
       hiddenSessionNames: [' OneStop-1 ', 'OneStop-1'],
     });
     const parsed = parseSessionDrawerFilterConfig(serializeSessionDrawerFilterConfig(original));
     expect(parsed).toEqual({
-      version: 1,
-      mode: 'hide-subagent',
-      masterNames: ['zterm-3'],
-      subagentNames: ['zterm-subagent-rw-ui-0906', 'not-a-collab'],
+      version: 2,
+      mode: 'hide-worker',
       hiddenSessionNames: ['OneStop-1'],
     });
-    expect(classifySessionDrawerVisibility('zterm-2', parsed)).toBe('unclassified');
     expect(parseSessionDrawerFilterConfig('{bad')).toEqual({
-      version: 1,
+      version: 2,
       mode: 'all',
-      masterNames: [],
-      subagentNames: [],
       hiddenSessionNames: [],
     });
-    expect(normalizeSessionDrawerFilterConfig({ mode: 'whitelist-master', masterNames: ['zterm-3'] })).toEqual({
-      version: 1,
+    expect(normalizeSessionDrawerFilterConfig({ mode: 'whitelist-master', hiddenSessionNames: ['zterm-3'] })).toEqual({
+      version: 2,
       mode: 'all',
-      masterNames: ['zterm-3'],
-      subagentNames: [],
-      hiddenSessionNames: [],
+      hiddenSessionNames: ['zterm-3'],
     });
+  });
+
+  it('includes CEO session in only-master and hide-worker modes', () => {
+    const sessions = [
+      { id: 'ceo', sessionName: 'workspace-1', collab: { role: 'ceo' as const, displayName: 'Bob' } },
+      { id: 'master', sessionName: 'zterm-1', collab: { role: 'master' as const, displayName: 'Jenny' } },
+      { id: 'worker', sessionName: 'zterm-2', collab: { role: 'worker' as const, displayName: 'Alice' } },
+    ];
+    expect(
+      filterSessionsByDrawerVisibility(
+        sessions,
+        config({ mode: 'only-master' }),
+        (row) => row.sessionName,
+        (row) => row.collab,
+      ).map((row) => row.id),
+    ).toEqual(['ceo', 'master']);
   });
 });

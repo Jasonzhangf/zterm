@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { normalizeRelayEndpointCandidates, type RelayEndpointCandidate } from '@zterm/shared/relay-directory';
+import type { TerminalSessionCatalogEntry, TerminalSessionCollabProjection } from '@zterm/shared/protocol';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import { resolveRelayDaemonCanonicalHostId } from '../lib/relay-account-directory';
 import {
@@ -36,6 +37,24 @@ function toServerGroupKey(entry: Pick<SessionGroupHistory, 'daemonHostId' | 'bri
     bridgePort: entry.bridgePort,
   });
   return ownerKey;
+}
+
+/**
+ * Resolve the merged Collab projection for a group update.
+ *
+ * An authoritative empty catalog (explicit `sessionCollabByNameCleared` with no
+ * roles) clears previous roles. An omitted field preserves the existing stored
+ * map so a partial refresh cannot resurrect a stale classification.
+ */
+function buildSessionCollabMerge(
+  canonical: { sessionCollabByName?: Record<string, TerminalSessionCollabProjection>; sessionCollabByNameCleared?: boolean },
+  existing?: Record<string, TerminalSessionCollabProjection>,
+): Partial<SessionGroupHistory> {
+  if (canonical.sessionCollabByNameCleared && !canonical.sessionCollabByName) {
+    return { sessionCollabByName: {}, sessionCollabByNameCleared: true };
+  }
+  const next = { ...(existing || {}), ...(canonical.sessionCollabByName || {}) };
+  return Object.keys(next).length > 0 ? { sessionCollabByName: next } : {};
 }
 
 function sessionGroupOwnersMatch(
@@ -87,6 +106,21 @@ function normalizeGroupEntry(
       sessionNames.includes(name) && typeof cwd === 'string' && cwd.trim()
     )).map(([name, cwd]) => [name, (cwd as string).trim()]))
     : {};
+  const sessionCollabByName = candidate.sessionCollabByName && typeof candidate.sessionCollabByName === 'object'
+    ? Object.fromEntries(Object.entries(candidate.sessionCollabByName).filter(([name, collab]) => (
+      sessionNames.includes(name)
+      && Boolean(collab && typeof collab === 'object' && (collab.role === 'ceo' || collab.role === 'master' || collab.role === 'worker') && typeof collab.displayName === 'string' && collab.displayName.trim())
+    )).map(([name, collab]) => [name, {
+      role: collab!.role,
+      displayName: collab!.displayName.trim(),
+      ...(typeof collab!.agentState === 'string' && collab!.agentState.trim() ? { agentState: collab!.agentState.trim() } : {}),
+    }]))
+    : {};
+  // An explicit clear directive means the current catalog is authoritative and
+  // unclassified for these sessions. It wins over a stale stored map.
+  const sessionCollabByNameCleared = Boolean(
+    (candidate as { sessionCollabByNameCleared?: boolean }).sessionCollabByNameCleared,
+  );
   const missingSessionNames = Array.isArray(candidate.missingSessionNames)
     ? candidate.missingSessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
@@ -147,6 +181,10 @@ function normalizeGroupEntry(
     ...(relayEndpointCandidates.length > 0 ? { relayEndpointCandidates } : {}),
     sessionNames: sortedSessionNames,
     ...(Object.keys(sessionCwdByName).length > 0 ? { sessionCwdByName } : {}),
+    ...(Object.keys(sessionCollabByName).length > 0 ? { sessionCollabByName } : {}),
+    ...(sessionCollabByNameCleared && Object.keys(sessionCollabByName).length === 0
+      ? { sessionCollabByName: {}, sessionCollabByNameCleared: true }
+      : {}),
     missingSessionNames: sortedMissingSessionNames,
     lastOpenedSessionName:
       lastOpenedSessionName
@@ -175,6 +213,13 @@ function mergeSessionGroupEntries(
   const sessionNames = [...new Set([...primary.sessionNames, ...supplement.sessionNames])]
     .sort((a, b) => a.localeCompare(b));
   const sessionCwdByName = { ...(primary.sessionCwdByName || {}), ...(supplement.sessionCwdByName || {}) };
+  const sessionCollabMerge = buildSessionCollabMerge(
+    {
+      sessionCollabByName: primary.sessionCollabByName,
+      sessionCollabByNameCleared: primary.sessionCollabByNameCleared,
+    },
+    supplement.sessionCollabByName,
+  );
   const missingSessionNames = [...new Set([
     ...(primary.missingSessionNames || []),
     ...(supplement.missingSessionNames || []),
@@ -197,6 +242,7 @@ function mergeSessionGroupEntries(
     relayEndpointCandidates: relayEndpointCandidates.length > 0 ? relayEndpointCandidates : undefined,
     sessionNames,
     ...(Object.keys(sessionCwdByName).length > 0 ? { sessionCwdByName } : {}),
+    ...sessionCollabMerge,
     missingSessionNames,
     ...(lastOpenedSessionName ? { lastOpenedSessionName } : { lastOpenedSessionName: undefined }),
     lastOpenedAt: Math.max(primary.lastOpenedAt, supplement.lastOpenedAt),
@@ -298,6 +344,10 @@ export function useSessionHistoryStorage(
         ),
         sessionNames: mergedSessionNames,
         sessionCwdByName: { ...(existing?.sessionCwdByName || {}), ...(canonicalGroup.sessionCwdByName || {}) },
+        // An authoritative empty catalog clears previous roles; an omitted
+        // field preserves the stored map so a partial refresh cannot resurrect
+        // a stale classification.
+        ...buildSessionCollabMerge(canonicalGroup, existing?.sessionCollabByName),
         missingSessionNames: (existing?.missingSessionNames || []).filter((sessionName) => (
           mergedSessionNames.includes(sessionName)
         )),
@@ -374,16 +424,38 @@ export function useSessionHistoryStorage(
   const pruneSessionGroupSelectionToRemoteTruth = useCallback((
     target: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
     remoteSessionNames: string[],
+    remoteSessionCatalog?: Array<Pick<TerminalSessionCatalogEntry, 'name' | 'cwd' | 'collab' | 'backend'>>,
   ) => {
     const normalizedRemoteSessionNames = normalizeRemoteTmuxSessionNames(remoteSessionNames);
     const remoteSessionNameSet = new Set(normalizedRemoteSessionNames);
+    const hasCatalog = Array.isArray(remoteSessionCatalog) && remoteSessionCatalog.length > 0;
+    const catalogCwdByName = hasCatalog
+      ? Object.fromEntries(
+        remoteSessionCatalog
+          .filter((entry) => (!entry.backend || entry.backend === 'tmux') && remoteSessionNameSet.has(entry.name.trim()) && entry.cwd?.trim())
+          .map((entry) => [entry.name.trim(), entry.cwd!.trim()]),
+      )
+      : {};
+    const catalogCollabByName = hasCatalog
+      ? Object.fromEntries(
+        remoteSessionCatalog
+          .filter((entry) => (!entry.backend || entry.backend === 'tmux') && remoteSessionNameSet.has(entry.name.trim()) && entry.collab?.role && entry.collab?.displayName?.trim())
+          .map((entry) => [entry.name.trim(), {
+            role: entry.collab!.role,
+            displayName: entry.collab!.displayName.trim(),
+            ...(entry.collab!.agentState?.trim() ? { agentState: entry.collab!.agentState.trim() } : {}),
+          }]),
+      )
+      : {};
     setSessionGroups((current) => {
       const canonicalTarget = canonicalizeSessionGroupOwner(target, relayDevicesRef.current);
       let changed = false;
+      let matchedAny = false;
       const next = collapseServerGroups(current, relayDevicesRef.current).flatMap((item) => {
         if (!sessionGroupOwnersMatch(item, canonicalTarget)) {
           return [item];
         }
+        matchedAny = true;
         if (normalizedRemoteSessionNames.length === 0) {
           changed = true;
           return [];
@@ -391,22 +463,56 @@ export function useSessionHistoryStorage(
         const nextLastOpenedSessionName = item.lastOpenedSessionName && remoteSessionNameSet.has(item.lastOpenedSessionName)
           ? item.lastOpenedSessionName
           : undefined;
+        const nextSessionCwdByName = {
+          ...Object.fromEntries(
+            Object.entries(item.sessionCwdByName || {}).filter(([name]) => remoteSessionNameSet.has(name)),
+          ),
+          ...catalogCwdByName,
+        };
+        const nextSessionCollabByName = hasCatalog
+          ? catalogCollabByName
+          : Object.fromEntries(
+            Object.entries(item.sessionCollabByName || {}).filter(([name]) => remoteSessionNameSet.has(name)),
+          );
+        const prevCwdJson = JSON.stringify(item.sessionCwdByName || {});
+        const nextCwdJson = JSON.stringify(nextSessionCwdByName);
+        const prevCollabJson = JSON.stringify(item.sessionCollabByName || {});
+        const nextCollabJson = JSON.stringify(nextSessionCollabByName);
         if (item.sessionNames.join('\u0000') === normalizedRemoteSessionNames.join('\u0000')
           && (item.missingSessionNames || []).length === 0
-          && item.lastOpenedSessionName === nextLastOpenedSessionName) {
+          && item.lastOpenedSessionName === nextLastOpenedSessionName
+          && prevCwdJson === nextCwdJson
+          && prevCollabJson === nextCollabJson) {
           return [item];
         }
         changed = true;
         return [{
           ...item,
           sessionNames: normalizedRemoteSessionNames,
-          sessionCwdByName: Object.fromEntries(
-            Object.entries(item.sessionCwdByName || {}).filter(([name]) => remoteSessionNameSet.has(name)),
-          ),
+          sessionCwdByName: nextSessionCwdByName,
+          sessionCollabByName: nextSessionCollabByName,
           missingSessionNames: [],
           lastOpenedSessionName: nextLastOpenedSessionName,
         }];
       });
+      if (!matchedAny && hasCatalog && normalizedRemoteSessionNames.length > 0) {
+        const created = normalizeGroupEntry({
+          name: canonicalTarget.daemonHostId || canonicalTarget.bridgeHost,
+          bridgeHost: canonicalTarget.bridgeHost,
+          bridgePort: canonicalTarget.bridgePort,
+          daemonHostId: canonicalTarget.daemonHostId,
+          terminalBackend: canonicalTarget.terminalBackend,
+          sessionNames: normalizedRemoteSessionNames,
+          sessionCwdByName: catalogCwdByName,
+          sessionCollabByName: catalogCollabByName,
+          missingSessionNames: [],
+          lastOpenedAt: Date.now(),
+        }, relayDevicesRef.current);
+        if (created) {
+          changed = true;
+          next.unshift(created);
+        }
+      }
       if (!changed) {
         return current;
       }

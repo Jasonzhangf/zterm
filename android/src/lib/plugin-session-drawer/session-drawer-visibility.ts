@@ -1,38 +1,43 @@
+// Drawer visibility truth. Classify only from the daemon-owned Collab
+// projection; the client never infers a role from a session name.
+import type { TerminalSessionCollabProjection } from '@zterm/shared/protocol';
+
 export const SESSION_DRAWER_FILTER_STORAGE_KEY = 'zterm:session-drawer-filter:v1';
 
 export const SESSION_DRAWER_FILTER_MODES = [
   'all',
   'only-master',
-  'hide-subagent',
+  'hide-worker',
 ] as const;
 
 export type SessionDrawerFilterMode = (typeof SESSION_DRAWER_FILTER_MODES)[number];
-export type SessionDrawerFilterClass = 'master' | 'subagent' | 'unclassified';
+export type SessionDrawerFilterClass = 'master' | 'worker' | 'unclassified';
 
 export interface SessionDrawerFilterConfig {
-  version: 1;
+  version: 2;
   mode: SessionDrawerFilterMode;
-  masterNames: string[];
-  subagentNames: string[];
   hiddenSessionNames: string[];
 }
 
 export const DEFAULT_SESSION_DRAWER_FILTER_CONFIG: SessionDrawerFilterConfig = {
-  version: 1,
+  version: 2,
   mode: 'all',
-  masterNames: [],
-  subagentNames: [],
   hiddenSessionNames: [],
 };
 
 export const SESSION_DRAWER_FILTER_LABELS: Record<SessionDrawerFilterMode, string> = {
   all: '全部',
   'only-master': '仅 master',
-  'hide-subagent': '隐藏 subagent',
+  'hide-worker': '隐藏 worker',
 };
 
-function isSessionDrawerFilterMode(value: string): value is SessionDrawerFilterMode {
-  return (SESSION_DRAWER_FILTER_MODES as readonly string[]).includes(value);
+function normalizeMode(value: string | undefined): SessionDrawerFilterMode {
+  // Legacy 'hide-subagent' from the manual name-list era now maps to
+  // 'hide-worker'; Collab classifies workers, so the old label hides them.
+  const candidate = value === 'hide-subagent' ? 'hide-worker' : value;
+  return (SESSION_DRAWER_FILTER_MODES as readonly string[]).includes(candidate || '')
+    ? (candidate as SessionDrawerFilterMode)
+    : DEFAULT_SESSION_DRAWER_FILTER_CONFIG.mode;
 }
 
 function normalizeNameList(names: unknown): string[] {
@@ -57,10 +62,8 @@ function normalizeNameList(names: unknown): string[] {
 
 export function createDefaultSessionDrawerFilterConfig(): SessionDrawerFilterConfig {
   return {
-    version: 1,
+    version: 2,
     mode: DEFAULT_SESSION_DRAWER_FILTER_CONFIG.mode,
-    masterNames: [],
-    subagentNames: [],
     hiddenSessionNames: [],
   };
 }
@@ -69,13 +72,13 @@ export function normalizeSessionDrawerFilterConfig(value: unknown): SessionDrawe
   const candidate = value && typeof value === 'object'
     ? value as Partial<SessionDrawerFilterConfig>
     : {};
+  // Legacy v1 configs carried manual role name lists. Those lists are no
+  // longer authoritative, and only hidden session names survive migration.
   return {
-    version: 1,
-    mode: typeof candidate.mode === 'string' && isSessionDrawerFilterMode(candidate.mode)
-      ? candidate.mode
-      : DEFAULT_SESSION_DRAWER_FILTER_CONFIG.mode,
-    masterNames: normalizeNameList(candidate.masterNames),
-    subagentNames: normalizeNameList(candidate.subagentNames),
+    version: 2,
+    mode: normalizeMode(
+      typeof candidate.mode === 'string' ? candidate.mode : undefined,
+    ),
     hiddenSessionNames: normalizeNameList(candidate.hiddenSessionNames),
   };
 }
@@ -102,25 +105,13 @@ export function resolveSessionNameForVisibility(input: {
 }
 
 export function classifySessionDrawerVisibility(
-  sessionName: string,
-  config: Pick<SessionDrawerFilterConfig, 'masterNames' | 'subagentNames'>,
+  collab: TerminalSessionCollabProjection | null | undefined,
 ): SessionDrawerFilterClass {
-  const name = sessionName.trim();
-  if (!name) {
-    return 'unclassified';
-  }
-  const masterNames = new Set(normalizeNameList(config.masterNames));
-  const subagentNames = new Set(normalizeNameList(config.subagentNames));
-  const listedMaster = masterNames.has(name);
-  const listedSubagent = subagentNames.has(name);
-  if (listedMaster && listedSubagent) {
-    return 'unclassified';
-  }
-  if (listedSubagent) {
-    return 'subagent';
-  }
-  if (listedMaster) {
+  if (collab?.role === 'ceo' || collab?.role === 'master') {
     return 'master';
+  }
+  if (collab?.role === 'worker') {
+    return 'worker';
   }
   return 'unclassified';
 }
@@ -132,8 +123,8 @@ export function sessionMatchesDrawerVisibility(
   if (mode === 'only-master') {
     return sessionClass === 'master';
   }
-  if (mode === 'hide-subagent') {
-    return sessionClass !== 'subagent';
+  if (mode === 'hide-worker') {
+    return sessionClass !== 'worker';
   }
   return true;
 }
@@ -153,6 +144,21 @@ export function hideSessionName(
   };
 }
 
+export function restoreHiddenSessionName(
+  config: SessionDrawerFilterConfig,
+  sessionName: string,
+): SessionDrawerFilterConfig {
+  const normalized = normalizeSessionDrawerFilterConfig(config);
+  const name = sessionName.trim();
+  if (!name || !normalized.hiddenSessionNames.includes(name)) {
+    return normalized;
+  }
+  return {
+    ...normalized,
+    hiddenSessionNames: normalized.hiddenSessionNames.filter((item) => item !== name),
+  };
+}
+
 export function restoreAllHiddenSessions(config: SessionDrawerFilterConfig): SessionDrawerFilterConfig {
   return {
     ...normalizeSessionDrawerFilterConfig(config),
@@ -164,6 +170,7 @@ export function filterSessionsByDrawerVisibility<T>(
   sessions: readonly T[],
   config: SessionDrawerFilterConfig,
   resolveSessionName: (session: T) => string,
+  resolveCollab?: (session: T) => TerminalSessionCollabProjection | null | undefined,
 ): T[] {
   const normalized = normalizeSessionDrawerFilterConfig(config);
   const hiddenSessionNames = new Set(normalized.hiddenSessionNames);
@@ -172,9 +179,9 @@ export function filterSessionsByDrawerVisibility<T>(
     if (sessionName && hiddenSessionNames.has(sessionName)) {
       return false;
     }
-    return sessionMatchesDrawerVisibility(
-      classifySessionDrawerVisibility(sessionName, normalized),
-      normalized.mode,
+    const sessionClass = classifySessionDrawerVisibility(
+      resolveCollab?.(session),
     );
+    return sessionMatchesDrawerVisibility(sessionClass, normalized.mode);
   });
 }

@@ -849,4 +849,26 @@ describe('TraversalRelayStore', () => {
     expect(listDeviceIds(store, user.id)).toEqual(['device-1']);
     expect(readFileSync(path, 'utf-8')).toBe(before);
   });
+
+  it('caps tokens per user at 64 most recent tokens on login and reload', () => {
+    const { path, store } = createStoreFixture();
+    store.register('Jason', 'secret');
+    const tokens: string[] = [];
+    for (let index = 0; index < 70; index += 1) {
+      const result = store.login('Jason', 'secret');
+      tokens.push(result.token);
+    }
+
+    for (let index = 0; index < 6; index += 1) {
+      expect(store.authenticate(tokens[index]!)).toBeNull();
+    }
+    for (let index = 6; index < 70; index += 1) {
+      expect(store.authenticate(tokens[index]!)?.username).toBe('jason');
+    }
+
+    const reloaded = new TraversalRelayStore(path);
+    const snapshot = JSON.parse(readFileSync(path, 'utf-8')) as { tokens?: unknown[] };
+    expect(snapshot.tokens?.length).toBe(64);
+    expect(reloaded.authenticate(tokens[69]!)?.username).toBe('jason');
+  });
 });

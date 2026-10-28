@@ -295,7 +295,7 @@ describe('TraversalSocket reconnect', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens Tailscale before non-LAN IPv4 when no relay account settings are present', async () => {
+  it('opens direct IPv4 before Tailscale when no relay account settings are present', async () => {
     new TraversalSocket({
       bridgeHost: '203.0.113.10',
       bridgePort: 3333,
@@ -312,11 +312,11 @@ describe('TraversalSocket reconnect', () => {
     });
     await flushMicrotasks();
 
-    // Tier-first: the higher-tier Tailscale candidate is attempted first and
-    // the lower-tier public IPv4 candidate must not race it in the same batch.
+    // Tier-first: the higher-tier direct IPv4 candidate is attempted first and
+    // the lower-tier Tailscale candidate must not race it in the same batch.
     expect(MockWebSocket.instances).toHaveLength(1);
-    expect(MockWebSocket.instances[0].url).toContain('100.66.1.82');
-    expect(MockWebSocket.instances.some((ws) => ws.url.includes('203.0.113.10'))).toBe(false);
+    expect(MockWebSocket.instances[0].url).toContain('203.0.113.10');
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(false);
   });
 
   it('attempts LAN endpoint before Tailscale when directory provides both', async () => {
@@ -1784,11 +1784,10 @@ describe('tailscale candidate dynamic verification', () => {
 
   it('accepts a healthy tailscale candidate after 900ms and before the generic deadline', async () => {
     const socket = new TraversalSocket({
-      bridgeHost: '203.0.113.10',
+      bridgeHost: '100.66.1.82',
       bridgePort: 3333,
       authToken: 'token',
       tailscaleHost: '100.66.1.82',
-      ipv4Host: '203.0.113.10',
       transportMode: 'websocket',
     }, settings, {
       routeHealthCache: new TraversalRouteHealthCache(),
@@ -1811,7 +1810,7 @@ describe('tailscale candidate dynamic verification', () => {
     socket.close();
   });
 
-  it('fails an unreachable tailscale candidate at the generic websocket deadline', async () => {
+  it('fails an unreachable direct IPv4 candidate then advances to tailscale at the generic websocket deadline', async () => {
     const socket = new TraversalSocket({
       bridgeHost: '203.0.113.10',
       bridgePort: 3333,
@@ -1830,19 +1829,19 @@ describe('tailscale candidate dynamic verification', () => {
     await vi.advanceTimersByTimeAsync(1800);
     await flushMicrotasks();
 
-    // Tier-first: the higher-tier Tailscale candidate is probed first. After
-    // it times out, the batch advances to the lower-tier public IPv4 candidate
+    // Tier-first: the higher-tier direct IPv4 candidate is probed first. After
+    // it times out, the batch advances to the lower-tier Tailscale candidate
     // instead of admitting it into the same earlier race.
     expect(socket.getDiagnostics().attempts.filter((item) => item.stage === 'error')).toHaveLength(1);
-    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'error')).toBe(true);
-    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'ipv4' && item.stage === 'connecting')).toBe(true);
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'ipv4' && item.stage === 'error')).toBe(true);
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'connecting')).toBe(true);
     expect(onclose).toHaveBeenCalledTimes(0);
 
     await vi.advanceTimersByTimeAsync(1800);
     await flushMicrotasks();
 
     expect(socket.getDiagnostics().attempts.filter((item) => item.stage === 'error')).toHaveLength(2);
-    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'ipv4' && item.stage === 'error')).toBe(true);
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'error')).toBe(true);
     expect(onclose).toHaveBeenCalledTimes(1);
     socket.close();
   });

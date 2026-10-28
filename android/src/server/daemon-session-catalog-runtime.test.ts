@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   buildSessionsCatalogPayload,
   createDaemonSessionCatalogRuntime,
+  DAEMON_COLLAB_PROJECTION_CACHE_MS,
   handleListSessionsMessageRuntime,
   type DaemonSessionCatalogRuntimeDeps,
 } from './daemon-session-catalog-runtime';
 import type { TerminalTransportConnection } from './terminal-runtime-types';
+import { buildTmuxSessionStableId } from './terminal-source-adapter';
 import type { TerminalSessionCatalogEntry } from '@zterm/shared/protocol';
 
 function makeDeps(
@@ -131,9 +133,7 @@ describe('daemon session catalog runtime', () => {
         { name: 'beta', backend: 'tmux' as const },
       ];
       vi.advanceTimersByTime(1000);
-      await vi.waitFor(() => {
-        expect(refresh).toHaveBeenCalledTimes(1);
-      });
+      await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
 
       expect(refresh).toHaveBeenCalledTimes(1);
       expect(refresh.mock.calls[0]?.[0]).toEqual([
@@ -141,10 +141,10 @@ describe('daemon session catalog runtime', () => {
         { name: 'beta', backend: 'tmux' },
       ]);
       expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
-      expect(runtime.read()).toEqual([
+      await vi.waitFor(() => expect(runtime.read()).toEqual([
         { name: 'alpha', backend: 'tmux' },
         { name: 'beta', backend: 'tmux' },
-      ]);
+      ]));
       runtime.dispose();
     } finally {
       vi.useRealTimers();
@@ -173,10 +173,10 @@ describe('daemon session catalog runtime', () => {
       vi.advanceTimersByTime(1000);
       await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
 
-      expect(runtime.read()).toEqual([
+      await vi.waitFor(() => expect(runtime.read()).toEqual([
         { name: 'alpha', backend: 'tmux' },
         { name: 'herdr-one', backend: 'herdr' },
-      ]);
+      ]));
       runtime.dispose();
     } finally {
       vi.useRealTimers();
@@ -204,12 +204,12 @@ describe('daemon session catalog runtime', () => {
       entries = [{ name: 'herdr-one', backend: 'herdr' }];
       vi.advanceTimersByTime(1000);
       await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
-      expect(runtime.read()).toEqual([{ name: 'herdr-one', backend: 'herdr' }]);
+      await vi.waitFor(() => expect(runtime.read()).toEqual([{ name: 'herdr-one', backend: 'herdr' }]));
 
       entries = [];
       vi.advanceTimersByTime(1000);
       await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
-      expect(runtime.read()).toEqual([]);
+      await vi.waitFor(() => expect(runtime.read()).toEqual([]));
       runtime.dispose();
     } finally {
       vi.useRealTimers();
@@ -356,6 +356,707 @@ describe('daemon session catalog runtime', () => {
       [['capture-pane', '-p', '-e', '-t', 'shell-a', '-S', '-20']],
       [['capture-pane', '-p', '-e', '-t', 'agent-b', '-S', '-20']],
     ]);
+  });
+
+  it('projects Collab roles from the registered tmux transport identity', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: [
+            '$75\tzterm-1\t/Users/fanzhang/.tmux/run/tmux-501/default',
+            '$76\tzterm-2\t/Users/fanzhang/.tmux/run/tmux-501/default',
+          ].join('\n'),
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return {
+          ok: true as const,
+          stdout: [
+            'zterm-1\t1234\tcodex',
+            'zterm-2\t5678\tcodex',
+          ].join('\n'),
+        };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runCollabWho = vi.fn(async () => ({
+      workers: [
+        {
+          display_name: 'Jenny',
+          role: 'master',
+          agent_state: 'idle',
+          transport: {
+            kind: 'tmux',
+            endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+            namespace: '$75',
+          },
+        },
+        {
+          display_name: 'Alice',
+          role: 'worker',
+          agent_state: 'ready',
+          transport: {
+            kind: 'tmux',
+            endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+            namespace: '$76',
+          },
+        },
+      ],
+    }));
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [
+        { name: 'zterm-1', backend: 'tmux', cwd: '/Volumes/extension/code/zterm' },
+        { name: 'zterm-2', backend: 'tmux', cwd: '/Volumes/extension/code/zterm' },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabWho,
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled[0]?.collab).toEqual({
+      role: 'master',
+      displayName: 'Jenny',
+      agentState: 'idle',
+    });
+    expect(sampled[1]?.collab).toEqual({
+      role: 'worker',
+      displayName: 'Alice',
+      agentState: 'ready',
+    });
+    expect(runCollabWho).toHaveBeenCalledTimes(1);
+    expect(runCollabWho).toHaveBeenCalledWith({ cwd: '/Volumes/extension/code/zterm' });
+    runtime.dispose();
+  });
+
+  it('keeps the catalog unclassified when the Collab projection is unavailable', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: '$75\tzterm-1\t/Users/fanzhang/.tmux/run/tmux-501/default',
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return { ok: true as const, stdout: 'zterm-1\t1234\tcodex' };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [
+        { name: 'zterm-1', backend: 'tmux', cwd: '/Volumes/extension/code/zterm' },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabWho: vi.fn(async () => {
+        throw new Error('collab daemon unavailable');
+      }),
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled).toHaveLength(1);
+    expect(sampled[0]?.name).toBe('zterm-1');
+    expect(sampled[0]).not.toHaveProperty('collab');
+    runtime.dispose();
+  });
+
+  it('refreshes the Collab projection on the cadence loop while membership is stable', async () => {
+    vi.useFakeTimers();
+    try {
+      let collabRole: 'master' | 'worker' = 'master';
+      const listTerminalSessionCatalog = vi.fn(() => [
+        { name: 'zterm-1', backend: 'tmux' as const, cwd: '/Volumes/extension/code/zterm' },
+      ]);
+      const runTmuxAsync = vi.fn(async (args: string[]) => {
+        if (args[0] === 'list-sessions') {
+          return {
+            ok: true as const,
+            stdout: '$75\tzterm-1\t/Users/fanzhang/.tmux/run/tmux-501/default',
+          };
+        }
+        if (args[0] === 'list-panes') {
+          return { ok: true as const, stdout: 'zterm-1\t1234\tcodex' };
+        }
+        return { ok: true as const, stdout: 'idle' };
+      });
+      const runCollabWho = vi.fn(async () => {
+        return {
+          workers: [
+            {
+              display_name: 'Jenny',
+              role: collabRole,
+              agent_state: 'idle',
+              transport: {
+                kind: 'tmux',
+                endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+                namespace: '$75',
+              },
+            },
+          ],
+        };
+      });
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+        runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+        runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+        readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+        runCollabWho,
+      });
+
+      // Cold start: the roster (master) is sampled once.
+      await runtime.refresh();
+      expect(runtime.read()[0]?.collab).toEqual({
+        role: 'master',
+        displayName: 'Jenny',
+        agentState: 'idle',
+      });
+      expect(runCollabWho).toHaveBeenCalledTimes(1);
+
+      // A worker registers into the already-open tmux session; membership is
+      // unchanged so the old loop would never re-sample.
+      collabRole = 'worker';
+      runtime.startRefreshLoop(1000);
+      // First tick is inside the cache TTL window: no new collab sample yet.
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => {
+        expect(listTerminalSessionCatalog).toHaveBeenCalledTimes(2);
+      });
+      expect(runtime.read()[0]?.collab?.role).toBe('master');
+      expect(runCollabWho).toHaveBeenCalledTimes(1);
+
+      // Past the projection cache TTL: the cadence loop re-samples Collab even
+      // though membership never changed, and the new role is published.
+      vi.advanceTimersByTime(DAEMON_COLLAB_PROJECTION_CACHE_MS);
+      await vi.waitFor(() => {
+        expect(runCollabWho).toHaveBeenCalledTimes(2);
+      });
+      await vi.waitFor(() => {
+        expect(runtime.read()[0]?.collab?.role).toBe('worker');
+      });
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('publishes a complete unclassified catalog when a cadence resample fails and recovers on the next success', async () => {
+    vi.useFakeTimers();
+    try {
+      let collabShouldFail = false;
+      const listTerminalSessionCatalog = vi.fn(() => [
+        { name: 'zterm-1', backend: 'tmux' as const, cwd: '/Volumes/extension/code/zterm' },
+      ]);
+      const runTmuxAsync = vi.fn(async (args: string[]) => {
+        if (args[0] === 'list-sessions') {
+          return {
+            ok: true as const,
+            stdout: '$75\tzterm-1\t/Users/fanzhang/.tmux/run/tmux-501/default',
+          };
+        }
+        if (args[0] === 'list-panes') {
+          return { ok: true as const, stdout: 'zterm-1\t1234\tcodex' };
+        }
+        return { ok: true as const, stdout: 'idle' };
+      });
+      const runCollabWho = vi.fn(async () => {
+        if (collabShouldFail) {
+          throw new Error('collab daemon unavailable');
+        }
+        return {
+          workers: [
+            {
+              display_name: 'Jenny',
+              role: 'master',
+              agent_state: 'idle',
+              transport: {
+                kind: 'tmux',
+                endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+                namespace: '$75',
+              },
+            },
+          ],
+        };
+      });
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+        runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+        runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+        readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+        runCollabWho,
+      });
+
+      await runtime.refresh();
+      expect(runtime.read()[0]?.collab?.role).toBe('master');
+      expect(runCollabWho).toHaveBeenCalledTimes(1);
+
+      // The Collab command now fails. The complete session catalog must stay
+      // resident with the stale role removed, not keep the old classification.
+      collabShouldFail = true;
+      runtime.startRefreshLoop(1000);
+      vi.advanceTimersByTime(1000 + DAEMON_COLLAB_PROJECTION_CACHE_MS);
+      await vi.waitFor(() => {
+        expect(runCollabWho).toHaveBeenCalledTimes(2);
+      });
+      await vi.waitFor(() => {
+        expect(runtime.read()[0]).not.toHaveProperty('collab');
+      });
+      expect(runtime.read()).toHaveLength(1);
+      expect(runtime.read()[0]?.name).toBe('zterm-1');
+      // Process observations are preserved even though classification is gone.
+      expect(runtime.read()[0]?.observation?.foregroundProcess).toBe('codex');
+      expect(listTerminalSessionCatalog.mock.calls.length).toBeGreaterThanOrEqual(2);
+
+      // The failure must clear the cache TTL so the next cadence tick samples
+      // again and restores the current classification.
+      collabShouldFail = false;
+      vi.advanceTimersByTime(1_000);
+      await vi.waitFor(() => {
+        expect(runCollabWho).toHaveBeenCalledTimes(3);
+      });
+      await vi.waitFor(() => {
+        expect(runtime.read()[0]?.collab?.role).toBe('master');
+      });
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('leaves a worker unclassified when its endpoint socket does not match the namespace', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: '$1\tzterm-1\t/Users/fanzhang/.tmux/run/tmux-501/socket-b',
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return { ok: true as const, stdout: 'zterm-1\t1234\tcodex' };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [
+        { name: 'zterm-1', backend: 'tmux', cwd: '/repo' },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabWho: vi.fn(async () => ({
+        workers: [
+          {
+            display_name: 'Jenny',
+            role: 'master',
+            transport: {
+              kind: 'tmux',
+              endpoint: '/Users/fanzhang/.tmux/run/tmux-501/socket-a',
+              namespace: '$1',
+            },
+          },
+        ],
+      })),
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled).toHaveLength(1);
+    expect(sampled[0]?.name).toBe('zterm-1');
+    // The sole enumerated '$1' lives on socket-b, so the socket-a registration
+    // must not borrow it.
+    expect(sampled[0]).not.toHaveProperty('collab');
+    runtime.dispose();
+  });
+
+  it('does not let a cached role leak onto a second same-name target that appears inside the TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const stableA = buildTmuxSessionStableId({
+        socketPath: '/socket-a',
+        serverPid: '501',
+        sessionId: '$1',
+        createdAt: 1000,
+      });
+      const stableB = buildTmuxSessionStableId({
+        socketPath: '/socket-b',
+        serverPid: '502',
+        sessionId: '$2',
+        createdAt: 2000,
+      });
+      let catalog: TerminalSessionCatalogEntry[] = [
+        { name: 'shared', backend: 'tmux', stableId: stableA, cwd: '/repo' },
+      ];
+      let listSessionsOutput = '$1\tshared\t/socket-a\t501\t1000';
+      const listTerminalSessionCatalog = vi.fn(() => catalog);
+      const runTmuxAsync = vi.fn(async (args: string[]) => {
+        if (args[0] === 'list-sessions') {
+          return { ok: true as const, stdout: listSessionsOutput };
+        }
+        if (args[0] === 'list-panes') {
+          return { ok: true as const, stdout: 'shared\t1234\tcodex' };
+        }
+        return { ok: true as const, stdout: 'idle' };
+      });
+      const runCollabWho = vi.fn(async () => ({
+        workers: [
+          {
+            display_name: 'Jenny',
+            role: 'master',
+            transport: { kind: 'tmux', endpoint: '/socket-a', namespace: '$1' },
+          },
+        ],
+      }));
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+        runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+        runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+        readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+        runCollabWho,
+      });
+
+      await runtime.refresh();
+      expect(runtime.read().find((entry) => entry.stableId === stableA)?.collab?.role)
+        .toBe('master');
+
+      // A second target with the same display name appears inside the cache TTL.
+      catalog = [
+        { name: 'shared', backend: 'tmux', stableId: stableA, cwd: '/repo' },
+        { name: 'shared', backend: 'tmux', stableId: stableB, cwd: '/repo' },
+      ];
+      listSessionsOutput = '$1\tshared\t/socket-a\t501\t1000\n$2\tshared\t/socket-b\t502\t2000';
+      runtime.startRefreshLoop(1000);
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => expect(runtime.read()).toHaveLength(2));
+
+      const rows = runtime.read();
+      expect(rows.filter((entry) => entry.name === 'shared')).toHaveLength(2);
+      expect(rows.every((entry) => !('collab' in entry))).toBe(true);
+      // The membership refresh used the cache fast path, so neither row may
+      // inherit the pre-change role.
+      expect(runCollabWho).toHaveBeenCalledTimes(1);
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not reuse a cached role for a replaced target with the same display name inside the TTL', async () => {
+    vi.useFakeTimers();
+    try {
+      const stableOld = buildTmuxSessionStableId({
+        socketPath: '/socket-a',
+        serverPid: '501',
+        sessionId: '$1',
+        createdAt: 1000,
+      });
+      const stableNew = buildTmuxSessionStableId({
+        socketPath: '/socket-a',
+        serverPid: '501',
+        sessionId: '$9',
+        createdAt: 9000,
+      });
+      let catalog: TerminalSessionCatalogEntry[] = [
+        { name: 'shared', backend: 'tmux', stableId: stableOld, cwd: '/repo' },
+      ];
+      let listSessionsOutput = '$1\tshared\t/socket-a\t501\t1000';
+      const runTmuxAsync = vi.fn(async (args: string[]) => {
+        if (args[0] === 'list-sessions') {
+          return { ok: true as const, stdout: listSessionsOutput };
+        }
+        if (args[0] === 'list-panes') {
+          return { ok: true as const, stdout: 'shared\t1234\tcodex' };
+        }
+        return { ok: true as const, stdout: 'idle' };
+      });
+      let collabNamespace = '$1';
+      const runCollabWho = vi.fn(async () => ({
+        workers: [
+          {
+            display_name: 'Jenny',
+            role: 'master',
+            transport: { kind: 'tmux', endpoint: '/socket-a', namespace: collabNamespace },
+          },
+        ],
+      }));
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog: () => catalog,
+        runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+        runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+        readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+        runCollabWho,
+      });
+
+      await runtime.refresh();
+      expect(runtime.read().find((entry) => entry.stableId === stableOld)?.collab?.role)
+        .toBe('master');
+
+      // The target is replaced with a new native identity under the same name.
+      // The stale registration still points at the old namespace.
+      catalog = [{ name: 'shared', backend: 'tmux', stableId: stableNew, cwd: '/repo' }];
+      listSessionsOutput = '$9\tshared\t/socket-a\t501\t9000';
+      runtime.startRefreshLoop(1000);
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => {
+        expect(runtime.read().find((entry) => entry.stableId === stableNew)).toBeTruthy();
+      });
+      expect(runtime.read().find((entry) => entry.stableId === stableNew)).not.toHaveProperty('collab');
+      expect(runCollabWho).toHaveBeenCalledTimes(1);
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not assign a classified role to a different target that shares a name with the registered target', async () => {
+    vi.useFakeTimers();
+    try {
+      const stableA = buildTmuxSessionStableId({
+        socketPath: '/socket-a',
+        serverPid: '501',
+        sessionId: '$1',
+        createdAt: 1000,
+      });
+      const stableB = buildTmuxSessionStableId({
+        socketPath: '/socket-b',
+        serverPid: '502',
+        sessionId: '$2',
+        createdAt: 2000,
+      });
+      const catalog: TerminalSessionCatalogEntry[] = [
+        { name: 'shared', backend: 'tmux', stableId: stableA, cwd: '/repo' },
+        { name: 'shared', backend: 'tmux', stableId: stableB, cwd: '/repo' },
+      ];
+      // Collab registers a master on exactly target A (socket-a / $1).
+      const runCollabWho = vi.fn(async () => ({
+        workers: [
+          {
+            display_name: 'Jenny',
+            role: 'master',
+            transport: { kind: 'tmux', endpoint: '/socket-a', namespace: '$1' },
+          },
+        ],
+      }));
+      // The live tmux listing returns both targets; neither shares a stable id
+      // with the other, and the name is ambiguous across sockets.
+      const listSessionsOutput = '$1\tshared\t/socket-a\t501\t1000\n$2\tshared\t/socket-b\t502\t2000';
+      const runTmuxAsync = vi.fn(async (args: string[]) => {
+        if (args[0] === 'list-sessions') {
+          return { ok: true as const, stdout: listSessionsOutput };
+        }
+        if (args[0] === 'list-panes') {
+          return { ok: true as const, stdout: 'shared\t1234\tcodex' };
+        }
+        return { ok: true as const, stdout: 'idle' };
+      });
+      const runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog: () => catalog,
+        runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+        runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+        readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+        runCollabWho,
+      });
+
+      const sampled = await runtime.refresh();
+      expect(sampled).toHaveLength(2);
+      // Only the exact stable-id match keeps the role; the same-name target B
+      // stays unclassified both at cold start and after a TTL re-sample.
+      expect(sampled.find((entry) => entry.stableId === stableA)?.collab?.role).toBe('master');
+      expect(sampled.find((entry) => entry.stableId === stableB)).not.toHaveProperty('collab');
+
+      runtime.startRefreshLoop(1000);
+      vi.advanceTimersByTime(1000 + DAEMON_COLLAB_PROJECTION_CACHE_MS);
+      await vi.waitFor(() => {
+        expect(runCollabWho).toHaveBeenCalledTimes(2);
+      });
+      const rows = runtime.read();
+      expect(rows.find((entry) => entry.stableId === stableA)?.collab?.role).toBe('master');
+      expect(rows.find((entry) => entry.stableId === stableB)).not.toHaveProperty('collab');
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('dedupes the same registered roster observed across multiple session CWDs', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: '$1\tzterm-1\t/socket-default\n$2\tzterm-2\t/socket-default',
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return {
+          ok: true as const,
+          stdout: 'zterm-1\t1234\tcodex\nzterm-2\t5678\tcodex',
+        };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runCollabWho = vi.fn(async () => ({
+      workers: [
+        {
+          display_name: 'Jenny',
+          role: 'master',
+          transport: { kind: 'tmux', endpoint: '/socket-default', namespace: '$1' },
+        },
+        {
+          display_name: 'Alice',
+          role: 'worker',
+          transport: { kind: 'tmux', endpoint: '/socket-default', namespace: '$2' },
+        },
+      ],
+    }));
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [
+        { name: 'zterm-1', backend: 'tmux', cwd: '/repo/a' },
+        { name: 'zterm-2', backend: 'tmux', cwd: '/repo/b' },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabWho,
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled.find((entry) => entry.name === 'zterm-1')?.collab).toEqual({
+      role: 'master',
+      displayName: 'Jenny',
+    });
+    expect(sampled.find((entry) => entry.name === 'zterm-2')?.collab).toEqual({
+      role: 'worker',
+      displayName: 'Alice',
+    });
+    // One distinct roster was sampled once per CWD, not once per row.
+    expect(runCollabWho).toHaveBeenCalledTimes(2);
+    runtime.dispose();
+  });
+
+  it('keeps a target unclassified when separate registrations report conflicting roles', async () => {
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: '$1\talpha\t/socket-default\n$2\tbeta\t/socket-default',
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return {
+          ok: true as const,
+          stdout: 'alpha\t1234\tcodex\nbeta\t5678\tcodex',
+        };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runCollabWho = vi.fn(async ({ cwd }: { cwd: string }) => ({
+      workers: [
+        {
+          display_name: 'Jenny',
+          role: cwd === '/repo/a' ? 'master' : 'worker',
+          transport: { kind: 'tmux', endpoint: '/socket-default', namespace: '$1' },
+        },
+      ],
+    }));
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => []),
+      listTerminalSessionCatalog: () => [
+        { name: 'alpha', backend: 'tmux', cwd: '/repo/a' },
+        { name: 'beta', backend: 'tmux', cwd: '/repo/b' },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabWho,
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled.find((entry) => entry.name === 'alpha')).not.toHaveProperty('collab');
+    expect(sampled.find((entry) => entry.name === 'beta')).not.toHaveProperty('collab');
+    runtime.dispose();
+  });
+
+  it('republishes the relay directory after an in-place collab resample', async () => {
+    vi.useFakeTimers();
+    try {
+      let collabRole: 'master' | 'worker' = 'master';
+      const listTerminalSessionCatalog = vi.fn(() => [
+        { name: 'zterm-1', backend: 'tmux' as const, cwd: '/Volumes/extension/code/zterm' },
+      ]);
+      const runTmuxAsync = vi.fn(async (args: string[]) => {
+        if (args[0] === 'list-sessions') {
+          return {
+            ok: true as const,
+            stdout: '$75\tzterm-1\t/Users/fanzhang/.tmux/run/tmux-501/default',
+          };
+        }
+        if (args[0] === 'list-panes') {
+          return { ok: true as const, stdout: 'zterm-1\t1234\tcodex' };
+        }
+        return { ok: true as const, stdout: 'idle' };
+      });
+      const runCollabWho = vi.fn(async () => ({
+        workers: [
+          {
+            display_name: 'Jenny',
+            role: collabRole,
+            transport: {
+              kind: 'tmux',
+              endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+              namespace: '$75',
+            },
+          },
+        ],
+      }));
+      let runtime: ReturnType<typeof createDaemonSessionCatalogRuntime>;
+      // Simulates the server wiring: the publish callback reads the resident
+      // catalog exactly as the relay directory builder does.
+      const republishedRoles: string[] = [];
+      runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog,
+        runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+        runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+        readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+        runCollabWho,
+        onCatalogResampled: () => {
+          const row = runtime.read().find((entry) => entry.name === 'zterm-1');
+          republishedRoles.push(row?.collab?.role ?? 'unclassified');
+        },
+      });
+
+      await runtime.refresh();
+      expect(runtime.read()[0]?.collab?.role).toBe('master');
+      expect(republishedRoles).toEqual([]);
+
+      collabRole = 'worker';
+      runtime.startRefreshLoop(1000);
+      // Inside the TTL the cadence tick does not resample or republish.
+      vi.advanceTimersByTime(1000);
+      await vi.waitFor(() => {
+        expect(listTerminalSessionCatalog.mock.calls.length).toBeGreaterThanOrEqual(2);
+      });
+      expect(republishedRoles).toEqual([]);
+
+      // Past the TTL the in-place role change is resampled and republished.
+      vi.advanceTimersByTime(DAEMON_COLLAB_PROJECTION_CACHE_MS);
+      await vi.waitFor(() => {
+        expect(republishedRoles).toEqual(['worker']);
+      });
+      expect(runtime.read()[0]?.collab?.role).toBe('worker');
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('omits observations for ambiguous same-name tmux targets while sampling unique names and retaining Herdr', async () => {
@@ -736,5 +1437,132 @@ describe('daemon session catalog runtime', () => {
         code: 'list_sessions_failed',
       },
     });
+  });
+
+  it('matches collab role when catalog stableId omits socketPath on the default socket while list-sessions outputs socket_path', async () => {
+    const defaultSocketStableId = buildTmuxSessionStableId({
+      serverPid: '2329',
+      sessionId: '$75',
+      createdAt: 1793147288,
+    });
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: '$75\tzterm-1\t/Users/fanzhang/.tmux/run/tmux-501/default\t2329\t1793147288',
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return { ok: true as const, stdout: 'zterm-1\t1234\tcodex' };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => ['zterm-1']),
+      listTerminalSessionCatalog: () => [
+        {
+          name: 'zterm-1',
+          backend: 'tmux',
+          stableId: defaultSocketStableId,
+          cwd: '/Volumes/extension/code/zterm',
+        },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabWho: vi.fn(async () => ({
+        workers: [
+          {
+            display_name: 'Jenny',
+            role: 'master',
+            agent_state: 'working',
+            transport: {
+              kind: 'tmux',
+              endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+              namespace: '$75',
+            },
+          },
+        ],
+      })),
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled[0]?.collab).toEqual({
+      role: 'master',
+      displayName: 'Jenny',
+      agentState: 'working',
+    });
+    runtime.dispose();
+  });
+
+  it('resolves host-wide CEO session from collab ceo status and worker_id', async () => {
+    const ceoStableId = buildTmuxSessionStableId({
+      serverPid: '2329',
+      sessionId: '$29',
+      createdAt: 1793138252,
+    });
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: '$29\tworkspace-1\t/Users/fanzhang/.tmux/run/tmux-501/default\t2329\t1793138252',
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return { ok: true as const, stdout: 'workspace-1\t1234\tcodex' };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => ['workspace-1']),
+      listTerminalSessionCatalog: () => [
+        {
+          name: 'workspace-1',
+          backend: 'tmux',
+          stableId: ceoStableId,
+          cwd: '/Users/fanzhang/.collab/workspace',
+        },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabCeoStatus: vi.fn(async () => ({
+        ceo: {
+          granted_by: 'codex-session-ceo-bob',
+          name: 'Bob',
+          workspace: '/Users/fanzhang',
+        },
+        default_workspace: '/Users/fanzhang/.collab/workspace',
+        worker_id: 'codex-session-ceo-bob',
+      })),
+      runCollabWho: vi.fn(async ({ cwd }: { cwd: string }) => {
+        if (cwd === '/Users/fanzhang') {
+          return {
+            workers: [
+              {
+                id: 'codex-session-ceo-bob',
+                display_name: 'Bob',
+                role: 'worker',
+                agent_state: 'idle',
+                transport: {
+                  kind: 'tmux',
+                  endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+                  namespace: '$29',
+                },
+              },
+            ],
+          };
+        }
+        return { workers: [] };
+      }),
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled[0]?.collab).toEqual({
+      role: 'ceo',
+      displayName: 'Bob',
+      agentState: 'idle',
+    });
+    runtime.dispose();
   });
 });

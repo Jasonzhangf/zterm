@@ -69,70 +69,74 @@ function renderSettings(
 describe('SettingsPage session drawer filter', () => {
   afterEach(cleanup);
 
-  it('renders the persisted mode and name lists', () => {
+  it('renders drawer filter guidance without manual name fields', () => {
     renderSettings({
       settings: {
         ...baseSettings,
         sessionDrawerFilter: {
-          version: 1,
-          mode: 'hide-subagent',
-          masterNames: ['zterm-3', 'master-a'],
-          subagentNames: ['worker-a'],
+          version: 2,
+          mode: 'hide-worker',
           hiddenSessionNames: ['OneStop-1'],
         },
       },
     });
 
-    expect((screen.getByLabelText('会话抽屉筛选模式') as HTMLSelectElement).value).toBe('hide-subagent');
-    expect((screen.getByLabelText('master 会话名') as HTMLTextAreaElement).value).toBe('zterm-3\nmaster-a');
-    expect((screen.getByLabelText('subagent 会话名') as HTMLTextAreaElement).value).toBe('worker-a');
-    expect((screen.getByLabelText('隐藏会话名') as HTMLTextAreaElement).value).toBe('OneStop-1');
+    expect(screen.getByTestId('settings-session-drawer-filter')).toBeTruthy();
+    expect(screen.getByText(/Collab 角色由 daemon 只读投影决定/)).toBeTruthy();
+    expect(screen.queryByLabelText('会话抽屉筛选模式')).toBeNull();
+    expect(screen.queryByLabelText('master 会话名')).toBeNull();
+    expect(screen.queryByLabelText('subagent 会话名')).toBeNull();
+    expect(screen.queryByLabelText('隐藏会话名')).toBeNull();
+    expect(screen.queryByTestId('settings-session-drawer-master-names')).toBeNull();
+    expect(screen.queryByTestId('settings-session-drawer-subagent-names')).toBeNull();
+    expect(screen.queryByTestId('settings-session-drawer-hidden-names')).toBeNull();
   });
 
-  it('normalizes edited values into BridgeSettings on the existing save action', () => {
+  it('keeps hidden session names when saving the existing settings draft', () => {
     const onSave = vi.fn(successfulBridgeSettings);
-    renderSettings({ onSave });
-
-    fireEvent.change(screen.getByLabelText('会话抽屉筛选模式'), {
-      target: { value: 'only-master' },
-    });
-    fireEvent.change(screen.getByLabelText('master 会话名'), {
-      target: { value: ' zterm-3 \nmaster-a\nzterm-3\n' },
-    });
-    fireEvent.change(screen.getByLabelText('subagent 会话名'), {
-      target: { value: '\nworker-a\n worker-b \nworker-a' },
-    });
-    fireEvent.change(screen.getByLabelText('隐藏会话名'), {
-      target: { value: '\nOneStop-1\n OneStop-1 \n' },
+    renderSettings({
+      onSave,
+      settings: {
+        ...baseSettings,
+        sessionDrawerFilter: {
+          version: 2,
+          mode: 'hide-worker',
+          hiddenSessionNames: ['OneStop-1', ' OneStop-1 ', 'tmux-master'],
+        },
+      },
     });
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
 
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       sessionDrawerFilter: {
-        version: 1,
-        mode: 'only-master',
-        masterNames: ['zterm-3', 'master-a'],
-        subagentNames: ['worker-a', 'worker-b'],
-        hiddenSessionNames: ['OneStop-1'],
+        version: 2,
+        mode: 'hide-worker',
+        hiddenSessionNames: ['OneStop-1', 'tmux-master'],
       },
     }));
   });
 
-  it('refreshes the draft from a rerendered persisted BridgeSettings value', () => {
-    const view = renderSettings();
-    const masterNames = screen.getByLabelText('master 会话名');
-    fireEvent.change(masterNames, { target: { value: 'draft-only' } });
-    expect((masterNames as HTMLTextAreaElement).value).toBe('draft-only');
+  it('refreshes the saved drawer config from a rerendered persisted BridgeSettings value', () => {
+    const onSave = vi.fn(successfulBridgeSettings);
+    const view = renderSettings({
+      onSave,
+      settings: {
+        ...baseSettings,
+        sessionDrawerFilter: {
+          version: 2,
+          mode: 'all',
+          hiddenSessionNames: ['old-hidden'],
+        },
+      },
+    });
 
     view.rerender(
       <SettingsPage
         settings={{
           ...baseSettings,
           sessionDrawerFilter: {
-            version: 1,
+            version: 2,
             mode: 'only-master',
-            masterNames: ['persisted-master'],
-            subagentNames: ['persisted-worker'],
             hiddenSessionNames: ['persisted-hidden'],
           },
         }}
@@ -145,7 +149,7 @@ describe('SettingsPage session drawer filter', () => {
         updateError={null}
         hasNewVersion={false}
         hasUpdateIgnorePolicy={false}
-        onSave={vi.fn(successfulBridgeSettings)}
+        onSave={onSave}
         onUpdatePreferencesChange={vi.fn(() => ({
           ok: true as const,
           preferences: updatePreferences,
@@ -158,10 +162,14 @@ describe('SettingsPage session drawer filter', () => {
       />,
     );
 
-    expect((screen.getByLabelText('会话抽屉筛选模式') as HTMLSelectElement).value).toBe('only-master');
-    expect((screen.getByLabelText('master 会话名') as HTMLTextAreaElement).value).toBe('persisted-master');
-    expect((screen.getByLabelText('subagent 会话名') as HTMLTextAreaElement).value).toBe('persisted-worker');
-    expect((screen.getByLabelText('隐藏会话名') as HTMLTextAreaElement).value).toBe('persisted-hidden');
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      sessionDrawerFilter: {
+        version: 2,
+        mode: 'only-master',
+        hiddenSessionNames: ['persisted-hidden'],
+      },
+    }));
   });
 
   it('round-trips sessionDrawerFilter through the existing BridgeSettings export key only', () => {
@@ -178,10 +186,8 @@ describe('SettingsPage session drawer filter', () => {
     const settings = {
       ...baseSettings,
       sessionDrawerFilter: {
-        version: 1 as const,
-        mode: 'hide-subagent' as const,
-        masterNames: ['zterm-3'],
-        subagentNames: ['worker-a'],
+        version: 2 as const,
+        mode: 'hide-worker' as const,
         hiddenSessionNames: ['OneStop-1'],
       },
     };

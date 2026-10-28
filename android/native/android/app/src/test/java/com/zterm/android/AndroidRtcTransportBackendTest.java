@@ -375,22 +375,25 @@ public final class AndroidRtcTransportBackendTest {
     }
 
     @Test
-    public void directSdpStripKeepsOnlySrflxAndPrflxNonTailscaleCandidates() {
+    public void directSdpStripKeepsHostSrflxAndPrflxNonTailscaleCandidates() {
         String sdp = "v=0\r\n"
             + "a=candidate:1 1 udp 2113937151 192.0.2.1 5000 typ host\r\n"
             + "a=candidate:2 1 udp 2113937151 100.64.0.2 5000 typ host\r\n"
             + "a=candidate:3 1 udp 2113937151 203.0.113.1 5000 typ srflx\r\n"
-            + "a=candidate:4 1 udp 2113937151 2001:db8::1 5000 typ prflx\r\n";
+            + "a=candidate:4 1 udp 2113937151 2001:db8::1 5000 typ prflx\r\n"
+            + "a=candidate:5 1 udp 41885439 159.75.134.56 59000 typ relay\r\n";
 
         String stripped = AndroidRtcTransportBackend.stripDirectSdp(sdp);
+        assertTrue(stripped.endsWith("\r\n"));
+        assertTrue(stripped.contains("192.0.2.1"));
         assertTrue(stripped.contains("typ srflx"));
         assertTrue(stripped.contains("typ prflx"));
-        assertFalse(stripped.contains("192.0.2.1"));
         assertFalse(stripped.contains("100.64.0.2"));
+        assertFalse(stripped.contains("typ relay"));
     }
 
     @Test
-    public void directAnswerSdpStripsHostAndTailscaleCandidatesBeforeRemoteDescription()
+    public void directAnswerSdpKeepsHostAndSrflxWhileStrippingTailscaleAndRelayCandidates()
         throws Exception {
         RecordingListener listener = new RecordingListener();
         AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
@@ -407,19 +410,43 @@ public final class AndroidRtcTransportBackendTest {
         String sdp = "v=0\r\n"
             + "a=candidate:1 1 udp 2113937151 192.0.2.1 5000 typ host\r\n"
             + "a=candidate:2 1 udp 2113937151 100.64.0.2 5000 typ host\r\n"
-            + "a=candidate:3 1 udp 2113937151 203.0.113.1 5000 typ srflx\r\n";
+            + "a=candidate:3 1 udp 2113937151 203.0.113.1 5000 typ srflx\r\n"
+            + "a=candidate:4 1 udp 41885439 159.75.134.56 59000 typ relay\r\n";
         String escaped = sdp.replace("\\", "\\\\").replace("\"", "\\\"")
             .replace("\r", "\\r").replace("\n", "\\n");
         backend.handleSignalMessage(
             "{\"type\":\"rtc-answer\",\"payload\":{\"sdp\":\"" + escaped + "\"}}");
 
         assertNotNull("direct answer must set a remote description", fakePeer.lastRemoteSet);
-        assertFalse("direct answer must strip host candidates",
+        assertTrue("direct answer must keep non-Tailscale host candidates for same-NAT hole punching",
             fakePeer.lastRemoteSet.description.contains("192.0.2.1"));
         assertFalse("direct answer must strip Tailscale candidates",
             fakePeer.lastRemoteSet.description.contains("100.64.0.2"));
+        assertFalse("direct answer must strip relay candidates",
+            fakePeer.lastRemoteSet.description.contains("typ relay"));
         assertTrue("direct answer must keep srflx candidates",
             fakePeer.lastRemoteSet.description.contains("203.0.113.1"));
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void iceDisconnectedStateSchedulesGracePeriodAndCancelsWhenConnected()
+        throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, 5_000L, listener);
+        backend.simulateIceConnectionStateForTests(PeerConnection.IceConnectionState.DISCONNECTED);
+        assertTrue("transient ICE disconnected must not immediately fail transport",
+            listener.events.isEmpty());
+        Field futureField = AndroidRtcTransportBackend.class.getDeclaredField("disconnectedFuture");
+        futureField.setAccessible(true);
+        assertNotNull("disconnected grace timer must be scheduled", futureField.get(backend));
+
+        backend.simulateIceConnectionStateForTests(PeerConnection.IceConnectionState.CONNECTED);
+        assertEquals("connected state must cancel disconnected grace timer",
+            null, futureField.get(backend));
+        assertTrue(listener.events.isEmpty());
         backend.closeQuietly("test");
     }
 

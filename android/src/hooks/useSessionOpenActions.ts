@@ -29,11 +29,12 @@ import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import { sanitizeTmuxSessionName } from '@zterm/shared/tmux-session-name';
 import {
   createTmuxSession,
+  fetchTmuxSessionCatalog,
   fetchTmuxSessions,
   killTmuxSession,
   renameTmuxSession,
 } from '../lib/tmux-sessions';
-import type { TerminalSessionCatalog } from '@zterm/shared/protocol';
+import type { TerminalSessionCatalog, TerminalSessionCatalogEntry, TerminalSessionCollabProjection } from '@zterm/shared/protocol';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
@@ -75,12 +76,16 @@ interface UseSessionOpenActionsOptions {
   sessionGroups?: SessionGroupHistory[];
   relayDevices?: TraversalRelayDeviceSnapshot[];
   deleteSessionGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string }) => void;
-  pruneSessionGroupSelectionToRemoteTruth: (target: {
-    bridgeHost: string;
-    bridgePort: number;
-    daemonHostId?: string;
-    terminalBackend?: 'tmux' | 'herdr';
-  }, remoteSessionNames: string[]) => void;
+  pruneSessionGroupSelectionToRemoteTruth: (
+    target: {
+      bridgeHost: string;
+      bridgePort: number;
+      daemonHostId?: string;
+      terminalBackend?: 'tmux' | 'herdr';
+    },
+    remoteSessionNames: string[],
+    remoteSessionCatalog?: Array<Pick<TerminalSessionCatalogEntry, 'name' | 'cwd' | 'collab' | 'backend'>>,
+  ) => void;
   setSessionGroupSelection: (group: {
     name: string;
     bridgeHost: string;
@@ -91,6 +96,7 @@ interface UseSessionOpenActionsOptions {
     relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
     sessionCwdByName?: Record<string, string>;
+    sessionCollabByName?: Record<string, TerminalSessionCollabProjection>;
     lastOpenedSessionName?: string;
   }) => void;
   markSessionGroupEntered: (group: {
@@ -119,6 +125,10 @@ interface UseSessionOpenActionsOptions {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
+  queryTerminalSessionCatalogOnOpenTransport?: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<TerminalSessionCatalog | null>;
   runtimeActiveSessionId: string | null;
   runtimeRefs: OpenTabRuntimeRefs;
   ensureTerminalPageVisible: () => void;
@@ -197,6 +207,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     switchSession,
     renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     runtimeActiveSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
@@ -565,6 +576,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       Object.entries(existingTmuxGroup?.sessionCwdByName || {})
         .filter(([name, cwd]) => normalizedSessionNames.includes(name) && cwd?.trim()),
     );
+    const preservedTmuxCollabByName = Object.fromEntries(
+      Object.entries(existingTmuxGroup?.sessionCollabByName || {})
+        .filter(([name, collab]) => normalizedSessionNames.includes(name) && Boolean(collab?.role && collab?.displayName)),
+    );
     const baseGroup = {
       name: target.daemonHostId || target.relayHostId || target.bridgeHost,
       bridgeHost: target.bridgeHost,
@@ -585,6 +600,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         entries.push(entry);
         entriesByBackend.set(entry.backend, entries);
       }
+      const currentTmuxHasNoCollab = Boolean(
+        entriesByBackend.get('tmux')?.length
+        && (entriesByBackend.get('tmux') || []).every((entry) => !entry.collab?.role),
+      );
       for (const backend of ['tmux', 'herdr'] as const) {
         const backendNames = normalizeRemoteTmuxSessionNames(
           (entriesByBackend.get(backend) || []).map((entry) => entry.name),
@@ -605,6 +624,14 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
               );
               return Object.keys(sessionCwdByName).length > 0 ? { sessionCwdByName } : {};
             })(),
+            sessionCollabByName: Object.fromEntries(
+              (entriesByBackend.get(backend) || [])
+                .filter((entry) => entry.name.trim() && entry.collab?.role && entry.collab?.displayName)
+                .map((entry) => [entry.name.trim(), entry.collab!]),
+            ),
+            ...(backend === 'tmux' && currentTmuxHasNoCollab
+              ? { sessionCollabByNameCleared: true }
+              : {}),
           });
         }
         if (backendNames.length > 0) {
@@ -613,7 +640,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
             bridgePort: target.bridgePort,
             daemonHostId: target.daemonHostId || target.relayHostId,
             terminalBackend: backend,
-          }, backendNames);
+          }, backendNames, entriesByBackend.get(backend) || []);
         }
       }
     } else {
@@ -624,6 +651,9 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           sessionNames: normalizedSessionNames,
           ...(target.terminalBackend !== 'herdr' && Object.keys(preservedTmuxCwdByName).length > 0
             ? { sessionCwdByName: preservedTmuxCwdByName }
+            : {}),
+          ...(target.terminalBackend !== 'herdr' && Object.keys(preservedTmuxCollabByName).length > 0
+            ? { sessionCollabByName: preservedTmuxCollabByName }
             : {}),
         });
       }
@@ -975,14 +1005,53 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
 
     void (async () => {
       try {
-        const remoteSessionNames = normalizeRemoteTmuxSessionNames(
-          await manageTmuxSessionsForTarget(target, { type: 'list-sessions' }),
+        const reusableCatalogSession = resolveReusableOpenSessionForTarget(
+          sessionsRef.current,
+          target,
+          '',
+          [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
+          false,
         );
-        handleRemoteSessionsRefreshed(target, remoteSessionNames ?? []);
+        let remoteCatalog: TerminalSessionCatalog | undefined;
+        let listedSessionNames: string[] | null | undefined;
+        if (reusableCatalogSession && queryTerminalSessionCatalogOnOpenTransport) {
+          const catalogResult = await queryTerminalSessionCatalogOnOpenTransport(
+            reusableCatalogSession.id,
+            { type: 'list-sessions' },
+          );
+          if (catalogResult) {
+            remoteCatalog = catalogResult;
+            listedSessionNames = catalogResult.sessionNames;
+          }
+        }
+        if (!listedSessionNames) {
+          if (reusableCatalogSession && manageTmuxSessionsOnOpenTransport) {
+            listedSessionNames = await manageTmuxSessionsForTarget(target, { type: 'list-sessions' });
+          } else {
+            if (typeof fetchTmuxSessionCatalog === 'function') {
+              const catalogResult = await fetchTmuxSessionCatalog(target, bridgeSettingsRef.current);
+              if (catalogResult && Array.isArray(catalogResult.sessionNames)) {
+                remoteCatalog = catalogResult;
+                listedSessionNames = catalogResult.sessionNames;
+              }
+            }
+            if (!listedSessionNames) {
+              listedSessionNames = await manageTmuxSessionsForTarget(target, { type: 'list-sessions' });
+            }
+          }
+        }
+        const remoteSessionNames = normalizeRemoteTmuxSessionNames(listedSessionNames ?? []);
+        handleRemoteSessionsRefreshed(target, remoteSessionNames ?? [], remoteCatalog);
         const remoteSessionNameSet = new Set(remoteSessionNames);
+        const ceoSessionName = remoteCatalog?.sessionCatalog
+          ?.find((entry) => entry.collab?.role === 'ceo' && remoteSessionNameSet.has(entry.name.trim()))
+          ?.name.trim()
+          || Object.entries(historyGroup?.sessionCollabByName || {})
+            .find(([name, collab]) => collab?.role === 'ceo' && remoteSessionNameSet.has(name.trim()))?.[0]?.trim()
+          || '';
         let sessionName = historySessionName && remoteSessionNameSet.has(historySessionName)
           ? historySessionName
-          : remoteSessionNames[0] || '';
+          : ceoSessionName || remoteSessionNames[0] || '';
         if (!sessionName) {
           sessionName = buildGeneratedSessionName();
           await manageTmuxSessionsForTarget(target, {
@@ -1006,7 +1075,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         onError?.(error instanceof Error ? error.message : String(error));
       }
     })();
-  }, [applyOpenTabState, bridgeSettingsRef, closedOpenTabReuseKeysRef, closedOpenTabSessionIdsRef, createSession, ensureTerminalPageVisible, handleQuickConnectDraft, handleRemoteSessionsRefreshed, hosts, manageTmuxSessionsForTarget, markSessionGroupEntered, openTabStateRef, pendingMaterializedOpenTabSessionIdsRef, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);
+  }, [applyOpenTabState, bridgeSettingsRef, closedOpenTabReuseKeysRef, closedOpenTabSessionIdsRef, createSession, ensureTerminalPageVisible, handleQuickConnectDraft, handleRemoteSessionsRefreshed, hosts, manageTmuxSessionsForTarget, manageTmuxSessionsOnOpenTransport, markSessionGroupEntered, openTabStateRef, pendingMaterializedOpenTabSessionIdsRef, queryTerminalSessionCatalogOnOpenTransport, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);
 
   const enrichTargetFromSavedHosts = useCallback((target: BridgeTarget) => {
     const daemonHostId = (target.daemonHostId || target.relayHostId || '').trim();

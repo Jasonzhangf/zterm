@@ -800,10 +800,8 @@ vi.mock('./pages/TerminalPage', () => ({
           data-testid="set-session-drawer-filter"
           onClick={() => {
             onSessionDrawerFilterConfigChange?.({
-              version: 1,
+              version: 2,
               mode: 'all',
-              masterNames: [],
-              subagentNames: [],
               hiddenSessionNames: ['zterm-3'],
             });
           }}
@@ -1046,10 +1044,8 @@ describe('App dynamic refresh matrix', () => {
 
     const updater = readBridgeSettingsUpdater(setBridgeSettings);
     expect(updater({ servers: [], sessionDrawerFilter: undefined }).sessionDrawerFilter).toEqual({
-      version: 1,
+      version: 2,
       mode: 'all',
-      masterNames: [],
-      subagentNames: [],
       hiddenSessionNames: ['zterm-3'],
     });
   });

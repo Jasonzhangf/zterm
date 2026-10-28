@@ -127,8 +127,9 @@ function buildWsUrl(base: string, relativePath: string) {
 }
 
 export function buildRelayTmuxSessionSnapshots(
-  sessionCatalog: Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd'>>,
+  sessionCatalog: Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd' | 'collab'>>,
   now: string,
+  options?: { omitCollab?: boolean },
 ): RelayTmuxSessionSnapshot[] {
   const seen = new Set<string>();
   const sessions: RelayTmuxSessionSnapshot[] = [];
@@ -141,6 +142,20 @@ export function buildRelayTmuxSessionSnapshots(
     sessions.push({
       name,
       ...(typeof entry.cwd === 'string' && entry.cwd.trim() ? { cwd: entry.cwd.trim() } : {}),
+      ...(!options?.omitCollab
+        && entry.collab
+        && (entry.collab.role === 'ceo' || entry.collab.role === 'master' || entry.collab.role === 'worker')
+        && entry.collab.displayName.trim()
+        ? {
+            collab: {
+              role: entry.collab.role,
+              displayName: entry.collab.displayName.trim(),
+              ...(entry.collab.agentState?.trim()
+                ? { agentState: entry.collab.agentState.trim() }
+                : {}),
+            },
+          }
+        : {}),
       updatedAt: now,
     });
   }
@@ -149,14 +164,19 @@ export function buildRelayTmuxSessionSnapshots(
 
 export function buildRelayDirectoryUpdateEnvelope(options: {
   endpoints: RelayEndpointCandidate[];
-  sessionCatalog: Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd'>>;
+  sessionCatalog: Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd' | 'collab'>>;
   now: string;
+  omitSessionCollab?: boolean;
 }): RelayHostEnvelope {
   return {
     type: 'directory-update',
     directory: {
       endpoints: options.endpoints,
-      sessions: buildRelayTmuxSessionSnapshots(options.sessionCatalog, options.now),
+      sessions: buildRelayTmuxSessionSnapshots(
+        options.sessionCatalog,
+        options.now,
+        options.omitSessionCollab ? { omitCollab: true } : undefined,
+      ),
       publishedAt: options.now,
     },
   };
@@ -165,8 +185,9 @@ export function buildRelayDirectoryUpdateEnvelope(options: {
 export function publishRelayDirectoryUpdate(options: {
   socket: RelayDirectoryPublisherSocket;
   listEndpointCandidates: (now: string) => RelayEndpointCandidate[];
-  listTerminalSessionCatalog: () => Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd'>>;
+  listTerminalSessionCatalog: () => Array<Pick<RelayTmuxSessionSnapshot, 'name' | 'cwd' | 'collab'>>;
   now: () => string;
+  omitSessionCollab?: boolean;
 }) {
   try {
     const now = options.now();
@@ -174,6 +195,7 @@ export function publishRelayDirectoryUpdate(options: {
       endpoints: options.listEndpointCandidates(now),
       sessionCatalog: options.listTerminalSessionCatalog(),
       now,
+      omitSessionCollab: options.omitSessionCollab,
     });
     if (options.socket.readyState === WebSocket.OPEN) {
       options.socket.send(JSON.stringify(envelope));
@@ -286,6 +308,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
       const nextSocket = new WebSocket(wsUrl);
       socket = nextSocket;
       publishLoop?.stop();
+      let omitSessionCollab = false;
       const publishCurrentDirectoryUpdate = () => {
         if (nextSocket.readyState !== WebSocket.OPEN) {
           return false;
@@ -295,6 +318,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
           listEndpointCandidates: options.listEndpointCandidates,
           listTerminalSessionCatalog: options.listTerminalSessionCatalog,
           now: options.now || (() => new Date().toISOString()),
+          omitSessionCollab,
         });
         if (!publishResult.ok) {
           console.warn(`[${new Date().toISOString()}] traversal relay directory publish failed: ${publishResult.reason}`);
@@ -337,6 +361,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
               listEndpointCandidates: options.listEndpointCandidates,
               listTerminalSessionCatalog: options.listTerminalSessionCatalog,
               now: options.now || (() => new Date().toISOString()),
+              omitSessionCollab,
             });
             if (publishResult.ok) {
               console.log(
@@ -367,6 +392,10 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
           }
           if (envelope.type === 'relay-error') {
             console.warn(`[${new Date().toISOString()}] traversal relay host error: ${envelope.reason || 'unknown error'}`);
+            if (!omitSessionCollab && /unknown session control field:\s*collab/i.test(envelope.reason || '')) {
+              omitSessionCollab = true;
+              publishCurrentDirectoryUpdate();
+            }
           }
         } catch (error) {
           console.warn(`[${new Date().toISOString()}] traversal relay host parse error: ${error instanceof Error ? error.message : String(error)}`);

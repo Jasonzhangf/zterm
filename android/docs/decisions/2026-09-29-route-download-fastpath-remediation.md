@@ -24,7 +24,7 @@ of terminal mux base64 chunks.
 - cleanup (sockets/timers cancelled, committedCandidate invariant)
 - retry/resume (bounded backoff, no silent fallback)
 
-Default priority: LAN -> Tailscale -> IPv6 -> IPv4 -> rtc-relay -> rtc-direct
+Default priority: LAN -> IPv6 -> IPv4 -> rtc-direct -> Tailscale -> rtc-relay
 
 ## 3. File Download DAG
 

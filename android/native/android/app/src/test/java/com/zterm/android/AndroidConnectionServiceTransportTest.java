@@ -496,7 +496,7 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     @Test
-    public void autoCandidatesPutSameSubnetLanBeforeTailscaleAndPublicDirect()
+    public void autoCandidatesPutSameSubnetLanBeforePublicDirectAndTailscale()
         throws Exception {
         AndroidConnectionService service = new AndroidConnectionService();
         AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
@@ -509,12 +509,12 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "tailscale", "ipv4"),
+            java.util.Arrays.asList("lan", "ipv4", "tailscale"),
             candidatePaths(newRuntime(service, target)));
     }
 
     @Test
-    public void autoCandidatesPutLoopbackLanBeforeTailscaleForEmulatorHostReplay()
+    public void autoCandidatesPutLoopbackLanBeforePublicDirectAndTailscaleForEmulatorHostReplay()
         throws Exception {
         AndroidConnectionService service = new AndroidConnectionService();
         AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
@@ -527,7 +527,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "tailscale", "ipv4"),
+            java.util.Arrays.asList("lan", "ipv4", "tailscale"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -545,12 +545,33 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("tailscale", "ipv4"),
+            java.util.Arrays.asList("ipv4", "tailscale"),
             candidatePaths(newRuntime(service, target)));
     }
 
     @Test
-    public void autoCandidatesPutSameSubnetLanBeforeTailscalePublicDirectAndRelay()
+    public void autoCandidatesSelectMatchingSubnetFromMultiInterfaceLanHosts()
+        throws Exception {
+        AndroidConnectionService service = new AndroidConnectionService();
+        AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+            .targetKey("target-multi-lan")
+            .bridgeHost("100.64.0.2")
+            .bridgePort(3333)
+            .lanHost("192.0.2.10")
+            .lanHosts(java.util.Arrays.asList("192.0.2.10", "127.0.0.2"))
+            .tailscaleHost("100.64.0.2")
+            .build();
+
+        Object runtime = newRuntime(service, target);
+        assertEquals(
+            java.util.Arrays.asList("lan", "tailscale"),
+            candidatePaths(runtime));
+        Object lanCandidate = candidateByPath(buildCandidates(runtime), "lan");
+        assertTrue(String.valueOf(candidateField(lanCandidate, "url")).contains("127.0.0.2:3333"));
+    }
+
+    @Test
+    public void autoCandidatesPutSameSubnetLanBeforeUdpDirectTailscaleAndRelay()
         throws Exception {
         AndroidConnectionService service = new AndroidConnectionService();
         AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
@@ -570,7 +591,7 @@ public final class AndroidConnectionServiceTransportTest {
             .build();
 
         assertEquals(
-            java.util.Arrays.asList("lan", "tailscale", "ipv6", "ipv4"),
+            java.util.Arrays.asList("lan", "ipv6", "ipv4", "rtc-direct", "tailscale"),
             candidatePaths(newRuntime(service, target)));
     }
 
@@ -646,9 +667,9 @@ public final class AndroidConnectionServiceTransportTest {
 
             assertEquals("next tier launches only after the current tier fails",
                 2, openedUrls.size());
-            assertTrue(openedUrls.get(1).contains("100.64.0.2"));
-            assertFalse("ipv6 must not launch while tailscale is still probing",
-                openedUrls.toString().contains("[2001:db8::10]"));
+            assertTrue(openedUrls.get(1).contains("[2001:db8::10]"));
+            assertFalse("tailscale must not launch while ipv6 is still probing",
+                openedUrls.toString().contains("100.64.0.2"));
         } finally {
             AndroidConnectionService.resetForTests();
         }
@@ -677,16 +698,22 @@ public final class AndroidConnectionServiceTransportTest {
             setField(runtime, "transportNetworkGeneration", 0L);
             setField(service, "networkGeneration", 0L);
             setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            setField(service, "httpClient", newWebSocketFactory(request ->
+                fakeSocket(new ArrayList<>(), true)));
 
             Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
             openCandidate.setAccessible(true);
             openCandidate.invoke(runtime);
-            assertEquals("auto relay-only target must enter relay exactly once",
-                Boolean.TRUE, field(runtime, "relayStartedThisAttempt"));
+            assertEquals("auto relay-only target must start rtc-direct before falling back to relay",
+                Boolean.FALSE, field(runtime, "relayStartedThisAttempt"));
 
             Method maybeStartRelay = runtime.getClass().getDeclaredMethod(
                 "maybeStartRelay", java.util.Map.class, java.util.Map.class, java.util.Map.class);
             maybeStartRelay.setAccessible(true);
+            maybeStartRelay.invoke(runtime, field(runtime, "candidateTimeouts"),
+                field(runtime, "candidateSockets"), field(runtime, "candidateDiagnostics"));
+            assertEquals("maybeStartRelay must enter relay once after direct candidates fail",
+                Boolean.TRUE, field(runtime, "relayStartedThisAttempt"));
             maybeStartRelay.invoke(runtime, field(runtime, "candidateTimeouts"),
                 field(runtime, "candidateSockets"), field(runtime, "candidateDiagnostics"));
 
@@ -726,6 +753,8 @@ public final class AndroidConnectionServiceTransportTest {
             setField(runtime, "transportNetworkGeneration", 0L);
             setField(service, "networkGeneration", 0L);
             setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            setField(service, "httpClient", newWebSocketFactory(request ->
+                fakeSocket(new ArrayList<>(), true)));
 
             Method openCandidate = runtime.getClass().getDeclaredMethod("openCandidate");
             openCandidate.setAccessible(true);
@@ -894,7 +923,7 @@ public final class AndroidConnectionServiceTransportTest {
             setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
 
             assertEquals(
-                java.util.Arrays.asList("lan", "tailscale", "ipv6", "ipv4"),
+                java.util.Arrays.asList("lan", "ipv6", "ipv4", "rtc-direct", "tailscale"),
                 candidatePaths(runtime));
 
             List<String> openedUrls = new ArrayList<>();
@@ -975,9 +1004,9 @@ public final class AndroidConnectionServiceTransportTest {
             String.valueOf(candidateField(relay, "signalUrl")).contains("token=relay-token"));
         assertFalse("rtc-relay signal must not use daemon auth token for relay signal",
             String.valueOf(candidateField(relay, "signalUrl")).contains("token=token-a"));
-        assertFalse("auto candidate builder must skip unvalidated WebRTC critical path",
-            autoCandidates.toString().contains("rtc-direct")
-                || autoCandidates.toString().contains("rtc-relay"));
+        assertEquals(
+            java.util.Arrays.asList("lan", "ipv6", "ipv4", "rtc-direct", "tailscale"),
+            candidatePaths(runtime));
     }
 
     @Test
@@ -1145,24 +1174,30 @@ public final class AndroidConnectionServiceTransportTest {
             java.util.Map<String, Runnable> timeouts = (java.util.Map<String, Runnable>) field(runtime, "candidateTimeouts");
             assertEquals(1, timeouts.size());
             new ArrayList<>(timeouts.values()).get(0).run();
-            assertEquals("LAN timeout advances to Tailscale only",
+            assertEquals("LAN timeout advances to IPv6 only",
                 2, openedUrls.size());
             assertTrue("opened=" + openedUrls,
-                openedUrls.get(1).contains("100.64.0.2"));
+                openedUrls.get(1).contains("[2001:db8::10]:3333"));
             assertEquals(1, timeouts.size());
             new ArrayList<>(timeouts.values()).get(0).run();
-            assertEquals("Tailscale timeout advances to IPv6 only",
+            assertEquals("IPv6 timeout advances to IPv4 only",
                 3, openedUrls.size());
             assertTrue("opened=" + openedUrls,
-                openedUrls.get(2).contains("[2001:db8::10]:3333"));
+                openedUrls.get(2).contains("203.0.113.10"));
             assertFalse("relay must wait for the last direct tier",
                 openedUrls.toString().contains("relay.example/client"));
             assertEquals(1, timeouts.size());
             new ArrayList<>(timeouts.values()).get(0).run();
-            assertEquals("IPv6 timeout advances to IPv4 only",
+            assertEquals("IPv4 timeout advances to rtc-direct only",
                 4, openedUrls.size());
             assertTrue("opened=" + openedUrls,
-                openedUrls.get(3).contains("203.0.113.10"));
+                openedUrls.get(3).contains("relay.example/client"));
+            assertEquals(1, timeouts.size());
+            new ArrayList<>(timeouts.values()).get(0).run();
+            assertEquals("rtc-direct timeout advances to Tailscale only",
+                5, openedUrls.size());
+            assertTrue("opened=" + openedUrls,
+                openedUrls.get(4).contains("100.64.0.2"));
             assertEquals(1, timeouts.size());
             new ArrayList<>(timeouts.values()).get(0).run();
 
@@ -1174,9 +1209,9 @@ public final class AndroidConnectionServiceTransportTest {
                 AndroidConnectionServiceSnapshot.State.CONNECTING,
                 stateMachine.readSnapshot().state);
             assertEquals("relay signal must open only after the last direct tier fails",
-                5, openedUrls.size());
+                6, openedUrls.size());
             assertTrue("opened=" + openedUrls,
-                openedUrls.get(4).contains("relay.example/client"));
+                openedUrls.get(5).contains("relay.example/client"));
             java.util.Map<String, Object> diagnostics =
                 (java.util.Map<String, Object>) field(runtime, "candidateDiagnostics");
             Object relayDiagnostic = null;
@@ -1233,10 +1268,10 @@ public final class AndroidConnectionServiceTransportTest {
                 2, openedUrls.size());
             assertTrue("first candidate must be the same-subnet LAN url",
                 openedUrls.get(0).contains("127.0.0.1"));
-            assertTrue("failure must fall through to Tailscale",
-                openedUrls.get(1).contains("100.64.0.2"));
-            assertFalse("IPv4 must not launch while Tailscale is still probing",
-                openedUrls.toString().contains("203.0.113.10"));
+            assertTrue("failure must fall through to IPv4 before Tailscale",
+                openedUrls.get(1).contains("203.0.113.10"));
+            assertFalse("Tailscale must not launch while IPv4 is still probing",
+                openedUrls.toString().contains("100.64.0.2"));
 
             Field stateMachineField = runtime.getClass().getDeclaredField("stateMachine");
             stateMachineField.setAccessible(true);

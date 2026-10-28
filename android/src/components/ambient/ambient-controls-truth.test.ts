@@ -48,7 +48,7 @@ describe('ambient control ownership truth', () => {
   it('keeps SettingsPage consuming shared controls instead of local control styles', () => {
     const settingsPage = read('src/pages/SettingsPage.tsx');
     expect(settingsPage).toContain(
-      "import {\n  AmbientButton,\n  AmbientInput,\n  AmbientSelect,\n  AmbientTextarea,\n} from '../components/ambient';",
+      "import {\n  AmbientButton,\n  AmbientInput,\n  AmbientSelect,\n} from '../components/ambient';",
     );
     expect(settingsPage).not.toMatch(/<(?:button|input|select|textarea)\b/);
     expect(settingsPage).toContain('variant="settings-back"');
@@ -58,7 +58,9 @@ describe('ambient control ownership truth', () => {
     expect(settingsPage).toContain('variant="settings-skin-option"');
     expect(settingsPage).toContain('<AmbientInput');
     expect(settingsPage).toContain('<AmbientSelect');
-    expect(settingsPage).toContain('<AmbientTextarea');
+    // The drawer filter is edited inside the drawer now, so Settings keeps no
+    // manual multiline text inputs.
+    expect(settingsPage).not.toContain('AmbientTextarea');
   });
 
   it('keeps TerminalHeader consuming shared controls for its local buttons', () => {

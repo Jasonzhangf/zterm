@@ -115,8 +115,8 @@ describe('buildTraversalPlan candidate scope', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'ipv4',
-      'rtc-relay',
       'rtc-direct',
+      'rtc-relay',
     ]);
 
     const rtcCandidates = plan.candidates.filter((candidate) => candidate.kind === 'rtc');
@@ -153,8 +153,8 @@ describe('buildTraversalPlan candidate scope', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'ipv4',
-      'rtc-relay',
       'rtc-direct',
+      'rtc-relay',
     ]);
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       id: 'rtc-direct:daemon-a',
@@ -260,8 +260,8 @@ describe('buildTraversalPlan candidate scope', () => {
     expect(defaultPlan.candidates.map((candidate) => candidate.path)).toEqual(['ipv4']);
     expect(boundPlan.candidates.map((candidate) => candidate.path)).toEqual([
       'ipv4',
-      'rtc-relay',
       'rtc-direct',
+      'rtc-relay',
     ]);
     expect(buildTraversalPlanCached(
       targetWithRtcDirectory,
@@ -348,8 +348,8 @@ describe('buildTraversalPlan candidate scope', () => {
     );
     const rtc = crossDaemon.candidates.filter((candidate) => candidate.kind === 'rtc');
     expect(rtc.map((candidate) => candidate.id)).toEqual([
-      'relay-rtc:daemon-a',
       'rtc-direct:daemon-a',
+      'relay-rtc:daemon-a',
     ]);
     expect(JSON.stringify(rtc)).not.toContain('daemon-b');
     expect(JSON.stringify(rtc)).not.toContain('198.51.100.20');

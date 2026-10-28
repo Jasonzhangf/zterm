@@ -3,7 +3,11 @@ import { fetchRemoteTmuxSessionNamesByOwner } from './open-tab-restore';
 import type { BridgeSettings } from './bridge-settings';
 import { resolveRelayDaemonCanonicalHostId } from './relay-account-directory';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from './types';
-import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
+import type {
+  TerminalMuxTargetClientMessage,
+  TerminalSessionCatalog,
+  TerminalSessionCatalogEntry,
+} from '@zterm/shared/protocol';
 
 export interface RemoteTabAuditDeps {
   openTabStateRef: { current: { tabs: PersistedOpenTab[]; activeSessionId: string | null } };
@@ -17,8 +21,16 @@ export interface RemoteTabAuditDeps {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
+  queryTerminalSessionCatalogOnOpenTransport?: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<TerminalSessionCatalog | null>;
   remoteOpenTabAuditTokenRef: { current: number };
-  pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
+  pruneSessionGroupSelectionToRemoteTruth: (
+    target: { bridgeHost: string; bridgePort: number; daemonHostId?: string },
+    remoteSessionNames: string[],
+    remoteSessionCatalog?: TerminalSessionCatalogEntry[],
+  ) => void;
 }
 
 function buildAuditOwnerKey(target: Pick<PersistedOpenTab | SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
@@ -73,6 +85,7 @@ export async function auditOpenTabsAgainstRemoteSessions(
   const canonicalAuditTargets = auditTargets.map((target) => (
     canonicalizeAuditTarget(target, deps.relayDevices || [])
   ));
+  const sessionCatalogByTarget = new Map<string, TerminalSessionCatalogEntry[]>();
   const sessionNamesByTarget = await fetchRemoteTmuxSessionNamesByOwner({
     targets: canonicalAuditTargets,
     bridgeSettings: deps.bridgeSettingsRef.current,
@@ -81,6 +94,12 @@ export async function auditOpenTabsAgainstRemoteSessions(
     openSessions: deps.sessionsRef?.current,
     prioritySessionIds: deps.prioritySessionIdsRef?.current,
     manageTmuxSessionsOnOpenTransport: deps.manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport: deps.queryTerminalSessionCatalogOnOpenTransport,
+    onSessionCatalogFetched: (targetKey, sessionCatalog) => {
+      if (sessionCatalog.length > 0) {
+        sessionCatalogByTarget.set(targetKey, sessionCatalog);
+      }
+    },
   });
   if (deps.remoteOpenTabAuditTokenRef.current !== auditToken) {
     return;
@@ -100,11 +119,20 @@ export async function auditOpenTabsAgainstRemoteSessions(
     if (remoteSessionNames == null) {
       continue;
     }
-    deps.pruneSessionGroupSelectionToRemoteTruth({
-      bridgeHost: target.bridgeHost,
-      bridgePort: target.bridgePort,
-      daemonHostId: target.daemonHostId,
-    }, remoteSessionNames);
+    const remoteSessionCatalog = sessionCatalogByTarget.get(ownerKey);
+    if (remoteSessionCatalog && remoteSessionCatalog.length > 0) {
+      deps.pruneSessionGroupSelectionToRemoteTruth({
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: target.daemonHostId,
+      }, remoteSessionNames, remoteSessionCatalog);
+    } else {
+      deps.pruneSessionGroupSelectionToRemoteTruth({
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: target.daemonHostId,
+      }, remoteSessionNames);
+    }
   }
 
   if (deps.remoteOpenTabAuditTokenRef.current !== auditToken) {

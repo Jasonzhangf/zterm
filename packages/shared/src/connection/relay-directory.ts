@@ -27,6 +27,15 @@ export interface RelayTmuxSessionSnapshot {
   name: string;
   cwd?: string;
   title?: string;
+  /**
+   * Read-only Collab projection published by the daemon. The client treats
+   * absence as unclassified and never infers a role from the session name.
+   */
+  collab?: {
+    role: 'ceo' | 'master' | 'worker';
+    displayName: string;
+    agentState?: string;
+  };
   updatedAt: string;
 }
 
@@ -127,9 +136,23 @@ function validateEndpointCandidate(value: unknown) {
   }
 }
 
+function validateSessionCollab(value: unknown) {
+  const collab = requireControlObject(value, 'session collab');
+  rejectUnknownFields(collab, new Set(['role', 'displayName', 'agentState']), 'session collab');
+  if (collab.role !== 'ceo' && collab.role !== 'master' && collab.role !== 'worker') {
+    throw new Error(`unsupported session collab role: ${String(collab.role || '')}`);
+  }
+  if (typeof collab.displayName !== 'string' || !collab.displayName.trim()) {
+    throw new Error('session collab displayName is required');
+  }
+  if (collab.agentState !== undefined && typeof collab.agentState !== 'string') {
+    throw new Error('session collab agentState must be string');
+  }
+}
+
 function validateSessionSnapshot(value: unknown) {
   const session = requireControlObject(value, 'session snapshot');
-  rejectUnknownFields(session, new Set(['name', 'cwd', 'title', 'updatedAt']), 'session');
+  rejectUnknownFields(session, new Set(['name', 'cwd', 'title', 'collab', 'updatedAt']), 'session');
   if (typeof session.name !== 'string' || !session.name.trim()) {
     throw new Error('session snapshot name is required');
   }
@@ -140,6 +163,9 @@ function validateSessionSnapshot(value: unknown) {
     if (session[field] !== undefined && typeof session[field] !== 'string') {
       throw new Error(`session snapshot ${field} must be string`);
     }
+  }
+  if (session.collab !== undefined) {
+    validateSessionCollab(session.collab);
   }
 }
 
@@ -241,6 +267,19 @@ export function normalizeRelayTmuxSessionSnapshots(input: unknown, now: string):
       name,
       ...(asString(candidate.cwd) ? { cwd: asString(candidate.cwd) } : {}),
       ...(asString(candidate.title) ? { title: asString(candidate.title) } : {}),
+      ...(candidate.collab && typeof candidate.collab === 'object'
+        && (candidate.collab.role === 'ceo' || candidate.collab.role === 'master' || candidate.collab.role === 'worker')
+        && asString(candidate.collab.displayName)
+        ? {
+            collab: {
+              role: candidate.collab.role,
+              displayName: asString(candidate.collab.displayName),
+              ...(asString(candidate.collab.agentState)
+                ? { agentState: asString(candidate.collab.agentState) }
+                : {}),
+            },
+          }
+        : {}),
       updatedAt: asString(candidate.updatedAt) || now,
     });
   }

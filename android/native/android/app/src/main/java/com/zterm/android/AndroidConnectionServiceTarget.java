@@ -1,8 +1,12 @@
 package com.zterm.android;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -33,6 +37,7 @@ public final class AndroidConnectionServiceTarget {
     public final String bridgeHost;
     public final int bridgePort;
     public final String lanHost;
+    public final List<String> lanHosts;
     public final String authToken;
     public final String daemonHostId;
     public final String relayHostId;
@@ -52,6 +57,9 @@ public final class AndroidConnectionServiceTarget {
         this.bridgeHost = b.bridgeHost;
         this.bridgePort = b.bridgePort;
         this.lanHost = b.lanHost;
+        this.lanHosts = b.lanHosts == null || b.lanHosts.isEmpty()
+            ? Collections.emptyList()
+            : Collections.unmodifiableList(new ArrayList<>(b.lanHosts));
         this.authToken = b.authToken;
         this.daemonHostId = b.daemonHostId;
         this.relayHostId = b.relayHostId;
@@ -73,6 +81,13 @@ public final class AndroidConnectionServiceTarget {
         json.put("bridgeHost", bridgeHost);
         json.put("bridgePort", bridgePort);
         if (lanHost != null) json.put("lanHost", lanHost);
+        if (!lanHosts.isEmpty()) {
+            JSONArray hostsArray = new JSONArray();
+            for (String host : lanHosts) {
+                hostsArray.put(host);
+            }
+            json.put("lanHosts", hostsArray);
+        }
         if (authToken != null) json.put("authToken", authToken);
         if (daemonHostId != null) json.put("daemonHostId", daemonHostId);
         if (relayHostId != null) json.put("relayHostId", relayHostId);
@@ -101,11 +116,22 @@ public final class AndroidConnectionServiceTarget {
         if (bridgePort <= 0 || bridgePort > 65535) {
             throw new IllegalArgumentException("target.bridgePort out of range");
         }
+        List<String> parsedLanHosts = new ArrayList<>();
+        JSONArray rawLanHosts = json.optJSONArray("lanHosts");
+        if (rawLanHosts != null) {
+            for (int i = 0; i < rawLanHosts.length(); i++) {
+                String item = rawLanHosts.optString(i, "").trim();
+                if (!item.isEmpty() && !parsedLanHosts.contains(item)) {
+                    parsedLanHosts.add(item);
+                }
+            }
+        }
         return new Builder()
             .targetKey(targetKey.trim())
             .bridgeHost(bridgeHost.trim())
             .bridgePort(bridgePort)
             .lanHost(optTrim(json, "lanHost"))
+            .lanHosts(parsedLanHosts)
             .authToken(optTrim(json, "authToken"))
             .daemonHostId(optTrim(json, "daemonHostId"))
             .relayHostId(optTrim(json, "relayHostId"))
@@ -136,6 +162,7 @@ public final class AndroidConnectionServiceTarget {
             && Objects.equals(bridgeHost, that.bridgeHost)
             && bridgePort == that.bridgePort
             && Objects.equals(lanHost, that.lanHost)
+            && Objects.equals(lanHosts, that.lanHosts)
             && Objects.equals(authToken, that.authToken)
             && Objects.equals(daemonHostId, that.daemonHostId)
             && Objects.equals(relayHostId, that.relayHostId)
@@ -153,7 +180,7 @@ public final class AndroidConnectionServiceTarget {
 
     @Override
     public int hashCode() {
-        return Objects.hash(targetKey, bridgeHost, bridgePort, lanHost, authToken, daemonHostId,
+        return Objects.hash(targetKey, bridgeHost, bridgePort, lanHost, lanHosts, authToken, daemonHostId,
             relayHostId, tailscaleHost, ipv6Host, ipv4Host, signalUrl, signalToken,
             signalUrlFromRelay,
             relayDeviceId, turnUrl, turnUsername, turnCredential);
@@ -164,6 +191,7 @@ public final class AndroidConnectionServiceTarget {
         private String bridgeHost;
         private int bridgePort;
         private String lanHost;
+        private List<String> lanHosts;
         private String authToken;
         private String daemonHostId;
         private String relayHostId;
@@ -182,6 +210,7 @@ public final class AndroidConnectionServiceTarget {
         public Builder bridgeHost(String v) { this.bridgeHost = v; return this; }
         public Builder bridgePort(int v) { this.bridgePort = v; return this; }
         public Builder lanHost(String v) { this.lanHost = v; return this; }
+        public Builder lanHosts(List<String> v) { this.lanHosts = v; return this; }
         public Builder authToken(String v) { this.authToken = v; return this; }
         public Builder daemonHostId(String v) { this.daemonHostId = v; return this; }
         public Builder relayHostId(String v) { this.relayHostId = v; return this; }

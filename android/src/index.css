@@ -322,26 +322,6 @@ label:focus {
   --neo-accent: var(--zterm-neo-accent);
 }
 
-.zterm-neo-drawer {
-  background: var(--zterm-skeu-material) !important;
-  color: var(--zterm-skeu-text) !important;
-  border-right-color: var(--zterm-skeu-edge-dark) !important;
-}
-
-.zterm-neo-drawer input {
-  background: var(--zterm-skeu-well) !important;
-  color: var(--zterm-skeu-text) !important;
-  border-color: var(--zterm-skeu-edge-dark) !important;
-}
-
-.zterm-neo-drawer input::placeholder {
-  color: var(--zterm-panel-muted);
-}
-
-.zterm-neo-drawer button:active {
-  background: var(--zterm-skeu-material-pressed) !important;
-}
-
 .zterm-connection-status-strip {
   color: var(--zterm-skeu-text) !important;
 }
@@ -721,7 +701,6 @@ label:focus {
 .zterm-skeu-well,
 .zterm-skeu-input,
 .amb-field,
-.zterm-neo-drawer input,
 .zterm-quick-input-editor-shell,
 .zterm-file-sheet textarea,
 .zterm-file-sheet input,
@@ -735,7 +714,6 @@ label:focus {
 }
 
 .zterm-skeu-raised,
-.zterm-neo-drawer button,
 .zterm-connection-route-menu button,
 .zterm-copy-menu button,
 .zterm-file-sheet button,
@@ -765,7 +743,6 @@ label:focus {
 }
 
 .zterm-skeu-raised:hover,
-.zterm-neo-drawer button:hover,
 .zterm-file-sheet button:hover,
 [data-testid="resource-bottom-sheet"] button:hover,
 [data-testid="zterm-dialog-panel"] button:hover,
@@ -774,7 +751,6 @@ label:focus {
 }
 
 .zterm-skeu-raised:active,
-.zterm-neo-drawer button:active,
 .zterm-file-sheet button:active,
 [data-testid="resource-bottom-sheet"] button:active,
 [data-testid="zterm-dialog-panel"] button:active,
@@ -786,10 +762,7 @@ label:focus {
 
 .zterm-skeu-raised[aria-pressed="true"],
 .zterm-skeu-raised[aria-selected="true"],
-.zterm-skeu-raised[data-active="true"],
-.zterm-neo-drawer button[aria-pressed="true"],
-.zterm-neo-drawer button[aria-selected="true"],
-.zterm-neo-drawer button[data-active="true"] {
+.zterm-skeu-raised[data-active="true"] {
   background: var(--zterm-skeu-material-active) !important;
   color: var(--zterm-panel-accent) !important;
   border-color: var(--zterm-panel-accent-border) !important;
@@ -800,7 +773,6 @@ label:focus {
 }
 
 .zterm-skeu-raised:disabled,
-.zterm-neo-drawer button:disabled,
 .zterm-file-sheet button:disabled,
 [data-testid="resource-bottom-sheet"] button:disabled,
 [data-testid="zterm-dialog-panel"] button:disabled,

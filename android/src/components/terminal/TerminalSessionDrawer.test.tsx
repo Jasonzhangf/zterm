@@ -7,6 +7,7 @@ import {
   TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX,
   TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX,
   TERMINAL_SESSION_DRAWER_ROW_TITLE_FONT_SIZE_PX,
+  terminalSessionDrawerHiddenRestoreTestId,
 } from './TerminalSessionDrawerContent';
 
 afterEach(() => {
@@ -46,7 +47,7 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.click(screen.getByText('创建'));
   }
 
-  it('uses the compact two-thirds drawer width', () => {
+  it('uses the readable Operate-mode drawer width', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -58,8 +59,8 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    expect(screen.getByTestId('terminal-session-drawer').style.width).toBe('48vw');
-    expect(screen.getByTestId('terminal-session-drawer').style.maxWidth).toBe('187px');
+    expect(screen.getByTestId('terminal-session-drawer').style.width).toBe('78vw');
+    expect(screen.getByTestId('terminal-session-drawer').style.maxWidth).toBe('312px');
     expect(Number(screen.getByTestId('terminal-session-drawer').style.zIndex)).toBeGreaterThan(140);
     expect(Number(screen.getByTestId('terminal-session-drawer-overlay').style.zIndex)).toBeGreaterThan(140);
   });
@@ -135,8 +136,8 @@ describe('TerminalSessionDrawer', () => {
     const header = screen.getByTestId('terminal-session-drawer-header');
     expect(header.style.paddingTop).toBe('28px');
     expect(header.style.paddingBottom).toBe('6px');
-    expect(screen.getByTestId('terminal-session-drawer-close').style.width).toBe('28px');
-    expect(screen.getByTestId('terminal-session-drawer-close').style.height).toBe('28px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.width).toBe('36px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.height).toBe('36px');
 
     const row = screen.getByTestId('terminal-session-drawer-row-s1');
     const select = within(row).getByTestId('terminal-session-drawer-select-s1');
@@ -1191,6 +1192,398 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`)).toBeTruthy();
   });
 
+  it('shows Collab role badges with exact MASTER/WORKER labels', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[
+          { ...sessions[0], collab: { role: 'master', displayName: 'Jenny' } },
+          { ...sessions[1], collab: { role: 'worker', displayName: 'Alice', agentState: 'idle' } },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const masterBadge = screen.getByTestId('terminal-session-drawer-collab-s1');
+    expect(masterBadge.textContent).toBe('MASTER');
+    expect(masterBadge.style.color).toBe('var(--zterm-settings-success)');
+    const workerBadge = screen.getByTestId('terminal-session-drawer-collab-s2');
+    expect(workerBadge.textContent).toBe('WORKER');
+    expect(screen.queryByTestId('terminal-session-drawer-collab-s3')).toBeNull();
+  });
+
+  it('reports a truthful showing N / M count line from the unfiltered total', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        unfilteredSessionCount={7}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const count = screen.getByTestId('terminal-session-drawer-count');
+    expect(count.textContent).toBe('显示 2 / 7 个会话');
+    expect(Number(count.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
+  });
+
+  it('states no matching session for an active filter that empties the list', () => {
+    const onFilterModeChange = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[]}
+        unfilteredSessionCount={2}
+        filterMode="only-master"
+        onFilterModeChange={onFilterModeChange}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-session-drawer-empty-host')).toBeNull();
+    expect(screen.getByTestId('terminal-session-drawer-empty-filter')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-empty-filter').textContent)
+      .toContain('当前筛选没有匹配的 session');
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-empty-filter-reset'));
+    expect(onFilterModeChange).toHaveBeenCalledWith('all');
+  });
+
+  it('states all sessions hidden and restores them from the empty state', () => {
+    const onRestoreAllHiddenSessions = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[]}
+        hiddenSessionNames={['tmux-master']}
+        hiddenSessionCount={1}
+        unfilteredSessionCount={1}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onRestoreAllHiddenSessions={onRestoreAllHiddenSessions}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-session-drawer-empty-host')).toBeNull();
+    expect(screen.getByTestId('terminal-session-drawer-empty-hidden')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-empty-hidden').textContent)
+      .toContain('所有 session 已隐藏');
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-empty-hidden-restore'));
+    expect(onRestoreAllHiddenSessions).toHaveBeenCalled();
+  });
+
+  it('keeps the genuinely empty host copy when there are no sessions at all', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        hosts={[{ hostKey: 'daemon-a', hostLabel: 'Mac Studio', connected: true }]}
+        sessions={[]}
+        unfilteredSessionCount={0}
+        hostSummaries={[{
+          hostKey: 'daemon-a',
+          unfilteredSessionCount: 0,
+          hiddenSessionCount: 0,
+          roleFilteredSessionCount: 0,
+        }]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const empty = screen.getByTestId('terminal-session-drawer-empty-host');
+    expect(empty.textContent).toContain('没有活跃 session');
+    expect(screen.queryByTestId('terminal-session-drawer-empty-filter')).toBeNull();
+    expect(screen.queryByTestId('terminal-session-drawer-empty-hidden')).toBeNull();
+  });
+
+  it('shows the empty host state when a stale hidden name belongs to another host', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        hosts={[
+          { hostKey: 'daemon-empty', hostLabel: 'Empty Host', connected: true },
+          { hostKey: 'daemon-full', hostLabel: 'Full Host', connected: true },
+        ]}
+        sessions={[]}
+        hiddenSessionNames={['stale-session']}
+        hiddenSessionCount={1}
+        hostSummaries={[
+          {
+            hostKey: 'daemon-empty',
+            unfilteredSessionCount: 0,
+            hiddenSessionCount: 0,
+            roleFilteredSessionCount: 0,
+          },
+          {
+            hostKey: 'daemon-full',
+            unfilteredSessionCount: 2,
+            hiddenSessionCount: 1,
+            roleFilteredSessionCount: 0,
+          },
+        ]}
+        unfilteredSessionCount={2}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onRestoreAllHiddenSessions={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    // The first/selected host is genuinely empty; the stale hidden name on the
+    // full host must not make it report all sessions as hidden.
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-host-daemon-empty'));
+    expect(screen.getByTestId('terminal-session-drawer-empty-host').textContent)
+      .toContain('没有活跃 session');
+    expect(screen.queryByTestId('terminal-session-drawer-empty-hidden')).toBeNull();
+  });
+
+  it('shows the role-filter empty state from the selected host, not global membership', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        hosts={[
+          { hostKey: 'daemon-master', hostLabel: 'Master Host', connected: true },
+          { hostKey: 'daemon-workers', hostLabel: 'Workers Host', connected: true },
+        ]}
+        sessions={[]}
+        filterMode="only-master"
+        hostSummaries={[
+          {
+            hostKey: 'daemon-master',
+            unfilteredSessionCount: 1,
+            hiddenSessionCount: 0,
+            roleFilteredSessionCount: 0,
+          },
+          {
+            hostKey: 'daemon-workers',
+            unfilteredSessionCount: 3,
+            hiddenSessionCount: 0,
+            roleFilteredSessionCount: 3,
+          },
+        ]}
+        unfilteredSessionCount={4}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onFilterModeChange={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-host-daemon-workers'));
+    expect(screen.getByTestId('terminal-session-drawer-empty-filter').textContent)
+      .toContain('当前筛选没有匹配的 session');
+    expect(screen.queryByTestId('terminal-session-drawer-empty-host')).toBeNull();
+    expect(screen.queryByTestId('terminal-session-drawer-empty-hidden')).toBeNull();
+  });
+
+  it('reports all-hidden only when the selected host actually has hidden sessions', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        hosts={[{ hostKey: 'daemon-a', hostLabel: 'Daemon A', connected: true }]}
+        sessions={[]}
+        hiddenSessionNames={['shared']}
+        hiddenSessionCount={1}
+        hostSummaries={[{
+          hostKey: 'daemon-a',
+          unfilteredSessionCount: 1,
+          hiddenSessionCount: 1,
+          roleFilteredSessionCount: 0,
+        }]}
+        unfilteredSessionCount={1}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onRestoreAllHiddenSessions={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-empty-hidden').textContent)
+      .toContain('所有 session 已隐藏');
+    expect(screen.queryByTestId('terminal-session-drawer-empty-host')).toBeNull();
+  });
+
+  it('uses at least 40px filter segments at 11px label', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        filterMode="all"
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    for (const mode of ['all', 'only-master', 'hide-worker'] as const) {
+      const segment = screen.getByTestId(`terminal-session-drawer-filter-${mode}`);
+      expect(Number(segment.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(40);
+      expect(Number(segment.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
+    }
+  });
+
+  it('uses at least 36px row hide and close hit areas', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onHideSession={vi.fn()}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    for (const id of ['s1', 's2']) {
+      const hide = screen.getByTestId(`terminal-session-drawer-hide-${id}`);
+      const close = screen.getByTestId(`terminal-session-drawer-close-${id}`);
+      for (const control of [hide, close]) {
+        expect(Number(control.style.minWidth.replace('px', ''))).toBeGreaterThanOrEqual(36);
+        expect(Number(control.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(36);
+      }
+    }
+  });
+
+  it('uses at least 36px hidden tray restore controls at 11px label', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        hiddenSessionNames={['tmux-master']}
+        hiddenSessionCount={1}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onRestoreHiddenSession={vi.fn()}
+        onRestoreAllHiddenSessions={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const bulk = screen.getByTestId('terminal-session-drawer-restore-hidden');
+    expect(Number(bulk.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(36);
+    expect(Number(bulk.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
+    const single = screen.getByTestId(terminalSessionDrawerHiddenRestoreTestId('tmux-master'));
+    expect(Number(single.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(36);
+    expect(Number(single.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
+  });
+
+  it('renders legible 11px theme-adaptive Collab chips', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[
+          { ...sessions[0], collab: { role: 'master', displayName: 'Jenny' } },
+          { ...sessions[1], collab: { role: 'worker', displayName: 'Alice' } },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const masterBadge = screen.getByTestId('terminal-session-drawer-collab-s1');
+    expect(masterBadge.style.fontSize).toBe('11px');
+    expect(masterBadge.style.background).toBe('var(--zterm-settings-success-soft)');
+    expect(masterBadge.style.color).toBe('var(--zterm-settings-success)');
+    expect(masterBadge.style.border).toContain('var(--zterm-settings-success)');
+    const workerBadge = screen.getByTestId('terminal-session-drawer-collab-s2');
+    expect(workerBadge.style.fontSize).toBe('11px');
+    expect(workerBadge.style.background).toBe('var(--zterm-settings-warning-soft)');
+    expect(workerBadge.style.color).toBe('var(--zterm-settings-warning)');
+  });
+
+  it('hides a row from the row chip action and keeps long titles truncating', () => {
+    const onHideSession = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[
+          { ...sessions[0], title: 'a-very-long-session-title-that-must-never-reach-the-badge' },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onHideSession={onHideSession}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-hide-s1'));
+    expect(onHideSession).toHaveBeenCalledWith('s1');
+    expect(screen.getByTestId('terminal-session-drawer-hide-s1').getAttribute('aria-label'))
+      .toBe('隐藏 a-very-long-session-title-that-must-never-reach-the-badge');
+    const row = screen.getByTestId('terminal-session-drawer-row-s1');
+    expect((row.firstElementChild as HTMLElement).style.minWidth).toBe('0px');
+  });
+
+  it('shows the hidden tray with individual and bulk restore', () => {
+    const onRestoreHiddenSession = vi.fn();
+    const onRestoreAllHiddenSessions = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        hiddenSessionNames={['tmux-master', 'OneStop/1']}
+        hiddenSessionCount={2}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onRestoreHiddenSession={onRestoreHiddenSession}
+        onRestoreAllHiddenSessions={onRestoreAllHiddenSessions}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-hidden-tray')).toBeTruthy();
+    expect(screen.getByText('已隐藏 2')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-restore-hidden-tmux-master'));
+    expect(onRestoreHiddenSession).toHaveBeenCalledWith('tmux-master');
+    fireEvent.click(screen.getByTestId(terminalSessionDrawerHiddenRestoreTestId('OneStop/1')));
+    expect(onRestoreHiddenSession).toHaveBeenCalledWith('OneStop/1');
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-restore-hidden'));
+    expect(onRestoreAllHiddenSessions).toHaveBeenCalled();
+  });
+
+  it('renders segmented drawer filter controls and routes mode changes', () => {
+    const onFilterModeChange = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        filterMode="all"
+        onFilterModeChange={onFilterModeChange}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-filter-all').getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-filter-only-master'));
+    expect(onFilterModeChange).toHaveBeenCalledWith('only-master');
+    expect(screen.getByTestId('terminal-session-drawer-filter-only-master').textContent).toBe('仅 master');
+  });
+
   it('moves focus outside before a session close can hide the drawer', () => {
     let activeElementAtClose: Element | null = null;
     const onCloseSession = vi.fn(() => {
@@ -1272,8 +1665,8 @@ describe('TerminalSessionDrawer', () => {
     expect(overlay.style.transition).toContain('opacity 150ms ease');
 
     const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
-    expect(closeTarget.style.width).toBe('20px');
-    expect(closeTarget.style.height).toBe('20px');
+    expect(Number(closeTarget.style.minWidth.replace('px', ''))).toBeGreaterThanOrEqual(36);
+    expect(Number(closeTarget.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(36);
     expect(closeTarget.style.position).toBe('');
     expect(closeTarget.style.color).toBe('var(--zterm-panel-danger)');
   });
@@ -1433,6 +1826,68 @@ describe('TerminalSessionDrawer', () => {
     expect(dialogStyle).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(dialogStyle).not.toMatch(/rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+/);
   });
+
+  it('shows every project master session by default in only-master mode and expands other windows per project on demand', () => {
+    const onSelectSession = vi.fn();
+    const ztermMaster = {
+      id: 'zterm-m',
+      stableKey: 'stable-zterm-m',
+      title: 'zterm-master',
+      subtitle: 'Mac Studio · zterm-master',
+      cwd: '/Users/jason/code/zterm',
+      hostKey: 'mac-studio',
+      hostLabel: 'Mac Studio',
+      collab: { role: 'master' as const, displayName: 'Jenny' },
+    };
+    const ztermWorker = {
+      id: 'zterm-w1',
+      stableKey: 'stable-zterm-w1',
+      title: 'zterm-worker-1',
+      subtitle: 'Mac Studio · zterm-worker-1',
+      cwd: '/Users/jason/code/zterm',
+      hostKey: 'mac-studio',
+      hostLabel: 'Mac Studio',
+      collab: { role: 'worker' as const, displayName: 'Alice' },
+    };
+    const appsdkMaster = {
+      id: 'appsdk-m',
+      stableKey: 'stable-appsdk-m',
+      title: 'appsdk-master',
+      subtitle: 'Mac Studio · appsdk-master',
+      cwd: '/Users/jason/code/appsdk',
+      hostKey: 'mac-studio',
+      hostLabel: 'Mac Studio',
+      collab: { role: 'master' as const, displayName: 'Bob' },
+    };
+
+    render(
+      <TerminalSessionDrawer
+        open
+        filterMode="only-master"
+        sessions={[ztermMaster, appsdkMaster]}
+        unfilteredSessions={[ztermMaster, ztermWorker, appsdkMaster]}
+        unfilteredSessionCount={3}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    // Every project with a master session shows its master session by default
+    expect(screen.getByTestId('terminal-session-drawer-row-zterm-m')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-row-appsdk-m')).toBeTruthy();
+    // Other windows in zterm are hidden by default in only-master mode
+    expect(screen.queryByTestId('terminal-session-drawer-row-zterm-w1')).toBeNull();
+
+    // Expanding other windows for /Users/jason/code/zterm reveals zterm-worker-1
+    const expandOthersButton = screen.getByTestId('terminal-session-drawer-folder-expand-others-/Users/jason/code/zterm');
+    expect(expandOthersButton.textContent).toContain('+1 窗口');
+    fireEvent.click(expandOthersButton);
+
+    expect(screen.getByTestId('terminal-session-drawer-row-zterm-w1')).toBeTruthy();
+    expect(expandOthersButton.textContent).toContain('收起 (1)');
+  });
 });
 
 describe('TerminalSessionDrawer catalog availability', () => {
@@ -1494,5 +1949,51 @@ describe('TerminalSessionDrawer catalog availability', () => {
     render(<TerminalSessionDrawer open sessions={baseSessions} onClose={vi.fn()} onSelectSession={vi.fn()} onCloseSession={vi.fn()} onOpenQuickTabPicker={vi.fn()} />);
     expect(screen.getByTestId('terminal-session-drawer-row-herdr-missing').style.opacity).toBe('1');
     expect(screen.queryByTestId('terminal-session-drawer-retry-herdr-missing')).toBeNull();
+  });
+
+  it('pins CEO folder at the top of the drawer and renders CEO badge', () => {
+    const sessionsWithCeo = [
+      {
+        id: 'zterm-1',
+        stableKey: 'zterm-1',
+        title: 'zterm-1',
+        subtitle: 'Mac Studio · zterm-1',
+        status: 'connected' as const,
+        active: true,
+        hostKey: 'daemon-a',
+        hostLabel: 'Mac Studio',
+        cwd: '/Volumes/extension/code/zterm',
+        collab: { role: 'master' as const, displayName: 'Jenny' },
+      },
+      {
+        id: 'workspace-1',
+        stableKey: 'workspace-1',
+        title: 'workspace-1',
+        subtitle: 'Mac Studio · workspace-1',
+        status: 'connected' as const,
+        active: false,
+        hostKey: 'daemon-a',
+        hostLabel: 'Mac Studio',
+        cwd: '/Users/fanzhang/.collab/workspace',
+        collab: { role: 'ceo' as const, displayName: 'Bob' },
+      },
+    ];
+    render(
+      <TerminalSessionDrawer
+        open
+        filterMode="only-master"
+        sessions={sessionsWithCeo}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    const badge = screen.getByTestId('terminal-session-drawer-collab-workspace-1');
+    expect(badge.textContent).toBe('CEO');
+    const folders = screen.getAllByTestId(/^terminal-session-drawer-folder-button-/);
+    expect(folders[0]?.getAttribute('data-testid')).toBe(
+      'terminal-session-drawer-folder-button-/Users/fanzhang/.collab/workspace',
+    );
   });
 });

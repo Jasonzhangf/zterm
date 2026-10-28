@@ -4701,6 +4701,11 @@
       "status": "active"
     },
     {
+      "from_module": "daemon.session_catalog",
+      "to_module": "daemon.source_adapter",
+      "status": "active"
+    },
+    {
       "from_module": "daemon.session_idle_detection",
       "to_module": "daemon.runtime",
       "status": "active"
@@ -5027,6 +5032,11 @@
     {
       "from_module": "client.connection_service",
       "to_module": "client.runtime",
+      "status": "active"
+    },
+    {
+      "from_module": "client.connection_service",
+      "to_module": "client.connection_home",
       "status": "active"
     }
   ]
