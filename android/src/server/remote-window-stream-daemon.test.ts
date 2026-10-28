@@ -1302,6 +1302,157 @@ describe('remote window stream daemon v2 contract', () => {
     await runtime.dispose();
   });
 
+  it('projects the applied group total into the acknowledged profile for a composite request', async () => {
+    // Regression for: the ACK used the focus share as
+    // RemoteWindowVideoProfile.maxBitrateBps, but that field is the group total
+    // (resolveRemoteWindowStreamGroupBudget subtracts the overview allocation
+    // from it). The client stores appliedVideoProfile as the acknowledged
+    // profile, so a 6 Mbps group with a 250 kbps overview was reported as
+    // 5.75 Mbps and disagreed with appliedGroupBudget.
+    const harness = makeDeferredCaptureRuntime();
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('quality-group-total'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'window-2',
+          title: 'Example 2',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      },
+    };
+    const started = harness.runtime.startStream(payload, {
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    harness.releaseFactory();
+    await started;
+    const result = await harness.runtime.updateStreamQuality!({
+      requestId: 'rw-quality-group-total',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: profile(),
+    });
+    expect(result).toMatchObject({
+      status: 'applied',
+      appliedVideoProfile: { maxBitrateBps: 6_000_000, overviewMaxBitrateBps: 250_000 },
+      appliedGroupBudget: {
+        totalMaxBitrateBps: 6_000_000,
+        focus: { maxBitrateBps: 5_750_000 },
+        overview: { maxBitrateBps: 250_000 },
+      },
+    });
+    const applied = result as {
+      appliedVideoProfile?: { maxBitrateBps: number };
+      appliedGroupBudget?: { totalMaxBitrateBps: number };
+    };
+    expect(applied.appliedVideoProfile?.maxBitrateBps)
+      .toBe(applied.appliedGroupBudget?.totalMaxBitrateBps);
+    await harness.runtime.dispose();
+  });
+
+  it('keeps the applied profile equal to the applied group total when both composite senders reject updates', async () => {
+    // The group total is recomputed from the bitrates actually in force. With
+    // both lanes rejected, the two previous 1 Mbps encodings stay live, so the
+    // acknowledged profile and appliedGroupBudget must both say 2 Mbps.
+    const peerConnection = {
+      localDescription: null as RTCSessionDescriptionInit | null,
+      connectionState: 'connected' as RTCPeerConnectionState,
+      iceConnectionState: 'connected' as RTCIceConnectionState,
+      close: vi.fn(),
+      addTrack: vi.fn(() => ({
+        getParameters: () => ({ encodings: [{ maxBitrate: 1_000_000, maxFramerate: 30 }] }),
+        setParameters: vi.fn(async () => {
+          throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+        }),
+      })),
+      createOffer: vi.fn(async () => ({ type: 'offer' as const, sdp: 'offer-sdp' })),
+      setLocalDescription: vi.fn(async (description: RTCSessionDescriptionInit) => {
+        peerConnection.localDescription = description;
+      }),
+      setRemoteDescription: vi.fn(async () => undefined),
+      addIceCandidate: vi.fn(async () => undefined),
+    };
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track', stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async () => captureSource),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('degraded-group-total'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'window-2',
+          title: 'Example 2',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      },
+    };
+    await startRuntimeStream(runtime, payload);
+    const result = await runtime.updateStreamQuality!({
+      requestId: 'rw-quality-degraded-group-total',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: profile(),
+    });
+    expect(result).toMatchObject({
+      status: 'applied',
+      appliedVideoProfile: { maxBitrateBps: 2_000_000, overviewMaxBitrateBps: 1_000_000 },
+      appliedGroupBudget: {
+        totalMaxBitrateBps: 2_000_000,
+        focus: { maxBitrateBps: 1_000_000 },
+        overview: { maxBitrateBps: 1_000_000 },
+      },
+      senderParametersDegraded: [
+        { lane: 'focus', reason: 'InvalidStateError' },
+        { lane: 'overview', reason: 'InvalidStateError' },
+      ],
+    });
+    await runtime.dispose();
+  });
+
   it('reports the transport chroma capability so clarity tiers cannot offer 4:4:4', async () => {
     // The video path is capture(BGRA) -> I420 -> VP8, and VP8 has no 4:4:4 profile.
     // The capability must say so, because a 4:4:4 clarity tier would be a lie the

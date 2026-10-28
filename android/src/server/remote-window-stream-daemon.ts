@@ -2039,7 +2039,11 @@ export function createRemoteWindowStreamDaemonRuntime(
       // as applied truth.
       const appliedVideoProfile = {
         ...videoProfile,
-        maxBitrateBps: appliedQuality.appliedBudget.focus.maxBitrateBps,
+        // RemoteWindowVideoProfile.maxBitrateBps is the group total, not the
+        // focus share: resolveRemoteWindowStreamGroupBudget subtracts the
+        // overview allocation from it. Project the applied group total so the
+        // acknowledged profile agrees with appliedGroupBudget.
+        maxBitrateBps: appliedQuality.appliedBudget.totalMaxBitrateBps,
         ...(videoProfile.overviewMaxBitrateBps !== undefined && appliedQuality.appliedBudget.overview
           ? { overviewMaxBitrateBps: appliedQuality.appliedBudget.overview.maxBitrateBps }
           : {}),

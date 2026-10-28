@@ -209,6 +209,18 @@ function createCapabilityStatusChannel() {
         },
       });
     },
+    publishCaptureStarted(streamId: string) {
+      handler?.({
+        type: 'remote-window-stream-status',
+        payload: {
+          requestId: `capture-started-${streamId}`,
+          streamId,
+          purpose: 'focus',
+          phase: 'starting',
+          stage: 'capture-started',
+        },
+      });
+    },
   };
 }
 
@@ -1352,6 +1364,105 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByText('页面加载失败')).toBeNull();
     expect(commitDecodedFrame).not.toHaveBeenCalledWith(null);
     expect(commitDecodedFrame.mock.calls.every((call) => call[0] != null)).toBe(true);
+  });
+
+  it('keeps the confirmed capture stage through a second start response and reaches streaming on the first decoded frame', async () => {
+    // Controller-level regression for the stage contract. The daemon can send
+    // capture-started before the startStream response resolves; the resolved
+    // response re-begins the same stream before attaching the receiver. That
+    // second begin must not reset awaiting-first-frame, otherwise the single
+    // first-decoded-frame callback is ignored and the UI stays on "receiving".
+    const focusTrack = { id: 'track-capture-before-resolve', kind: 'video', readyState: 'live', muted: false };
+    const mediaStream = {
+      id: 'media-stream-capture-before-resolve',
+      getTracks: () => [focusTrack],
+      getVideoTracks: () => [focusTrack],
+    } as unknown as MediaStream;
+    const startResponse = createDeferred<{ streamId: string; mediaStream: MediaStream }>();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-capture-before-resolve',
+      targets: [makeTarget('app-capture-before-resolve', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn((_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => (
+      startResponse.promise.then(() => ({
+        streamId,
+        mediaStream,
+        bindings: [{
+          lane: 'focus' as const,
+          mediaStream,
+          streamId,
+          mediaPlanVersion: 2 as const,
+          mediaEpoch: 0,
+          trackId: focusTrack.id,
+        }],
+      }))
+    ));
+    const stopStream = vi.fn();
+    const statusChannel = createCapabilityStatusChannel();
+    const frameCallbacks: Array<{ video: HTMLVideoElement; callback: VideoFrameRequestCallback }> = [];
+    vi.mocked(HTMLVideoElement.prototype.requestVideoFrameCallback).mockImplementation(function (this: HTMLVideoElement, callback) {
+      frameCallbacks.push({ video: this, callback });
+      return frameCallbacks.length;
+    });
+    const drawImage = vi.fn();
+    const getContextSpy = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+      drawImage,
+    } as unknown as CanvasRenderingContext2D);
+
+    try {
+      render(
+        <RemoteWindowOverlay
+          activeSessionId="session-capture-before-resolve"
+          requestTargets={requestTargets}
+          startStream={startStream}
+          stopStream={stopStream}
+          onRemoteWindowMessage={statusChannel.onRemoteWindowMessage}
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+      fireEvent.click(await screen.findByTestId('remote-window-target-app-capture-before-resolve'));
+      await waitFor(() => expect(startStream).toHaveBeenCalledTimes(1));
+
+      // The promise is still pending: the daemon capture-started already arrived.
+      const streamId = startStream.mock.calls[0]![2];
+      statusChannel.publishCaptureStarted(streamId);
+
+      // Resolve the start response: the second begin + attach must preserve
+      // awaiting-first-frame, not reset it.
+      await act(async () => {
+        startResponse.resolve({ streamId, mediaStream });
+      });
+      const video = await screen.findByTestId('remote-window-video') as HTMLVideoElement;
+      expect(video.srcObject).toBe(mediaStream);
+      expect(screen.getByTestId('remote-window-stage-status').textContent).toContain('正在接收');
+      Object.defineProperties(video, {
+        readyState: { configurable: true, value: 4 },
+        videoWidth: { configurable: true, value: 800 },
+        videoHeight: { configurable: true, value: 600 },
+      });
+
+      // The single decoded-frame callback is the wire-truth event that closes the
+      // stage; it must reach streaming even though the second setup ran.
+      await waitFor(() => expect(frameCallbacks.some((frame) => frame.video === video)).toBe(true));
+      await act(async () => {
+        frameCallbacks.filter((frame) => frame.video === video).forEach((frame) => {
+          frame.callback(0, { presentedFrames: 1 } as VideoFrameCallbackMetadata);
+        });
+      });
+      // First decoded frame reaches the streaming stage through the controller.
+      // `applyRemoteWindowFirstDecodedFrame` only transitions from
+      // awaiting-first-frame. The stage chip disappears once playback reveals
+      // (`videoHasPlayed`), and the More panel streamStatusText reports "已连接".
+      fireEvent.click(screen.getByTestId('remote-window-more-toggle'));
+      await waitFor(() => {
+        expect(screen.queryByTestId('remote-window-stage-status')).toBeNull();
+        expect(screen.getByTestId('remote-window-user-stream-status').textContent)
+          .toContain('串流：已连接');
+      });
+      expect(stopStream).not.toHaveBeenCalled();
+    } finally {
+      getContextSpy.mockRestore();
+    }
   });
 
   it('stops the stream and reports unsupported decoded-frame projection', async () => {
