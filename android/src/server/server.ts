@@ -496,6 +496,7 @@ const {
   closeDetachedTerminalSession,
   renameTmuxSession,
 } = terminalControlRuntime;
+let relayHostClient: ReturnType<typeof createTraversalRelayHostClient> | null = null;
 const daemonSessionCatalogRuntime = createDaemonSessionCatalogRuntime({
   listTmuxSessions,
   listTerminalSessions,
@@ -504,9 +505,12 @@ const daemonSessionCatalogRuntime = createDaemonSessionCatalogRuntime({
   runTmuxAsyncForSession: (args, sessionName) => terminalControlRuntime.runTmuxAsyncForSession(args, sessionName),
   readProcessGroup: readDaemonProcessGroup,
   observationHistory: daemonSessionObservationHistory,
+  // The collab-only cadence resample updates the resident snapshot without a
+  // membership refresh; republish so phone clients receive in-place role
+  // changes through the same relay directory edge.
+  onCatalogResampled: () => relayHostClient?.publishDirectoryUpdate(),
 });
 const listTerminalSessionCatalog = () => daemonSessionCatalogRuntime.read();
-let relayHostClient: ReturnType<typeof createTraversalRelayHostClient> | null = null;
 const refreshDaemonSessionCatalog = async (detectedEntries?: TerminalSessionCatalogEntry[]) => {
   const catalog = await daemonSessionCatalogRuntime.refresh(undefined, detectedEntries);
   relayHostClient?.publishDirectoryUpdate();

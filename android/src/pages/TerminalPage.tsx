@@ -12,6 +12,7 @@ import { ResourceBottomSheet } from '../components/terminal/ResourceBottomSheet'
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { AmbientButton } from '../components/ambient';
+import { UNSCOPED_HOST_GROUP_KEY } from '../components/terminal/terminal-session-drawer-helpers';
 import {
   resolveSessionInputEpoch,
   resolveTerminalSessionGroupActiveSessionProjection,
@@ -31,17 +32,22 @@ import {
   TERMINAL_PORTRAIT_STAGE_TOP_OFFSET_PX,
 } from './terminal-page-status-helpers';
 import type {
+  TerminalSessionDrawerHostSummary,
   TerminalSessionDrawerHost,
   TerminalSessionDrawerItem,
   TerminalSessionDrawerSlot,
 } from '../lib/plugin-session-drawer/session-drawer-contract';
 import {
+  classifySessionDrawerVisibility,
   filterSessionsByDrawerVisibility,
   hideSessionName,
   normalizeSessionDrawerFilterConfig,
   restoreAllHiddenSessions,
+  restoreHiddenSessionName,
   resolveSessionNameForVisibility,
+  sessionMatchesDrawerVisibility,
   type SessionDrawerFilterConfig,
+  type SessionDrawerFilterMode,
 } from '../lib/plugin-session-drawer/session-drawer-visibility';
 import type { ResolveFileBrowserSessionPort, TerminalFileBrowserSlot } from '../lib/plugin-file-browser/file-browser-contract';
 import type {
@@ -1415,6 +1421,12 @@ function TerminalPageComponent({
           .filter((session) => session.name.trim() && session.cwd?.trim())
           .map((session) => [session.name.trim(), session.cwd!.trim()] as const),
       ].filter(([name]) => sessionNames.includes(name)));
+      const sessionCollabByName = Object.fromEntries([
+        ...Object.entries(existingGroup?.sessionCollabByName || {}),
+        ...catalogSessions
+          .filter((session) => session.name.trim() && session.collab?.role && session.collab?.displayName)
+          .map((session) => [session.name.trim(), session.collab!] as const),
+      ].filter(([name]) => sessionNames.includes(name)));
       const lastOpenedSessionName = existingGroup?.lastOpenedSessionName?.trim();
       return [{
         id: `daemon:${daemonHostId}`,
@@ -1427,6 +1439,7 @@ function TerminalPageComponent({
         relayEndpointCandidates: device.daemon.endpoints,
         sessionNames,
         ...(Object.keys(sessionCwdByName).length > 0 ? { sessionCwdByName } : {}),
+        ...(Object.keys(sessionCollabByName).length > 0 ? { sessionCollabByName } : {}),
         missingSessionNames: [],
         lastOpenedSessionName: lastOpenedSessionName && sessionNames.includes(lastOpenedSessionName)
           ? lastOpenedSessionName
@@ -1504,6 +1517,14 @@ function TerminalPageComponent({
           continue;
         }
         const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
+        const liveCatalogSession = relayDevice?.daemon.sessions?.find(
+          (session) => session.name.trim() === sessionName.trim(),
+        );
+        // Prefer the current catalog truth; only fall back to stored history
+        // when the live catalog does not cover this session and history has not
+        // been authoritatively cleared.
+        const sessionCollab = liveCatalogSession?.collab
+          ?? (!group.sessionCollabByNameCleared ? group.sessionCollabByName?.[sessionName] : undefined);
         const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
         const useLiveDaemonTarget = Boolean(relayDevice);
         const liveDirectEndpoint = (relayDevice?.daemon.endpoints || []).find((endpoint) => (
@@ -1600,6 +1621,7 @@ function TerminalPageComponent({
           hostLabel: serverIdentity.label,
           terminalBackend: groupBackend,
           cwd: group.sessionCwdByName?.[sessionName],
+          ...(sessionCollab ? { collab: sessionCollab } : {}),
           subtitle: `${serverIdentity.label} · ${sessionName}${formatTerminalBackendSuffix(groupBackend)}`,
         });
       }
@@ -1629,10 +1651,12 @@ function TerminalPageComponent({
       }
     }
     return {
+      unfilteredItems: items,
       items: filterSessionsByDrawerVisibility(
         items,
         resolvedSessionDrawerFilterConfig,
         (item) => resolveSessionNameForVisibility(item),
+        (item) => item.collab,
       ),
       unfilteredItemCount: items.length,
       targets,
@@ -1670,10 +1694,48 @@ function TerminalPageComponent({
     }
     return [...hosts.values()];
   }, [drawerRemoteSessions.items, relayCatalogProjectionDevices]);
-  const drawerSessions = useMemo(() => {
+  // Host-scoped pre-filter membership and removal reasons. The drawer empty
+  // state reads this so a stale hidden name on one host can never describe a
+  // genuinely empty or different selected host.
+  const drawerHostSummaries = useMemo<TerminalSessionDrawerHostSummary[]>(() => {
+    const hiddenNames = new Set(resolvedSessionDrawerFilterConfig.hiddenSessionNames);
+    const mode = resolvedSessionDrawerFilterConfig.mode;
+    const summaries = new Map<string, TerminalSessionDrawerHostSummary>();
+    const ensure = (hostKey: string) => {
+      let summary = summaries.get(hostKey);
+      if (!summary) {
+        summary = {
+          hostKey,
+          unfilteredSessionCount: 0,
+          hiddenSessionCount: 0,
+          roleFilteredSessionCount: 0,
+        };
+        summaries.set(hostKey, summary);
+      }
+      return summary;
+    };
+    for (const host of drawerHosts) {
+      ensure(host.hostKey);
+    }
+    for (const item of drawerRemoteSessions.unfilteredItems) {
+      const hostKey = item.hostKey?.trim() || UNSCOPED_HOST_GROUP_KEY;
+      const summary = ensure(hostKey);
+      summary.unfilteredSessionCount += 1;
+      const sessionName = resolveSessionNameForVisibility(item).trim();
+      if (sessionName && hiddenNames.has(sessionName)) {
+        summary.hiddenSessionCount += 1;
+        continue;
+      }
+      if (!sessionMatchesDrawerVisibility(classifySessionDrawerVisibility(item.collab), mode)) {
+        summary.roleFilteredSessionCount += 1;
+      }
+    }
+    return [...summaries.values()];
+  }, [drawerHosts, drawerRemoteSessions.unfilteredItems, resolvedSessionDrawerFilterConfig]);
+  const drawerNonHiddenSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
 
-    const catalogItems = drawerRemoteSessions.items.map((item) => {
+    const catalogItems = drawerRemoteSessions.unfilteredItems.map((item) => {
       const liveSession = sessions.find((session) => session.id === item.id) || null;
       if (!liveSession) {
         return item;
@@ -1708,10 +1770,58 @@ function TerminalPageComponent({
 
     return filterSessionsByDrawerVisibility(
       [...projectedItems.values()],
+      {
+        ...resolvedSessionDrawerFilterConfig,
+        mode: 'all',
+      },
+      (item) => resolveSessionNameForVisibility(item),
+      (item) => item.collab,
+    );
+  }, [activeSession, drawerRemoteSessions.unfilteredItemCount, drawerRemoteSessions.unfilteredItems, renderedPaneSessions, resolveSessionGroupSlot, resolvedSessionDrawerFilterConfig, sessions]);
+  const drawerSessions = useMemo(() => (
+    filterSessionsByDrawerVisibility(
+      drawerNonHiddenSessions,
       resolvedSessionDrawerFilterConfig,
       (item) => resolveSessionNameForVisibility(item),
-    );
-  }, [activeSession, drawerRemoteSessions.items, drawerRemoteSessions.unfilteredItemCount, renderedPaneSessions, resolveSessionGroupSlot, resolvedSessionDrawerFilterConfig, sessions]);
+      (item) => item.collab,
+    )
+  ), [drawerNonHiddenSessions, resolvedSessionDrawerFilterConfig]);
+  // Pre-filter session count for the drawer's "showing N / M" line and truthful
+  // empty-state copy. Derived from the same catalog the drawer rows come from.
+  const drawerUnfilteredSessionCount = useMemo(() => {
+    const preFilterCount = drawerRemoteSessions.unfilteredItemCount;
+    if (preFilterCount > 0) {
+      return preFilterCount;
+    }
+    // The empty-catalog fallback row stands in for one live client session.
+    return activeSession && activeSession.state !== 'closed' ? 1 : 0;
+  }, [activeSession, drawerRemoteSessions.unfilteredItemCount]);
+  // When the drawer has no remote catalog rows, fall back to a synthetic
+  // host-scoped summary so the empty state still reflects the selected host.
+  const drawerEffectiveHostSummaries = useMemo<TerminalSessionDrawerHostSummary[]>(() => {
+    if (drawerHostSummaries.length > 0) {
+      return drawerHostSummaries;
+    }
+    const hostSummariesFallbackSelectedHostKey = drawerHosts[0]?.hostKey || UNSCOPED_HOST_GROUP_KEY;
+    // The page owns the selected-host decision through the drawer group key.
+    const hostKey = hostSummariesFallbackSelectedHostKey;
+    const unfiltered = drawerUnfilteredSessionCount;
+    const mode = resolvedSessionDrawerFilterConfig.mode;
+    const hidden = resolvedSessionDrawerFilterConfig.hiddenSessionNames.length;
+    const roleFiltered = hidden > 0
+      ? 0
+      : (unfiltered > 0 && !sessionMatchesDrawerVisibility('unclassified', mode) ? unfiltered : 0);
+    return [{
+      hostKey,
+      unfilteredSessionCount: unfiltered,
+      hiddenSessionCount: hidden,
+      roleFilteredSessionCount: roleFiltered,
+    }];
+  }, [
+    drawerHostSummaries,
+    drawerUnfilteredSessionCount,
+    resolvedSessionDrawerFilterConfig,
+  ]);
   useEffect(() => {
     if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
       return;
@@ -3429,8 +3539,8 @@ function TerminalPageComponent({
   }, [handleSwitchSessionFromChrome]);
 
   const handleHideSessionFromDrawer = useCallback((sessionId: string) => {
-    const sessionName = drawerRemoteSessions.items
-      .concat(drawerSessions)
+    const sessionName = drawerRemoteSessions.unfilteredItems
+      .concat(drawerNonHiddenSessions)
       .find((item) => item.id === sessionId)?.sessionName?.trim();
     if (!sessionName || !onSessionDrawerFilterConfigChange) {
       return;
@@ -3438,11 +3548,26 @@ function TerminalPageComponent({
     onSessionDrawerFilterConfigChange(
       hideSessionName(resolvedSessionDrawerFilterConfig, sessionName),
     );
-  }, [drawerRemoteSessions.items, drawerSessions, onSessionDrawerFilterConfigChange, resolvedSessionDrawerFilterConfig]);
+  }, [drawerNonHiddenSessions, drawerRemoteSessions.unfilteredItems, onSessionDrawerFilterConfigChange, resolvedSessionDrawerFilterConfig]);
 
   const handleRestoreAllHiddenSessions = useCallback(() => {
     onSessionDrawerFilterConfigChange?.(
       restoreAllHiddenSessions(resolvedSessionDrawerFilterConfig),
+    );
+  }, [onSessionDrawerFilterConfigChange, resolvedSessionDrawerFilterConfig]);
+
+  const handleRestoreHiddenSessionFromDrawer = useCallback((sessionName: string) => {
+    onSessionDrawerFilterConfigChange?.(
+      restoreHiddenSessionName(resolvedSessionDrawerFilterConfig, sessionName),
+    );
+  }, [onSessionDrawerFilterConfigChange, resolvedSessionDrawerFilterConfig]);
+
+  const handleSessionDrawerFilterModeChange = useCallback((mode: SessionDrawerFilterMode) => {
+    onSessionDrawerFilterConfigChange?.(
+      normalizeSessionDrawerFilterConfig({
+        ...resolvedSessionDrawerFilterConfig,
+        mode,
+      }),
     );
   }, [onSessionDrawerFilterConfigChange, resolvedSessionDrawerFilterConfig]);
 
@@ -3466,7 +3591,7 @@ function TerminalPageComponent({
         });
         return;
       }
-      const title = drawerSessions.find((item) => item.id === sessionId)?.title
+      const title = drawerNonHiddenSessions.find((item) => item.id === sessionId)?.title
         || remoteCloseTarget.sessionName;
       setDrawerCloseDialog({
         sessionId,
@@ -3478,7 +3603,7 @@ function TerminalPageComponent({
       return;
     }
     onCloseSession(sessionId, 'terminal-session-drawer-close-button');
-  }, [drawerRemoteSessions.closeTargets, drawerSessions, onCloseDrawerRemoteSession, onCloseSession]);
+  }, [drawerNonHiddenSessions, drawerRemoteSessions.closeTargets, onCloseDrawerRemoteSession, onCloseSession]);
 
   const handleConfirmDrawerClose = useCallback(() => {
     if (!drawerCloseDialog) {
@@ -3920,6 +4045,7 @@ function TerminalPageComponent({
                 topInsetPx: headerTopInsetPx,
                 bottomInsetPx: keyboardInset,
                 sessions: drawerSessions,
+                unfilteredSessions: drawerNonHiddenSessions,
                 hosts: drawerHosts,
                 onClose: handleCloseSessionDrawer,
                 onSelectSession: handleSelectSessionFromDrawer,
@@ -3928,6 +4054,12 @@ function TerminalPageComponent({
                 onHideSession: handleHideSessionFromDrawer,
                 onRestoreAllHiddenSessions: handleRestoreAllHiddenSessions,
                 hiddenSessionCount: resolvedSessionDrawerFilterConfig.hiddenSessionNames.length,
+                hiddenSessionNames: resolvedSessionDrawerFilterConfig.hiddenSessionNames,
+                onRestoreHiddenSession: handleRestoreHiddenSessionFromDrawer,
+                unfilteredSessionCount: drawerUnfilteredSessionCount,
+                hostSummaries: drawerEffectiveHostSummaries,
+                filterMode: resolvedSessionDrawerFilterConfig.mode,
+                onFilterModeChange: handleSessionDrawerFilterModeChange,
                 sessionGroupLayoutAxis,
                 onOpenQuickTabPicker: handleOpenQuickTabPickerFromDrawer,
                 onDebugAddEvent: handleSessionDrawerDebugAddEvent,

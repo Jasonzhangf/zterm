@@ -33,7 +33,7 @@ import {
   killTmuxSession,
   renameTmuxSession,
 } from '../lib/tmux-sessions';
-import type { TerminalSessionCatalog } from '@zterm/shared/protocol';
+import type { TerminalSessionCatalog, TerminalSessionCollabProjection } from '@zterm/shared/protocol';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
@@ -91,6 +91,7 @@ interface UseSessionOpenActionsOptions {
     relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
     sessionCwdByName?: Record<string, string>;
+    sessionCollabByName?: Record<string, TerminalSessionCollabProjection>;
     lastOpenedSessionName?: string;
   }) => void;
   markSessionGroupEntered: (group: {
@@ -565,6 +566,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       Object.entries(existingTmuxGroup?.sessionCwdByName || {})
         .filter(([name, cwd]) => normalizedSessionNames.includes(name) && cwd?.trim()),
     );
+    const preservedTmuxCollabByName = Object.fromEntries(
+      Object.entries(existingTmuxGroup?.sessionCollabByName || {})
+        .filter(([name, collab]) => normalizedSessionNames.includes(name) && Boolean(collab?.role && collab?.displayName)),
+    );
     const baseGroup = {
       name: target.daemonHostId || target.relayHostId || target.bridgeHost,
       bridgeHost: target.bridgeHost,
@@ -585,6 +590,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         entries.push(entry);
         entriesByBackend.set(entry.backend, entries);
       }
+      const currentTmuxHasNoCollab = Boolean(
+        entriesByBackend.get('tmux')?.length
+        && (entriesByBackend.get('tmux') || []).every((entry) => !entry.collab?.role),
+      );
       for (const backend of ['tmux', 'herdr'] as const) {
         const backendNames = normalizeRemoteTmuxSessionNames(
           (entriesByBackend.get(backend) || []).map((entry) => entry.name),
@@ -605,6 +614,14 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
               );
               return Object.keys(sessionCwdByName).length > 0 ? { sessionCwdByName } : {};
             })(),
+            sessionCollabByName: Object.fromEntries(
+              (entriesByBackend.get(backend) || [])
+                .filter((entry) => entry.name.trim() && entry.collab?.role && entry.collab?.displayName)
+                .map((entry) => [entry.name.trim(), entry.collab!]),
+            ),
+            ...(backend === 'tmux' && currentTmuxHasNoCollab
+              ? { sessionCollabByNameCleared: true }
+              : {}),
           });
         }
         if (backendNames.length > 0) {
@@ -624,6 +641,9 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           sessionNames: normalizedSessionNames,
           ...(target.terminalBackend !== 'herdr' && Object.keys(preservedTmuxCwdByName).length > 0
             ? { sessionCwdByName: preservedTmuxCwdByName }
+            : {}),
+          ...(target.terminalBackend !== 'herdr' && Object.keys(preservedTmuxCollabByName).length > 0
+            ? { sessionCollabByName: preservedTmuxCollabByName }
             : {}),
         });
       }

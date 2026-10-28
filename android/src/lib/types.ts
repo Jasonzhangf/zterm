@@ -12,6 +12,7 @@ import type {
   BridgeClientMessage,
   BridgeServerMessage,
   RemoteWindowStreamCleanupResult,
+  TerminalSessionCollabProjection,
 } from '@zterm/shared/protocol';
 import type {
   SessionBufferState as SharedSessionBufferState,
@@ -398,6 +399,14 @@ export interface SessionGroupHistory {
   sessionNames: string[];
   /** daemon-owned cwd projection keyed by backend-qualified session name */
   sessionCwdByName?: Record<string, string>;
+  /** daemon-owned Collab projection keyed by backend-qualified session name */
+  sessionCollabByName?: Record<string, TerminalSessionCollabProjection>;
+  /**
+   * When true, the current authoritative catalog carried no Collab roles and
+   * any previously stored `sessionCollabByName` must be cleared. An omitted
+   * flag with an absent `sessionCollabByName` still preserves prior truth.
+   */
+  sessionCollabByNameCleared?: boolean;
   missingSessionNames?: string[];
   lastOpenedSessionName?: string;
   lastOpenedAt: number;

@@ -490,10 +490,8 @@ describe('bridge-settings helpers', () => {
     });
 
     expect(settings.sessionDrawerFilter).toEqual({
-      version: 1,
-      mode: 'hide-subagent',
-      masterNames: ['zterm-3'],
-      subagentNames: ['zterm-subagent-rw-ui-0906'],
+      version: 2,
+      mode: 'hide-worker',
       hiddenSessionNames: ['OneStop-1'],
     });
     expect(normalizeBridgeSettings({ ...baseSettings }).sessionDrawerFilter).toBeUndefined();

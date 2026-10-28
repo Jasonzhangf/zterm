@@ -29,7 +29,6 @@ import {
   AmbientButton,
   AmbientInput,
   AmbientSelect,
-  AmbientTextarea,
 } from '../components/ambient';
 import {
   settingsViewportPadding,
@@ -48,18 +47,8 @@ import type { BridgeSettingsWriteResult } from '@zterm/shared';
 import type { AppUpdatePreferencesWriteResult } from '../lib/app-update-runtime';
 import {
   normalizeSessionDrawerFilterConfig,
-  SESSION_DRAWER_FILTER_LABELS,
-  SESSION_DRAWER_FILTER_MODES,
   type SessionDrawerFilterConfig,
 } from '../lib/plugin-session-drawer/session-drawer-visibility';
-
-function sessionDrawerNamesToText(names: readonly string[]): string {
-  return names.join('\n');
-}
-
-function sessionDrawerNamesFromText(value: string): string[] {
-  return value.split(/\r?\n/);
-}
 
 interface SettingsPageProps {
   settings: BridgeSettings;
@@ -457,81 +446,8 @@ export function SettingsPage({
         <div data-testid="settings-session-drawer-filter" style={settingsSectionStyle()}>
           <SettingsSectionTitle>会话抽屉筛选</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
-            仅按这里明确列出的会话名分类；未列出的会话保持未分类。
+            Collab 角色由 daemon 只读投影决定。请在会话抽屉内切换筛选模式，并隐藏或恢复会话。
           </div>
-          <label htmlFor="settings-session-drawer-filter-mode" style={{ display: 'block', marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
-            筛选模式
-          </label>
-          <AmbientSelect
-            id="settings-session-drawer-filter-mode"
-            aria-label="会话抽屉筛选模式"
-            value={sessionDrawerFilterDraft.mode}
-            onChange={(event) => {
-              const mode = event.currentTarget.value as SessionDrawerFilterConfig['mode'];
-              setSessionDrawerFilterDraft((current) => ({
-                ...current,
-                mode,
-              }));
-            }}
-          >
-            {SESSION_DRAWER_FILTER_MODES.map((mode) => (
-              <option key={mode} value={mode}>{SESSION_DRAWER_FILTER_LABELS[mode]}</option>
-            ))}
-          </AmbientSelect>
-          <label htmlFor="settings-session-drawer-master-names" style={{ display: 'block', marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
-            master 会话名（每行一个）
-          </label>
-          <AmbientTextarea
-            variant="settings-multiline"
-            id="settings-session-drawer-master-names"
-            aria-label="master 会话名"
-            data-testid="settings-session-drawer-master-names"
-            rows={4}
-            value={sessionDrawerNamesToText(sessionDrawerFilterDraft.masterNames)}
-            onChange={(event) => {
-              const masterNames = sessionDrawerNamesFromText(event.currentTarget.value);
-              setSessionDrawerFilterDraft((current) => ({
-                ...current,
-                masterNames,
-              }));
-            }}
-          />
-          <label htmlFor="settings-session-drawer-subagent-names" style={{ display: 'block', marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
-            subagent 会话名（每行一个）
-          </label>
-          <AmbientTextarea
-            variant="settings-multiline"
-            id="settings-session-drawer-subagent-names"
-            aria-label="subagent 会话名"
-            data-testid="settings-session-drawer-subagent-names"
-            rows={4}
-            value={sessionDrawerNamesToText(sessionDrawerFilterDraft.subagentNames)}
-            onChange={(event) => {
-              const subagentNames = sessionDrawerNamesFromText(event.currentTarget.value);
-              setSessionDrawerFilterDraft((current) => ({
-                ...current,
-                subagentNames,
-              }));
-            }}
-          />
-          <label htmlFor="settings-session-drawer-hidden-names" style={{ display: 'block', marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>
-            隐藏会话名（每行一个）
-          </label>
-          <AmbientTextarea
-            variant="settings-multiline"
-            id="settings-session-drawer-hidden-names"
-            aria-label="隐藏会话名"
-            data-testid="settings-session-drawer-hidden-names"
-            rows={4}
-            value={sessionDrawerNamesToText(sessionDrawerFilterDraft.hiddenSessionNames)}
-            onChange={(event) => {
-              const hiddenSessionNames = sessionDrawerNamesFromText(event.currentTarget.value);
-              setSessionDrawerFilterDraft((current) => ({
-                ...current,
-                hiddenSessionNames,
-              }));
-            }}
-          />
         </div>
         </SettingsGroup>
 
