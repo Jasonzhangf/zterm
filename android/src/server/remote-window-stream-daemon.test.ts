@@ -1302,6 +1302,80 @@ describe('remote window stream daemon v2 contract', () => {
     await runtime.dispose();
   });
 
+  it('reports an unknown previous bitrate as degraded instead of the requested cap', async () => {
+    // A rejected setParameters() with no prior maxBitrate means the encoder
+    // runs unbounded (0). The ACK must carry a 0 bitrate, never the requested
+    // 6 Mbps.
+    const peerConnection = {
+      localDescription: null as RTCSessionDescriptionInit | null,
+      connectionState: 'connected' as RTCPeerConnectionState,
+      iceConnectionState: 'connected' as RTCIceConnectionState,
+      close: vi.fn(),
+      addTrack: vi.fn(() => ({
+        getParameters: () => ({ encodings: [{ rid: 'f' }] }),
+        setParameters: vi.fn(async () => {
+          throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+        }),
+      })),
+      createOffer: vi.fn(async () => ({ type: 'offer' as const, sdp: 'offer-sdp' })),
+      setLocalDescription: vi.fn(async (description: RTCSessionDescriptionInit) => {
+        peerConnection.localDescription = description;
+      }),
+      setRemoteDescription: vi.fn(async () => undefined),
+      addIceCandidate: vi.fn(async () => undefined),
+    };
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track', stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async () => captureSource),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const payload = start('unknown-bitrate-ack');
+    await startRuntimeStream(runtime, payload);
+
+    const result = await runtime.updateStreamQuality!({
+      requestId: 'rw-quality-unknown-bitrate',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: { ...profile(), maxCaptureWidth: 1200, maxCaptureHeight: 750, maxFrameRateFps: 24 },
+    });
+    expect(result).toMatchObject({
+      status: 'degraded-unknown-bitrate',
+      appliedVideoProfile: { maxBitrateBps: 0 },
+      appliedGroupBudget: { totalMaxBitrateBps: 0, focus: { maxBitrateBps: 0 } },
+      senderParametersDegraded: [{ lane: 'focus', reason: 'InvalidStateError' }],
+    });
+    expect(result).not.toMatchObject({ appliedVideoProfile: { maxBitrateBps: 6_000_000 } });
+    expect(captureSource.updateVideoProfile).toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
   it('projects the applied group total into the acknowledged profile for a composite request', async () => {
     // Regression for: the ACK used the focus share as
     // RemoteWindowVideoProfile.maxBitrateBps, but that field is the group total

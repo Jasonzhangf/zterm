@@ -62,4 +62,45 @@ describe('remote window acknowledged quality state', () => {
       message: 'sender rejected',
     })).toMatchObject({ phase: 'rejected', revision: 2, message: 'sender rejected' });
   });
+
+  it('forms acknowledged state when a lane bitrate is unknown (unbounded, 0)', () => {
+    // A rejected sender update with no previous maxBitrate must still yield a
+    // usable acknowledged profile: capture fields applied, bitrate reported as
+    // 0 (unbounded) instead of the requested cap.
+    const pending = beginRemoteWindowQualityRequest({
+      state: createRemoteWindowQualityApplyState(),
+      qualityKey: 'stream|smooth',
+      requested: config,
+    });
+    const accepted = acceptRemoteWindowQualityResult(pending.state, {
+      requestId: 'quality-unknown',
+      streamId: 'stream',
+      streamGroupId: 'stream',
+      mediaPlan: 'single-focus' as const,
+      mediaPlanVersion: 1 as const,
+      revision: pending.revision,
+      targetId: 'target',
+      status: 'degraded-unknown-bitrate',
+      requestedVideoProfile: config,
+      appliedVideoProfile: { ...config, maxBitrateBps: 0 },
+      appliedGroupBudget: {
+        totalMaxBitrateBps: 0,
+        focus: {
+          maxBitrateBps: 0,
+          maxFrameRateFps: config.maxFrameRateFps,
+          maxCaptureWidth: config.maxCaptureWidth,
+          maxCaptureHeight: config.maxCaptureHeight,
+          maxFrameAgeMs: config.maxFrameAgeMs,
+        },
+      },
+      senderParametersDegraded: [{ lane: 'focus', reason: 'InvalidStateError' }],
+    });
+    expect(accepted).toMatchObject({
+      phase: 'applied',
+      applied: { maxBitrateBps: 0 },
+      acknowledged: { profile: { maxBitrateBps: 0 } },
+    });
+    expect(accepted.phase === 'applied' && accepted.acknowledged.senderParametersDegraded)
+      .toEqual([{ lane: 'focus', reason: 'InvalidStateError' }]);
+  });
 });

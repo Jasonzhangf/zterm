@@ -59,7 +59,10 @@ function acknowledgedFromResult(
   qualityKey: string,
   result: RemoteWindowStreamQualityResultPayload,
 ): RemoteWindowQualityAcknowledged | null {
-  if (result.status !== 'applied' || !result.appliedVideoProfile) {
+  if (
+    (result.status !== 'applied' && result.status !== 'degraded-unknown-bitrate')
+    || !result.appliedVideoProfile
+  ) {
     return null;
   }
   return {

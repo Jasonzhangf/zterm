@@ -761,7 +761,13 @@ export interface RemoteWindowStreamQualityResultPayload {
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
-  status: 'applied' | 'rejected';
+  /**
+   * `degraded-unknown-bitrate` means the capture profile applied but a sender
+   * rejected the bitrate update while its previous bitrate is unknown. The
+   * applied budget then reports an unbounded (`0`) bitrate for that lane
+   * instead of inventing the requested limit.
+   */
+  status: 'applied' | 'degraded-unknown-bitrate' | 'rejected';
   requestedVideoProfile: RemoteWindowVideoProfile;
   appliedVideoProfile?: RemoteWindowVideoProfile;
   appliedGroupBudget?: RemoteWindowStreamGroupBudget;

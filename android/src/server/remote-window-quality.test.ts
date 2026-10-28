@@ -248,6 +248,33 @@ describe('remote window stream-group quality owner', () => {
     expect(applied.budget.focus.maxCaptureWidth).toBe(1440);
   });
 
+  it('flags a rejected sender update with an unset previous bitrate as unknown', async () => {
+    // A freshly negotiated sender usually has no maxBitrate until the first
+    // successful setParameters(). A rejection must not leave the requested
+    // limit in the applied budget.
+    const focusSender = {
+      getParameters: () => ({ encodings: [{ rid: 'f' }] }),
+      setParameters: vi.fn(async () => {
+        throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+      }),
+    } as unknown as RTCRtpSender;
+    const applied = await applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender,
+      focusCaptureSource: makeCapture({
+        maxFrameRateFps: 60,
+        maxCaptureWidth: 1920,
+        maxCaptureHeight: 1200,
+      }, vi.fn(async () => undefined)),
+    });
+
+    expect(applied.senderBitrateUnknown).toBe(true);
+    expect(applied.senderParametersDegraded).toEqual([
+      { lane: 'focus', reason: 'InvalidStateError' },
+    ]);
+    expect(applied.budget.focus.maxBitrateBps).toBe(6_000_000);
+  });
+
   it('applies the focus capture profile while the overview capture source is unassigned', async () => {
     // A composite stream starts the overview capture after the focus lane, so
     // the overview capture source can be missing when a quality request

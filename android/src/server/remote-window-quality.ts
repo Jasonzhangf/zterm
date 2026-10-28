@@ -157,6 +157,12 @@ export interface RemoteWindowStreamGroupQualityApplied {
    */
   appliedBudget: RemoteWindowStreamGroupBudget;
   /**
+   * True when a rejected sender update left one or more lane bitrates
+   * unbounded. The wire ACK must keep reporting unknown instead of inventing
+   * an applied value.
+   */
+  senderBitrateUnknown: boolean;
+  /**
    * Lanes whose negotiated sender encodings could not be updated. Their capture
    * profile still applied; their encoder keeps the previous bitrate.
    */
@@ -198,6 +204,7 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
     focus: { ...budget.focus },
     ...(budget.overview ? { overview: { ...budget.overview } } : {}),
   };
+  let senderBitrateUnknown = false;
   const applied: PreparedRemoteWindowQualityLane[] = [];
   const senderParametersDegraded: RemoteWindowStreamGroupQualityApplied['senderParametersDegraded'] = [];
   try {
@@ -224,6 +231,20 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
             }
             appliedBudget.totalMaxBitrateBps = appliedBudget.focus.maxBitrateBps
               + (appliedBudget.overview?.maxBitrateBps ?? 0);
+          } else {
+            // WebRTC treats an unset maxBitrate as unbounded. Preserve that
+            // truth (0 = no cap) instead of leaving the requested limit in the
+            // applied budget.
+            senderBitrateUnknown = true;
+            if (lane.laneName === 'focus') {
+              appliedBudget.focus.maxBitrateBps = 0;
+            } else if (appliedBudget.overview) {
+              appliedBudget.overview.maxBitrateBps = 0;
+            }
+            appliedBudget.totalMaxBitrateBps = appliedBudget.focus.maxBitrateBps === 0
+              || (appliedBudget.overview?.maxBitrateBps ?? 0) === 0
+              ? 0
+              : appliedBudget.focus.maxBitrateBps + (appliedBudget.overview?.maxBitrateBps ?? 0);
           }
           senderParametersDegraded.push({
             lane: lane.laneName,
@@ -244,7 +265,7 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
         lane.captureProfileApplied = true;
       }
     }
-    return { budget, appliedBudget, senderParametersDegraded };
+    return { budget, appliedBudget, senderParametersDegraded, senderBitrateUnknown };
   } catch (error) {
     const rollbackErrors: string[] = [];
     for (const lane of applied.reverse()) {

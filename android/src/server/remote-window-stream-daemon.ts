@@ -2048,6 +2048,26 @@ export function createRemoteWindowStreamDaemonRuntime(
           ? { overviewMaxBitrateBps: appliedQuality.appliedBudget.overview.maxBitrateBps }
           : {}),
       };
+      if (appliedQuality.senderBitrateUnknown) {
+        // The capture profile applied but at least one lane's previous bitrate
+        // is unknown (unbounded = 0). Ship the applied profile with a 0 bitrate
+        // so the client forms an acknowledged state without inventing a cap.
+        return {
+          requestId: payload.requestId,
+          streamId: payload.streamId,
+          streamGroupId: payload.streamGroupId,
+          mediaPlan: payload.mediaPlan,
+          mediaPlanVersion: payload.mediaPlanVersion,
+          revision: payload.revision,
+          purpose: entry.purpose,
+          targetId: payload.targetId,
+          status: 'degraded-unknown-bitrate',
+          requestedVideoProfile: payload.videoProfile,
+          appliedVideoProfile,
+          appliedGroupBudget: appliedQuality.appliedBudget,
+          senderParametersDegraded: appliedQuality.senderParametersDegraded,
+        };
+      }
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,

@@ -1059,6 +1059,88 @@ describe('daemon session catalog runtime', () => {
     }
   });
 
+  it('republishes a role change when two targets share a name on different sockets', async () => {
+    vi.useFakeTimers();
+    try {
+      const stableA = buildTmuxSessionStableId({
+        socketPath: '/socket-a',
+        serverPid: '501',
+        sessionId: '$1',
+        createdAt: 1000,
+      });
+      const stableB = buildTmuxSessionStableId({
+        socketPath: '/socket-b',
+        serverPid: '502',
+        sessionId: '$2',
+        createdAt: 2000,
+      });
+      const catalog: TerminalSessionCatalogEntry[] = [
+        { name: 'shared', backend: 'tmux', stableId: stableA, cwd: '/repo' },
+        { name: 'shared', backend: 'tmux', stableId: stableB, cwd: '/repo' },
+      ];
+      const listSessionsOutput = '$1\tshared\t/socket-a\t501\t1000\n$2\tshared\t/socket-b\t502\t2000';
+      const runTmuxAsync = vi.fn(async (args: string[]) => {
+        if (args[0] === 'list-sessions') {
+          return { ok: true as const, stdout: listSessionsOutput };
+        }
+        if (args[0] === 'list-panes') {
+          return { ok: true as const, stdout: 'shared\t1234\tcodex' };
+        }
+        return { ok: true as const, stdout: 'idle' };
+      });
+      let roleA: 'master' | 'worker' = 'master';
+      const runCollabWho = vi.fn(async () => ({
+        workers: [
+          {
+            display_name: 'shared',
+            role: roleA,
+            transport: { kind: 'tmux', endpoint: '/socket-a', namespace: '$1' },
+          },
+          {
+            display_name: 'shared',
+            role: 'worker',
+            transport: { kind: 'tmux', endpoint: '/socket-b', namespace: '$2' },
+          },
+        ],
+      }));
+      const republishedRoles: string[] = [];
+      let runtime: ReturnType<typeof createDaemonSessionCatalogRuntime>;
+      runtime = createDaemonSessionCatalogRuntime({
+        listTmuxSessions: vi.fn(() => []),
+        listTerminalSessionCatalog: () => catalog,
+        runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+        runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+        readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+        runCollabWho,
+        onCatalogResampled: () => {
+          const row = runtime.read().find((entry) => entry.stableId === stableA);
+          republishedRoles.push(row?.collab?.role ?? 'unclassified');
+        },
+      });
+
+      await runtime.refresh();
+      expect(runtime.read().find((entry) => entry.stableId === stableA)?.collab?.role)
+        .toBe('master');
+      expect(runtime.read().find((entry) => entry.stableId === stableB)?.collab?.role)
+        .toBe('worker');
+      expect(republishedRoles).toEqual([]);
+
+      // Only target A changes role. Keying the projection comparison by the
+      // shared display name would hide this change behind target B.
+      roleA = 'worker';
+      runtime.startRefreshLoop(1000);
+      vi.advanceTimersByTime(1000 + DAEMON_COLLAB_PROJECTION_CACHE_MS);
+      await vi.waitFor(() => {
+        expect(republishedRoles).toEqual(['worker']);
+      });
+      expect(runtime.read().find((entry) => entry.stableId === stableA)?.collab?.role)
+        .toBe('worker');
+      runtime.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('omits observations for ambiguous same-name tmux targets while sampling unique names and retaining Herdr', async () => {
     const staleObservation = {
       observedAt: 1,
