@@ -1111,6 +1111,197 @@ describe('remote window stream daemon v2 contract', () => {
     await runtime.dispose();
   });
 
+  it('keeps the focus lane streaming when the overview capture fails after it started', async () => {
+    // The overview lane is optional at every point of its life, not only at
+    // start. A capture error after the first frame used to call the whole-group
+    // stop owner, which closed a healthy focus picture and its input path.
+    const peerConnection = makePeerConnection();
+    const statuses: RemoteWindowStreamStatusPayload[] = [];
+    const laneFrames: Array<(frame: {
+      width: number;
+      height: number;
+      rgba: Uint8Array;
+      capturedAtMs?: number;
+    }) => void> = [];
+    const laneErrors: Array<(error: Error) => void> = [];
+    const videoSourceOnFrame = vi.fn();
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: `video-track-${laneFrames.length}`, stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: videoSourceOnFrame,
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async (_nextTarget, options) => {
+        laneFrames.push(options.onFrame);
+        laneErrors.push(options.onError);
+        return captureSource;
+      }),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const flush = async (turns = 6) => {
+      for (let turn = 0; turn < turns; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    };
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('overview-error-after-start'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'composite-live',
+          title: 'Computer Use Controls',
+          windowBoundsTopLeftPx: { x: 100, y: 100, width: 360, height: 352 },
+          cropRectTopLeftPx: { x: 100, y: 100, width: 360, height: 352 },
+        }],
+      },
+    };
+    const started = runtime.startStream(payload, {
+      sendStatus: (status) => {
+        statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    await expect(started).resolves.toMatchObject({
+      streamId: payload.streamId,
+      mediaPlanVersion: 2,
+    });
+    expect(laneErrors).toHaveLength(2);
+
+    // Both lanes are live; now the optional overview capture reports a runtime
+    // failure. Only that lane may be released.
+    laneErrors[1](new Error('overview SCStream stopped unexpectedly'));
+    await flush();
+
+    expect(captureSource.stop).toHaveBeenCalledTimes(1);
+    expect(statuses.some((status) => (
+      status.lane === 'overview'
+      && /overview lane unavailable: overview SCStream stopped unexpectedly/u.test(status.message ?? '')
+    ))).toBe(true);
+
+    // The focus lane still dispatches frames to its own video source.
+    const framesBefore = videoSourceOnFrame.mock.calls.length;
+    laneFrames[0]({
+      width: 800,
+      height: 600,
+      rgba: new Uint8Array(800 * 600 * 4),
+      capturedAtMs: 1_000_000,
+    });
+    await flush();
+    expect(videoSourceOnFrame.mock.calls.length).toBeGreaterThan(framesBefore);
+
+    // And the stream is still alive for a quality transaction.
+    await expect(runtime.updateStreamQuality!({
+      requestId: 'rw-quality-after-overview-error',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: profile(),
+    })).resolves.toMatchObject({ status: 'applied', streamId: payload.streamId });
+    await runtime.dispose();
+  });
+
+  it('acks the encoder bitrate actually in force when sender parameters are rejected', async () => {
+    // The pinned wrtc build rejects negotiated encoding updates. The capture
+    // profile still changes, but the ACK must report the previous encoder
+    // bitrate and the degraded lane instead of projecting the requested one.
+    const peerConnection = {
+      localDescription: null as RTCSessionDescriptionInit | null,
+      connectionState: 'connected' as RTCPeerConnectionState,
+      iceConnectionState: 'connected' as RTCIceConnectionState,
+      close: vi.fn(),
+      addTrack: vi.fn(() => ({
+        getParameters: () => ({ encodings: [{ maxBitrate: 1_000_000, maxFramerate: 30 }] }),
+        setParameters: vi.fn(async () => {
+          throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+        }),
+      })),
+      createOffer: vi.fn(async () => ({ type: 'offer' as const, sdp: 'offer-sdp' })),
+      setLocalDescription: vi.fn(async (description: RTCSessionDescriptionInit) => {
+        peerConnection.localDescription = description;
+      }),
+      setRemoteDescription: vi.fn(async () => undefined),
+      addIceCandidate: vi.fn(async () => undefined),
+    };
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track', stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async () => captureSource),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const payload = start('degraded-quality-ack');
+    await startRuntimeStream(runtime, payload);
+
+    await expect(runtime.updateStreamQuality!({
+      requestId: 'rw-quality-degraded',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: { ...profile(), maxCaptureWidth: 1200, maxCaptureHeight: 750, maxFrameRateFps: 24 },
+    })).resolves.toMatchObject({
+      status: 'applied',
+      appliedVideoProfile: { maxBitrateBps: 1_000_000 },
+      appliedGroupBudget: { totalMaxBitrateBps: 1_000_000, focus: { maxBitrateBps: 1_000_000 } },
+      senderParametersDegraded: [{ lane: 'focus', reason: 'InvalidStateError' }],
+    });
+    expect(captureSource.updateVideoProfile).toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
   it('reports the transport chroma capability so clarity tiers cannot offer 4:4:4', async () => {
     // The video path is capture(BGRA) -> I420 -> VP8, and VP8 has no 4:4:4 profile.
     // The capability must say so, because a 4:4:4 clarity tier would be a lie the

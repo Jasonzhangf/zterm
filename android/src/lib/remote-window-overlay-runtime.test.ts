@@ -526,6 +526,30 @@ describe('remote window session stage contract', () => {
     expect(stageOf(applyRemoteWindowFirstDecodedFrame(attached, 'stream-1'))).toBe('streaming');
   });
 
+  it('keeps the confirmed capture stage when the start response re-begins the same stream', () => {
+    // Controller order: begin at request time, daemon capture-started arrives
+    // before the start promise resolves, then the resolved response re-begins
+    // the same stream before attaching the receiver. The second begin must not
+    // reset awaiting-first-frame, otherwise the single first-decoded-frame
+    // event is ignored and the user stays on "waiting for data".
+    const requested = beginRemoteWindowStreamSetup(lockedState(), 'stream-1');
+    const captured = applyRemoteWindowCaptureStarted(requested, 'stream-1');
+    expect(stageOf(captured)).toBe('awaiting-first-frame');
+    const resolved = beginRemoteWindowStreamSetup(captured, 'stream-1');
+    expect(stageOf(resolved)).toBe('awaiting-first-frame');
+    const attached = attachRemoteWindowStreamReceiver(resolved, 'stream-1');
+    expect(stageOf(attached)).toBe('awaiting-first-frame');
+    expect(stageOf(applyRemoteWindowFirstDecodedFrame(attached, 'stream-1'))).toBe('streaming');
+  });
+
+  it('restarts setup after an error even when the stream id repeats', () => {
+    const failed = beginRemoteWindowStreamSetup(lockedState(), 'stream-1');
+    const errored = failRemoteWindowStream(failed, 'stream-1', new Error('start failed'));
+    const retried = beginRemoteWindowStreamSetup(errored, 'stream-1');
+    expect(stageOf(retried)).toBe('starting');
+    expect(retried.phase === 'targetLocked' ? retried.streamErrorMessage : null).toBeNull();
+  });
+
   it('ignores stage events that belong to another stream', () => {
     const attached = attachRemoteWindowStreamReceiver(
       beginRemoteWindowStreamSetup(lockedState(), 'stream-1'),

@@ -152,7 +152,7 @@ import {
   resolveRemoteWindowCloseResult,
   resolveRemoteWindowCloseDialogProjection,
   formatRemoteWindowStageLabel,
-  formatRemoteWindowRouteLatency,
+  formatRemoteWindowRouteLatency, formatRemoteWindowSenderDegradedSuffix,
   type RemoteWindowRouteLatencyFacts,
   type RemoteWindowOrientationPolicy,
   type RemoteWindowClosePhase,
@@ -591,7 +591,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
     onResetGestures: resetSurfaceGestures,
   });
   const {
-    lastAck, qualityStatus, failureMessage, adaptiveCause,
+    lastAck, qualityStatus, failureMessage, adaptiveCause, senderParametersDegraded,
     networkQuality,
     lastStatsSample, resetQualityState: resetQualityApplyState,
   } = useRemoteWindowQuality({
@@ -3029,7 +3029,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
       onQualityApply={(settings) => {
         commitQualitySettings(settings);
       }}
-      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : formatRemoteWindowStageLabel(state.streamStatus)} · ${qualityStatus}${formatRemoteWindowRouteLatency(routeLatencyFacts) ? ` · ${formatRemoteWindowRouteLatency(routeLatencyFacts)}` : ''}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
+      streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : formatRemoteWindowStageLabel(state.streamStatus)} · ${qualityStatus}${formatRemoteWindowRouteLatency(routeLatencyFacts) ? ` · ${formatRemoteWindowRouteLatency(routeLatencyFacts)}` : ''}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}${formatRemoteWindowSenderDegradedSuffix(senderParametersDegraded)}`}
       networkStatusText={`压力：${adaptiveCause === 'none' ? '无' : adaptiveCause} · 网络：${networkQuality?.effectiveType || '未知'}${networkQuality?.rttMs ? ` · RTT ${networkQuality.rttMs}ms` : ''}`}
       onDismiss={() => setStreamStatusOpen(false)}
       onRemoteClose={openRemoteCloseConfirm}
@@ -3096,7 +3096,7 @@ export const RemoteWindowOverlayController = memo(function RemoteWindowOverlayCo
           moreOpen={streamStatusOpen}
           screenshotBusy={screenshotBusy}
           screenshotButtonStyle={screenshotButtonStyle}
-          streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : formatRemoteWindowStageLabel(state.streamStatus)} · ${qualityStatus}${formatRemoteWindowRouteLatency(routeLatencyFacts) ? ` · ${formatRemoteWindowRouteLatency(routeLatencyFacts)}` : ''}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}`}
+          streamStatusText={`串流：${state.streamStatus === 'streaming' ? '已连接' : formatRemoteWindowStageLabel(state.streamStatus)} · ${qualityStatus}${formatRemoteWindowRouteLatency(routeLatencyFacts) ? ` · ${formatRemoteWindowRouteLatency(routeLatencyFacts)}` : ''}${lastAck ? ` · 已确认：${formatRemoteWindowQualityProfile(lastAck.profile)}` : ''}${failureMessage ? ` · ${failureMessage}` : ''}${formatRemoteWindowSenderDegradedSuffix(senderParametersDegraded)}`}
           targetKindLabel={formatTargetKind(state.target)}
            passivePreview={embedded && state.mode === 'floating'}
           onClose={handleExplicitClose}

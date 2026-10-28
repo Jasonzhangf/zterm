@@ -234,6 +234,11 @@ describe('remote window stream-group quality owner', () => {
     expect(applied.senderParametersDegraded).toEqual([
       { lane: 'focus', reason: 'InvalidStateError' },
     ]);
+    // The acknowledgement must carry the encoder bitrate that is actually in
+    // force, not the requested one.
+    expect(applied.appliedBudget.focus.maxBitrateBps).toBe(9_000_000);
+    expect(applied.appliedBudget.totalMaxBitrateBps).toBe(9_000_000);
+    expect(applied.budget.focus.maxBitrateBps).toBe(6_000_000);
     expect(updateVideoProfile).toHaveBeenCalledTimes(1);
     expect(updateVideoProfile).toHaveBeenCalledWith({
       maxFrameRateFps: 30,

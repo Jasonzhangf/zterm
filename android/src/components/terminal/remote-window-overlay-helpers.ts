@@ -813,6 +813,17 @@ export function formatRemoteWindowRouteLatency(facts: RemoteWindowRouteLatencyFa
 }
 
 /**
+ * The quality ACK's applied profile already carries the encoder bitrate that
+ * is actually in force. This suffix names the lanes whose requested budget the
+ * pinned wrtc build rejected, so "confirmed" never hides a missing change.
+ */
+export function formatRemoteWindowSenderDegradedSuffix(
+  lanes: ReadonlyArray<{ lane: 'focus' | 'overview' }>,
+): string {
+  return lanes.length === 0 ? '' : ` · 码率未生效：${lanes.map((lane) => lane.lane).join('、')}`;
+}
+
+/**
  * Maps the traversal owner's resolved path to a short user label. Unknown or
  * missing paths return null so the caller keeps the plain stage wording.
  */

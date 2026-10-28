@@ -841,6 +841,35 @@ export function createRemoteWindowStreamDaemonRuntime(
   };
 
   /**
+   * The overview lane is an optional enhancement. Its runtime failure never
+   * owns the focus stream: release only this lane's capture, publish an explicit
+   * unavailable status, and keep the focus capture, input and shared peer.
+   */
+  const releaseRemoteWindowOverviewLane = (entry: ActiveRemoteWindowStream, reason: string) => {
+    const overviewCaptureSource = entry.overviewCaptureSource;
+    if (!overviewCaptureSource) {
+      return;
+    }
+    entry.overviewCaptureSource = null;
+    let stopError: string | null = null;
+    try {
+      overviewCaptureSource.stop();
+    } catch (error) {
+      stopError = error instanceof Error ? error.message : String(error);
+    }
+    entry.handlers.sendStatus?.({
+      requestId: entry.requestId,
+      streamId: entry.streamId,
+      purpose: entry.purpose,
+      phase: entry.framesSent > 0 ? 'streaming' : 'starting',
+      lane: 'overview',
+      framesSent: entry.framesSent,
+      framesDropped: entry.framesDropped,
+      message: `overview lane unavailable: ${reason}${stopError ? `; stop failed: ${stopError}` : ''}`,
+    });
+  };
+
+  /**
    * The one serialized async stop owner. Admission closes immediately, pending
    * answers are cancelled before any negotiation continuation, already admitted
    * input settles, then input-helper leases and session resources are released.
@@ -1152,10 +1181,12 @@ export function createRemoteWindowStreamDaemonRuntime(
       try {
         sendRemoteWindowVideoFrame(entry, pending.frame, lane);
       } catch (error) {
-        stopAndSurface(
-          entry,
-          `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        const reason = `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`;
+        if (lane === 'overview') {
+          releaseRemoteWindowOverviewLane(entry, reason);
+        } else {
+          stopAndSurface(entry, reason);
+        }
         return;
       }
       if (lane === 'overview' ? entry.pendingOverviewFrame : entry.pendingFocusFrame) {
@@ -1561,7 +1592,10 @@ export function createRemoteWindowStreamDaemonRuntime(
             if (!isCurrentStream(streamEntry)) {
               return;
             }
-            stopAndSurface(streamEntry, error.message || 'remote window overview capture failed');
+            releaseRemoteWindowOverviewLane(
+              streamEntry,
+              error.message || 'remote window overview capture failed',
+            );
           },
         }).catch((overviewStartError: unknown) => {
           // overview 是低码率总览增强，不是用户正在看/正在输入的主画面。它起不来时按本文件
@@ -1999,6 +2033,17 @@ export function createRemoteWindowStreamDaemonRuntime(
       entry.videoProfile = videoProfile;
       entry.maxFrameAgeMs = videoProfile.maxFrameAgeMs;
       entry.qualityRevision = payload.revision;
+      // The ACK reports what the senders actually applied. When wrtc rejects a
+      // negotiated encoding update, the capture profile still changed but the
+      // encoder keeps its previous bitrate; never project the requested budget
+      // as applied truth.
+      const appliedVideoProfile = {
+        ...videoProfile,
+        maxBitrateBps: appliedQuality.appliedBudget.focus.maxBitrateBps,
+        ...(videoProfile.overviewMaxBitrateBps !== undefined && appliedQuality.appliedBudget.overview
+          ? { overviewMaxBitrateBps: appliedQuality.appliedBudget.overview.maxBitrateBps }
+          : {}),
+      };
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
@@ -2010,8 +2055,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         targetId: payload.targetId,
         status: 'applied',
         requestedVideoProfile: payload.videoProfile,
-        appliedVideoProfile: videoProfile,
-        appliedGroupBudget: appliedQuality.budget,
+        appliedVideoProfile,
+        appliedGroupBudget: appliedQuality.appliedBudget,
         ...(appliedQuality.senderParametersDegraded.length > 0
           ? { senderParametersDegraded: appliedQuality.senderParametersDegraded }
           : {}),

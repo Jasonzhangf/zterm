@@ -151,6 +151,12 @@ function prepareLane(
 export interface RemoteWindowStreamGroupQualityApplied {
   budget: RemoteWindowStreamGroupBudget;
   /**
+   * The budget the senders actually accepted. A lane whose negotiated
+   * `setParameters()` was rejected keeps its previous encoder bitrate, so this
+   * budget reports that value instead of the requested one.
+   */
+  appliedBudget: RemoteWindowStreamGroupBudget;
+  /**
    * Lanes whose negotiated sender encodings could not be updated. Their capture
    * profile still applied; their encoder keeps the previous bitrate.
    */
@@ -187,6 +193,11 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
       budget: budget.overview,
     }, 'overview', { requireCaptureSource: false }));
   }
+  const appliedBudget: RemoteWindowStreamGroupBudget = {
+    totalMaxBitrateBps: budget.totalMaxBitrateBps,
+    focus: { ...budget.focus },
+    ...(budget.overview ? { overview: { ...budget.overview } } : {}),
+  };
   const applied: PreparedRemoteWindowQualityLane[] = [];
   const senderParametersDegraded: RemoteWindowStreamGroupQualityApplied['senderParametersDegraded'] = [];
   try {
@@ -202,7 +213,18 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
           // The capture profile is the resolution lever the user sees. A
           // runtime that rejects every negotiated encoding update must not take
           // it down: keep the previous encoder bitrate for this lane, report the
-          // degradation, and still apply the capture profile.
+          // degradation, and still apply the capture profile. The acknowledgement
+          // must carry that previous bitrate as the applied truth.
+          const previousBitrate = lane.previousEncodingParameters[0]?.maxBitrate;
+          if (typeof previousBitrate === 'number' && Number.isFinite(previousBitrate)) {
+            if (lane.laneName === 'focus') {
+              appliedBudget.focus.maxBitrateBps = previousBitrate;
+            } else if (appliedBudget.overview) {
+              appliedBudget.overview.maxBitrateBps = previousBitrate;
+            }
+            appliedBudget.totalMaxBitrateBps = appliedBudget.focus.maxBitrateBps
+              + (appliedBudget.overview?.maxBitrateBps ?? 0);
+          }
           senderParametersDegraded.push({
             lane: lane.laneName,
             reason: formatRemoteWindowVideoProfileError(error),
@@ -222,7 +244,7 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
         lane.captureProfileApplied = true;
       }
     }
-    return { budget, senderParametersDegraded };
+    return { budget, appliedBudget, senderParametersDegraded };
   } catch (error) {
     const rollbackErrors: string[] = [];
     for (const lane of applied.reverse()) {

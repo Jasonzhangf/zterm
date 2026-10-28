@@ -347,6 +347,13 @@ export function beginRemoteWindowStreamSetup(
       streamErrorMessage: 'Remote window stream requires streamId',
     };
   }
+  if (state.streamId === normalizedStreamId && state.streamStatus !== 'error') {
+    // The request already began this exact stream. Re-running setup after the
+    // start response resolves must not erase a stage the daemon already
+    // confirmed (capture-started -> awaiting-first-frame); the decoded-frame
+    // event is delivered once and would otherwise be dropped forever.
+    return state;
+  }
   return {
     ...state,
     streamId: normalizedStreamId,

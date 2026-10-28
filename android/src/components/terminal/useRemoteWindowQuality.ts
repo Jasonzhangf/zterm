@@ -303,6 +303,16 @@ export function useRemoteWindowQuality({
     if (qualityApplyStateRef.current.phase === 'rejected' && qualityApplyStateRef.current.unsupported) {
       return;
     }
+    // The pinned wrtc build rejects negotiated encoding updates, so the
+    // encoder keeps its previous bitrate. An automatic bitrate ladder would
+    // keep requesting a budget that can never apply, so stop dispatch here
+    // while the manual path and capture-profile requests stay available.
+    if (
+      qualityApplyStateRef.current.acknowledged?.senderParametersDegraded
+        .some((lane) => lane.lane === 'focus')
+    ) {
+      return;
+    }
     if (qualityApplyStateRef.current.acknowledged === null) {
       return;
     }
@@ -569,6 +579,7 @@ export function useRemoteWindowQuality({
           ? qualityApplyState.unsupported ? 'unsupported' as const : 'rejected' as const
           : 'idle' as const,
     lastAck: qualityApplyState.acknowledged,
+    senderParametersDegraded: qualityApplyState.acknowledged?.senderParametersDegraded ?? [],
     failureMessage: qualityApplyState.phase === 'rejected' ? qualityApplyState.message : null,
     failureCode: qualityApplyState.phase === 'rejected' ? qualityApplyState.code : null,
     networkQuality,
