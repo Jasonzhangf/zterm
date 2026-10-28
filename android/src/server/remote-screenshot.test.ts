@@ -23,7 +23,11 @@ describe('resolveRemoteScreenshotErrorMessage', () => {
       15000,
     );
 
-    expect(message).toBe('zterm-daemon 缺少系统截图权限，请在 Mac 系统设置 -> 隐私与安全性 -> 屏幕与系统音频录制 中允许 zterm-daemon，然后重新运行 zterm-daemon install-service');
+    // The install step owns the grant, so the message must send the user there
+    // first and keep the manual Privacy list route as the fallback.
+    expect(message).toContain('重新运行 zterm-daemon install-service');
+    expect(message).toContain('安装步骤会弹出系统授权窗口');
+    expect(message).toContain('系统设置 -> 隐私与安全性 -> 屏幕与系统音频录制');
   });
 
   it('keeps timeout errors explicit', () => {

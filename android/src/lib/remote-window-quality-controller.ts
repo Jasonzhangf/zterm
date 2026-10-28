@@ -12,6 +12,14 @@ export interface RemoteWindowQualityAcknowledged {
   qualityKey: string;
   profile: RemoteWindowVideoProfile;
   groupBudget: RemoteWindowStreamGroupBudget | null;
+  /**
+   * Lanes whose encoder bitrate could not be updated, so the applied profile
+   * only changed the capture resolution/frame rate for them. Empty when the
+   * whole group budget applied.
+   */
+  senderParametersDegraded: NonNullable<
+    RemoteWindowStreamQualityResultPayload['senderParametersDegraded']
+  >;
 }
 
 export type RemoteWindowQualityApplyState =
@@ -59,6 +67,7 @@ function acknowledgedFromResult(
     qualityKey,
     profile: result.appliedVideoProfile,
     groupBudget: result.appliedGroupBudget ?? null,
+    senderParametersDegraded: result.senderParametersDegraded ?? [],
   };
 }
 

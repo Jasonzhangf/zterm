@@ -1,7 +1,7 @@
 import type { CSSProperties, RefObject } from 'react';
 import ztermRemoteWindowLogoUrl from '../../../../assets/logo_engraved.png';
 import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
-import { formatTargetSubtitle } from './remote-window-overlay-helpers';
+import { formatRemoteWindowStageLabel, formatTargetSubtitle } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
 
 export interface RemoteWindowVideoContentProps {
@@ -53,6 +53,11 @@ export function RemoteWindowVideoContent({
     return (
       <>
         {wallpaper}
+        {!videoHasPlayed ? (
+          <div data-testid="remote-window-stage-status" style={{ ...styles.videoStatus, position: 'absolute', zIndex: 3 }}>
+            {formatRemoteWindowStageLabel(streamStatus)}
+          </div>
+        ) : null}
         {overviewCropVisible ? (
           <canvas
             ref={overviewCanvasRef}
@@ -135,7 +140,9 @@ export function RemoteWindowVideoContent({
     return (
       <div style={styles.videoFrame}>
         {wallpaper}
-        <div style={styles.videoStatus}>正在建立视频流</div>
+        <div data-testid="remote-window-stage-status" style={styles.videoStatus}>
+          {formatRemoteWindowStageLabel(streamStatus)}
+        </div>
         <div style={styles.videoMeta}>{formatTargetSubtitle(target)}</div>
       </div>
     );
@@ -144,7 +151,7 @@ export function RemoteWindowVideoContent({
     return (
       <div data-testid="remote-window-stream-error" style={{ ...styles.videoFrame, ...styles.videoError }}>
         {wallpaper}
-        <div style={styles.videoStatus}>视频流启动失败</div>
+        <div style={styles.videoStatus}>{formatRemoteWindowStageLabel(streamStatus)}</div>
         <div style={styles.videoMeta}>{streamErrorMessage || 'remote window stream failed'}</div>
       </div>
     );
@@ -152,7 +159,9 @@ export function RemoteWindowVideoContent({
   return (
     <div style={styles.videoFrame}>
       {wallpaper}
-      <div style={styles.videoStatus}>等待视频流</div>
+      <div data-testid="remote-window-stage-status" style={styles.videoStatus}>
+        {formatRemoteWindowStageLabel(streamStatus)}
+      </div>
       <div style={styles.videoMeta}>{formatTargetSubtitle(target)}</div>
     </div>
   );

@@ -986,7 +986,25 @@ describe('terminal mirror runtime lifecycle truth', () => {
         sessions,
         captureMirrorAuthoritativeBufferFromTmux,
       } = createRuntime({
-        mirrorBufferChanged: () => (changed ? [{ startIndex: 10, endIndex: 11 }] : []),
+        // The capture has to carry the change: an identical capture is provably
+        // an empty publish and the runtime short-circuits it before the diff.
+        captureMirrorAuthoritativeBufferFromTmux: async (mirror: SessionMirror) => {
+          mirror.bufferStartIndex = 0;
+          mirror.bufferLines = changed
+            ? [[{ char: 120, fg: 256, bg: 256, flags: 0, width: 1 }]]
+            : [];
+          mirror.cursor = null;
+          mirror.cursorKeysApp = false;
+          return true;
+        },
+        mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => (
+          findChangedIndexedRanges({
+            previousStartIndex,
+            previousLines,
+            nextStartIndex: mirror.bufferStartIndex,
+            nextLines: mirror.bufferLines,
+          })
+        ),
       });
       const session = createSession();
       sessions.set(session.id, session);
@@ -2628,6 +2646,353 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
         type: 'buffer-sync',
       }),
     );
+  });
+
+  it('coalesces recurring live-sync ticks so the publish DAG is not invoked once per capture', async () => {
+    vi.useFakeTimers();
+    try {
+      let lineChar = 97;
+      const mirrorBufferChanged = vi.fn(
+        (targetMirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => (
+          findChangedIndexedRanges({
+            previousStartIndex,
+            previousLines,
+            nextStartIndex: targetMirror.bufferStartIndex,
+            nextLines: targetMirror.bufferLines,
+          })
+        ),
+      );
+      const {
+        runtime,
+        sessions,
+        captureMirrorAuthoritativeBufferFromTmux,
+      } = createRuntime({
+        captureMirrorAuthoritativeBufferFromTmux: async (targetMirror: SessionMirror) => {
+          lineChar += 1;
+          targetMirror.bufferStartIndex = 0;
+          targetMirror.bufferLines = [[{ char: lineChar, fg: 256, bg: 256, flags: 0, width: 1 }]];
+          targetMirror.cursor = null;
+          targetMirror.cursorKeysApp = false;
+          return true;
+        },
+        mirrorBufferChanged,
+      });
+      const session = createSession();
+      sessions.set(session.id, session);
+
+      await runtime.attachTmux(session, {
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+
+      // The initial publish is explicit, so it always runs the DAG once.
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+
+      // Two live-sync ticks land inside the coalescing window: both capture
+      // tmux truth, but neither runs the publish DAG. Without the window the
+      // DAG would run once per capture.
+      await vi.advanceTimersByTimeAsync(33);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(3);
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+
+      // Past the window the next tick diffs and publishes again.
+      await vi.advanceTimersByTimeAsync(120);
+      expect(mirrorBufferChanged.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps every changed range when live-sync ticks are coalesced', async () => {
+    vi.useFakeTimers();
+    try {
+      const cell = (char: number): TerminalCell[] => [{ char, fg: 256, bg: 256, flags: 0, width: 1 }];
+      const captures: TerminalCell[][][] = [
+        [cell(97), cell(98), cell(99)],
+        [cell(65), cell(98), cell(99)],
+        [cell(65), cell(98), cell(67)],
+        [cell(65), cell(98), cell(67)],
+      ];
+      let captureIndex = 0;
+      const diffBases: Array<{ startIndex: number; lines: TerminalCell[][] }> = [];
+      const { runtime, sessions, sendText } = createRuntime({
+        captureMirrorAuthoritativeBufferFromTmux: async (targetMirror: SessionMirror) => {
+          targetMirror.bufferStartIndex = 0;
+          targetMirror.bufferLines = captures[Math.min(captureIndex, captures.length - 1)]!;
+          captureIndex += 1;
+          targetMirror.cursor = null;
+          targetMirror.cursorKeysApp = false;
+          return true;
+        },
+        mirrorBufferChanged: (targetMirror, previousStartIndex, previousLines) => {
+          diffBases.push({ startIndex: previousStartIndex, lines: previousLines });
+          return findChangedIndexedRanges({
+            previousStartIndex,
+            previousLines,
+            nextStartIndex: targetMirror.bufferStartIndex,
+            nextLines: targetMirror.bufferLines,
+          });
+        },
+      });
+      const session = createSession();
+      sessions.set(session.id, session);
+      const mirror = runtime.createMirror('demo');
+      mirror.lifecycle = 'ready';
+      mirror.subscribers.add(session.id);
+
+      // Initial publish: a b c.
+      await runtime.syncMirrorCanonicalBuffer(mirror);
+      // Coalesced ticks change index 0, then index 2.
+      await runtime.syncMirrorCanonicalBuffer(mirror, { liveSyncTick: true });
+      await vi.advanceTimersByTimeAsync(33);
+      await runtime.syncMirrorCanonicalBuffer(mirror, { liveSyncTick: true });
+      // Past the window: the diff base must be the last published snapshot, so
+      // the union still carries the index 0 change from the first coalesced
+      // tick plus the index 2 change from the second.
+      await vi.advanceTimersByTimeAsync(200);
+      await runtime.syncMirrorCanonicalBuffer(mirror, { liveSyncTick: true });
+
+      expect(diffBases).toHaveLength(2);
+      expect(diffBases[1]).toEqual({ startIndex: 0, lines: captures[0] });
+      const bufferSyncs = sendText.mock.calls
+        .map(([, text]) => JSON.parse(text as string) as {
+          type: string;
+          payload: { startIndex: number; endIndex: number; lines: Array<{ i: number; t: string }> };
+        })
+        .filter((message) => message.type === 'buffer-sync');
+      expect(bufferSyncs).toHaveLength(2);
+      expect(bufferSyncs[1]!.payload.startIndex).toBe(0);
+      expect(bufferSyncs[1]!.payload.endIndex).toBe(3);
+      expect(bufferSyncs[1]!.payload.lines).toEqual([
+        { i: 0, t: 'A' },
+        { i: 1, t: 'b' },
+        { i: 2, t: 'C' },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('publishes immediately on forceRevision even inside the coalescing window', async () => {
+    let lineChar = 97;
+    const mirrorBufferChanged = vi.fn(
+      (targetMirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => (
+        findChangedIndexedRanges({
+          previousStartIndex,
+          previousLines,
+          nextStartIndex: targetMirror.bufferStartIndex,
+          nextLines: targetMirror.bufferLines,
+        })
+      ),
+    );
+    const { runtime, sessions } = createRuntime({
+      captureMirrorAuthoritativeBufferFromTmux: async (targetMirror: SessionMirror) => {
+        lineChar += 1;
+        targetMirror.bufferStartIndex = 0;
+        targetMirror.bufferLines = [[{ char: lineChar, fg: 256, bg: 256, flags: 0, width: 1 }]];
+        targetMirror.cursor = null;
+        targetMirror.cursorKeysApp = false;
+        return true;
+      },
+      mirrorBufferChanged,
+    });
+    const session = createSession();
+    sessions.set(session.id, session);
+    const mirror = runtime.createMirror('demo');
+    mirror.lifecycle = 'ready';
+    mirror.subscribers.add(session.id);
+
+    await runtime.syncMirrorCanonicalBuffer(mirror);
+    expect(mirror.revision).toBe(1);
+    expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+
+    await runtime.syncMirrorCanonicalBuffer(mirror, { liveSyncTick: true });
+    expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+
+    await runtime.syncMirrorCanonicalBuffer(mirror, { forceRevision: true });
+    expect(mirrorBufferChanged).toHaveBeenCalledTimes(2);
+    expect(mirror.revision).toBe(2);
+  });
+
+  it('short-circuits the publish DAG when a live-sync capture is identical to the published snapshot', async () => {
+    vi.useFakeTimers();
+    try {
+      const cell = (char: number): TerminalCell[] => [{ char, fg: 256, bg: 256, flags: 0, width: 1 }];
+      const mirrorBufferChanged = vi.fn(
+        (targetMirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => (
+          findChangedIndexedRanges({
+            previousStartIndex,
+            previousLines,
+            nextStartIndex: targetMirror.bufferStartIndex,
+            nextLines: targetMirror.bufferLines,
+          })
+        ),
+      );
+      const { runtime, sessions, sendText, captureMirrorAuthoritativeBufferFromTmux } = createRuntime({
+        // Every capture rebuilds fresh cell objects with the same content, so
+        // only a value comparison can prove the publish would be empty.
+        captureMirrorAuthoritativeBufferFromTmux: async (targetMirror: SessionMirror) => {
+          targetMirror.bufferStartIndex = 0;
+          targetMirror.bufferLines = [cell(97), cell(98)];
+          targetMirror.cursor = null;
+          targetMirror.cursorKeysApp = false;
+          return true;
+        },
+        mirrorBufferChanged,
+      });
+      const session = createSession();
+      sessions.set(session.id, session);
+      const mirror = runtime.createMirror('demo');
+      mirror.lifecycle = 'ready';
+      mirror.subscribers.add(session.id);
+
+      await runtime.syncMirrorCanonicalBuffer(mirror);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+      expect(mirror.revision).toBe(1);
+
+      // Drive the real live-sync loop. Each tick runs well past
+      // MIRROR_PUBLISH_COALESCE_MS, so the coalescing window cannot explain the
+      // skip. Without the identity guard the DAG is invoked once per tick,
+      // because the capture still lands in mirror truth.
+      runtime.scheduleMirrorLiveSync(mirror, 0);
+      for (let tick = 0; tick < 3; tick += 1) {
+        await vi.advanceTimersByTimeAsync(250);
+      }
+
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(4);
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+      expect(mirror.revision).toBe(1);
+      // The only buffer-sync in the log is the initial publish. A skipped tick
+      // must not broadcast a buffer-sync.
+      expect(
+        sendText.mock.calls
+          .map(([, text]) => JSON.parse(text as string) as { type: string })
+          .filter((message) => message.type === 'buffer-sync'),
+      ).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not hide a real change after identical captures: the changed range is published once the cell changes', async () => {
+    vi.useFakeTimers();
+    try {
+      const cell = (char: number): TerminalCell[] => [{ char, fg: 256, bg: 256, flags: 0, width: 1 }];
+      // Fresh cell objects on every capture: only a value comparison can prove
+      // that the publish would be empty.
+      let content = (): TerminalCell[][] => [cell(97), cell(120), cell(99)];
+      const mirrorBufferChanged = vi.fn(
+        (targetMirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => (
+          findChangedIndexedRanges({
+            previousStartIndex,
+            previousLines,
+            nextStartIndex: targetMirror.bufferStartIndex,
+            nextLines: targetMirror.bufferLines,
+          })
+        ),
+      );
+      const { runtime, sessions, sendText } = createRuntime({
+        captureMirrorAuthoritativeBufferFromTmux: async (targetMirror: SessionMirror) => {
+          targetMirror.bufferStartIndex = 0;
+          targetMirror.bufferLines = content();
+          targetMirror.cursor = null;
+          targetMirror.cursorKeysApp = false;
+          return true;
+        },
+        mirrorBufferChanged,
+      });
+      const session = createSession();
+      sessions.set(session.id, session);
+      const mirror = runtime.createMirror('demo');
+      mirror.lifecycle = 'ready';
+      mirror.subscribers.add(session.id);
+
+      await runtime.syncMirrorCanonicalBuffer(mirror);
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+      expect(mirror.revision).toBe(1);
+
+      // Several identical ticks, each far outside the coalescing window, are
+      // skipped by the identity guard and must not advance the published state.
+      for (let tick = 0; tick < 3; tick += 1) {
+        await vi.advanceTimersByTimeAsync(250);
+        await runtime.syncMirrorCanonicalBuffer(mirror, { liveSyncTick: true });
+      }
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+
+      // One changed cell: the DAG runs again and publishes exactly that range,
+      // so the guard never loses a range.
+      content = () => [cell(97), cell(120), cell(121)];
+      await vi.advanceTimersByTimeAsync(250);
+      await runtime.syncMirrorCanonicalBuffer(mirror, { liveSyncTick: true });
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(2);
+      expect(mirror.revision).toBe(2);
+      const bufferSyncs = sendText.mock.calls
+        .map(([, text]) => JSON.parse(text as string) as {
+          type: string;
+          payload: { startIndex: number; endIndex: number; lines: Array<{ i: number; t: string }> };
+        })
+        .filter((message) => message.type === 'buffer-sync');
+      // [0] is the initial publish; [1] is the changed tick that the guard let
+      // through, and it carries exactly the changed range.
+      expect(bufferSyncs).toHaveLength(2);
+      expect(bufferSyncs[1]!.payload.startIndex).toBe(2);
+      expect(bufferSyncs[1]!.payload.endIndex).toBe(3);
+      expect(bufferSyncs[1]!.payload.lines).toEqual([{ i: 2, t: 'y' }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('treats a changed bufferStartIndex with identical line content as changed', async () => {
+    vi.useFakeTimers();
+    try {
+      const cell = (char: number): TerminalCell[] => [{ char, fg: 256, bg: 256, flags: 0, width: 1 }];
+      const mirrorBufferChanged = vi.fn(
+        (targetMirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => (
+          findChangedIndexedRanges({
+            previousStartIndex,
+            previousLines,
+            nextStartIndex: targetMirror.bufferStartIndex,
+            nextLines: targetMirror.bufferLines,
+          })
+        ),
+      );
+      let startIndex = 0;
+      const { runtime, sessions } = createRuntime({
+        captureMirrorAuthoritativeBufferFromTmux: async (targetMirror: SessionMirror) => {
+          targetMirror.bufferStartIndex = startIndex;
+          targetMirror.bufferLines = [cell(97), cell(98)];
+          targetMirror.cursor = null;
+          targetMirror.cursorKeysApp = false;
+          return true;
+        },
+        mirrorBufferChanged,
+      });
+      const session = createSession();
+      sessions.set(session.id, session);
+      const mirror = runtime.createMirror('demo');
+      mirror.lifecycle = 'ready';
+      mirror.subscribers.add(session.id);
+
+      await runtime.syncMirrorCanonicalBuffer(mirror);
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(1);
+
+      // Same two lines at a different absolute start index: the identity is not
+      // the line content alone, so the DAG must run and re-anchor the window.
+      // The tick is past the coalescing window, so only the identity guard can
+      // explain a skip.
+      startIndex = 2;
+      await vi.advanceTimersByTimeAsync(250);
+      await runtime.syncMirrorCanonicalBuffer(mirror, { liveSyncTick: true });
+      expect(mirrorBufferChanged).toHaveBeenCalledTimes(2);
+      expect(mirrorBufferChanged.mock.calls[1]![1]).toBe(0);
+      expect(mirrorBufferChanged.mock.calls[1]![2]).toEqual([cell(97), cell(98)]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

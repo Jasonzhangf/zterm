@@ -14,6 +14,12 @@ import {
 import { buildRemoteWindowCanvasLayoutV1 } from './remote-window-canvas-layout';
 import { SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT } from './remote-window-scripts';
 
+function extractBlock(source: string, anchor: string, length: number) {
+  const start = source.indexOf(anchor);
+  expect(start, `${anchor} should exist`).toBeGreaterThanOrEqual(0);
+  return source.slice(start, start + length);
+}
+
 function makeTarget(overrides: Partial<RemoteWindowStreamTargetManifest> = {}): RemoteWindowStreamTargetManifest {
   return {
     streamTargetId: 'app-window:1:100',
@@ -281,6 +287,18 @@ printf '\\132\\122\\127\\061\\002\\000\\000\\000\\002\\000\\000\\000\\020\\000\\
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('captureFrameDelayMilliseconds');
   });
 
+  it('converts BGRA frames to RGBA with a vectorized channel permutation', () => {
+    // The per-pixel Swift loop replaced by vImage was the frame-rate ceiling:
+    // at 597x385 it costs ~7ms per frame on the ScreenCaptureKit callback, so a
+    // 10Hz source could not keep up. The channel map must stay byte-identical
+    // to the loop it replaces: BGRA source -> RGBA destination.
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('import Accelerate');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('vImagePermuteChannels_ARGB8888');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('var channelMap: [UInt8] = [2, 1, 0, 3]');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('rowBytes: bytesPerRow');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('for x in 0..<width {');
+  });
+
   it('updates the existing SCStream configuration and filter without stop/start', () => {
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('func updateCapture(config: CaptureConfig) async throws');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('updateContentFilter(filter)');
@@ -291,15 +309,30 @@ printf '\\132\\122\\127\\061\\002\\000\\000\\000\\002\\000\\000\\000\\020\\000\\
 
   it('fails before capture startup when Screen Recording permission is not granted', () => {
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('CGPreflightScreenCaptureAccess()');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Screen Recording permission is required');
+    // The runtime child cannot show a dialog, so its text must name the install
+    // step as the owner of the request instead of telling the user to grant by hand.
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('run zterm-daemon install-service');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('exit(5)');
   });
 
-  it('fails immediately without requesting, polling, or retrying Screen Recording permission', () => {
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('CGRequestScreenCaptureAccess()');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('permissionDeadline');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toContain('Thread.sleep');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).not.toMatch(/while\s+Date\(\)/u);
+  it('fails immediately without polling or retrying Screen Recording permission during capture', () => {
+    // The runtime capture path stays preflight-only: the grant decision belongs to
+    // the install step, and a stream must never block on a dialog.
+    const runtimeCaptureBlock = extractBlock(
+      SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT,
+      'func startRemoteWindowCaptureProcess()',
+      4_600,
+    );
+    expect(runtimeCaptureBlock).not.toContain('CGRequestScreenCaptureAccess()');
+    expect(runtimeCaptureBlock).not.toContain('permissionDeadline');
+    expect(runtimeCaptureBlock).not.toContain('Thread.sleep');
+    expect(runtimeCaptureBlock).not.toMatch(/while\s+Date\(\)/u);
+  });
+
+  it('requests Screen Recording permission in the install-time probe only', () => {
+    const probeBlock = extractBlock(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT, '--permission-probe', 620);
+    expect(probeBlock).not.toContain('CGRequestScreenCaptureAccess()');
+    expect(probeBlock).not.toContain('requestScreenCapturePermission');
   });
 
   it('requires the installed capture binary instead of falling back to swift -e', async () => {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { RemoteWindowOverlayState } from './remote-window-overlay-runtime';
 import {
+  applyRemoteWindowCaptureStarted,
+  applyRemoteWindowFirstDecodedFrame,
   applyRemoteWindowTargetCatalog,
   applyRemoteWindowTargetCatalogSnapshot,
   attachRemoteWindowStreamReceiver,
@@ -168,7 +171,7 @@ describe('remote window overlay runtime', () => {
       mode: 'fullscreen',
       streamId: 'stream-1',
       streamStarted: true,
-      streamStatus: 'streaming',
+      streamStatus: 'awaiting-first-data',
       target,
     });
     expect(floating).toMatchObject({
@@ -240,7 +243,7 @@ describe('remote window overlay runtime', () => {
       target: nextTarget,
       streamId: 'next-canvas',
       streamStarted: true,
-      streamStatus: 'streaming',
+      streamStatus: 'awaiting-first-data',
       streamHandoff: null,
     });
   });
@@ -274,7 +277,7 @@ describe('remote window overlay runtime', () => {
       phase: 'targetLocked',
       streamId: 'stream-1',
       streamStarted: true,
-      streamStatus: 'streaming',
+      streamStatus: 'awaiting-first-data',
       target: resized,
     });
     expect(synced.phase === 'targetLocked' ? synced.targets.map((item) => item.streamTargetId) : []).toEqual(['app-1', 'app-2']);
@@ -486,5 +489,49 @@ describe('remote window composite layout', () => {
     const target = makeTarget();
     const attached = attachSameAppCompositeWindows(target, [target]);
     expect(attached.compositeWindows).toBeUndefined();
+  });
+});
+
+describe('remote window session stage contract', () => {
+  function lockedState() {
+    const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);
+    const catalog = applyRemoteWindowTargetCatalog(started.state, started.requestEpoch, {
+      requestId: 'rw-stage',
+      targets: [makeTarget('app-stage', 'app-window')],
+    });
+    return selectRemoteWindowTarget(catalog, 'app-stage');
+  }
+
+  function stageOf(state: RemoteWindowOverlayState) {
+    return state.phase === 'targetLocked' ? state.streamStatus : null;
+  }
+
+  it('runs awaiting-first-data then awaiting-first-frame before streaming', () => {
+    const setup = beginRemoteWindowStreamSetup(lockedState(), 'stream-1');
+    expect(stageOf(setup)).toBe('starting');
+    const attached = attachRemoteWindowStreamReceiver(setup, 'stream-1');
+    expect(stageOf(attached)).toBe('awaiting-first-data');
+    const captured = applyRemoteWindowCaptureStarted(attached, 'stream-1');
+    expect(stageOf(captured)).toBe('awaiting-first-frame');
+    const streaming = applyRemoteWindowFirstDecodedFrame(captured, 'stream-1');
+    expect(stageOf(streaming)).toBe('streaming');
+  });
+
+  it('accepts capture-started before the receiver attaches without skipping a stage', () => {
+    const setup = beginRemoteWindowStreamSetup(lockedState(), 'stream-1');
+    const captured = applyRemoteWindowCaptureStarted(setup, 'stream-1');
+    expect(stageOf(captured)).toBe('awaiting-first-frame');
+    const attached = attachRemoteWindowStreamReceiver(captured, 'stream-1');
+    expect(stageOf(attached)).toBe('awaiting-first-frame');
+    expect(stageOf(applyRemoteWindowFirstDecodedFrame(attached, 'stream-1'))).toBe('streaming');
+  });
+
+  it('ignores stage events that belong to another stream', () => {
+    const attached = attachRemoteWindowStreamReceiver(
+      beginRemoteWindowStreamSetup(lockedState(), 'stream-1'),
+      'stream-1',
+    );
+    expect(applyRemoteWindowCaptureStarted(attached, 'stream-2')).toBe(attached);
+    expect(applyRemoteWindowFirstDecodedFrame(attached, 'stream-2')).toBe(attached);
   });
 });

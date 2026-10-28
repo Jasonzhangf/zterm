@@ -5,6 +5,7 @@
 import type {
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamIceCandidate,
+  RemoteWindowStreamLatencyTelemetry,
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowVideoProfile,
@@ -142,4 +143,222 @@ export function convertRgbaToI420Frame(
     data: frame.rgba,
   }, i420);
   return i420;
+}
+
+/**
+ * Bounded rolling accumulator behind `RemoteWindowStreamLatencyTelemetry`.
+ *
+ * It only observes the daemon's own pipeline: capture timestamps, the
+ * capture-to-encoder handoff, sender `getStats()` totals and the input
+ * injection duration. It never feeds control state.
+ */
+export interface RemoteWindowLatencyAccumulator {
+  /** A capture frame arrived from the capture source. */
+  recordCaptureArrival(arrivedAtMs: number): void;
+  recordCapture(capturedAtMs: number, handedOffAtMs: number): void;
+  /**
+   * Size of the frame the daemon actually captured for the focus lane. The
+   * requested `maxCaptureWidth` is an intention; only the capture source knows
+   * the size it produced, so this is the witness of a zoom-aware capture raise.
+   */
+  recordCaptureSize(width: number, height: number): void;
+  recordInputInjection(durationMs: number): void;
+  applySenderStats(report: RTCStatsReport | null | undefined, sampledAtMs: number): void;
+  snapshot(sampleWindowMs: number): RemoteWindowStreamLatencyTelemetry | null;
+}
+
+const REMOTE_WINDOW_LATENCY_SAMPLE_CAPACITY = 240;
+
+function pushBounded(samples: number[], value: number) {
+  if (!Number.isFinite(value) || value < 0) {
+    return;
+  }
+  samples.push(value);
+  if (samples.length > REMOTE_WINDOW_LATENCY_SAMPLE_CAPACITY) {
+    samples.splice(0, samples.length - REMOTE_WINDOW_LATENCY_SAMPLE_CAPACITY);
+  }
+}
+
+function nearestRankPercentile(samples: number[], percentile: number): number | null {
+  if (samples.length === 0) {
+    return null;
+  }
+  const sorted = [...samples].sort((left, right) => left - right);
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(percentile * sorted.length) - 1));
+  return sorted[index];
+}
+
+function readStatsNumber(entry: Record<string, unknown>, key: string): number | null {
+  const value = entry[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+export function createRemoteWindowLatencyAccumulator(): RemoteWindowLatencyAccumulator {
+  const captureToEncodeSamples: number[] = [];
+  // Capture arrivals and encoder handoffs are counted separately: the drop
+  // policy between them is exactly what a frozen remote window looks like, and
+  // one shared counter could not tell a slow capture source from a policy that
+  // throws away what the source delivered.
+  const captureArrivalTimestamps: number[] = [];
+  const dispatchTimestamps: number[] = [];
+  const inputInjectionSamples: number[] = [];
+  let previousOutbound: {
+    sampledAtMs: number;
+    framesEncoded: number;
+    totalEncodeTimeMs: number;
+    totalPacketSendDelayMs: number;
+    packetsSent: number;
+    bytesSent: number;
+  } | null = null;
+  let encodeMsPerFrame: number | null = null;
+  let packetSendDelayMs: number | null = null;
+  let encodedFps: number | null = null;
+  let sentBitrateBps: number | null = null;
+  let codecMimeType: string | null = null;
+  let networkRttMs: number | null = null;
+  let networkJitterMs: number | null = null;
+  let packetLossRatio: number | null = null;
+  let captureWidth: number | null = null;
+  let captureHeight: number | null = null;
+
+  return {
+    recordCaptureArrival(arrivedAtMs) {
+      pushBounded(captureArrivalTimestamps, arrivedAtMs);
+    },
+
+    recordCaptureSize(width, height) {
+      if (Number.isFinite(width) && width > 0 && Number.isFinite(height) && height > 0) {
+        captureWidth = Math.floor(width);
+        captureHeight = Math.floor(height);
+      }
+    },
+
+    recordCapture(capturedAtMs, handedOffAtMs) {
+      pushBounded(captureToEncodeSamples, handedOffAtMs - capturedAtMs);
+      pushBounded(dispatchTimestamps, handedOffAtMs);
+    },
+
+    recordInputInjection(durationMs) {
+      pushBounded(inputInjectionSamples, durationMs);
+    },
+
+    applySenderStats(report, sampledAtMs) {
+      if (!report || typeof report.forEach !== 'function') {
+        return;
+      }
+      let outbound: Record<string, unknown> | null = null;
+      let remoteInbound: Record<string, unknown> | null = null;
+      const codecMimeById = new Map<string, string>();
+      report.forEach((entry: unknown) => {
+        if (!entry || typeof entry !== 'object') {
+          return;
+        }
+        const record = entry as Record<string, unknown>;
+        if (record.type === 'codec' && typeof record.id === 'string' && typeof record.mimeType === 'string') {
+          codecMimeById.set(record.id, record.mimeType);
+          return;
+        }
+        const kind = record.kind ?? record.mediaType;
+        if (kind !== 'video') {
+          return;
+        }
+        if (record.type === 'outbound-rtp') {
+          outbound = record;
+        } else if (record.type === 'remote-inbound-rtp') {
+          remoteInbound = record;
+        }
+      });
+      if (outbound) {
+        const outboundRecord = outbound as Record<string, unknown>;
+        const current = {
+          sampledAtMs,
+          framesEncoded: readStatsNumber(outboundRecord, 'framesEncoded') ?? 0,
+          totalEncodeTimeMs: (readStatsNumber(outboundRecord, 'totalEncodeTime') ?? 0) * 1000,
+          totalPacketSendDelayMs: (readStatsNumber(outboundRecord, 'totalPacketSendDelay') ?? 0) * 1000,
+          packetsSent: readStatsNumber(outboundRecord, 'packetsSent') ?? 0,
+          bytesSent: readStatsNumber(outboundRecord, 'bytesSent') ?? 0,
+        };
+        const codecId = outboundRecord.codecId;
+        if (typeof codecId === 'string') {
+          codecMimeType = codecMimeById.get(codecId) ?? codecMimeType;
+        }
+        if (previousOutbound) {
+          const elapsedMs = current.sampledAtMs - previousOutbound.sampledAtMs;
+          const encodedDelta = current.framesEncoded - previousOutbound.framesEncoded;
+          const encodeDeltaMs = current.totalEncodeTimeMs - previousOutbound.totalEncodeTimeMs;
+          const sendDelayDeltaMs = current.totalPacketSendDelayMs - previousOutbound.totalPacketSendDelayMs;
+          const sentDelta = current.packetsSent - previousOutbound.packetsSent;
+          const bytesDelta = current.bytesSent - previousOutbound.bytesSent;
+          if (elapsedMs > 0 && encodedDelta > 0) {
+            encodeMsPerFrame = encodeDeltaMs / encodedDelta;
+            encodedFps = (encodedDelta * 1000) / elapsedMs;
+          }
+          if (sentDelta > 0) {
+            packetSendDelayMs = sendDelayDeltaMs / sentDelta;
+          }
+          if (elapsedMs > 0 && bytesDelta > 0) {
+            sentBitrateBps = (bytesDelta * 8 * 1000) / elapsedMs;
+          }
+        }
+        previousOutbound = current;
+      }
+      if (remoteInbound) {
+        const inboundRecord = remoteInbound as Record<string, unknown>;
+        const roundTripTime = readStatsNumber(inboundRecord, 'roundTripTime');
+        const jitter = readStatsNumber(inboundRecord, 'jitter');
+        const packetsLost = readStatsNumber(inboundRecord, 'packetsLost');
+        networkRttMs = roundTripTime === null ? null : roundTripTime * 1000;
+        networkJitterMs = jitter === null ? null : jitter * 1000;
+        const packetsSent = previousOutbound?.packetsSent ?? 0;
+        packetLossRatio = packetsLost !== null && packetsSent > 0
+          ? Math.min(1, Math.max(0, packetsLost / packetsSent))
+          : null;
+      }
+    },
+
+    snapshot(sampleWindowMs) {
+      if (
+        captureArrivalTimestamps.length === 0
+        && captureToEncodeSamples.length === 0
+        && inputInjectionSamples.length === 0
+        && encodeMsPerFrame === null
+        && networkRttMs === null
+      ) {
+        return null;
+      }
+      const windowStartMs = captureArrivalTimestamps.length > 0
+        ? Math.max(captureArrivalTimestamps[0], Date.now() - sampleWindowMs)
+        : null;
+      const rateInWindow = (timestamps: number[]) => {
+        if (windowStartMs === null) {
+          return null;
+        }
+        const inWindow = timestamps.filter((timestamp) => timestamp >= windowStartMs).length;
+        return inWindow > 0 ? (inWindow * 1000) / Math.max(1, Date.now() - windowStartMs) : null;
+      };
+      return {
+        sampleWindowMs,
+        captureToEncodeMs: captureToEncodeSamples.length > 0
+          ? captureToEncodeSamples[captureToEncodeSamples.length - 1]
+          : null,
+        captureToEncodeP50Ms: nearestRankPercentile(captureToEncodeSamples, 0.5),
+        captureToEncodeP95Ms: nearestRankPercentile(captureToEncodeSamples, 0.95),
+        encodeMsPerFrame,
+        packetSendDelayMs,
+        capturedFps: rateInWindow(captureArrivalTimestamps),
+        dispatchedFps: rateInWindow(dispatchTimestamps),
+        encodedFps,
+        sentBitrateBps,
+        codecMimeType,
+        networkRttMs,
+        networkJitterMs,
+        packetLossRatio,
+        inputInjectP50Ms: nearestRankPercentile(inputInjectionSamples, 0.5),
+        inputInjectP95Ms: nearestRankPercentile(inputInjectionSamples, 0.95),
+        inputInjectSamples: inputInjectionSamples.length,
+        captureWidth,
+        captureHeight,
+      };
+    },
+  };
 }

@@ -196,6 +196,7 @@ function createCapabilityStatusChannel() {
             maxVideoLanes: 1,
             screenCaptureKit: true,
             typedPerLaneStatus: true,
+            chromaFormats: ['420'] as const,
             preflight: {
               wrtc: 'available',
               abi: 'supported',
@@ -1296,7 +1297,10 @@ describe('RemoteWindowOverlay', () => {
       expect(video.srcObject).toBe(mediaStream);
       expect(video.style.pointerEvents).toBe('none');
     });
+    // Attached receiver without a frame is still not streaming: the UI must
+    // name the stage that only the daemon's events can close.
     expect(screen.queryByText('等待视频流')).toBeNull();
+    expect(screen.getByTestId('remote-window-stage-status')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '退出串流' }));
     await waitFor(() => {

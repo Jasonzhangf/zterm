@@ -41,6 +41,10 @@ describe('remote screenshot daemon black-box contract', () => {
     expect(preflightBody).not.toContain('ZTERM_DAEMON_CAPTURE_NATIVE');
     expect(preflightBody).toContain('--permission-probe');
     expect(preflightBody).toContain('ScreenCaptureKit permission preflight failed');
+    expect(preflightBody).toContain('Privacy & Security -> Screen & System Audio Recording');
+    expect(preflightBody).toContain('clicking + and adding that exact file');
+    expect(preflightBody).toContain('refused to show a grant dialog');
+    expect(preflightBody).not.toContain('grant dialog is owned by this install step');
     expect(preflightBody).not.toContain("execFileSync('/usr/sbin/screencapture'");
     expect(preflightBody).not.toContain("execFileSync('/bin/launchctl'");
     expect(preflightBody).not.toMatch(/permission belongs to the GUI screenshot helper|Mac 端截图 helper/u);
@@ -93,9 +97,26 @@ describe('remote screenshot daemon black-box contract', () => {
     expect(nativeDaemon).toContain('guard hasScreenCapturePermission() else');
     expect(captureSource).toContain('CGPreflightScreenCaptureAccess()');
     expect(nativeDaemon).toContain('SCScreenshotManager.captureImage');
-    expect(nativeDaemon).not.toContain('CGRequestScreenCaptureAccess()');
     expect(nativeDaemon).not.toContain('/usr/sbin/screencapture');
     expect(nativeDaemon).not.toMatch(/(^|[^\w])Process\(\)/u);
+  });
+
+  it('requests Screen Recording permission at install time instead of leaving the user to add it', () => {
+    // The install probe is the product's grant step. A preflight-only probe made
+    // macOS never prompt, so the Privacy list had no zterm entry and every first
+    // user had to open System Settings and pick the capture binary by hand.
+    const nativeDaemon = readProjectFile('scripts/native/zterm-daemon.swift');
+    const permissionProbeBlock = extractBlock(nativeDaemon, 'if args.dropFirst().first == "--permission-probe"', 520);
+    const requestBlock = extractBlock(nativeDaemon, 'static func requestScreenCapturePermission()', 900);
+
+    expect(permissionProbeBlock).toContain('requestScreenCapturePermission()');
+    expect(permissionProbeBlock).not.toContain('hasScreenCapturePermission() else');
+    expect(requestBlock).toContain('CGRequestScreenCaptureAccess()');
+    // One request, one bounded wait, one exit: never a loop that re-asks or resets TCC.
+    expect(requestBlock).toContain('permissionGrantDeadline()');
+    // The install step must say what it is waiting for, not fall silent.
+    expect(requestBlock).toContain('Answer the macOS dialog');
+    expect(nativeDaemon).not.toContain('tccutil');
   });
 
   it('does not expose helper/socket/start-Mac-app guidance to Android users', () => {

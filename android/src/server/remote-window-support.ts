@@ -69,9 +69,21 @@ export function buildScreenCaptureKitStartupTimeoutMessage(stderrBuffer: string,
     .filter(Boolean)
     .slice(-3)
     .join(' ');
-  return stderrDetail
-    ? `ScreenCaptureKit capture did not produce a frame before timeout after ${timeoutMs}ms: ${stderrDetail}`
-    : `ScreenCaptureKit capture did not produce a frame before timeout after ${timeoutMs}ms`;
+  const timeoutDetail = `did not produce a frame before timeout after ${timeoutMs}ms`;
+  // A child that reaches this line has built its SCStream. When that child then
+  // delivers no frame and prints no error, the generic timeout hides the fact
+  // that the stream itself came up. Naming the case keeps a zero-frame start
+  // attributable to the capture layer instead of looking like an absent stream.
+  const startedStream = /capture started \(SCStream\)/u.test(stderrBuffer);
+  const detail = stderrDetail
+    ? `${startedStream ? `${timeoutDetail} while the SCStream was running` : timeoutDetail}: ${stderrDetail}`
+    : timeoutDetail;
+  return `ScreenCaptureKit capture ${detail}`;
+}
+
+export function isScreenCaptureKitZeroFrameTimeoutMessage(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /did not produce a frame before timeout/u.test(message);
 }
 
 export function summarizeRemoteWindowCatalogError(error: unknown, fallbackMessage: string) {

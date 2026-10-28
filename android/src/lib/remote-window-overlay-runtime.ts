@@ -33,7 +33,7 @@ export type RemoteWindowOverlayState =
       targets: RemoteWindowStreamTargetManifest[];
       mode: RemoteWindowOverlayMode;
       streamStarted: boolean;
-      streamStatus: 'idle' | 'starting' | 'streaming' | 'error';
+      streamStatus: 'idle' | 'starting' | 'awaiting-first-data' | 'awaiting-first-frame' | 'streaming' | 'error';
       streamId?: string;
       streamErrorMessage?: string | null;
       streamFailureStage?: RemoteWindowStreamFailureStage | null;
@@ -386,12 +386,51 @@ export function attachRemoteWindowStreamReceiver(
   if (state.phase !== 'targetLocked' || state.streamId !== streamId) {
     return state;
   }
+  // Receiver attach is a real transport event; before the capture child reports
+  // it started, the stage is "connected, waiting for data".
   return {
     ...state,
     streamStarted: true,
-    streamStatus: 'streaming',
+    streamStatus: state.streamStatus === 'awaiting-first-frame' ? 'awaiting-first-frame' : 'awaiting-first-data',
     streamErrorMessage: null,
     streamFailureStage: null,
+  };
+}
+
+/** daemon 采集已起事件：`awaiting-first-data`/`starting` 进 `awaiting-first-frame`。 */
+export function applyRemoteWindowCaptureStarted(
+  state: RemoteWindowOverlayState,
+  streamId: string,
+): RemoteWindowOverlayState {
+  if (state.phase !== 'targetLocked' || state.streamId !== streamId) {
+    return state;
+  }
+  if (state.streamStatus === 'streaming' || state.streamStatus === 'error') {
+    return state;
+  }
+  return {
+    ...state,
+    streamStarted: true,
+    streamStatus: 'awaiting-first-frame',
+    streamErrorMessage: null,
+    streamFailureStage: null,
+  };
+}
+
+/** daemon 首帧事件：`awaiting-first-frame` 才允许进入 `streaming`。 */
+export function applyRemoteWindowFirstDecodedFrame(
+  state: RemoteWindowOverlayState,
+  streamId: string,
+): RemoteWindowOverlayState {
+  if (state.phase !== 'targetLocked' || state.streamId !== streamId) {
+    return state;
+  }
+  if (state.streamStatus !== 'awaiting-first-frame') {
+    return state;
+  }
+  return {
+    ...state,
+    streamStatus: 'streaming',
   };
 }
 

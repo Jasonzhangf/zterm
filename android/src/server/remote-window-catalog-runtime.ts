@@ -26,6 +26,17 @@ interface RemoteWindowTargetCatalogCacheEntry {
   response: RemoteWindowStreamTargetsResponsePayload;
 }
 
+/**
+ * App-window projection of a resident catalog snapshot. The composite
+ * auto-add/remove poll needs the same manifests the client sees, so it reads the
+ * daemon-owned snapshot instead of paying for a second live enumeration.
+ */
+function appWindowTargetsFromCatalogPayload(
+  response: RemoteWindowStreamTargetsResponsePayload,
+): RemoteWindowStreamTargetManifest[] {
+  return response.targets.filter((target) => target.videoTarget.kind === 'app-window');
+}
+
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS = 5_000;
 
 export interface RemoteWindowCatalogRuntimeDeps {
@@ -432,10 +443,34 @@ export function createRemoteWindowCatalogRuntime(
     startRefreshTimer();
   };
 
-  const listAppWindowTargets = async () => buildMacosAppWindowTargets(
-    await queryMacosAppWindowCatalog(),
-    deps.now(),
-  );
+  // The composite auto-add/remove poll reads the daemon-owned snapshot. It must
+  // not start its own enumeration: one live app-window query costs a full
+  // `swift -e` compile+run (about 1s), and running that every 3s starved the
+  // capture read path of a composite stream.
+  // The composite auto-add/remove poll reads the daemon-owned snapshot. It must
+  // not start its own enumeration: one live app-window query costs a full
+  // `swift -e` compile+run (about 1s), and running that every 3s starved the
+  // capture read path of a composite stream.
+  const listAppWindowTargets = async () => {
+    const ready = snapshot;
+    if (ready) {
+      return appWindowTargetsFromCatalogPayload(ready.response);
+    }
+    if (!refresh) {
+      void startRefresh(`rw-catalog-refresh-${deps.nowMs()}`);
+      startRefreshTimer();
+    }
+    const pending = refresh;
+    const settled = pending ? await pending : null;
+    const refreshed = snapshot;
+    if (refreshed) {
+      return appWindowTargetsFromCatalogPayload(refreshed.response);
+    }
+    if (settled && 'targets' in settled) {
+      return appWindowTargetsFromCatalogPayload(settled);
+    }
+    return [];
+  };
 
   const awaitAppWindowCloseObservation = (
     request: RemoteWindowAppWindowCloseObservationRequest,

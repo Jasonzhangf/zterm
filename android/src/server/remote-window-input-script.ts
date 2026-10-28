@@ -138,38 +138,19 @@ func copyAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
     return value as AnyObject?
 }
 
-func frontmostProcessPidFromSystemEvents() -> Int32? {
-    let process = Process()
-    let output = Pipe()
-    let error = Pipe()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    process.arguments = [
-        "-e",
-        "tell application \"System Events\" to get unix id of first application process whose frontmost is true"
-    ]
-    process.standardOutput = output
-    process.standardError = error
-    do {
-        try process.run()
-        process.waitUntilExit()
-    } catch {
+func frontmostProcessPid() -> Int32? {
+    // 前台 PID 是每次输入校验都要读的事实。原先用 osascript + System Events 子进程
+    // 探测，单次约 0.4s；focusTargetWindow 每次输入最多探测 4 次（快速路径 1 次 +
+    // 重试循环 3 次），实测 daemonInputInjectMs p50 = 1543ms。NSWorkspace 是同一事实
+    // 的进程内来源，不改变任何校验语义，只是不再起子进程。
+    guard let frontmostApplication = NSWorkspace.shared.frontmostApplication else {
         return nil
     }
-    guard process.terminationStatus == 0 else {
-        return nil
-    }
-    let data = output.fileHandleForReading.readDataToEndOfFile()
-    guard
-        let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-        let frontmostPid = Int32(raw)
-    else {
-        return nil
-    }
-    return frontmostPid
+    return frontmostApplication.processIdentifier
 }
 
 func frontmostPidMatches(_ pid: Int32) -> Bool {
-    return frontmostProcessPidFromSystemEvents() == pid
+    return frontmostProcessPid() == pid
 }
 
 func waitForRunningApplication(_ pid: Int32) -> NSRunningApplication? {
@@ -217,14 +198,13 @@ func findAxWindow(_ appElement: AXUIElement, _ targetWindowId: CGWindowID) -> AX
 
 func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication) {
     app.unhide()
-    let process = Process()
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-    process.arguments = [
-        "-e",
-        "tell application \"System Events\" to set frontmost of first process whose unix id is " + String(config.pid) + " to true"
-    ]
-    try? process.run()
-    process.waitUntilExit()
+    // 事件级前台/窗口校验仍是语义闸门，保持不变；这里只换激活机制：原先每次输入都
+    // spawn osascript + System Events 再 waitUntilExit（约 0.4s），focusTargetWindow 最
+    // 多重试 3 次，实测 daemonInputInjectMs p50 = 1360ms。NSRunningApplication.activate
+    // 做的是同一件"把该 pid 置前"的事，但不额外起子进程。
+    if !app.activate(options: [.activateIgnoringOtherApps]) {
+        _ = app.activate(options: [])
+    }
 }
 
 func focusTargetWindow(_ config: InputConfig) throws {
@@ -248,15 +228,27 @@ func focusTargetWindow(_ config: InputConfig) throws {
     }
     var isFrontmost = false
     var isFocused = false
-    for attempt in 0..<3 {
-        activateTargetApplication(config, app)
-        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
-        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-        usleep(attempt == 0 ? 120000 : 180000)
+    // macOS activation is asynchronous. The first input after a stream starts can
+    // arrive while the target app is still becoming frontmost, and the old fixed
+    // 3 x ~180ms budget expired first. A rejected action event is dropped for good
+    // (the daemon acks it as non-retryable), so that keystroke never reaches the
+    // remote window. Poll the real transition up to a deadline instead, and re-assert
+    // activation periodically because a request is dropped while another app holds focus.
+    let focusDeadline = Date().timeIntervalSince1970 + 1.5
+    var nextAssertAt = 0.0
+    while Date().timeIntervalSince1970 < focusDeadline {
+        let now = Date().timeIntervalSince1970
+        if now >= nextAssertAt {
+            activateTargetApplication(config, app)
+            AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+            AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+            AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
+            AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+            nextAssertAt = now + 0.3
+        }
+        usleep(50000)
         isFrontmost = frontmostPidMatches(config.pid)
         isFocused = focusedWindowMatchesTarget(appElement, targetWindowId)
         if isFrontmost && isFocused {

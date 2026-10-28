@@ -67,18 +67,26 @@ function makePeerConnection() {
  * implementation whose factory promise settles after real I/O, which the
  * previous `await Promise.resolve()` test could not exercise.
  */
-function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectSource?: boolean } = {}) {
+function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectSource?: boolean | 'zero-frame' | 'other'; rejectOverviewSource?: boolean; deferOverviewSource?: boolean } = {}) {
   const peerConnection = makePeerConnection();
   const statuses: RemoteWindowStreamStatusPayload[] = [];
   const frameConsumer = vi.fn();
   let onFrame: ((frame: { width: number; height: number; rgba: Uint8Array; capturedAtMs?: number }) => void) | null = null;
   let releaseFactory: () => void = () => undefined;
+  let releaseOverviewFactory: () => void = () => undefined;
   let resolveEmitted: () => void = () => undefined;
+  let factoryCalls = 0;
   const factoryEmitted = new Promise<void>((resolve) => {
     resolveEmitted = resolve;
   });
   const factoryGate = new Promise<void>((resolve) => {
     releaseFactory = resolve;
+  });
+  // The overview lane starts a second capture after the focus lane. This gate
+  // holds that second factory call pending so tests can observe the window
+  // between the two capture-ready transitions.
+  const overviewFactoryGate = new Promise<void>((resolve) => {
+    releaseOverviewFactory = resolve;
   });
   const captureSource = {
     captureEpoch: 0,
@@ -108,6 +116,7 @@ function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectS
     }),
     rgbaToI420: vi.fn(),
     captureSourceFactory: vi.fn(async (_target, options) => {
+      factoryCalls += 1;
       onFrame = options.onFrame;
       // A legal capture implementation emits its first frame before this
       // factory promise resolves.
@@ -120,9 +129,21 @@ function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectS
       resolveEmitted();
       // Hold the factory pending across a real event-loop turn so the daemon
       // cannot rely on microtask ordering for capture-source assignment.
+      if (factoryCalls > 1 && input.deferOverviewSource) {
+        await overviewFactoryGate;
+      }
       await factoryGate;
       if (input.rejectSource) {
-        throw new Error('remote window capture source failed to start');
+        // 'zero-frame' reproduces the live Air case: the child started its
+        // SCStream and then delivered no frame within the startup timeout.
+        throw new Error(input.rejectSource === 'zero-frame'
+          ? 'ScreenCaptureKit capture did not produce a frame before timeout after 20000ms while the SCStream was running'
+          : input.rejectSource === 'other'
+            ? 'ScreenCaptureKit capture failed to start: Unable to find window'
+            : 'remote window capture source failed to start');
+      }
+      if (input.rejectOverviewSource && factoryCalls > 1) {
+        throw new Error('remote window overview capture did not produce a frame before timeout after 20000ms');
       }
       return captureSource;
     }),
@@ -133,7 +154,7 @@ function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectS
     )),
     runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
   });
-  return { runtime, statuses, frameConsumer, captureSource, releaseFactory, factoryEmitted, getOnFrame: () => onFrame };
+  return { runtime, statuses, frameConsumer, captureSource, releaseFactory, releaseOverviewFactory, factoryEmitted, getOnFrame: () => onFrame };
 }
 
 describe('remote window stream daemon v2 contract', () => {
@@ -328,6 +349,63 @@ describe('remote window stream daemon v2 contract', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(harness.frameConsumer).not.toHaveBeenCalled();
     expect(harness.statuses.filter((status) => status.phase === 'streaming')).toHaveLength(0);
+    await harness.runtime.dispose();
+  });
+
+  it('names the focus zero-frame startup timeout apart from a failure to reach capture', async () => {
+    // Live evidence from the Air: the child printed
+    // "capture started (SCStream)" and then produced no frame. Reporting that
+    // as focus-capture-start hides the fact that the stream itself came up.
+    const harness = makeDeferredCaptureRuntime({ rejectSource: 'zero-frame' });
+    const payload = start('capture-zero-frame');
+    const started = harness.runtime.startStream(payload, {
+      sendStatus: (status) => {
+        harness.statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    await harness.factoryEmitted;
+    harness.releaseFactory();
+    const startedResult = await started;
+    expect(startedResult).toMatchObject({
+      streamId: payload.streamId,
+      code: 'remote_window_stream_start_failed',
+      failureStage: 'focus-capture-first-frame',
+    });
+    await harness.runtime.dispose();
+  });
+
+  it('keeps a non-zero-frame capture rejection on the capture-start stage', async () => {
+    const harness = makeDeferredCaptureRuntime({ rejectSource: 'other' });
+    const payload = start('capture-other-failure');
+    const started = harness.runtime.startStream(payload, {
+      sendStatus: (status) => {
+        harness.statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    await harness.factoryEmitted;
+    harness.releaseFactory();
+    const startedResult = await started;
+    expect(startedResult).toMatchObject({
+      streamId: payload.streamId,
+      code: 'remote_window_stream_start_failed',
+      failureStage: 'focus-capture-start',
+    });
     await harness.runtime.dispose();
   });
 
@@ -822,5 +900,143 @@ describe('remote window stream daemon v2 contract', () => {
       error: expect.objectContaining({ code: 'remote_window_stream_quality_unsupported' }),
     }));
     await runtime.dispose();
+  });
+
+  it('applies a composite quality request while the overview lane capture source is unassigned', async () => {
+    // Regression for: a composite (overview-plus-focus) stream starts its
+    // overview capture after the focus lane. Applying the group there used to
+    // reject the whole request as `quality_unsupported`, so the focus capture
+    // profile never followed the requested budget — observed on device as a
+    // zoomed pinch that requested a larger capture ceiling while the capture
+    // stayed at the base size.
+    const harness = makeDeferredCaptureRuntime({ deferOverviewSource: true });
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('quality-overview-race'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'window-2',
+          title: 'Example 2',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      },
+    };
+    let qualityResult: Promise<unknown> | null = null;
+    const started = harness.runtime.startStream(payload, {
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+        qualityResult = harness.runtime.updateStreamQuality!({
+          requestId: 'rw-quality-overview-race',
+          streamId: payload.streamId,
+          streamGroupId: payload.streamId,
+          mediaPlan: 'overview-plus-focus',
+          mediaPlanVersion: 2,
+          revision: 1,
+          targetId: payload.target.streamTargetId,
+          videoProfile: profile(),
+        });
+      },
+    });
+    const flush = async (turns = 8) => {
+      for (let turn = 0; turn < turns; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    };
+    // Let the handshake reach sendOffer, where the client fires its quality
+    // request; the focus capture factory is still gated at this point.
+    await flush();
+    expect(qualityResult).not.toBeNull();
+    // The focus lane becomes ready first; the overview lane capture is still
+    // pending. The request must still apply, because the overview lane has no
+    // capture source to profile yet and must not block the focus lane.
+    harness.releaseFactory();
+    await flush();
+    await expect(qualityResult!).resolves.toEqual(expect.objectContaining({
+      status: 'applied',
+      streamId: payload.streamId,
+      revision: 1,
+    }));
+    harness.releaseOverviewFactory();
+    await started;
+    await harness.runtime.dispose();
+  });
+
+  it('keeps the focus lane streaming when the overview lane capture cannot start', async () => {
+    // Regression for: a composite (multi-window) target whose overview capture never
+    // produced a frame failed the whole start with `remote_window_stream_start_failed`
+    // at `overview-capture-start`. On device the client then retried the same request
+    // (9 × 20s timeout observed), so a multi-window app group never became usable even
+    // though the focus lane and its input path were fine.
+    const harness = makeDeferredCaptureRuntime({ rejectOverviewSource: true });
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('overview-lane-unavailable'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'window-2',
+          title: 'Example 2',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      },
+    };
+    const started = harness.runtime.startStream(payload, {
+      sendStatus: (status) => {
+        harness.statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    harness.releaseFactory();
+    await expect(started).resolves.toMatchObject({
+      streamId: payload.streamId,
+      mediaPlanVersion: 2,
+    });
+    expect(harness.statuses.some((status) => (
+      status.lane === 'overview' && /overview lane unavailable/u.test(status.message ?? '')
+    ))).toBe(true);
+    expect(harness.captureSource.stop).not.toHaveBeenCalled();
+    await harness.runtime.dispose();
+  });
+
+  it('reports the transport chroma capability so clarity tiers cannot offer 4:4:4', async () => {
+    // The video path is capture(BGRA) -> I420 -> VP8, and VP8 has no 4:4:4 profile.
+    // The capability must say so, because a 4:4:4 clarity tier would be a lie the
+    // encoder cannot honour (measured 4:2:0 text loss: 73-80% of saturated pixels
+    // move by more than 16 levels).
+    const harness = makeDeferredCaptureRuntime();
+    const payload = start('chroma-capability');
+    const started = harness.runtime.startStream(payload, {
+      sendStatus: (status) => {
+        harness.statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    harness.releaseFactory();
+    await started;
+    const capability = harness.statuses.find((status) => status.stage === 'capability-verified')?.capability;
+    expect(capability?.chromaFormats).toEqual(['420']);
+    await harness.runtime.dispose();
   });
 });

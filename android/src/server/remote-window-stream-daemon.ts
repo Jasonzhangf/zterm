@@ -6,6 +6,8 @@ import {
   normalizeRemoteWindowVideoProfile,
   formatRemoteWindowVideoProfileError,
   convertRgbaToI420Frame,
+  createRemoteWindowLatencyAccumulator,
+  type RemoteWindowLatencyAccumulator,
 } from './remote-window-stream-daemon-helpers';
 import type {
   RemoteWindowStreamIceCandidatePayload,
@@ -56,6 +58,7 @@ import {
   type RemoteWindowStreamSessionResources,
 } from './remote-window-stream-session';
 import {
+  isScreenCaptureKitZeroFrameTimeoutMessage,
   truncateRemoteWindowErrorMessage,
 } from './remote-window-support';
 import {
@@ -86,12 +89,30 @@ import {
 } from './remote-window-capture';
 
 export * from './remote-window-scripts';
+import { MACOS_REMOTE_WINDOW_INPUT_SWIFT } from './remote-window-scripts';
+import { prepareSwiftScript } from './macos-swift-script';
 export * from './remote-window-support';
 export * from './remote-window-catalog';
 export * from './remote-window-input-helper';
 export * from './remote-window-capture';
 
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_REFRESH_INTERVAL_MS = 5_000;
+// Daemon-side latency observation cadence and rolling window. Both are bounded
+// so the published projection stays small and the timer cost stays flat.
+// Measured on a live Air daemon (one observation window): a 1s cadence made
+// `getStats()` resolve in 354-660ms per sample. A controlled loopback with a
+// 58-entry report resolves in ~1ms with no measurable event-loop lag, so the
+// causal link between sampling and a ~1fps captured stream on device is NOT
+// established. 5s keeps the latency projection fresh at a tenth of the duty.
+const REMOTE_WINDOW_LATENCY_SAMPLE_INTERVAL_MS = 5_000;
+/**
+ * A `getStats()` sample that resolves this slowly is surfaced as a defect,
+ * not a slow sample: on a live peer it can hold the daemon event loop for
+ * hundreds of milliseconds, which delays capture handoff and makes the
+ * launchd health probe miss and restart the daemon mid-stream.
+ */
+const REMOTE_WINDOW_LATENCY_SLOW_STATS_WARN_MS = 250;
+const REMOTE_WINDOW_LATENCY_SAMPLE_WINDOW_MS = 10_000;
 
 interface RemoteWindowDagpipeGateOptions {
   requestId: string;
@@ -182,6 +203,8 @@ export interface RemoteWindowStreamDaemonDeps {
   captureBinary?: string;
   iterm2PythonTimeoutMs?: number;
   appWindowCatalogTimeoutMs?: number;
+  /** Bound for the one-time compile that caches the helper Swift source. */
+  swiftScriptCompileTimeoutMs?: number;
   targetCatalogRefreshIntervalMs?: number;
   nowMs?: () => number;
   warmTargetCatalogOnStart?: boolean;
@@ -268,6 +291,11 @@ interface ActiveRemoteWindowStream extends Omit<RemoteWindowStreamSessionResourc
   overviewFramesSent?: number;
   framesDropped: number;
   compositePollTimer: ReturnType<typeof setInterval> | null;
+  // Bounded daemon-side latency observation for this stream. The accumulator
+  // only measures; the timer that publishes it is released by the single
+  // retire owner below.
+  latencyAccumulator: RemoteWindowLatencyAccumulator;
+  latencyTimer: ReturnType<typeof setInterval> | null;
   handlers: RemoteWindowStreamDaemonHandlers;
   focusRevision: number;
   pendingFocusReady: RemoteWindowStreamFocusResultPayload | null;
@@ -502,6 +530,21 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     return remoteWindowInputHelper;
   };
+  let inputHelperScriptPrepared: Promise<unknown> | null = null;
+  // The helper starts its own process, so the compiled source must exist before
+  // either path touches it: a stream that is only previewed never warms but can
+  // still deliver input, and an interpreted start costs seconds of compiler time
+  // and leaves an interpreter child behind.
+  const ensureInputHelperScriptPrepared = () => {
+    if (!inputHelperScriptPrepared) {
+      inputHelperScriptPrepared = prepareSwiftScript({
+        swiftBinary,
+        source: MACOS_REMOTE_WINDOW_INPUT_SWIFT,
+        timeoutMs: deps.swiftScriptCompileTimeoutMs,
+      });
+    }
+    return inputHelperScriptPrepared;
+  };
   const warmRemoteWindowInputHelperForTarget = async (target: RemoteWindowStreamTargetManifest) => {
     if (
       platform !== 'darwin'
@@ -511,9 +554,11 @@ export function createRemoteWindowStreamDaemonRuntime(
     ) {
       return;
     }
+    await ensureInputHelperScriptPrepared();
     await getRemoteWindowInputHelper().warm();
   };
-  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target, options) => {
+  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || (async (payload, target, options) => {
+    await ensureInputHelperScriptPrepared();
     // 每个业务输入都在同一持久 helper 队列内完成前台/窗口校验后再注入。
     // 禁止时间防抖跳过校验：用户可在任意时刻把另一窗口置前。
     return getRemoteWindowInputHelper().send({
@@ -702,6 +747,10 @@ export function createRemoteWindowStreamDaemonRuntime(
     if (entry.compositePollTimer) {
       clearInterval(entry.compositePollTimer);
       entry.compositePollTimer = null;
+    }
+    if (entry.latencyTimer) {
+      clearInterval(entry.latencyTimer);
+      entry.latencyTimer = null;
     }
     activeStreams.delete(entry.streamId);
     clearRemoteWindowStreamIceState(entry.streamId);
@@ -947,6 +996,68 @@ export function createRemoteWindowStreamDaemonRuntime(
     );
   }
 
+  /**
+   * Bounded latency publisher for one stream. It reads the peer connection's
+   * own stats report (wrtc implements `getStats` on the peer connection, not on
+   * the sender) and republishes a rolling projection on the existing stream
+   * status message. A stats failure only skips one sample; it never fails the
+   * stream and never feeds control state.
+   */
+  function startRemoteWindowLatencySampling(entry: ActiveRemoteWindowStream) {
+    if (entry.latencyTimer) {
+      return;
+    }
+    entry.latencyTimer = setInterval(() => {
+      void sampleRemoteWindowLatency(entry);
+    }, REMOTE_WINDOW_LATENCY_SAMPLE_INTERVAL_MS);
+  }
+
+  async function sampleRemoteWindowLatency(entry: ActiveRemoteWindowStream) {
+    if (!isCurrentStream(entry) || entry.cleanupDone) {
+      return;
+    }
+    let report: RTCStatsReport | null = null;
+    const peerConnection = entry.peerConnection;
+    // A live sendonly peer can make `getStats()` resolve in hundreds of
+    // milliseconds (measured once on a live Air daemon, 354-660ms at 1Hz; not
+    // reproduced in a controlled loopback, ~1ms). A sample that slow is
+    // surfaced instead of staying invisible, because it can delay capture
+    // handoff and make the launchd health probe miss and restart the daemon
+    // mid-stream.
+    const statsSamplingDisabled = process.env.ZTERM_DAEMON_DISABLE_STATS_SAMPLING === '1';
+    if (!statsSamplingDisabled && peerConnection && typeof peerConnection.getStats === 'function') {
+      const statsStartedAtMs = nowMs();
+      try {
+        report = await peerConnection.getStats();
+      } catch {
+        report = null;
+      }
+      const statsDurationMs = nowMs() - statsStartedAtMs;
+      if (statsDurationMs >= REMOTE_WINDOW_LATENCY_SLOW_STATS_WARN_MS) {
+        console.error(
+          `[remote-window-latency] getStats blocked the event loop for ${statsDurationMs}ms`,
+        );
+      }
+    }
+    if (!isCurrentStream(entry) || entry.cleanupDone) {
+      return;
+    }
+    entry.latencyAccumulator.applySenderStats(report, nowMs());
+    const latency = entry.latencyAccumulator.snapshot(REMOTE_WINDOW_LATENCY_SAMPLE_WINDOW_MS);
+    if (!latency) {
+      return;
+    }
+    entry.handlers.sendStatus?.({
+      requestId: entry.requestId,
+      streamId: entry.streamId,
+      purpose: entry.purpose,
+      phase: 'streaming',
+      framesSent: entry.framesSent,
+      framesDropped: entry.framesDropped,
+      latency,
+    });
+  }
+
   function sendRemoteWindowVideoFrame(
     entry: ActiveRemoteWindowStream,
     captureFrame: RemoteWindowCaptureFrame,
@@ -958,12 +1069,26 @@ export function createRemoteWindowStreamDaemonRuntime(
       return;
     }
     videoSource.onFrame(i420Frame);
+    if (lane === 'focus') {
+      // Observation only: capture timestamp -> encoder handoff. The encoder and
+      // the pacer are measured separately from peer connection stats totals.
+      // A frame without a capture timestamp yields no sample instead of a fake 0.
+      const capturedAtMs = captureFrame.capturedAtMs;
+      if (typeof capturedAtMs === 'number' && Number.isFinite(capturedAtMs)) {
+        entry.latencyAccumulator.recordCapture(capturedAtMs, nowMs());
+      }
+      // The capture source is the only owner of the size it actually produces,
+      // so a zoom-aware raise is witnessed from the frame, never from the
+      // requested profile.
+      entry.latencyAccumulator.recordCaptureSize(captureFrame.width, captureFrame.height);
+    }
     if (lane === 'overview') {
       entry.overviewFramesSent = (entry.overviewFramesSent ?? 0) + 1;
       return;
     }
     entry.framesSent += 1;
     if (entry.framesSent === 1) {
+      startRemoteWindowLatencySampling(entry);
       entry.handlers.sendStatus?.({
         requestId: entry.requestId,
         streamId: entry.streamId,
@@ -1051,6 +1176,10 @@ export function createRemoteWindowStreamDaemonRuntime(
     if (!isCurrentStream(entry)) {
       return;
     }
+    // Measure the capture source before the latest-frame slot and the frame-age
+    // policy decide what survives, so a frozen stream can be attributed to
+    // either a slow source or a drop policy.
+    entry.latencyAccumulator.recordCaptureArrival(nowMs());
     enqueueRemoteWindowLatestFrame(entry, lane, captureFrame);
     if (isRemoteWindowPeerMediaReady(entry, lane)) {
       scheduleRemoteWindowFrameDrain(entry, lane);
@@ -1111,7 +1240,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     const purpose: RemoteWindowStreamPurpose = payload.purpose ?? 'focus';
     let entry: ActiveRemoteWindowStream | null = null;
-    let failureStage: RemoteWindowStreamFailureStage = 'request-validation';
+    let failureStage: RemoteWindowStreamFailureStage | undefined = 'request-validation';
     try {
       validateStreamTargetForCapture(payload.target);
       failureStage = 'media-plan-validation';
@@ -1150,6 +1279,11 @@ export function createRemoteWindowStreamDaemonRuntime(
           maxVideoLanes: mediaPlanContract.lanes.length === 2 ? 2 : 1,
           screenCaptureKit: true,
           typedPerLaneStatus: true,
+          // 采集是 BGRA，daemon 走 rgbaToI420 后交给 VP8；VP8 没有 4:4:4 profile，
+          // 所以本传输只能承载 4:2:0。清晰度档位必须按这个字段来，不能提供编码器
+          // 承载不了的 4:4:4 档（实测 4:2:0 在彩色文字上改动 73–80% 的饱和像素，
+          // 见 evidence/remote-stream-perf-1013/chroma-420-vs-444.png）。
+          chromaFormats: ['420'],
           preflight: {
             wrtc: 'available',
             abi: 'supported',
@@ -1217,6 +1351,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         maxFrameAgeMs: requestedVideoProfile.maxFrameAgeMs,
         captureSource: null,
         compositePollTimer: null,
+        latencyAccumulator: createRemoteWindowLatencyAccumulator(),
+        latencyTimer: null,
         handlers,
         framesSent: 0,
         framesDropped: 0,
@@ -1357,6 +1493,14 @@ export function createRemoteWindowStreamDaemonRuntime(
           }
           stopAndSurface(streamEntry, error.message || 'remote window capture failed');
         },
+      }).catch((focusStartError: unknown) => {
+        // The capture factory owns the SCStream lifecycle, so a stream that
+        // started but produced no frame is its zero-frame startup timeout, not
+        // a failure to reach capture at all.
+        if (isScreenCaptureKitZeroFrameTimeoutMessage(focusStartError)) {
+          failureStage = 'focus-capture-first-frame';
+        }
+        throw focusStartError;
       });
       if (!isCurrentStream(streamEntry)) {
         captureSource.stop();
@@ -1388,8 +1532,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       // 双流：组合 target 额外启动低码率总览（overview）捕获（全部窗口平铺 canvas）
       if (hasOverviewLane) {
         failureStage = 'overview-capture-start';
-        const overviewCaptureSource = await captureSourceFactory(payload.target, {
-          frameRate: overviewFrameRate,
+        const overviewCaptureSource = await captureSourceFactory(payload.target, {          frameRate: overviewFrameRate,
           maxCaptureWidth: Math.min(960, requestedVideoProfile.maxCaptureWidth),
           maxCaptureHeight: Math.min(600, requestedVideoProfile.maxCaptureHeight),
           startupTimeoutMs: captureStartupTimeoutMs,
@@ -1418,14 +1561,35 @@ export function createRemoteWindowStreamDaemonRuntime(
             }
             stopAndSurface(streamEntry, error.message || 'remote window overview capture failed');
           },
+        }).catch((overviewStartError: unknown) => {
+          // overview 是低码率总览增强，不是用户正在看/正在输入的主画面。它起不来时按本文件
+          // 既有约定（见下方 overview catalog/layout update rejected）只报状态并继续 focus 流；
+          // 否则组合目标会让整个串流起不来，客户端还会按可靠投递反复重试（实测同一 requestId
+          // 重试 9 次 × 20s 超时），多窗口 App 组因此完全不可用。
+          handlers.sendStatus?.({
+            requestId: payload.requestId,
+            streamId: payload.streamId,
+            purpose,
+            phase: 'starting',
+            lane: 'overview',
+            message: `overview lane unavailable: ${overviewStartError instanceof Error ? overviewStartError.message : String(overviewStartError)}`,
+          });
+          return null;
         });
-        if (!isCurrentStream(streamEntry)) {
-          overviewCaptureSource.stop();
+        if (!overviewCaptureSource) {
+          failureStage = undefined;
+        }        if (!isCurrentStream(streamEntry)) {
+          overviewCaptureSource?.stop();
           throw new Error('remote window stream was closed before overview capture started');
         }
-        streamEntry.overviewCaptureSource = overviewCaptureSource;
-        scheduleRemoteWindowFrameDrain(streamEntry, 'overview');
-        if (!streamEntry.overviewCaptureStartedReported) {
+        if (overviewCaptureSource) {
+          streamEntry.overviewCaptureSource = overviewCaptureSource;
+        }
+        drainPendingRemoteWindowQualityRequests(streamEntry, updateStreamQuality);
+        if (overviewCaptureSource) {
+          scheduleRemoteWindowFrameDrain(streamEntry, 'overview');
+        }
+        if (overviewCaptureSource && !streamEntry.overviewCaptureStartedReported) {
           streamEntry.overviewCaptureStartedReported = true;
           handlers.sendStatus?.({
             requestId: payload.requestId,
@@ -1444,6 +1608,10 @@ export function createRemoteWindowStreamDaemonRuntime(
           void (async () => {
             const activeEntry = streamEntry;
             if (!activeEntry || !isCurrentStream(activeEntry)) {
+              return;
+            }
+            if (!activeEntry.overviewCaptureSource) {
+              // overview lane 起不来时没有可更新的捕获；保留 timer，但不再扫描 catalog。
               return;
             }
             try {
@@ -1516,7 +1684,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       }
       flushPendingRemoteWindowVideoFrame(streamEntry);
       try {
-        await applyRemoteWindowStreamGroupQuality({
+        const appliedStartQuality = await applyRemoteWindowStreamGroupQuality({
           requested: requestedVideoProfile,
           focusSender: videoSender || null,
           focusCaptureSource: streamEntry.captureSource,
@@ -1525,6 +1693,13 @@ export function createRemoteWindowStreamDaemonRuntime(
         });
         videoProfile = requestedVideoProfile;
         streamEntry.videoProfile = videoProfile;
+        if (appliedStartQuality.senderParametersDegraded.length > 0) {
+          // The capture profile applied; the encoder keeps its previous bitrate.
+          // Surface it instead of pretending the whole budget was applied.
+          videoProfileWarning = appliedStartQuality.senderParametersDegraded
+            .map((entry) => `${entry.lane} lane bitrate: ${entry.reason}`)
+            .join('; ');
+        }
       } catch (error) {
         videoProfileWarning = formatRemoteWindowVideoProfileError(error);
       }
@@ -1798,9 +1973,9 @@ export function createRemoteWindowStreamDaemonRuntime(
     // The client's first quality request reaches the daemon before the async
     // ScreenCaptureKit factory assigns entry.captureSource. Rather than reject
     // the request as `quality_unsupported`, queue it and let the capture-ready
-    // transition drain it. This is the only place a quality request can race
-    // capture readiness, so a single drain point at the assignment site is
-    // enough; the drain re-enters this function and re-runs the full gate.
+    // transition drain it. The overview lane starts later and its own capture
+    // source is handled inside the group apply, so this queue only tracks the
+    // focus lane; the assignment sites drain the queue.
     if (entry.captureSource === null) {
       return new Promise<RemoteWindowStreamQualityResultPayload | RemoteWindowStreamErrorPayload>((resolve) => {
         entry.pendingQualityRequests.push({ payload, resolve });
@@ -1812,7 +1987,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       if (!videoProfile) {
         throw new Error('remote window stream quality requires videoProfile');
       }
-      const appliedGroupBudget = await applyRemoteWindowStreamGroupQuality({
+      const appliedQuality = await applyRemoteWindowStreamGroupQuality({
         requested: videoProfile,
         focusSender: entry.videoSender,
         focusCaptureSource: entry.captureSource,
@@ -1834,7 +2009,10 @@ export function createRemoteWindowStreamDaemonRuntime(
         status: 'applied',
         requestedVideoProfile: payload.videoProfile,
         appliedVideoProfile: videoProfile,
-        appliedGroupBudget,
+        appliedGroupBudget: appliedQuality.budget,
+        ...(appliedQuality.senderParametersDegraded.length > 0
+          ? { senderParametersDegraded: appliedQuality.senderParametersDegraded }
+          : {}),
       };
     } catch (error) {
       return {
@@ -2025,6 +2203,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         ...(control.lane === 'continuous' ? { maxAgeMs: entry.maxFrameAgeMs } : {}),
       },
     });
+    // Observation only: daemon receive -> macOS injection complete.
+    entry.latencyAccumulator.recordInputInjection(nowMs() - daemonReceivedAtMs);
     if (payload.event.kind === 'window-resize') {
       if (operationResult?.kind !== 'window-resize') {
         throw new Error('remote window resize native readback missing');

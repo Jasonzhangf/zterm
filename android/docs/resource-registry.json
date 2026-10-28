@@ -2702,7 +2702,7 @@
     },
     {
       "resource_id": "resource.remote_window_frame_projection",
-      "status": "design",
+      "status": "active",
       "resource_type": "projection_resource",
       "identity": "Client-owned decoded-video-frame callback clock, draw-once frame identity, overview cadence, and bounded paint/frame-age diagnostics for visible remote-window canvases",
       "owner_feature": "desktop.remote_window_stream",

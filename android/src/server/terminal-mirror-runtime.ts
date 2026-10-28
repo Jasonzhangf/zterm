@@ -9,6 +9,7 @@ import type {
   TerminalCursorState,
 } from '@zterm/shared/types';
 import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
+import { rowsEqual } from './canonical-buffer';
 import { createDaemonBufferPublisherRuntime } from './daemon-buffer-publisher-runtime';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import { resolveTerminalLiveSyncDelay } from './terminal-performance-scheduler';
@@ -132,6 +133,7 @@ export interface TerminalMirrorRuntime {
   syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: {
     forceRevision?: boolean;
     requestPostFlushIfBusy?: boolean;
+    liveSyncTick?: boolean;
   }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
@@ -149,6 +151,64 @@ export interface TerminalMirrorRuntime {
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 const MIRROR_LIVE_SYNC_IDLE_MS = 120;
+// Live-sync ticks keep capturing tmux truth, but the native mirror publish DAG
+// is coalesced to at most one run per window. A skipped tick is folded into the
+// next run, which diffs against the last published snapshot instead of the
+// previous capture.
+const MIRROR_PUBLISH_COALESCE_MS = 100;
+// Temporary diagnostic for the mirror publish rate investigation: aggregates
+// sync-path and native-DAG activity into one log line every 5s so the daemon
+// log shows which path drives the publish DAG and how often.
+const mirrorSyncDiagnostic = {
+  timerTicks: 0,
+  explicitSyncs: 0,
+  forceSyncs: 0,
+  coalescedTicks: 0,
+  unchangedSkips: 0,
+  dagCalls: 0,
+  dagMs: 0,
+  maxBufferLines: 0,
+  windowStartedAt: Date.now(),
+  timer: null as ReturnType<typeof setInterval> | null,
+};
+function recordMirrorSyncDiagnostic(kind: 'timer' | 'explicit' | 'force') {
+  if (kind === 'timer') {
+    mirrorSyncDiagnostic.timerTicks += 1;
+  } else if (kind === 'force') {
+    mirrorSyncDiagnostic.forceSyncs += 1;
+  } else {
+    mirrorSyncDiagnostic.explicitSyncs += 1;
+  }
+  if (mirrorSyncDiagnostic.timer) {
+    return;
+  }
+  mirrorSyncDiagnostic.timer = setInterval(() => {
+    const diagnostic = mirrorSyncDiagnostic;
+    if (
+      diagnostic.timerTicks + diagnostic.explicitSyncs + diagnostic.forceSyncs
+      + diagnostic.coalescedTicks + diagnostic.unchangedSkips + diagnostic.dagCalls === 0
+    ) {
+      return;
+    }
+    const windowMs = Math.max(1, Date.now() - diagnostic.windowStartedAt);
+    console.error(
+      `[mirror-sync] window=${windowMs}ms timer=${diagnostic.timerTicks} explicit=${diagnostic.explicitSyncs}`
+      + ` force=${diagnostic.forceSyncs} coalesced=${diagnostic.coalescedTicks}`
+      + ` unchanged=${diagnostic.unchangedSkips} dagCalls=${diagnostic.dagCalls}`
+      + ` dagMs=${diagnostic.dagMs} maxBufferLines=${diagnostic.maxBufferLines}`,
+    );
+    diagnostic.timerTicks = 0;
+    diagnostic.explicitSyncs = 0;
+    diagnostic.forceSyncs = 0;
+    diagnostic.coalescedTicks = 0;
+    diagnostic.unchangedSkips = 0;
+    diagnostic.dagCalls = 0;
+    diagnostic.dagMs = 0;
+    diagnostic.maxBufferLines = 0;
+    diagnostic.windowStartedAt = Date.now();
+  }, 5_000);
+  mirrorSyncDiagnostic.timer.unref?.();
+}
 // Cap for quiet-capture backoff (120 -> 240 -> 480 -> 500ms). External tmux
 // writes are detected within this window while an idle terminal stops paying
 // a full 1305-line capture at 30fps.
@@ -165,11 +225,23 @@ interface PendingAdaptiveWidthCleanup {
   appliedRows: number | null;
 }
 
+// Last mirror state that was actually handed to subscribers. It is the diff
+// base for the next publish, so a coalesced tick's changes are still delivered
+// by that next run.
+interface PublishedMirrorSnapshot {
+  startIndex: number;
+  lines: TerminalCell[][];
+  // Time of the last publish that carried changed ranges. Null until then, so a
+  // full resync or a no-change run never opens a coalescing window.
+  changedAt: number | null;
+}
+
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
   const pendingPostFlushImmediateSyncMirrors = new WeakSet<SessionMirror>();
   const pendingAdaptiveWidthCleanup = new Map<string, PendingAdaptiveWidthCleanup>();
+  const publishedMirrorSnapshots = new WeakMap<SessionMirror, PublishedMirrorSnapshot>();
 
   function isTmuxSessionUnavailableError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -490,7 +562,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   async function syncMirrorCanonicalBuffer(
     mirror: SessionMirror,
-    options?: { forceRevision?: boolean; requestPostFlushIfBusy?: boolean },
+    options?: { forceRevision?: boolean; requestPostFlushIfBusy?: boolean; liveSyncTick?: boolean },
   ) {
     if (mirror.lifecycle !== 'ready') {
       return false;
@@ -523,15 +595,89 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           rows: mirror.rows,
         });
         mirror.consecutiveFailures = 0;
-        const changedRanges = deps.mirrorBufferChanged(mirror, previousStartIndex, previousLines);
+        const publishedSnapshot = publishedMirrorSnapshots.get(mirror);
+        // A live-sync tick inside the coalescing window skips the native publish
+        // DAG. The capture above already landed in mirror truth, and the next
+        // run diffs against the last published snapshot, so every skipped tick
+        // is still delivered as one union of changed ranges. Explicit syncs
+        // (initial publish, client refresh) and forceRevision publish at once.
+        const coalescePublish = Boolean(options?.liveSyncTick)
+          && !forceRevision
+          && publishedSnapshot !== undefined
+          && publishedSnapshot.changedAt !== null
+          && Date.now() - publishedSnapshot.changedAt < MIRROR_PUBLISH_COALESCE_MS;
+        // The native publish DAG serializes both full buffers as JSON on the
+        // daemon main thread. When the capture is cell-for-cell identical to the
+        // snapshot subscribers already received, the DAG's result is provably
+        // empty (content and startIndex are the only diff inputs), so skip it.
+        // The snapshot is left untouched, so it stays the diff base of the next
+        // run and a later change still publishes the full union of ranges.
+        const unchangedPublish = !forceRevision
+          && publishedSnapshot !== undefined
+          && publishedSnapshot.startIndex === mirror.bufferStartIndex
+          && publishedSnapshot.lines.length === mirror.bufferLines.length
+          && publishedSnapshot.lines.every((line, index) => rowsEqual(line, mirror.bufferLines[index]));
+        const skipPublishDag = coalescePublish || unchangedPublish;
+        recordMirrorSyncDiagnostic(
+          forceRevision ? 'force' : options?.liveSyncTick ? 'timer' : 'explicit',
+        );
+        const dagStartedAtMs = Date.now();
+        const dagCpuStartedAt = process.cpuUsage();
+        const changedRanges = skipPublishDag
+          ? []
+          : deps.mirrorBufferChanged(
+              mirror,
+              publishedSnapshot ? publishedSnapshot.startIndex : previousStartIndex,
+              publishedSnapshot ? publishedSnapshot.lines : previousLines,
+            );
+        if (unchangedPublish) {
+          mirrorSyncDiagnostic.unchangedSkips += 1;
+        } else if (coalescePublish) {
+          mirrorSyncDiagnostic.coalescedTicks += 1;
+        } else {
+          const dagMs = Date.now() - dagStartedAtMs;
+          mirrorSyncDiagnostic.dagCalls += 1;
+          mirrorSyncDiagnostic.dagMs += dagMs;
+          mirrorSyncDiagnostic.maxBufferLines = Math.max(
+            mirrorSyncDiagnostic.maxBufferLines,
+            mirror.bufferLines.length,
+          );
+          // Process-wide CPU (all threads) is a coarse discriminator: wall time
+          // far above CPU time means the call was blocked, not computing.
+          if (dagMs >= 200) {
+            const cpu = process.cpuUsage(dagCpuStartedAt);
+            console.error(
+              `[mirror-sync] slow-dag wallMs=${dagMs} cpuMs=${Math.round((cpu.user + cpu.system) / 1000)}`
+              + ` lines=${mirror.bufferLines.length}`,
+            );
+          }
+        }
+        if (!skipPublishDag) {
+          // The snapshot is exactly what subscribers just received, so it is
+          // the diff base of the next run. Only a publish that carried changes
+          // opens the coalescing window: the first change after a quiet period
+          // is still published on the next tick.
+          publishedMirrorSnapshots.set(mirror, {
+            startIndex: mirror.bufferStartIndex,
+            lines: mirror.bufferLines.slice(),
+            changedAt: changedRanges.length > 0 ? Date.now() : (publishedSnapshot?.changedAt ?? null),
+          });
+        }
         const cursorChanged = !deps.mirrorCursorEqual(previousCursor, mirror.cursor);
         const cursorKeysAppChanged = previousCursorKeysApp !== mirror.cursorKeysApp;
         const hasLiveActivity = forceRevision || changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged;
         // Content-change truth drives the quiet-capture backoff. Cursor-only
         // changes (head broadcasts) do NOT keep the capture loop hot: an idle
         // terminal must not pay a full tmux capture every 33ms just to confirm
-        // the same 1305 lines.
-        mirror.lastFlushHadContentChanges = forceRevision || changedRanges.length > 0;
+        // the same 1305 lines. An unchanged publish records no content change,
+        // so the quiet backoff engages. A coalesced tick with pending changes
+        // keeps the previous cadence so the loop stays hot until the window
+        // elapses and the union is published.
+        if (unchangedPublish) {
+          mirror.lastFlushHadContentChanges = false;
+        } else if (!skipPublishDag) {
+          mirror.lastFlushHadContentChanges = forceRevision || changedRanges.length > 0;
+        }
         if (hasLiveActivity) {
           mirror.revision += 1;
           mirror.lastLiveActivityAt = Date.now();
@@ -667,6 +813,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       }
       void syncMirrorCanonicalBuffer(mirror, {
         requestPostFlushIfBusy: delayMs === 0,
+        liveSyncTick: true,
       }).finally(() => {
         if (
           mirror.lifecycle !== 'ready'

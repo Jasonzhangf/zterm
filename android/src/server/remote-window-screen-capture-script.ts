@@ -1,4 +1,5 @@
 export const SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT = String.raw`
+import Accelerate
 import AppKit
 import CoreGraphics
 import CoreMedia
@@ -213,19 +214,40 @@ final class FrameOutput: NSObject, SCStreamOutput {
         let source = baseAddress.assumingMemoryBound(to: UInt8.self)
         var rgba = Data(count: width * height * 4)
         rgba.withUnsafeMutableBytes { destinationRaw in
-            guard let destinationBase = destinationRaw.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+            guard let destinationBase = destinationRaw.baseAddress else {
                 return
             }
-            for y in 0..<height {
-                let sourceRow = source.advanced(by: y * bytesPerRow)
-                let destinationRow = destinationBase.advanced(by: y * width * 4)
-                for x in 0..<width {
-                    let sourcePixel = sourceRow.advanced(by: x * 4)
-                    let destinationPixel = destinationRow.advanced(by: x * 4)
-                    destinationPixel[0] = sourcePixel[2]
-                    destinationPixel[1] = sourcePixel[1]
-                    destinationPixel[2] = sourcePixel[0]
-                    destinationPixel[3] = sourcePixel[3]
+            var sourceBuffer = vImage_Buffer(
+                data: UnsafeMutableRawPointer(mutating: source),
+                height: vImagePixelCount(height),
+                width: vImagePixelCount(width),
+                rowBytes: bytesPerRow,
+            )
+            var destinationBuffer = vImage_Buffer(
+                data: destinationBase,
+                height: vImagePixelCount(height),
+                width: vImagePixelCount(width),
+                rowBytes: width * 4,
+            )
+            var channelMap: [UInt8] = [2, 1, 0, 3]
+            let result = vImagePermuteChannels_ARGB8888(
+                &sourceBuffer,
+                &destinationBuffer,
+                &channelMap,
+                vImage_Flags(kvImageNoFlags),
+            )
+            if result != kvImageNoError {
+                for y in 0..<height {
+                    let sourceRow = source.advanced(by: y * bytesPerRow)
+                    let destinationRow = destinationBase.assumingMemoryBound(to: UInt8.self).advanced(by: y * width * 4)
+                    for x in 0..<(width * 4) {
+                        destinationRow[x] = sourceRow[x]
+                    }
+                    for x in stride(from: 0, to: width * 4, by: 4) {
+                        let blue = destinationRow[x]
+                        destinationRow[x] = destinationRow[x + 2]
+                        destinationRow[x + 2] = blue
+                    }
                 }
             }
         }
@@ -247,7 +269,7 @@ final class FrameOutput: NSObject, SCStreamOutput {
 func startRemoteWindowCaptureProcess() {
     if CommandLine.arguments.dropFirst().contains("--permission-probe") {
         guard hasScreenCapturePermission() else {
-            stderrLine("Screen Recording permission is required; grant zterm-daemon in macOS Privacy settings")
+            stderrLine("Screen Recording permission is not granted to zterm-daemon; run zterm-daemon install-service, which requests the permission, or allow zterm-daemon in macOS Privacy settings")
             exit(5)
         }
         exit(0)
@@ -270,7 +292,7 @@ func startRemoteWindowCaptureProcess() {
     let captureState = CaptureState(config: initialConfig)
 
     guard hasScreenCapturePermission() else {
-        stderrLine("Screen Recording permission is required; grant zterm-daemon in macOS Privacy settings")
+        stderrLine("Screen Recording permission is not granted to zterm-daemon; run zterm-daemon install-service, which requests the permission, or allow zterm-daemon in macOS Privacy settings")
         exit(5)
     }
     let sampleQueue = DispatchQueue(label: "zterm.remote-window.capture.sample")
@@ -481,7 +503,7 @@ func startRemoteWindowCaptureProcess() {
 
 func startRemoteWindowValidateProcess(windowIds: [String]) {
     guard hasScreenCapturePermission() else {
-        stderrLine("Screen Recording permission is required; grant zterm-daemon in macOS Privacy settings")
+        stderrLine("Screen Recording permission is not granted to zterm-daemon; run zterm-daemon install-service, which requests the permission, or allow zterm-daemon in macOS Privacy settings")
         exit(5)
     }
 

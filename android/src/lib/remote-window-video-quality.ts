@@ -99,6 +99,70 @@ export function applyRemoteWindowMaxFrameRate(
   };
 }
 
+// Zoom-aware capture resolution (B-2). The client zooms the decoded pixels;
+// without a capture raise the encoder keeps the unzoomed ceiling and the zoom
+// region is upscaled, so text sharpens only up to the old pixel budget. When
+// the projection crosses the engage threshold the capture ceiling is raised by
+// the zoom factor, clamped to the real source pixels, and the focus bitrate is
+// scaled by the same factor (still bounded by the user cap) so the added
+// pixels are not starved. The factor is sticky between release and engage:
+// a pinch hovering around a boundary cannot flap the capture resolution.
+export const REMOTE_WINDOW_ZOOM_CAPTURE_ENGAGE_SCALE = 2;
+export const REMOTE_WINDOW_ZOOM_CAPTURE_RELEASE_SCALE = 1.6;
+export const REMOTE_WINDOW_ZOOM_CAPTURE_MAX_FACTOR = 3;
+
+export function resolveRemoteWindowZoomCaptureFactor(
+  previous: number,
+  zoomScale: number,
+): number {
+  const scale = Number.isFinite(zoomScale) ? zoomScale : 1;
+  if (scale >= REMOTE_WINDOW_ZOOM_CAPTURE_ENGAGE_SCALE) {
+    return Math.min(
+      REMOTE_WINDOW_ZOOM_CAPTURE_MAX_FACTOR,
+      Math.max(1, Math.floor(scale)),
+    );
+  }
+  if (scale < REMOTE_WINDOW_ZOOM_CAPTURE_RELEASE_SCALE) {
+    return 1;
+  }
+  return Number.isFinite(previous) && previous >= 2
+    ? Math.min(REMOTE_WINDOW_ZOOM_CAPTURE_MAX_FACTOR, Math.max(2, previous))
+    : 1;
+}
+
+export function applyRemoteWindowZoomCaptureProfile(
+  profile: RemoteWindowVideoProfile,
+  options: {
+    factor: number;
+    source?: { width: number; height: number } | null;
+    maxBitrateCapBps?: number | null;
+  },
+): RemoteWindowVideoProfile {
+  const factor = Math.max(1, Math.floor(Number.isFinite(options.factor) ? options.factor : 1));
+  if (factor <= 1) {
+    return profile;
+  }
+  const source = options.source;
+  const sourceWidth = source && Number.isFinite(source.width) ? Math.floor(source.width) : null;
+  const sourceHeight = source && Number.isFinite(source.height) ? Math.floor(source.height) : null;
+  const width = sourceWidth !== null
+    ? Math.min(sourceWidth, Math.ceil(profile.maxCaptureWidth * factor))
+    : Math.ceil(profile.maxCaptureWidth * factor);
+  const height = sourceHeight !== null
+    ? Math.min(sourceHeight, Math.ceil(profile.maxCaptureHeight * factor))
+    : Math.ceil(profile.maxCaptureHeight * factor);
+  const cap = typeof options.maxBitrateCapBps === 'number' && Number.isFinite(options.maxBitrateCapBps)
+    ? options.maxBitrateCapBps
+    : null;
+  const scaledBitrate = profile.maxBitrateBps * factor;
+  return {
+    ...profile,
+    maxCaptureWidth: Math.max(1, Math.round(width)),
+    maxCaptureHeight: Math.max(1, Math.round(height)),
+    maxBitrateBps: cap !== null ? Math.min(cap, scaledBitrate) : scaledBitrate,
+  };
+}
+
 // Internal ABR guardrails. These are deliberately kept out of the wire
 // profile: the daemon receives the resolved max bitrate, while the client
 // owns the policy limits used to prevent text quality collapsing under load.

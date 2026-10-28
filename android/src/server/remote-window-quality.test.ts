@@ -68,7 +68,7 @@ describe('remote window stream-group quality owner', () => {
         maxCaptureWidth: 1440,
         maxCaptureHeight: 900,
       }, overviewProfile),
-    })).resolves.toMatchObject({ totalMaxBitrateBps: 6_000_000 });
+    })).resolves.toMatchObject({ budget: { totalMaxBitrateBps: 6_000_000 } });
     expect(focusSet).toHaveBeenCalledWith(expect.objectContaining({
       encodings: [{ rid: 'f', maxBitrate: 5_750_000, maxFramerate: 30 }],
     }));
@@ -206,7 +206,11 @@ describe('remote window stream-group quality owner', () => {
     }]);
   });
 
-  it('does not rollback a sender whose setParameters failed before commit', async () => {
+  it('reports a rejected sender update as a degradation and still applies the capture profile', async () => {
+    // The pinned @roamhq/wrtc build rejects every negotiated setParameters()
+    // with InvalidStateError. The capture resolution must still follow the
+    // request, and the wire result must state that the encoder bitrate did not
+    // change instead of failing the whole request.
     const getParameters = vi.fn(() => ({
       encodings: [{ maxBitrate: 9_000_000, maxFramerate: 60 }],
     }) as RTCRtpSendParameters);
@@ -215,13 +219,61 @@ describe('remote window stream-group quality owner', () => {
     });
     const updateVideoProfile = vi.fn(async () => undefined);
 
-    await expect(applyRemoteWindowStreamGroupQuality({
+    const applied = await applyRemoteWindowStreamGroupQuality({
       requested,
       focusSender: { getParameters, setParameters } as unknown as RTCRtpSender,
-      focusCaptureSource: makeCapture(requested, updateVideoProfile),
-    })).rejects.toThrow(/^InvalidStateError$/);
+      focusCaptureSource: makeCapture({
+        maxFrameRateFps: 60,
+        maxCaptureWidth: 1920,
+        maxCaptureHeight: 1200,
+      }, updateVideoProfile),
+    });
+
     expect(getParameters).toHaveBeenCalledTimes(1);
     expect(setParameters).toHaveBeenCalledTimes(1);
-    expect(updateVideoProfile).not.toHaveBeenCalled();
+    expect(applied.senderParametersDegraded).toEqual([
+      { lane: 'focus', reason: 'InvalidStateError' },
+    ]);
+    expect(updateVideoProfile).toHaveBeenCalledTimes(1);
+    expect(updateVideoProfile).toHaveBeenCalledWith({
+      maxFrameRateFps: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+    });
+    expect(applied.budget.focus.maxCaptureWidth).toBe(1440);
+  });
+
+  it('applies the focus capture profile while the overview capture source is unassigned', async () => {
+    // A composite stream starts the overview capture after the focus lane, so
+    // the overview capture source can be missing when a quality request
+    // arrives. The focus lane is the one the user sees: it must still receive
+    // its capture profile, and the group must not be rejected as unsupported.
+    const focusProfile = vi.fn(async () => undefined);
+    const applied = await applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender: {
+        getParameters: () => ({ encodings: [{ rid: 'f' }] }),
+        setParameters: vi.fn(async () => undefined),
+      } as unknown as RTCRtpSender,
+      focusCaptureSource: makeCapture({
+        maxFrameRateFps: 60,
+        maxCaptureWidth: 1920,
+        maxCaptureHeight: 1200,
+      }, focusProfile),
+      overviewSender: {
+        getParameters: () => ({ encodings: [{ rid: 'o' }] }),
+        setParameters: vi.fn(async () => undefined),
+      } as unknown as RTCRtpSender,
+      overviewCaptureSource: null,
+    });
+
+    expect(applied.budget.overview).toBeDefined();
+    expect(applied.senderParametersDegraded).toEqual([]);
+    expect(focusProfile).toHaveBeenCalledTimes(1);
+    expect(focusProfile).toHaveBeenCalledWith({
+      maxFrameRateFps: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+    });
   });
 });
