@@ -1421,12 +1421,25 @@ function TerminalPageComponent({
           .filter((session) => session.name.trim() && session.cwd?.trim())
           .map((session) => [session.name.trim(), session.cwd!.trim()] as const),
       ].filter(([name]) => sessionNames.includes(name)));
-      const sessionCollabByName = Object.fromEntries([
+      const mergedCollabByName = Object.fromEntries([
         ...Object.entries(existingGroup?.sessionCollabByName || {}),
         ...catalogSessions
           .filter((session) => session.name.trim() && session.collab?.role && session.collab?.displayName)
           .map((session) => [session.name.trim(), session.collab!] as const),
-      ].filter(([name]) => sessionNames.includes(name)));
+      ]);
+      // A live catalog row that exists without a collab projection is
+      // authoritative. Clear any stored historical role so a deregistered,
+      // ambiguous, or failed-resample session stays unclassified instead of
+      // resurrecting an obsolete master/worker from history.
+      for (const name of sessionNames) {
+        const liveSession = catalogSessions.find((session) => session.name.trim() === name);
+        if (liveSession && !(liveSession.collab?.role && liveSession.collab?.displayName)) {
+          delete mergedCollabByName[name];
+        }
+      }
+      const sessionCollabByName = Object.fromEntries(
+        Object.entries(mergedCollabByName).filter(([name]) => sessionNames.includes(name)),
+      );
       const lastOpenedSessionName = existingGroup?.lastOpenedSessionName?.trim();
       return [{
         id: `daemon:${daemonHostId}`,

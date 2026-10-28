@@ -275,6 +275,48 @@ describe('remote window stream-group quality owner', () => {
     expect(applied.budget.focus.maxBitrateBps).toBe(6_000_000);
   });
 
+  it('keeps the group total unknown when a later lane rejects with a known bitrate', async () => {
+    // Regression: focus rejected with no previous maxBitrate set the group
+    // total to 0 (unbounded). A later overview rejection with a known previous
+    // bitrate must not recompute the total back to a finite cap.
+    const focusSender = {
+      getParameters: () => ({ encodings: [{ rid: 'f' }] }),
+      setParameters: vi.fn(async () => {
+        throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+      }),
+    } as unknown as RTCRtpSender;
+    const overviewSender = {
+      getParameters: () => ({ encodings: [{ rid: 'o', maxBitrate: 1_000_000, maxFramerate: 5 }] }),
+      setParameters: vi.fn(async () => {
+        throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+      }),
+    } as unknown as RTCRtpSender;
+    const applied = await applyRemoteWindowStreamGroupQuality({
+      requested,
+      focusSender,
+      focusCaptureSource: makeCapture({
+        maxFrameRateFps: 60,
+        maxCaptureWidth: 1920,
+        maxCaptureHeight: 1200,
+      }),
+      overviewSender,
+      overviewCaptureSource: makeCapture({
+        maxFrameRateFps: 8,
+        maxCaptureWidth: 1440,
+        maxCaptureHeight: 900,
+      }),
+    });
+
+    expect(applied.senderBitrateUnknown).toBe(true);
+    expect(applied.appliedBudget.focus.maxBitrateBps).toBe(0);
+    expect(applied.appliedBudget.overview?.maxBitrateBps).toBe(1_000_000);
+    expect(applied.appliedBudget.totalMaxBitrateBps).toBe(0);
+    expect(applied.senderParametersDegraded).toEqual([
+      { lane: 'focus', reason: 'InvalidStateError' },
+      { lane: 'overview', reason: 'InvalidStateError' },
+    ]);
+  });
+
   it('applies the focus capture profile while the overview capture source is unassigned', async () => {
     // A composite stream starts the overview capture after the focus lane, so
     // the overview capture source can be missing when a quality request

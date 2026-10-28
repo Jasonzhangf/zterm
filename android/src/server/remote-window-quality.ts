@@ -229,8 +229,6 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
             } else if (appliedBudget.overview) {
               appliedBudget.overview.maxBitrateBps = previousBitrate;
             }
-            appliedBudget.totalMaxBitrateBps = appliedBudget.focus.maxBitrateBps
-              + (appliedBudget.overview?.maxBitrateBps ?? 0);
           } else {
             // WebRTC treats an unset maxBitrate as unbounded. Preserve that
             // truth (0 = no cap) instead of leaving the requested limit in the
@@ -241,10 +239,6 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
             } else if (appliedBudget.overview) {
               appliedBudget.overview.maxBitrateBps = 0;
             }
-            appliedBudget.totalMaxBitrateBps = appliedBudget.focus.maxBitrateBps === 0
-              || (appliedBudget.overview?.maxBitrateBps ?? 0) === 0
-              ? 0
-              : appliedBudget.focus.maxBitrateBps + (appliedBudget.overview?.maxBitrateBps ?? 0);
           }
           senderParametersDegraded.push({
             lane: lane.laneName,
@@ -265,6 +259,12 @@ export async function applyRemoteWindowStreamGroupQuality(options: {
         lane.captureProfileApplied = true;
       }
     }
+    // Compute the group total once after all lane updates. If any lane keeps an
+    // unknown (unbounded = 0) bitrate, the group total is also unknown; a later
+    // known lane must not resurrect a finite cap from the requested budget.
+    appliedBudget.totalMaxBitrateBps = senderBitrateUnknown
+      ? 0
+      : appliedBudget.focus.maxBitrateBps + (appliedBudget.overview?.maxBitrateBps ?? 0);
     return { budget, appliedBudget, senderParametersDegraded, senderBitrateUnknown };
   } catch (error) {
     const rollbackErrors: string[] = [];
