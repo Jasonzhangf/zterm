@@ -4,6 +4,7 @@ import type {
   RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
 } from '@zterm/shared/protocol';
+import { validateStreamTargetForCapture } from './remote-window-capture';
 import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 import { createRemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 
@@ -1011,6 +1012,103 @@ describe('remote window stream daemon v2 contract', () => {
     ))).toBe(true);
     expect(harness.captureSource.stop).not.toHaveBeenCalled();
     await harness.runtime.dispose();
+  });
+
+  it('keeps the focus lane streaming when a composite overview window is outside the display', async () => {
+    const peerConnection = makePeerConnection();
+    const statuses: RemoteWindowStreamStatusPayload[] = [];
+    const captureTargets: RemoteWindowStreamStartRequestV2Payload['target'][] = [];
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track', stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async (nextTarget, options) => {
+        captureTargets.push(nextTarget);
+        validateStreamTargetForCapture(nextTarget);
+        options.onFrame({
+          width: 800,
+          height: 600,
+          rgba: new Uint8Array(800 * 600 * 4),
+          capturedAtMs: 1_000_000,
+        });
+        return captureSource;
+      }),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('overview-out-of-display'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        videoTarget: {
+          ...target().videoTarget,
+          windowBoundsTopLeftPx: { x: 1390, y: 30, width: 2450, height: 2046 },
+          cropRectTopLeftPx: { x: 1390, y: 30, width: 2450, height: 2046 },
+        },
+        capture: {
+          source: 'ScreenCaptureKit',
+          coordinateSpace: 'macos-top-left-px',
+          scale: 1,
+          displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
+          createdAt: '2026-10-28T00:00:00.000Z',
+        },
+        compositeWindows: [{
+          windowId: 'composite-offscreen',
+          title: 'Computer Use Controls',
+          windowBoundsTopLeftPx: { x: 3518, y: 418, width: 360, height: 352 },
+          cropRectTopLeftPx: { x: 3518, y: 418, width: 360, height: 352 },
+        }],
+      },
+    };
+
+    const started = runtime.startStream(payload, {
+      sendStatus: (status) => {
+        statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+
+    await expect(started).resolves.toMatchObject({
+      streamId: payload.streamId,
+      mediaPlanVersion: 2,
+    });
+    expect(captureTargets).toHaveLength(2);
+    expect(captureTargets[0].compositeWindows).toBeUndefined();
+    expect(captureTargets[1].compositeWindows).toHaveLength(1);
+    expect(statuses.some((status) => (
+      status.lane === 'overview'
+      && /overview lane unavailable: remote window target frame is outside display/u.test(status.message ?? '')
+    ))).toBe(true);
+    expect(captureSource.stop).not.toHaveBeenCalled();
+    await runtime.dispose();
   });
 
   it('reports the transport chroma capability so clarity tiers cannot offer 4:4:4', async () => {

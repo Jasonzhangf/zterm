@@ -1242,9 +1242,14 @@ export function createRemoteWindowStreamDaemonRuntime(
     let entry: ActiveRemoteWindowStream | null = null;
     let failureStage: RemoteWindowStreamFailureStage | undefined = 'request-validation';
     try {
-      validateStreamTargetForCapture(payload.target);
-      failureStage = 'media-plan-validation';
       const hasCompositeWindows = (payload.target.compositeWindows ?? []).length > 0;
+      const focusTarget: RemoteWindowStreamTargetManifest = hasCompositeWindows
+        ? { ...payload.target, compositeWindows: undefined }
+        : payload.target;
+      // Focus is the required lane. Composite validation belongs to the
+      // optional overview lane, whose failure is settled without stopping focus.
+      validateStreamTargetForCapture(focusTarget);
+      failureStage = 'media-plan-validation';
       const expectedMediaPlan = hasCompositeWindows ? 'overview-plus-focus' : 'single-focus';
       const mediaPlanContract = getRemoteWindowMediaPlanV2Contract(expectedMediaPlan);
       const hasOverviewLane = mediaPlanContract.lanes.some((lane) => lane.role === 'overview');
@@ -1467,9 +1472,6 @@ export function createRemoteWindowStreamDaemonRuntime(
       // Overview lane 只对真正组合（多个窗口）启用；单 app-window 目标不
       // 启动第二路 capture，避免 focus 与 overview 出现双份全分辨率采样。
       // focus（高码率主窗口）流：主窗口单独捕获全分辨率；组合模式时剥离 compositeWindows
-      const focusTarget: RemoteWindowStreamTargetManifest = hasCompositeWindows
-        ? { ...payload.target, compositeWindows: undefined }
-        : payload.target;
       failureStage = 'focus-capture-start';
       const captureSource = await captureSourceFactory(focusTarget, {
         frameRate: streamFrameRate,
