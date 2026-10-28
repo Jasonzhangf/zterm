@@ -27,6 +27,15 @@ export interface RelayTmuxSessionSnapshot {
   name: string;
   cwd?: string;
   title?: string;
+  /**
+   * Read-only Collab projection published by the daemon. The client treats
+   * absence as unclassified and never infers a role from the session name.
+   */
+  collab?: {
+    role: 'master' | 'worker';
+    displayName: string;
+    agentState?: string;
+  };
   updatedAt: string;
 }
 
@@ -241,6 +250,19 @@ export function normalizeRelayTmuxSessionSnapshots(input: unknown, now: string):
       name,
       ...(asString(candidate.cwd) ? { cwd: asString(candidate.cwd) } : {}),
       ...(asString(candidate.title) ? { title: asString(candidate.title) } : {}),
+      ...(candidate.collab && typeof candidate.collab === 'object'
+        && (candidate.collab.role === 'master' || candidate.collab.role === 'worker')
+        && asString(candidate.collab.displayName)
+        ? {
+            collab: {
+              role: candidate.collab.role,
+              displayName: asString(candidate.collab.displayName),
+              ...(asString(candidate.collab.agentState)
+                ? { agentState: asString(candidate.collab.agentState) }
+                : {}),
+            },
+          }
+        : {}),
       updatedAt: asString(candidate.updatedAt) || now,
     });
   }

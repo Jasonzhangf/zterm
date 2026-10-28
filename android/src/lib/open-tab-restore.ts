@@ -2,10 +2,14 @@ import type { BridgeSettings } from './bridge-settings';
 import { normalizeOpenTabIntentState } from './open-tab-intent';
 import { resolveRelayDaemonCanonicalHostId } from './relay-account-directory';
 import { buildSessionSemanticOwnerKey, sessionSemanticOwnersMatch } from './session-semantic-identity';
-import { fetchTmuxSessions } from './tmux-sessions';
+import { fetchTmuxSessionCatalog, fetchTmuxSessions } from './tmux-sessions';
 import { normalizeRemoteTmuxSessionNames } from './tmux-session-list';
 import type { Host, PersistedOpenTab, Session, TraversalRelayDeviceSnapshot } from './types';
-import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
+import type {
+  TerminalMuxTargetClientMessage,
+  TerminalSessionCatalog,
+  TerminalSessionCatalogEntry,
+} from '@zterm/shared/protocol';
 
 const OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS = 2500;
 
@@ -259,6 +263,14 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
+  queryTerminalSessionCatalogOnOpenTransport?: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<TerminalSessionCatalog | null>;
+  onSessionCatalogFetched?: (
+    targetKey: string,
+    sessionCatalog: TerminalSessionCatalogEntry[],
+  ) => void;
 }): Promise<Map<string, string[] | null>> {
   const traversalSettings = buildTraversalSettings(options.bridgeSettings);
   const sessionNamesByTarget = new Map<string, string[] | null>();
@@ -275,13 +287,35 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
       bridgePort: target.bridgePort,
       terminalBackend: target.terminalBackend,
     });
-    const reusableSession = options.manageTmuxSessionsOnOpenTransport && options.openSessions
+    const reusableSession = (
+      options.queryTerminalSessionCatalogOnOpenTransport || options.manageTmuxSessionsOnOpenTransport
+    ) && options.openSessions
       ? resolveReusableManagedRemoteSessionForTarget(
         options.openSessions,
         target,
         options.prioritySessionIds,
       )
       : null;
+    if (reusableSession && options.queryTerminalSessionCatalogOnOpenTransport) {
+      try {
+        const managedCatalog = await options.queryTerminalSessionCatalogOnOpenTransport(
+          reusableSession.id,
+          { type: 'list-sessions' },
+        );
+        if (managedCatalog !== null) {
+          if (managedCatalog.sessionCatalog.length > 0) {
+            options.onSessionCatalogFetched?.(targetKey, managedCatalog.sessionCatalog);
+          }
+          const sessionNames = normalizeRemoteTmuxSessionNames(managedCatalog.sessionNames);
+          return { targetKey, sessionNames, ok: true as const };
+        }
+        if (!options.manageTmuxSessionsOnOpenTransport) {
+          return { targetKey, sessionNames: [] as string[], ok: false as const };
+        }
+      } catch (_error) {
+        return { targetKey, sessionNames: [] as string[], ok: false as const };
+      }
+    }
     if (reusableSession && options.manageTmuxSessionsOnOpenTransport) {
       try {
         const managedSessionNames = await options.manageTmuxSessionsOnOpenTransport(
@@ -298,6 +332,24 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
       }
     }
     try {
+      if (options.onSessionCatalogFetched && typeof fetchTmuxSessionCatalog === 'function') {
+        const catalog = await withTimeout(fetchTmuxSessionCatalog(
+          {
+            bridgeHost: target.bridgeHost,
+            bridgePort: target.bridgePort,
+            daemonHostId: target.daemonHostId,
+            authToken: target.authToken,
+            relayHostId: target.daemonHostId,
+            terminalBackend: target.terminalBackend,
+          },
+          traversalSettings,
+        ), OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS, `fetchTmuxSessions:${targetKey}`);
+        if (catalog.sessionCatalog.length > 0) {
+          options.onSessionCatalogFetched(targetKey, catalog.sessionCatalog);
+        }
+        const sessionNames = normalizeRemoteTmuxSessionNames(catalog.sessionNames);
+        return { targetKey, sessionNames, ok: true as const };
+      }
       const sessionNames = normalizeRemoteTmuxSessionNames(await withTimeout(fetchTmuxSessions(
         {
           bridgeHost: target.bridgeHost,

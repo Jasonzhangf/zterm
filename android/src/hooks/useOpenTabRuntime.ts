@@ -23,7 +23,11 @@ import { useOpenTabLifecycleEffects, type OpenTabAuditReason } from './useOpenTa
 import { useOpenTabRestoreRuntimeSync } from './useOpenTabRestoreRuntimeSync';
 import { useOpenTabSessionActions } from './useOpenTabSessionActions';
 import { auditOpenTabsAgainstRemoteSessions as auditOpenTabsAgainstRemoteSessionsLib } from '../lib/remote-tab-audit';
-import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
+import type {
+  TerminalMuxTargetClientMessage,
+  TerminalSessionCatalog,
+  TerminalSessionCatalogEntry,
+} from '@zterm/shared/protocol';
 import type {
   SessionTargetNetworkProbeFailure,
   SessionTargetNetworkSignal,
@@ -84,10 +88,18 @@ interface UseOpenTabRuntimeOptions {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
+  queryTerminalSessionCatalogOnOpenTransport?: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<TerminalSessionCatalog | null>;
   clearSessionDraft: (sessionId: string) => void;
   ensureTerminalPageVisible: () => void;
   setPageState: Dispatch<SetStateAction<AppPageState>>;
-  pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
+  pruneSessionGroupSelectionToRemoteTruth: (
+    target: { bridgeHost: string; bridgePort: number; daemonHostId?: string },
+    remoteSessionNames: string[],
+    remoteSessionCatalog?: TerminalSessionCatalogEntry[],
+  ) => void;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
   /** Client network-generation owner; lifecycle hook stamps status events with
@@ -159,6 +171,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     notifyTargetNetworkSignal,
     reportTargetNetworkProbeError,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
     setPageState,
@@ -417,10 +430,11 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
         current: [terminalActiveSessionIdRef.current, runtimeActiveSessionIdRef.current],
       },
       manageTmuxSessionsOnOpenTransport,
+      queryTerminalSessionCatalogOnOpenTransport,
       remoteOpenTabAuditTokenRef,
       pruneSessionGroupSelectionToRemoteTruth,
     });
-  }, [manageTmuxSessionsOnOpenTransport, pruneSessionGroupSelectionToRemoteTruth, relayDevices, sessionGroups]);
+  }, [manageTmuxSessionsOnOpenTransport, pruneSessionGroupSelectionToRemoteTruth, queryTerminalSessionCatalogOnOpenTransport, relayDevices, sessionGroups]);
   useEffect(() => {
     sessionsRef.current = sessions;
     runtimeActiveSessionIdRef.current = runtimeActiveSessionId;

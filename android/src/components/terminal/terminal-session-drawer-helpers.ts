@@ -4,8 +4,8 @@
 import type { TerminalSessionGroupSlotName } from '../../lib/session-group-viewport';
 import type { TerminalSessionGroupLayoutAxis } from '../../lib/terminal-layout-profile';
 
-export const DRAWER_WIDTH = '48vw';
-export const DRAWER_MAX_WIDTH = '187px';
+export const DRAWER_WIDTH = '78vw';
+export const DRAWER_MAX_WIDTH = '312px';
 export const SWIPE_CLOSE_THRESHOLD_PX = 48;
 export const SWIPE_CLOSE_VERTICAL_TOLERANCE_PX = 44;
 export const UNSCOPED_HOST_GROUP_KEY = '__unscoped__';

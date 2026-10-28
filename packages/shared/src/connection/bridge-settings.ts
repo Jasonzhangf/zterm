@@ -26,10 +26,8 @@ export type TerminalShellSkin = 'auto' | 'light' | 'blue' | 'black';
 export type TerminalFontSize = 'minimum' | 'small' | 'medium' | 'large';
 
 export interface SessionDrawerFilterSettings {
-  version: 1;
-  mode: 'all' | 'only-master' | 'hide-subagent';
-  masterNames: string[];
-  subagentNames: string[];
+  version: 2;
+  mode: 'all' | 'only-master' | 'hide-worker';
   hiddenSessionNames: string[];
 }
 
@@ -532,15 +530,15 @@ function normalizeSessionDrawerFilterSettings(value: unknown): SessionDrawerFilt
   if (!value || typeof value !== 'object') {
     return undefined;
   }
-  const candidate = value as Partial<SessionDrawerFilterSettings>;
-  const mode = candidate.mode === 'only-master' || candidate.mode === 'hide-subagent' || candidate.mode === 'all'
+  const candidate = value as { mode?: unknown; hiddenSessionNames?: unknown };
+  const mode = candidate.mode === 'only-master' || candidate.mode === 'hide-worker' || candidate.mode === 'all'
     ? candidate.mode
-    : 'all';
+    : candidate.mode === 'hide-subagent'
+      ? 'hide-worker'
+      : 'all';
   return {
-    version: 1,
+    version: 2,
     mode,
-    masterNames: normalizeNameList(candidate.masterNames),
-    subagentNames: normalizeNameList(candidate.subagentNames),
     hiddenSessionNames: normalizeNameList(candidate.hiddenSessionNames),
   };
 }

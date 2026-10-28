@@ -1120,6 +1120,18 @@ export interface TerminalSessionCatalogEntry {
   /** daemon-owned pane working directory; UI must render, never infer */
   cwd?: string;
   observation?: TerminalSessionObservation;
+  /**
+   * Read-only Collab projection resolved by the daemon from the registered
+   * tmux transport. Absence means unclassified; the client must not infer a
+   * role from the session name.
+   */
+  collab?: TerminalSessionCollabProjection;
+}
+
+export interface TerminalSessionCollabProjection {
+  role: 'master' | 'worker';
+  displayName: string;
+  agentState?: string;
 }
 
 export type TerminalSessionAgentStatus = 'running' | 'idle' | 'unknown' | 'error';

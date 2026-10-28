@@ -288,6 +288,7 @@ export function projectRelayDirectoryDeviceSnapshots(
           hostId: device.daemon.hostId,
           version: device.daemon.version,
           endpoints: device.daemon.endpoints,
+          // Collab projection is read-only client data; preserve it verbatim.
           sessions: device.daemon.sessions,
         }
       : {

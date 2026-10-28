@@ -4701,6 +4701,11 @@
       "status": "active"
     },
     {
+      "from_module": "daemon.session_catalog",
+      "to_module": "daemon.source_adapter",
+      "status": "active"
+    },
+    {
       "from_module": "daemon.session_idle_detection",
       "to_module": "daemon.runtime",
       "status": "active"

@@ -129,6 +129,7 @@ function makeRelayDevice(overrides: Partial<{
   includeDirectEndpoint: boolean;
   sessions: string[];
   sessionCwds: Record<string, string | undefined>;
+  sessionCollab: Record<string, { role: 'master' | 'worker'; displayName: string; agentState?: string }>;
   daemonConnected: boolean;
 }> = {}) {
   const deviceId = overrides.deviceId || 'device-mac-studio';
@@ -172,6 +173,7 @@ function makeRelayDevice(overrides: Partial<{
         ...(Object.prototype.hasOwnProperty.call(overrides.sessionCwds || {}, name)
           ? (overrides.sessionCwds?.[name] ? { cwd: overrides.sessionCwds[name] } : {})
           : { cwd: '/Users/jason' }),
+        ...(overrides.sessionCollab?.[name] ? { collab: overrides.sessionCollab[name] } : {}),
         title: name,
         updatedAt: now,
       })),
@@ -3134,14 +3136,17 @@ describe('TerminalPage portrait session drawer', () => {
   }
 
   const visibilityFilterConfig: SessionDrawerFilterConfig = {
-    version: 1,
+    version: 2,
     mode: 'only-master',
-    masterNames: ['zterm-3'],
-    subagentNames: ['zterm-subagent-rw-ui-0906'],
     hiddenSessionNames: [],
   };
 
-  function renderVisibilityFixture(options: {
+  const visibilityCollab = {
+    'zterm-3': { role: 'master' as const, displayName: 'Jenny' },
+    'zterm-subagent-rw-ui-0906': { role: 'worker' as const, displayName: 'Alice' },
+  };
+
+  function renderVisibilityPage(options: {
     onCloseSession?: ComponentProps<typeof TerminalPageBase>['onCloseSession'];
     onCloseDrawerRemoteSession?: ComponentProps<typeof TerminalPageBase>['onCloseDrawerRemoteSession'];
     sessionDrawerFilterConfig?: SessionDrawerFilterConfig;
@@ -3168,10 +3173,22 @@ describe('TerminalPage portrait session drawer', () => {
       sessionNames: ['zterm-3', 'zterm-subagent-rw-ui-0906', 'OneStop-1'],
       lastOpenedAt: 1,
     }];
-    render(
+    const relayDevices = [makeRelayDevice({
+      hostId: 'daemon-a',
+      deviceName: 'Daemon A',
+      sessions: ['zterm-3', 'zterm-subagent-rw-ui-0906', 'OneStop-1'],
+      sessionCollab: visibilityCollab,
+    })];
+    return {
+      sessions,
+      sessionGroups,
+      onCloseSession,
+      onCloseDrawerRemoteSession,
+      element: (
       <TerminalPage
         sessions={sessions}
         sessionGroups={sessionGroups}
+        relayDevices={relayDevices}
         activeSession={master}
         sessionDrawerFilterConfig={options.sessionDrawerFilterConfig}
         onSessionDrawerFilterConfigChange={options.onSessionDrawerFilterConfigChange}
@@ -3189,9 +3206,36 @@ describe('TerminalPage portrait session drawer', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-      />,
-    );
-    return { sessions, sessionGroups, onCloseSession, onCloseDrawerRemoteSession };
+      />
+      ),
+    };
+  }
+
+  function renderVisibilityFixture(options: {
+    sessionDrawerFilterConfig?: SessionDrawerFilterConfig;
+    onSessionDrawerFilterConfigChange?: ComponentProps<typeof TerminalPageBase>['onSessionDrawerFilterConfigChange'];
+    onCloseSession?: ComponentProps<typeof TerminalPageBase>['onCloseSession'];
+    onCloseDrawerRemoteSession?: ComponentProps<typeof TerminalPageBase>['onCloseDrawerRemoteSession'];
+  } = {}) {
+    const page = renderVisibilityPage(options);
+    const view = render(page.element);
+    return {
+      ...page,
+      rerender: (next: Parameters<typeof renderVisibilityPage>[0]) => {
+        view.rerender(renderVisibilityPage(next).element);
+      },
+    };
+  }
+
+  function renderVisibilityPageOnly(options: {
+    onCloseSession?: ComponentProps<typeof TerminalPageBase>['onCloseSession'];
+    onCloseDrawerRemoteSession?: ComponentProps<typeof TerminalPageBase>['onCloseDrawerRemoteSession'];
+    sessionDrawerFilterConfig?: SessionDrawerFilterConfig;
+    onSessionDrawerFilterConfigChange?: ComponentProps<typeof TerminalPageBase>['onSessionDrawerFilterConfigChange'];
+  } = {}) {
+    const page = renderVisibilityPage(options);
+    render(page.element);
+    return page;
   }
 
   it('projects only-master drawer rows and hides subagent plus unclassified names', async () => {
@@ -3204,13 +3248,133 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.queryByTestId('terminal-session-drawer-row-sub')).toBeNull();
     expect(screen.queryByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:OneStop-1')).toBeNull();
     expect(screen.queryByText('OneStop-1')).toBeNull();
+    // 1 visible master row out of the 3 pre-filter catalog sessions.
+    expect(screen.getByTestId('terminal-session-drawer-count').textContent).toBe('显示 1 / 3 个会话');
+
+    // Expanding other windows under the project folder reveals subagent and unclassified rows on demand.
+    const expandOthers = screen.getByTestId('terminal-session-drawer-folder-expand-others-/Users/jason');
+    expect(expandOthers.textContent).toContain('+2 窗口');
+    fireEvent.click(expandOthers);
+    expect(screen.getByTestId('terminal-session-drawer-row-sub')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:OneStop-1')).toBeTruthy();
   });
 
-  it('projects hide-subagent drawer rows while keeping master and unclassified names', async () => {
+  it('shows the truthful all-hidden empty state and count through the page', async () => {
+    renderVisibilityFixture({
+      sessionDrawerFilterConfig: {
+        version: 2,
+        mode: 'all',
+        hiddenSessionNames: ['zterm-3', 'zterm-subagent-rw-ui-0906', 'OneStop-1'],
+      },
+    });
+    swipeOpenPortraitDrawer();
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-empty-hidden')).toBeTruthy());
+    expect(screen.queryByTestId('terminal-session-drawer-empty-host')).toBeNull();
+    expect(screen.getByTestId('terminal-session-drawer-empty-hidden').textContent)
+      .toContain('所有 session 已隐藏');
+    expect(screen.getByTestId('terminal-session-drawer-count').textContent).toBe('显示 0 / 3 个会话');
+  });
+
+  it('keeps host-scoped empty state truthful when another host holds the hidden names', async () => {
+    render(
+      <TerminalPage
+        sessions={[makeSession('live')]}
+        sessionGroups={[]}
+        activeSession={makeSession('live')}
+        sessionDrawerFilterConfig={{
+          version: 2,
+          mode: 'all',
+          hiddenSessionNames: ['stale-hidden'],
+        }}
+        relayDevices={[
+          makeRelayDevice({
+            hostId: 'daemon-full',
+            deviceName: 'Full Host',
+            sessions: ['stale-hidden', 'zterm-visible'],
+          }),
+        ]}
+        onSessionDrawerFilterConfigChange={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+    swipeOpenPortraitDrawer();
+
+    // The stale hidden name lives in the global config, but the full host's
+    // live catalog still has an unclassified visible row, so it must not be
+    // reported as all sessions hidden.
+    expect(await screen.findByTestId('terminal-session-drawer-row-remote:daemon:daemon-full::session:zterm-visible'))
+      .toBeTruthy();
+    expect(screen.queryByTestId('terminal-session-drawer-empty-hidden')).toBeNull();
+    // The hidden name remains restorable from the tray.
+    expect(screen.getByTestId('terminal-session-drawer-restore-hidden-stale-hidden')).toBeTruthy();
+  });
+
+  it('shows the role-filter empty state for the selected host only', async () => {
+    render(
+      <TerminalPage
+        sessions={[makeSession('live')]}
+        sessionGroups={[]}
+        activeSession={makeSession('live')}
+        sessionDrawerFilterConfig={{
+          version: 2,
+          mode: 'only-master',
+          hiddenSessionNames: [],
+        }}
+        relayDevices={[
+          makeRelayDevice({
+            hostId: 'daemon-master',
+            deviceName: 'Master Host',
+            sessions: ['zterm-master'],
+            sessionCollab: { 'zterm-master': { role: 'master', displayName: 'Jenny' } },
+          }),
+          makeRelayDevice({
+            hostId: 'daemon-workers',
+            deviceName: 'Workers Host',
+            sessions: ['zterm-1', 'zterm-2', 'zterm-3'],
+          }),
+        ]}
+        onSessionDrawerFilterConfigChange={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+    swipeOpenPortraitDrawer();
+
+    const workersHost = await screen.findByTestId('terminal-session-drawer-host-daemon-workers');
+    fireEvent.click(workersHost);
+    expect(await screen.findByTestId('terminal-session-drawer-empty-filter')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-empty-filter').textContent)
+      .toContain('当前筛选没有匹配的 session');
+    expect(screen.queryByTestId('terminal-session-drawer-empty-host')).toBeNull();
+  });
+
+  it('projects hide-worker drawer rows while keeping master and unclassified names', async () => {
     renderVisibilityFixture({
       sessionDrawerFilterConfig: {
         ...visibilityFilterConfig,
-        mode: 'hide-subagent',
+        mode: 'hide-worker',
       },
     });
     swipeOpenPortraitDrawer();
@@ -3221,7 +3385,7 @@ describe('TerminalPage portrait session drawer', () => {
   });
 
   it('keeps a filtered open tab in sessions and locally closeable without remote kill', async () => {
-    const { sessions, onCloseSession, onCloseDrawerRemoteSession } = renderVisibilityFixture({
+    const { sessions, onCloseSession, onCloseDrawerRemoteSession } = renderVisibilityPageOnly({
       sessionDrawerFilterConfig: visibilityFilterConfig,
     });
     expect(sessions.map((session) => session.id)).toEqual(['master', 'sub']);
@@ -3243,12 +3407,12 @@ describe('TerminalPage portrait session drawer', () => {
       throw new Error('remote kill failed');
     });
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    const { sessionGroups } = renderVisibilityFixture({
+    renderVisibilityPageOnly({
       onCloseSession,
       onCloseDrawerRemoteSession,
       sessionDrawerFilterConfig: {
         ...visibilityFilterConfig,
-        mode: 'hide-subagent',
+        mode: 'hide-worker',
       },
     });
 
@@ -3259,9 +3423,7 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('无法关闭 OneStop-1'));
     expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        sessionNames: sessionGroups[0]!.sessionNames,
-      }),
+      expect.objectContaining({ sessionNames: ['OneStop-1', 'zterm-3', 'zterm-subagent-rw-ui-0906'] }),
       'OneStop-1',
     );
     expect(onCloseSession).not.toHaveBeenCalled();
@@ -3273,10 +3435,8 @@ describe('TerminalPage portrait session drawer', () => {
     localStorage.setItem(
       SESSION_DRAWER_FILTER_STORAGE_KEY,
       serializeSessionDrawerFilterConfig({
-        version: 1,
+        version: 2,
         mode: 'all',
-        masterNames: [],
-        subagentNames: [],
         hiddenSessionNames: [],
       }),
     );
@@ -3302,8 +3462,6 @@ describe('TerminalPage portrait session drawer', () => {
       sessionDrawerFilterConfig: {
         ...visibilityFilterConfig,
         mode: 'all',
-        masterNames: [],
-        subagentNames: [],
       },
       onSessionDrawerFilterConfigChange,
     });
@@ -3327,10 +3485,8 @@ describe('TerminalPage portrait session drawer', () => {
         sessionGroups={[]}
         activeSession={makeSession('master')}
         sessionDrawerFilterConfig={{
-          version: 1,
+          version: 2,
           mode: 'all',
-          masterNames: [],
-          subagentNames: [],
           hiddenSessionNames: ['tmux-master'],
         }}
         onSessionDrawerFilterConfigChange={onSessionDrawerFilterConfigChange}
@@ -3362,10 +3518,8 @@ describe('TerminalPage portrait session drawer', () => {
         sessionGroups={[]}
         activeSession={makeSession('master')}
         sessionDrawerFilterConfig={{
-          version: 1,
+          version: 2,
           mode: 'all',
-          masterNames: [],
-          subagentNames: [],
           hiddenSessionNames: [],
         }}
         onSessionDrawerFilterConfigChange={onSessionDrawerFilterConfigChange}
@@ -3384,6 +3538,44 @@ describe('TerminalPage portrait session drawer', () => {
       />,
     );
     expect(screen.queryByTestId('terminal-session-drawer-restore-hidden')).toBeNull();
+  });
+
+  it('projects relay Collab roles onto drawer rows and restores one hidden session by name', async () => {
+    const onSessionDrawerFilterConfigChange = vi.fn();
+    const { rerender } = renderVisibilityFixture({
+      sessionDrawerFilterConfig: {
+        ...visibilityFilterConfig,
+        mode: 'all',
+      },
+      onSessionDrawerFilterConfigChange,
+    });
+    swipeOpenPortraitDrawer();
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-row-master')).toBeTruthy());
+    const masterBadge = screen.getByTestId('terminal-session-drawer-collab-master');
+    expect(masterBadge.textContent).toBe('MASTER');
+    const workerBadge = screen.getByTestId('terminal-session-drawer-collab-sub');
+    expect(workerBadge.textContent).toBe('WORKER');
+    expect(screen.queryByTestId('terminal-session-drawer-collab-remote:daemon:daemon-a::session:OneStop-1')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-hide-master'));
+    expect(onSessionDrawerFilterConfigChange).toHaveBeenCalledWith(expect.objectContaining({
+      hiddenSessionNames: ['zterm-3'],
+    }));
+
+    rerender({
+      sessionDrawerFilterConfig: {
+        ...visibilityFilterConfig,
+        mode: 'all',
+        hiddenSessionNames: ['zterm-3', 'OneStop-1'],
+      },
+      onSessionDrawerFilterConfigChange,
+    });
+    expect(await screen.findByTestId('terminal-session-drawer-hidden-tray')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-restore-hidden-zterm-3'));
+    expect(onSessionDrawerFilterConfigChange).toHaveBeenCalledWith(expect.objectContaining({
+      hiddenSessionNames: ['OneStop-1'],
+    }));
   });
 });
 
