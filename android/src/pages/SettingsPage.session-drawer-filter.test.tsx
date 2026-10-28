@@ -69,7 +69,7 @@ function renderSettings(
 describe('SettingsPage session drawer filter', () => {
   afterEach(cleanup);
 
-  it('renders drawer filter guidance without manual name fields', () => {
+  it('keeps drawer filtering out of settings', () => {
     renderSettings({
       settings: {
         ...baseSettings,
@@ -81,8 +81,8 @@ describe('SettingsPage session drawer filter', () => {
       },
     });
 
-    expect(screen.getByTestId('settings-session-drawer-filter')).toBeTruthy();
-    expect(screen.getByText(/Collab 角色由 daemon 只读投影决定/)).toBeTruthy();
+    expect(screen.queryByTestId('settings-session-drawer-filter')).toBeNull();
+    expect(screen.queryByText('会话抽屉筛选')).toBeNull();
     expect(screen.queryByLabelText('会话抽屉筛选模式')).toBeNull();
     expect(screen.queryByLabelText('master 会话名')).toBeNull();
     expect(screen.queryByLabelText('subagent 会话名')).toBeNull();

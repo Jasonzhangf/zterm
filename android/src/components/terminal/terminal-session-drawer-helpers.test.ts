@@ -13,8 +13,8 @@ import {
 
 describe('terminal-session-drawer-helpers', () => {
   it('keeps drawer layout tokens stable', () => {
-    expect(DRAWER_WIDTH).toBe('48vw');
-    expect(DRAWER_MAX_WIDTH).toBe('187px');
+    expect(DRAWER_WIDTH).toBe('78vw');
+    expect(DRAWER_MAX_WIDTH).toBe('312px');
     expect(UNSCOPED_HOST_GROUP_KEY).toBe('__unscoped__');
     expect(UNSCOPED_HOST_GROUP_LABEL).toBe('未绑定主机');
   });

@@ -10,6 +10,7 @@ import {
   shortenFolderLabel,
 } from './terminal-session-drawer-helpers';
 import { TerminalSessionDrawerFolderMenu } from './TerminalSessionDrawerFolderMenu';
+import { DrawerCloseIcon, DrawerHideIcon } from './TerminalSessionDrawerIcons';
 import { TerminalSessionDrawerNewSessionDialog } from './TerminalSessionDrawerNewSessionDialog';
 import { TerminalSessionDrawerSlotMenu } from './TerminalSessionDrawerSlotMenu';
 import { getServerIdentityTone } from '../../lib/server-identity';
@@ -514,8 +515,10 @@ function TerminalSessionDrawerComponent({
           bottom: 0,
           width: DRAWER_WIDTH,
           maxWidth: DRAWER_MAX_WIDTH,
-          transform: open ? 'translateX(0)' : 'translateX(calc(-100% - 12px))',
-          transition: 'transform 180ms ease',
+          // Android WebView retains stale row text when the open drawer keeps
+          // a translateX layer over the live terminal surface.
+          transform: open ? 'none' : 'translateX(calc(-100% - 12px))',
+          transition: open ? 'none' : 'transform 180ms ease',
           zIndex: 150,
           display: 'flex',
           flexDirection: 'column',
@@ -569,20 +572,20 @@ function TerminalSessionDrawerComponent({
               ref={closeButtonRef}
               onClick={requestCloseDrawer}
               style={{
-                width: '36px',
-                height: '36px',
+                width: '40px',
+                height: '40px',
                 padding: 0,
-                borderRadius: '10px',
-                border: '1px solid var(--zterm-panel-border)',
-                background: 'var(--zterm-panel-surface)',
+                borderRadius: '8px',
+                border: 'none',
+                background: 'transparent',
                 color: 'var(--zterm-panel-text)',
-                fontSize: '16px',
-                lineHeight: 1,
-                fontWeight: 700,
                 flexShrink: 0,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
             >
-              ×
+              <DrawerCloseIcon size={18} />
             </AmbientButton>
           </div>
           <div
@@ -591,11 +594,11 @@ function TerminalSessionDrawerComponent({
             aria-label="会话抽屉筛选"
             style={{
               display: 'flex',
-              gap: '4px',
+              gap: '2px',
               minWidth: 0,
-              padding: '3px',
-              borderRadius: '10px',
-              background: 'var(--zterm-panel-surface)',
+              padding: '2px',
+              borderRadius: '9px',
+              background: 'color-mix(in srgb, var(--zterm-panel-surface) 72%, transparent)',
               border: '1px solid var(--zterm-panel-border)',
             }}
           >
@@ -614,10 +617,10 @@ function TerminalSessionDrawerComponent({
                     minWidth: 0,
                     minHeight: '40px',
                     height: '40px',
-                    padding: '0 6px',
-                    borderRadius: '7px',
+                    padding: '0 5px',
+                    borderRadius: '6px',
                     border: selected
-                      ? '1px solid var(--zterm-panel-accent)'
+                      ? '1px solid var(--zterm-panel-accent-border)'
                       : '1px solid transparent',
                     background: selected ? 'var(--zterm-panel-active)' : 'transparent',
                     color: selected ? 'var(--zterm-panel-active-text)' : 'var(--zterm-panel-muted)',
@@ -647,7 +650,7 @@ function TerminalSessionDrawerComponent({
             overflowY: 'auto',
             touchAction: 'pan-y',
             WebkitOverflowScrolling: 'touch',
-            padding: '6px 10px 10px',
+            padding: '4px 8px 8px',
           }}
         >
           {showHostRail ? (
@@ -655,11 +658,13 @@ function TerminalSessionDrawerComponent({
               data-testid="terminal-session-drawer-host-rail"
               style={{
                 display: 'flex',
-                flexDirection: 'column',
+                flexDirection: 'row',
                 gap: '4px',
-                padding: '2px 0 8px',
+                padding: '0 0 8px',
                 borderBottom: '1px solid var(--zterm-panel-border)',
                 flexShrink: 0,
+                overflowX: 'auto',
+                scrollbarWidth: 'none',
               }}
             >
               {hostGroups.map((group) => {
@@ -690,14 +695,14 @@ function TerminalSessionDrawerComponent({
                     data-testid={`terminal-session-drawer-host-${group.groupKey}`}
                     onClick={() => setSelectedHostKey(group.groupKey)}
                     style={{
-                      width: '100%',
+                      width: 'auto',
                       minHeight: '40px',
                       flexShrink: 0,
-                      padding: '0 10px',
+                      padding: '0 9px',
                       border: isActive
                         ? '1px solid var(--zterm-panel-accent-border)'
                         : '1px solid transparent',
-                      borderRadius: '8px',
+                      borderRadius: '7px',
                       background: isActive ? 'var(--zterm-panel-active)' : 'transparent',
                       color: isActive ? 'var(--zterm-panel-active-text)' : 'var(--zterm-panel-text)',
                       fontSize: '12px',
@@ -744,10 +749,10 @@ function TerminalSessionDrawerComponent({
           <div
             data-testid="terminal-session-drawer-list"
             style={{
-              paddingTop: '8px',
+              paddingTop: '6px',
               display: 'flex',
               flexDirection: 'column',
-              gap: '6px',
+              gap: '4px',
             }}
           >
           {cwdGroups.map((folder) => {
@@ -765,8 +770,8 @@ function TerminalSessionDrawerComponent({
               data-testid={`terminal-session-drawer-folder-${folder.cwd}`}
               role="group"
               style={{
-                borderLeft: '2px solid color-mix(in srgb, var(--zterm-panel-border) 75%, transparent)',
-                paddingLeft: '6px',
+                borderBottom: '1px solid color-mix(in srgb, var(--zterm-panel-border) 68%, transparent)',
+                paddingBottom: '4px',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
@@ -827,9 +832,9 @@ function TerminalSessionDrawerComponent({
                   style={{
                     flex: '1 1 0',
                     minWidth: 0,
-                    minHeight: '34px',
-                    padding: '0 6px',
-                    borderRadius: '6px',
+                    minHeight: '40px',
+                    padding: '0 4px',
+                    borderRadius: 0,
                     border: 'none',
                     background: 'transparent',
                     color: 'var(--zterm-panel-text)',
@@ -887,9 +892,9 @@ function TerminalSessionDrawerComponent({
                     }}
                     style={{
                       flexShrink: 0,
-                      minHeight: '28px',
+                      minHeight: '40px',
                       padding: '0 8px',
-                      borderRadius: '999px',
+                      borderRadius: '7px',
                       border: othersExpanded
                         ? '1px solid var(--zterm-panel-accent-border)'
                         : '1px solid var(--zterm-panel-border)',
@@ -912,11 +917,6 @@ function TerminalSessionDrawerComponent({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '2px' }}>
                   {displayedItems.map((session) => {
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
-            const activeRowBorderColor = slotTone
-              ? slotTone.border
-              : session.active
-              ? 'var(--zterm-panel-accent)'
-              : 'var(--zterm-panel-border)';
             const activeRowBackground = slotTone
               ? slotTone.background
               : session.active
@@ -955,17 +955,15 @@ function TerminalSessionDrawerComponent({
                 minHeight: `${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`,
                 width: '100%',
                 padding: 0,
-                borderRadius: '10px',
+                borderRadius: '6px',
                 border: slotTone
                   ? `1px solid ${slotTone.border}`
-                  : session.active
-                  ? `1px solid ${activeRowBorderColor}`
-                  : '1px solid var(--zterm-panel-border)',
+                  : '1px solid transparent',
                 background: slotTone
                   ? slotTone.background
                   : session.active
                   ? activeRowBackground
-                  : 'var(--zterm-panel-surface)',
+                  : 'transparent',
                 display: 'grid',
                 gridTemplateColumns: 'minmax(0, 1fr) auto',
                 alignItems: 'stretch',
@@ -975,7 +973,7 @@ function TerminalSessionDrawerComponent({
                 overflow: 'visible',
                 position: 'relative',
                 boxShadow: session.active && !slotTone
-                  ? 'inset 0 0 0 1px color-mix(in srgb, var(--zterm-panel-accent) 22%, transparent)'
+                  ? 'inset 3px 0 0 var(--zterm-panel-accent)'
                   : 'none',
               }}
             >
@@ -1086,10 +1084,10 @@ function TerminalSessionDrawerComponent({
                   alignItems: 'center',
                   justifyContent: 'flex-end',
                   gap: '4px',
-                  padding: '4px 6px 4px 2px',
-                  borderRadius: '8px',
+                  padding: '4px 0',
+                  borderRadius: 0,
                   border: 'none',
-                  background: 'color-mix(in srgb, var(--zterm-panel-bg) 36%, transparent)',
+                  background: 'transparent',
                 }}
               >
                 {session.paneLabel ? (
@@ -1203,25 +1201,26 @@ function TerminalSessionDrawerComponent({
                       onHideSession(session.id);
                     }}
                     style={{
-                      width: '36px',
-                      minWidth: '36px',
-                      maxWidth: '36px',
-                      height: '36px',
-                      minHeight: '36px',
-                      maxHeight: '36px',
+                      width: '40px',
+                      minWidth: '40px',
+                      maxWidth: '40px',
+                      height: '40px',
+                      minHeight: '40px',
+                      maxHeight: '40px',
                       padding: 0,
-                      border: '1px solid var(--zterm-panel-border)',
+                      border: 'none',
                       borderRadius: '8px',
-                      background: 'var(--zterm-panel-bg)',
+                      background: 'transparent',
                       color: 'var(--zterm-panel-muted)',
-                      fontSize: '15px',
-                      lineHeight: 1,
-                      fontWeight: 800,
                       pointerEvents: 'auto',
                       flexShrink: 0,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
+                    className="zterm-session-drawer-icon-button"
                   >
-                    −
+                    <DrawerHideIcon />
                   </AmbientButton>
                 ) : null}
                 <AmbientButton
@@ -1255,25 +1254,26 @@ function TerminalSessionDrawerComponent({
                     activateCloseSession(session.id);
                   }}
                   style={{
-                    width: '36px',
-                    minWidth: '36px',
-                    maxWidth: '36px',
-                    height: '36px',
-                    minHeight: '36px',
-                    maxHeight: '36px',
+                    width: '40px',
+                    minWidth: '40px',
+                    maxWidth: '40px',
+                    height: '40px',
+                    minHeight: '40px',
+                    maxHeight: '40px',
                     padding: 0,
-                    border: '1px solid var(--zterm-panel-border)',
+                    border: 'none',
                     borderRadius: '8px',
-                    background: 'var(--zterm-panel-bg)',
+                    background: 'transparent',
                     color: 'var(--zterm-panel-danger)',
-                    fontSize: '15px',
-                    lineHeight: 1,
-                    fontWeight: 800,
                     pointerEvents: 'auto',
                     flexShrink: 0,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                   }}
+                  className="zterm-session-drawer-icon-button"
                 >
-                  ×
+                  <DrawerCloseIcon />
                 </AmbientButton>
               </div>
             </div>
@@ -1383,11 +1383,12 @@ function TerminalSessionDrawerComponent({
           <div
             data-testid="terminal-session-drawer-hidden-tray"
             style={{
-              margin: '6px 2px 2px',
-              padding: '8px 10px',
-              borderRadius: '10px',
-              border: '1px solid var(--zterm-panel-border)',
-              background: 'var(--zterm-panel-surface)',
+              margin: '4px 0 0',
+              padding: '8px 2px 2px',
+              borderRadius: 0,
+              border: 'none',
+              borderTop: '1px solid var(--zterm-panel-border)',
+              background: 'transparent',
               display: 'flex',
               flexDirection: 'column',
               gap: '6px',
@@ -1404,11 +1405,11 @@ function TerminalSessionDrawerComponent({
                 data-testid="terminal-session-drawer-restore-hidden"
                 onClick={onRestoreAllHiddenSessions}
                 style={{
-                  minHeight: '36px',
+                  minHeight: '40px',
                   padding: '0 12px',
-                  borderRadius: '8px',
+                  borderRadius: '6px',
                   border: '1px solid var(--zterm-panel-border)',
-                  background: 'var(--zterm-panel-bg)',
+                  background: 'transparent',
                   color: 'var(--zterm-panel-text)',
                   fontSize: '11px',
                   fontWeight: 700,
@@ -1444,11 +1445,11 @@ function TerminalSessionDrawerComponent({
                   onClick={() => onRestoreHiddenSession?.(hiddenName)}
                   style={{
                     flexShrink: 0,
-                    minHeight: '36px',
+                    minHeight: '40px',
                     padding: '0 12px',
-                    borderRadius: '8px',
+                    borderRadius: '6px',
                     border: '1px solid var(--zterm-panel-border)',
-                    background: 'var(--zterm-panel-bg)',
+                    background: 'transparent',
                     color: 'var(--zterm-panel-text)',
                     fontSize: '11px',
                     fontWeight: 700,
@@ -1498,90 +1499,90 @@ function TerminalSessionDrawerComponent({
           />
         ) : null}
 
-        <AmbientButton
-          data-testid="terminal-session-drawer-add"
-          data-amb-flat="true"
-          aria-label="新建 session"
-          type="button"
-          onTouchStartCapture={(event) => {
-            onDebugAddEvent?.(`add:capstart:${describeEventTarget(event.target)}`);
-          }}
-          onTouchEndCapture={(event) => {
-            onDebugAddEvent?.(`add:capend:${describeEventTarget(event.target)}`);
-          }}
-          onTouchStart={() => {
-            onDebugAddEvent?.('add:touchstart');
-          }}
-          onTouchEnd={(event) => {
-            onDebugAddEvent?.('add:touchend');
-            event.preventDefault();
-            event.stopPropagation();
-            onDebugAddEvent?.('add:callback');
-            openNewSessionDialog();
-          }}
-          onPointerDown={() => {
-            onDebugAddEvent?.('add:pointerdown');
-          }}
-          onPointerUp={() => {
-            onDebugAddEvent?.('add:pointerup');
-          }}
-          onClick={() => {
-            onDebugAddEvent?.('add:click');
-            if (!newSessionDraft) {
+        {!newSessionDraft ? (
+          <AmbientButton
+            data-testid="terminal-session-drawer-add"
+            data-amb-flat="true"
+            aria-label="新建 session"
+            type="button"
+            onTouchStartCapture={(event) => {
+              onDebugAddEvent?.(`add:capstart:${describeEventTarget(event.target)}`);
+            }}
+            onTouchEndCapture={(event) => {
+              onDebugAddEvent?.(`add:capend:${describeEventTarget(event.target)}`);
+            }}
+            onTouchStart={() => {
+              onDebugAddEvent?.('add:touchstart');
+            }}
+            onTouchEnd={(event) => {
+              onDebugAddEvent?.('add:touchend');
+              event.preventDefault();
+              event.stopPropagation();
+              onDebugAddEvent?.('add:callback');
               openNewSessionDialog();
-            }
-          }}
-          style={{
-            width: '100%',
-            height: 'auto',
-            minHeight: '64px',
-            borderRadius: 0,
-            padding: `10px 12px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,
-            borderTop: '1px solid var(--zterm-panel-border)',
-            borderLeft: 'none',
-            borderRight: 'none',
-            borderBottom: 'none',
-            background: 'var(--zterm-panel-bg)',
-            color: 'var(--zterm-panel-text)',
-            appearance: 'none',
-            flexShrink: 0,
-          }}
-        >
-          <div
+            }}
+            onPointerDown={() => {
+              onDebugAddEvent?.('add:pointerdown');
+            }}
+            onPointerUp={() => {
+              onDebugAddEvent?.('add:pointerup');
+            }}
+            onClick={() => {
+              onDebugAddEvent?.('add:click');
+              openNewSessionDialog();
+            }}
             style={{
               width: '100%',
-              minHeight: '46px',
-              borderRadius: '10px',
-              border: '1px solid var(--zterm-panel-border)',
-              background: 'var(--zterm-panel-surface)',
+              height: 'auto',
+              minHeight: '56px',
+              borderRadius: 0,
+              padding: `8px 10px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,
+              borderTop: '1px solid var(--zterm-panel-border)',
+              borderLeft: 'none',
+              borderRight: 'none',
+              borderBottom: 'none',
+              background: 'var(--zterm-panel-bg)',
               color: 'var(--zterm-panel-text)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '8px',
-              fontSize: '13px',
-              fontWeight: 700,
-              touchAction: 'manipulation',
+              appearance: 'none',
+              flexShrink: 0,
             }}
           >
-            <span
+            <div
               style={{
-                width: '18px',
-                height: '18px',
-                borderRadius: '999px',
-                display: 'inline-flex',
+                width: '100%',
+                minHeight: '40px',
+                borderRadius: '7px',
+                border: '1px solid var(--zterm-panel-border)',
+                background: 'var(--zterm-panel-surface)',
+                color: 'var(--zterm-panel-text)',
+                display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: 'var(--zterm-panel-active)',
-                color: 'var(--zterm-panel-accent)',
-                fontSize: '15px',
+                gap: '8px',
+                fontSize: '13px',
+                fontWeight: 700,
+                touchAction: 'manipulation',
               }}
             >
-              +
-            </span>
-            <span>New Session</span>
-          </div>
-        </AmbientButton>
+              <span
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '999px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: 'var(--zterm-panel-active)',
+                  color: 'var(--zterm-panel-accent)',
+                  fontSize: '15px',
+                }}
+              >
+                +
+              </span>
+              <span>New Session</span>
+            </div>
+          </AmbientButton>
+        ) : null}
       </aside>
     </>
   );

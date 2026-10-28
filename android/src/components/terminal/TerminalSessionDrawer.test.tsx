@@ -136,8 +136,10 @@ describe('TerminalSessionDrawer', () => {
     const header = screen.getByTestId('terminal-session-drawer-header');
     expect(header.style.paddingTop).toBe('28px');
     expect(header.style.paddingBottom).toBe('6px');
-    expect(screen.getByTestId('terminal-session-drawer-close').style.width).toBe('36px');
-    expect(screen.getByTestId('terminal-session-drawer-close').style.height).toBe('36px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.width).toBe('40px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.height).toBe('40px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.borderStyle).toBe('none');
+    expect(screen.getByTestId('terminal-session-drawer-close').querySelector('svg')).toBeTruthy();
 
     const row = screen.getByTestId('terminal-session-drawer-row-s1');
     const select = within(row).getByTestId('terminal-session-drawer-select-s1');
@@ -155,6 +157,8 @@ describe('TerminalSessionDrawer', () => {
     expect(subtitle.style.whiteSpace).toBe('nowrap');
     expect(subtitle.style.overflow).toBe('hidden');
     expect(subtitle.style.textOverflow).toBe('ellipsis');
+    expect(screen.getByTestId('terminal-session-drawer-close-s1').style.borderStyle).toBe('none');
+    expect(screen.getByTestId('terminal-session-drawer-close-s1').querySelector('svg')).toBeTruthy();
   });
 
   it('renders a single-column session list and routes select/plus actions', () => {
@@ -708,7 +712,7 @@ describe('TerminalSessionDrawer', () => {
     );
 
     expect(screen.getByTestId('terminal-session-drawer-host-rail')).toBeTruthy();
-    expect(screen.getByTestId('terminal-session-drawer-host-rail').style.flexDirection).toBe('column');
+    expect(screen.getByTestId('terminal-session-drawer-host-rail').style.flexDirection).toBe('row');
     expect(screen.getByTestId('terminal-session-drawer-host-100.127.23.27:3333')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-host-100.127.23.27:3333').getAttribute('data-tree-level')).toBe('1');
@@ -1134,7 +1138,7 @@ describe('TerminalSessionDrawer', () => {
     expect(openStyle.boxShadow ?? '').toBe('none');
   });
 
-  it('draws the active row with accent border and groups close/badges into one chip', () => {
+  it('draws the active row with an accent edge and keeps close/badges in row flow', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1148,16 +1152,16 @@ describe('TerminalSessionDrawer', () => {
 
     const activeRow = screen.getByTestId(`terminal-session-drawer-row-${sessions[0]!.id}`) as HTMLElement;
     expect(activeRow.getAttribute('data-active')).toBe('true');
-    expect(activeRow.style.border).toBe('1px solid var(--zterm-panel-accent)');
-    expect(activeRow.style.boxShadow).toContain('color-mix');
+    expect(activeRow.style.border).toBe('1px solid transparent');
+    expect(activeRow.style.boxShadow).toContain('inset 3px 0 0');
 
     const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
     expect(closeTarget.style.position).not.toBe('absolute');
-    expect(closeTarget.style.border).toBe('1px solid var(--zterm-panel-border)');
+    expect(closeTarget.style.borderStyle).toBe('none');
     const chip = closeTarget.parentElement as HTMLElement | null;
     expect(chip).not.toBeNull();
-    expect(chip?.style.borderRadius).toBe('8px');
-    expect(chip?.style.background).toContain('color-mix');
+    expect(chip?.style.borderRadius).toBe('0px');
+    expect(chip?.style.background).toBe('transparent');
   });
 
   it('keeps pane, slot, and close controls in row flow so grouped rows are not clipped', () => {
@@ -1438,7 +1442,7 @@ describe('TerminalSessionDrawer', () => {
     }
   });
 
-  it('uses at least 36px row hide and close hit areas', () => {
+  it('uses at least 40px row hide and close hit areas', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1455,13 +1459,13 @@ describe('TerminalSessionDrawer', () => {
       const hide = screen.getByTestId(`terminal-session-drawer-hide-${id}`);
       const close = screen.getByTestId(`terminal-session-drawer-close-${id}`);
       for (const control of [hide, close]) {
-        expect(Number(control.style.minWidth.replace('px', ''))).toBeGreaterThanOrEqual(36);
-        expect(Number(control.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(36);
+        expect(Number(control.style.minWidth.replace('px', ''))).toBeGreaterThanOrEqual(40);
+        expect(Number(control.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(40);
       }
     }
   });
 
-  it('uses at least 36px hidden tray restore controls at 11px label', () => {
+  it('uses at least 40px hidden tray restore controls at 11px label', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1478,10 +1482,10 @@ describe('TerminalSessionDrawer', () => {
     );
 
     const bulk = screen.getByTestId('terminal-session-drawer-restore-hidden');
-    expect(Number(bulk.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(36);
+    expect(Number(bulk.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(40);
     expect(Number(bulk.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
     const single = screen.getByTestId(terminalSessionDrawerHiddenRestoreTestId('tmux-master'));
-    expect(Number(single.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(36);
+    expect(Number(single.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(40);
     expect(Number(single.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
   });
 
@@ -1802,7 +1806,7 @@ describe('TerminalSessionDrawer', () => {
     });
   });
 
-  it('keeps the new-session dialog styled with the existing --zterm-panel-* tokens (no bespoke colors)', () => {
+  it('renders the new-session form as a compact footer sheet with panel tokens', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1822,7 +1826,8 @@ describe('TerminalSessionDrawer', () => {
     const dialogStyle = dialog.getAttribute('style') || '';
     expect(dialogStyle).toContain('var(--zterm-panel-border)');
     expect(dialogStyle).toContain('var(--zterm-panel-bg)');
-    expect(dialogStyle).toContain('var(--zterm-panel-shadow)');
+    expect(dialogStyle).toContain('border-top');
+    expect(screen.queryByTestId('terminal-session-drawer-add')).toBeNull();
     expect(dialogStyle).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(dialogStyle).not.toMatch(/rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+/);
   });
