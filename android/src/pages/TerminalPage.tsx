@@ -1398,14 +1398,22 @@ function TerminalPageComponent({
       if (!daemonHostId) {
         return [];
       }
-      const directEndpoint = (device.daemon.endpoints || []).find((endpoint) => (
-        endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
-      )) || (device.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
       const existingGroup = sessionGroups.find((group) => (
         group.daemonHostId?.trim() === daemonHostId
         || resolveDrawerIdentity(group).key === daemonHostId
-        || (directEndpoint?.host?.trim() === group.bridgeHost.trim() && directEndpoint.port === group.bridgePort)
+        || (device.daemon.endpoints || []).some((endpoint) => (
+          endpoint.host?.trim() === group.bridgeHost.trim() && endpoint.port === group.bridgePort
+        ))
       ));
+      const directEndpoint = (device.daemon.endpoints || []).find((endpoint) => (
+        existingGroup?.bridgeHost?.trim()
+        && endpoint.host?.trim() === existingGroup.bridgeHost.trim()
+        && endpoint.port
+      )) || (device.daemon.endpoints || []).find((endpoint) => (
+        endpoint.kind === 'lan' && endpoint.host?.trim() && endpoint.port
+      )) || (device.daemon.endpoints || []).find((endpoint) => (
+        endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
+      )) || (device.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
       const catalogSessions = device.daemon.sessions || [];
       const sessionNames = [...new Set(
         catalogSessions.map((session) => session.name.trim()).filter(Boolean),
@@ -1523,6 +1531,12 @@ function TerminalPageComponent({
         const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
         const useLiveDaemonTarget = Boolean(relayDevice);
         const liveDirectEndpoint = (relayDevice?.daemon.endpoints || []).find((endpoint) => (
+          group.bridgeHost?.trim()
+          && endpoint.host?.trim() === group.bridgeHost.trim()
+          && endpoint.port
+        )) || (relayDevice?.daemon.endpoints || []).find((endpoint) => (
+          endpoint.kind === 'lan' && endpoint.host?.trim() && endpoint.port
+        )) || (relayDevice?.daemon.endpoints || []).find((endpoint) => (
           endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
         )) || (relayDevice?.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
         const reuseKey = buildSessionSemanticReuseKey({

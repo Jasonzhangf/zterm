@@ -10,6 +10,7 @@ import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch'
 const resolveRemoteRestorableOpenTabStateMock = vi.fn();
 const createTmuxSessionMock = vi.fn();
 const fetchTmuxSessionsMock = vi.fn();
+const fetchTmuxSessionCatalogMock = vi.fn();
 const killTmuxSessionMock = vi.fn();
 
 vi.mock('../lib/open-tab-restore', () => ({
@@ -19,6 +20,7 @@ vi.mock('../lib/open-tab-restore', () => ({
 vi.mock('../lib/tmux-sessions', () => ({
   createTmuxSession: (...args: unknown[]) => createTmuxSessionMock(...args),
   fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
+  fetchTmuxSessionCatalog: (...args: unknown[]) => fetchTmuxSessionCatalogMock(...args),
   killTmuxSession: (...args: unknown[]) => killTmuxSessionMock(...args),
 }));
 
@@ -173,6 +175,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
     createTmuxSessionMock.mockResolvedValue([]);
     fetchTmuxSessionsMock.mockReset();
     fetchTmuxSessionsMock.mockResolvedValue([]);
+    fetchTmuxSessionCatalogMock.mockReset();
+    fetchTmuxSessionCatalogMock.mockResolvedValue(null);
     killTmuxSessionMock.mockReset();
     killTmuxSessionMock.mockResolvedValue([]);
     resolveRemoteRestorableOpenTabStateMock.mockReset();
@@ -1893,6 +1897,70 @@ describe('useSessionOpenActions remote tmux rename', () => {
     await expect(result.current.handleRenameRemoteSession('active-zterm', 'new-name')).rejects.toThrow('rename failed');
     expect(harness.spies.renameRemoteSession).not.toHaveBeenCalled();
     expect(harness.refs.openTabStateRef.current.tabs).toHaveLength(0);
+  });
+
+  it('persists sessionCwdByName and sessionCollabByName when opening a saved connection returns a session catalog', async () => {
+    const harness = createOptions();
+    fetchTmuxSessionCatalogMock.mockResolvedValueOnce({
+      sessionNames: ['zterm-1', 'zterm-2'],
+      sessionCatalog: [
+        {
+          backend: 'tmux',
+          stableId: 'tmux:1:1:1',
+          name: 'zterm-1',
+          cwd: '/Volumes/extension/code/zterm',
+          collab: { role: 'master', displayName: 'Jenny', agentState: 'thinking' },
+        },
+        {
+          backend: 'tmux',
+          stableId: 'tmux:1:2:1',
+          name: 'zterm-2',
+          cwd: '/Volumes/extension/code/zterm',
+          collab: { role: 'worker', displayName: 'Alice' },
+        },
+      ],
+    });
+    harness.spies.createSession.mockReturnValue('runtime:mac-studio:zterm-1');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const savedServer = {
+      id: 'bridge-preset:mac-studio',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      sessionName: '',
+      authToken: 'token-a',
+      relayEndpointCandidates: [],
+      authType: 'password' as const,
+      tags: ['bridge-server'],
+      pinned: false,
+    };
+
+    await act(async () => {
+      result.current.handleOpenSavedConnection(savedServer);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        terminalBackend: 'tmux',
+        sessionNames: ['zterm-1', 'zterm-2'],
+        sessionCwdByName: {
+          'zterm-1': '/Volumes/extension/code/zterm',
+          'zterm-2': '/Volumes/extension/code/zterm',
+        },
+        sessionCollabByName: {
+          'zterm-1': { role: 'master', displayName: 'Jenny', agentState: 'thinking' },
+          'zterm-2': { role: 'worker', displayName: 'Alice' },
+        },
+      }),
+    );
   });
 
   it('is a no-op for empty or unchanged names', async () => {

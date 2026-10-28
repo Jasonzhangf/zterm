@@ -35,6 +35,11 @@ export interface DaemonSessionCatalogDeps {
    */
   runCollabWho?: (input: { cwd: string }) => Promise<unknown>;
   /**
+   * Read-only host-wide Collab CEO status (`collab ceo status`). Used to
+   * identify the host-wide CEO session (`role: 'ceo').
+   */
+  runCollabCeoStatus?: () => Promise<unknown>;
+  /**
    * Called after the collab-only cadence resample commits a new resident
    * snapshot so the server can republish the relay directory. This keeps the
    * resample path from silently changing classifications that phone clients
@@ -99,8 +104,58 @@ function stripAmbiguousObservations(entries: readonly TerminalSessionCatalogEntr
 }
 
 interface CollabWorkerProjection extends TerminalSessionCollabProjection {
+  workerId?: string;
   endpoint?: string;
   namespace: string;
+}
+
+interface CollabCeoStatus {
+  workerId?: string;
+  name?: string;
+  workspace?: string;
+  defaultWorkspace?: string;
+}
+
+function parseCollabCeoStatus(raw: unknown): CollabCeoStatus | null {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  const record = raw as {
+    ceo?: unknown;
+    worker_id?: unknown;
+    default_workspace?: unknown;
+  };
+  if (!record.ceo || typeof record.ceo !== 'object') {
+    return null;
+  }
+  const ceo = record.ceo as {
+    granted_by?: unknown;
+    name?: unknown;
+    workspace?: unknown;
+  };
+  const workerId = typeof record.worker_id === 'string' && record.worker_id.trim()
+    ? record.worker_id.trim()
+    : typeof ceo.granted_by === 'string' && ceo.granted_by.trim()
+      ? ceo.granted_by.trim()
+      : undefined;
+  const name = typeof ceo.name === 'string' && ceo.name.trim()
+    ? ceo.name.trim()
+    : undefined;
+  const workspace = typeof ceo.workspace === 'string' && ceo.workspace.trim()
+    ? ceo.workspace.trim()
+    : undefined;
+  const defaultWorkspace = typeof record.default_workspace === 'string' && record.default_workspace.trim()
+    ? record.default_workspace.trim()
+    : undefined;
+  if (!workerId && !name && !defaultWorkspace) {
+    return null;
+  }
+  return {
+    ...(workerId ? { workerId } : {}),
+    ...(name ? { name } : {}),
+    ...(workspace ? { workspace } : {}),
+    ...(defaultWorkspace ? { defaultWorkspace } : {}),
+  };
 }
 
 interface TmuxSessionIdentity {
@@ -109,6 +164,12 @@ interface TmuxSessionIdentity {
   socketPath?: string;
   /** Canonical native target identity when pid + created-at are available. */
   stableId?: string;
+  /**
+   * Native target identity without socketPath. Used when the catalog enumerator
+   * built stableId on the default/latched socket (where socketPath is omitted)
+   * while `tmux list-sessions -F '#{socket_path}'` expands the concrete path.
+   */
+  defaultSocketStableId?: string;
 }
 
 function parseCollabWorkers(raw: unknown): CollabWorkerProjection[] {
@@ -125,6 +186,7 @@ function parseCollabWorkers(raw: unknown): CollabWorkerProjection[] {
       continue;
     }
     const worker = candidate as {
+      id?: unknown;
       role?: unknown;
       display_name?: unknown;
       agent_state?: unknown;
@@ -142,7 +204,7 @@ function parseCollabWorkers(raw: unknown): CollabWorkerProjection[] {
     if (!namespace || !displayName) {
       continue;
     }
-    const role = worker.role === 'master' || worker.role === 'worker'
+    const role = worker.role === 'ceo' || worker.role === 'master' || worker.role === 'worker'
       ? worker.role
       : null;
     if (!role) {
@@ -152,6 +214,9 @@ function parseCollabWorkers(raw: unknown): CollabWorkerProjection[] {
       role,
       displayName,
       namespace,
+      ...(typeof worker.id === 'string' && worker.id.trim()
+        ? { workerId: worker.id.trim() }
+        : {}),
       ...(typeof worker.agent_state === 'string' && worker.agent_state.trim()
         ? { agentState: worker.agent_state.trim() }
         : {}),
@@ -183,11 +248,19 @@ function parseTmuxSessionIdentities(stdout: string): TmuxSessionIdentity[] {
           createdAt,
         })
       : undefined;
+    const defaultSocketStableId = normalizedServerPid && Number.isFinite(createdAt)
+      ? buildTmuxSessionStableId({
+          serverPid: normalizedServerPid,
+          sessionId: normalizedId,
+          createdAt,
+        })
+      : undefined;
     identities.push({
       sessionId: normalizedId,
       name: normalizedName,
       ...(normalizedSocketPath ? { socketPath: normalizedSocketPath } : {}),
       ...(stableId ? { stableId } : {}),
+      ...(defaultSocketStableId ? { defaultSocketStableId } : {}),
     });
   }
   return identities;
@@ -207,19 +280,41 @@ function resolveCollabBinary() {
   return candidates.find((candidate) => existsSync(candidate)) || 'collab';
 }
 
-function runCollabWhoDefault(input: { cwd: string }): Promise<unknown> {
-  if (!input.cwd || !existsSync(input.cwd)) {
-    return Promise.resolve({ workers: [] });
-  }
+const COLLAB_DEFAULT_SUBPROCESS_CONCURRENCY = 2;
+let activeCollabSubprocesses = 0;
+const pendingCollabSubprocesses: Array<() => void> = [];
+
+function withCollabSubprocessSlot<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const start = () => {
+      activeCollabSubprocesses += 1;
+      task()
+        .then(resolve, reject)
+        .finally(() => {
+          activeCollabSubprocesses = Math.max(0, activeCollabSubprocesses - 1);
+          const next = pendingCollabSubprocesses.shift();
+          if (next) {
+            next();
+          }
+        });
+    };
+    if (activeCollabSubprocesses < COLLAB_DEFAULT_SUBPROCESS_CONCURRENCY) {
+      start();
+    } else {
+      pendingCollabSubprocesses.push(start);
+    }
+  });
+}
+
+function runCollabCeoStatusDefault(): Promise<unknown> {
   const binary = resolveCollabBinary();
-  return new Promise((resolve, reject) => {
+  return withCollabSubprocessSlot(() => new Promise((resolve, reject) => {
     execFile(
       binary,
-      ['who'],
+      ['ceo', 'status'],
       {
-        cwd: input.cwd,
-        timeout: 2_000,
-        maxBuffer: 1_000_000,
+        timeout: 5_000,
+        maxBuffer: 4_000_000,
         windowsHide: true,
         env: process.env,
       },
@@ -235,7 +330,38 @@ function runCollabWhoDefault(input: { cwd: string }): Promise<unknown> {
         }
       },
     );
-  });
+  }));
+}
+
+function runCollabWhoDefault(input: { cwd: string }): Promise<unknown> {
+  if (!input.cwd || !existsSync(input.cwd)) {
+    return Promise.resolve({ workers: [] });
+  }
+  const binary = resolveCollabBinary();
+  return withCollabSubprocessSlot(() => new Promise((resolve, reject) => {
+    execFile(
+      binary,
+      ['who'],
+      {
+        cwd: input.cwd,
+        timeout: 5_000,
+        maxBuffer: 4_000_000,
+        windowsHide: true,
+        env: process.env,
+      },
+      (error, stdout) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        try {
+          resolve(JSON.parse(stdout) as unknown);
+        } catch (parseError) {
+          reject(parseError);
+        }
+      },
+    );
+  }));
 }
 
 function withoutCollab(entry: TerminalSessionCatalogEntry): TerminalSessionCatalogEntry {
@@ -399,7 +525,14 @@ export function createDaemonSessionCatalogRuntime(
         identity: TmuxSessionIdentity,
       ): TerminalSessionCatalogEntry | null => {
         if (identity.stableId) {
-          return entriesByStableId.get(identity.stableId) ?? null;
+          const exact = entriesByStableId.get(identity.stableId);
+          if (exact) {
+            return exact;
+          }
+          if (identity.defaultSocketStableId) {
+            return entriesByStableId.get(identity.defaultSocketStableId) ?? null;
+          }
+          return null;
         }
         const byName = entriesByName.get(identity.name);
         if (byName && byName.length === 1 && !ambiguousNames.has(identity.name)) {
@@ -449,7 +582,23 @@ export function createDaemonSessionCatalogRuntime(
       }
 
       const runCollabWho = deps.runCollabWho || runCollabWhoDefault;
-      const uniqueCwds = [...new Set(cwdByName.values())];
+      const runCollabCeoStatus = deps.runCollabCeoStatus ?? (deps.runCollabWho ? undefined : runCollabCeoStatusDefault);
+      let ceoStatus: CollabCeoStatus | null = null;
+      if (runCollabCeoStatus) {
+        try {
+          ceoStatus = parseCollabCeoStatus(await runCollabCeoStatus());
+        } catch {
+          ceoStatus = null;
+        }
+      }
+      const sessionCwds = new Set(cwdByName.values());
+      const uniqueCwds = [
+        ...new Set([
+          ...sessionCwds,
+          ...(ceoStatus?.workspace ? [ceoStatus.workspace] : []),
+          ...(ceoStatus?.defaultWorkspace ? [ceoStatus.defaultWorkspace] : []),
+        ]),
+      ];
       // Group observations by the native catalog identity before checking
       // conflicts. The same registered worker observed from several session
       // CWDs must collapse to one observation; only genuinely distinct or
@@ -462,13 +611,15 @@ export function createDaemonSessionCatalogRuntime(
         try {
           raw = await runCollabWho({ cwd });
         } catch (error) {
-          collabWhoFailed = true;
-          failedCwds.add(cwd);
-          console.warn(
-            `[daemon.session_catalog] collab projection unavailable for ${cwd}: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
+          if (sessionCwds.has(cwd)) {
+            collabWhoFailed = true;
+            failedCwds.add(cwd);
+            console.warn(
+              `[daemon.session_catalog] collab projection unavailable for ${cwd}: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+          }
           return;
         }
         for (const worker of parseCollabWorkers(raw)) {
@@ -489,10 +640,24 @@ export function createDaemonSessionCatalogRuntime(
           if (!entry || (entry.cwd?.trim() && failedCwds.has(entry.cwd.trim()))) {
             continue;
           }
+          const isCeoWorker = Boolean(
+            ceoStatus && (
+              (ceoStatus.workerId && worker.workerId === ceoStatus.workerId)
+              || (
+                ceoStatus.name
+                && worker.displayName === ceoStatus.name
+                && (
+                  cwd === ceoStatus.workspace
+                  || cwd === ceoStatus.defaultWorkspace
+                  || (entry.cwd?.trim() && entry.cwd.trim() === ceoStatus.defaultWorkspace)
+                )
+              )
+            ),
+          );
           const key = nativeTmuxKey(entry);
           const group = observationsByNativeKey.get(key) || [];
           group.push({
-            role: worker.role,
+            role: isCeoWorker ? 'ceo' : worker.role,
             displayName: worker.displayName,
             ...(worker.agentState ? { agentState: worker.agentState } : {}),
           });
@@ -525,6 +690,24 @@ export function createDaemonSessionCatalogRuntime(
           continue;
         }
         next.set(key, distinct.values().next().value!);
+      }
+      if (
+        ceoStatus?.defaultWorkspace
+        && ![...next.values()].some((item) => item.role === 'ceo')
+      ) {
+        const defaultWorkspaceEntries = entries.filter(
+          (entry) => entry.backend === 'tmux' && entry.cwd?.trim() === ceoStatus.defaultWorkspace,
+        );
+        if (defaultWorkspaceEntries.length === 1) {
+          const entry = defaultWorkspaceEntries[0]!;
+          const key = nativeTmuxKey(entry);
+          if (!failedNativeKeys.has(key) && !observationsByNativeKey.has(key)) {
+            next.set(key, {
+              role: 'ceo',
+              displayName: ceoStatus.name || 'CEO',
+            });
+          }
+        }
       }
       return { projection: next, ok: !collabWhoFailed };
     })().then((sample) => {

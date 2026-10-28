@@ -243,6 +243,44 @@ function toDirectoryDevice(record: TraversalRelayDeviceRecord): RelayDirectoryDe
   };
 }
 
+const MAX_TOKENS_PER_USER = 64;
+
+function pruneTokensPerUser(
+  tokens: TraversalRelayTokenRecord[],
+  maxPerUser = MAX_TOKENS_PER_USER,
+): TraversalRelayTokenRecord[] {
+  const byUser = new Map<string, TraversalRelayTokenRecord[]>();
+  for (const token of tokens) {
+    if (!token || typeof token.userId !== 'string' || typeof token.token !== 'string') {
+      continue;
+    }
+    let list = byUser.get(token.userId);
+    if (!list) {
+      list = [];
+      byUser.set(token.userId, list);
+    }
+    list.push(token);
+  }
+  const kept = new Set<TraversalRelayTokenRecord>();
+  for (const list of byUser.values()) {
+    if (list.length <= maxPerUser) {
+      for (const item of list) {
+        kept.add(item);
+      }
+      continue;
+    }
+    const sorted = [...list].sort((left, right) => {
+      const leftTime = left.lastUsedAt || left.createdAt || '';
+      const rightTime = right.lastUsedAt || right.createdAt || '';
+      return leftTime.localeCompare(rightTime);
+    });
+    for (const item of sorted.slice(-maxPerUser)) {
+      kept.add(item);
+    }
+  }
+  return tokens.filter((token) => kept.has(token));
+}
+
 export class TraversalRelayStore {
   private data: TraversalRelayStoreData;
 
@@ -261,7 +299,9 @@ export class TraversalRelayStore {
     const parsed = JSON.parse(raw) as Partial<TraversalRelayStoreData>;
     return {
       users: Array.isArray(parsed.users) ? parsed.users as TraversalRelayUserRecord[] : [],
-      tokens: Array.isArray(parsed.tokens) ? parsed.tokens as TraversalRelayTokenRecord[] : [],
+      tokens: Array.isArray(parsed.tokens)
+        ? pruneTokensPerUser(parsed.tokens as TraversalRelayTokenRecord[])
+        : [],
       devices: Array.isArray(parsed.devices)
         ? parsed.devices
             .map((entry) => asStoredDevice(entry as Partial<TraversalRelayDeviceRecord>))
@@ -420,6 +460,7 @@ export class TraversalRelayStore {
     };
     return this.commitCandidate((candidate) => {
       candidate.tokens.push({ ...tokenRecord });
+      candidate.tokens = pruneTokensPerUser(candidate.tokens);
       return {
         result: {
           token: tokenRecord.token,

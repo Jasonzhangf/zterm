@@ -1950,4 +1950,50 @@ describe('TerminalSessionDrawer catalog availability', () => {
     expect(screen.getByTestId('terminal-session-drawer-row-herdr-missing').style.opacity).toBe('1');
     expect(screen.queryByTestId('terminal-session-drawer-retry-herdr-missing')).toBeNull();
   });
+
+  it('pins CEO folder at the top of the drawer and renders CEO badge', () => {
+    const sessionsWithCeo = [
+      {
+        id: 'zterm-1',
+        stableKey: 'zterm-1',
+        title: 'zterm-1',
+        subtitle: 'Mac Studio · zterm-1',
+        status: 'connected' as const,
+        active: true,
+        hostKey: 'daemon-a',
+        hostLabel: 'Mac Studio',
+        cwd: '/Volumes/extension/code/zterm',
+        collab: { role: 'master' as const, displayName: 'Jenny' },
+      },
+      {
+        id: 'workspace-1',
+        stableKey: 'workspace-1',
+        title: 'workspace-1',
+        subtitle: 'Mac Studio · workspace-1',
+        status: 'connected' as const,
+        active: false,
+        hostKey: 'daemon-a',
+        hostLabel: 'Mac Studio',
+        cwd: '/Users/fanzhang/.collab/workspace',
+        collab: { role: 'ceo' as const, displayName: 'Bob' },
+      },
+    ];
+    render(
+      <TerminalSessionDrawer
+        open
+        filterMode="only-master"
+        sessions={sessionsWithCeo}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    const badge = screen.getByTestId('terminal-session-drawer-collab-workspace-1');
+    expect(badge.textContent).toBe('CEO');
+    const folders = screen.getAllByTestId(/^terminal-session-drawer-folder-button-/);
+    expect(folders[0]?.getAttribute('data-testid')).toBe(
+      'terminal-session-drawer-folder-button-/Users/fanzhang/.collab/workspace',
+    );
+  });
 });

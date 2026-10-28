@@ -163,4 +163,20 @@ describe('session drawer visibility', () => {
       hiddenSessionNames: ['zterm-3'],
     });
   });
+
+  it('includes CEO session in only-master and hide-worker modes', () => {
+    const sessions = [
+      { id: 'ceo', sessionName: 'workspace-1', collab: { role: 'ceo' as const, displayName: 'Bob' } },
+      { id: 'master', sessionName: 'zterm-1', collab: { role: 'master' as const, displayName: 'Jenny' } },
+      { id: 'worker', sessionName: 'zterm-2', collab: { role: 'worker' as const, displayName: 'Alice' } },
+    ];
+    expect(
+      filterSessionsByDrawerVisibility(
+        sessions,
+        config({ mode: 'only-master' }),
+        (row) => row.sessionName,
+        (row) => row.collab,
+      ).map((row) => row.id),
+    ).toEqual(['ceo', 'master']);
+  });
 });

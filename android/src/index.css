@@ -780,6 +780,8 @@ label:focus {
   cursor: not-allowed;
   opacity: 0.48;
   box-shadow: var(--zterm-skeu-inset-shadow) !important;
+}
+
 [data-zterm-input-modality="keyboard"] .zterm-skeu-raised:focus-visible,
 [data-zterm-input-modality="keyboard"] .zterm-neo-drawer button:focus-visible,
 [data-zterm-input-modality="keyboard"] .zterm-file-sheet button:focus-visible,

@@ -98,7 +98,7 @@ public class AndroidConnectionService extends Service {
     static final long PHYSICAL_ERROR_DEBOUNCE_MS = 5_000L;
     static final long WEBSOCKET_CANDIDATE_TIMEOUT_MS = 1_800L;
     static final long RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 6_000L;
-    static final long RTC_RELAY_CANDIDATE_TIMEOUT_MS = 2_500L;
+    static final long RTC_RELAY_CANDIDATE_TIMEOUT_MS = 8_000L;
     private static final int MUX_PROTOCOL_VERSION = 1;
     private static final int MAX_NOTIFICATION_SESSION_ACTIONS = 3;
     private static final int NOTIFICATION_PULSE_UPDATES = 6;
@@ -123,6 +123,7 @@ public class AndroidConnectionService extends Service {
     private OkHttpClient httpClient;
     private final Map<String, TargetRuntime> targets = new ConcurrentHashMap<>();
     private final Map<String, String> policyByTargetKey = new ConcurrentHashMap<>();
+    private String defaultPolicyKey;
     private final Map<String, Integer> notificationPulseUpdateCounts = new ConcurrentHashMap<>();
     private final Map<String, Long> notificationPulseGenerations = new ConcurrentHashMap<>();
     private String clientInstanceId;
@@ -445,6 +446,7 @@ public class AndroidConnectionService extends Service {
             return;
         }
         String policyKey = policyKey(policy);
+        defaultPolicyKey = policyKey;
         boolean anyChanged = false;
         for (TargetRuntime runtime : targets.values()) {
             String current = policyByTargetKey.get(runtime.target.targetKey);
@@ -478,6 +480,10 @@ public class AndroidConnectionService extends Service {
             targets.remove(target.targetKey);
         }
         String policyKey = policyByTargetKey.get(target.targetKey);
+        if (policyKey == null && defaultPolicyKey != null) {
+            policyKey = defaultPolicyKey;
+            policyByTargetKey.put(target.targetKey, policyKey);
+        }
         AndroidConnectionServiceRoutePolicy policy = parsePolicyKey(policyKey);
         TargetRuntime runtime = new TargetRuntime(target, policy);
         targets.put(target.targetKey, runtime);
@@ -844,7 +850,7 @@ public class AndroidConnectionService extends Service {
     }
 
     private final class TargetRuntime extends WebSocketListener {
-        private static final String[] DIRECT_TIER_ORDER = {"lan", "tailscale", "ipv6", "ipv4"};
+        private static final String[] DIRECT_TIER_ORDER = {"lan", "ipv6", "ipv4", "rtc-direct", "tailscale"};
         final AndroidConnectionServiceTarget target;
         volatile AndroidConnectionServiceRoutePolicy routePolicy;
         volatile List<RouteCandidateDiagnostic> routeDiagnostics;
@@ -1095,12 +1101,14 @@ public class AndroidConnectionService extends Service {
             committedCandidate = diagnostic;
             diagnostic.selected = true;
             diagnostic.succeed(System.currentTimeMillis());
+            String existingIcePair = candidate.rtc && stateMachine != null
+                ? stateMachine.readSnapshot().selectedIcePairJson : null;
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
                 generation,
                 candidate.path,
                 resolvedRelayTransportFor(candidate),
                 endpointFor(candidate),
-                null), System.currentTimeMillis());
+                existingIcePair), System.currentTimeMillis());
             injectRouteDiagnostics();
         }
 
@@ -1144,6 +1152,11 @@ public class AndroidConnectionService extends Service {
             if (activeRtcCandidate != null
                 && activeRtcCandidate.candidateId.equals(diagnostic.candidateId)) {
                 activeRtcCandidate = null;
+            }
+            if (diagnostic.candidate != null && diagnostic.candidate.rtc
+                && (committedCandidate == null
+                    || !committedCandidate.candidateId.equals(diagnostic.candidateId))) {
+                closeRtcQuietly();
             }
             Runnable timeout = candidateTimeouts.remove(diagnostic.candidateId);
             if (timeout != null) workerHandler.removeCallbacks(timeout);
@@ -1249,6 +1262,7 @@ public class AndroidConnectionService extends Service {
 
         private void openRtcCandidate(RouteCandidate candidate, RouteCandidateDiagnostic diagnostic) {
             final AndroidRtcTransportBackend[] holder = new AndroidRtcTransportBackend[1];
+            final boolean[] openingSynchronously = {true};
             AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
                 AndroidConnectionService.this,
                 httpClient,
@@ -1289,28 +1303,50 @@ public class AndroidConnectionService extends Service {
 
                     @Override
                     public void onRtcError(String message) {
-                        workerHandler.post(() -> {
+                        Runnable handle = () -> {
                             if (stopped || rtcBackend != self() || generation == null
                                 || transportNetworkGeneration != networkGeneration) {
                                 return;
                             }
+                            if (committedCandidate == null
+                                || !committedCandidate.candidateId.equals(diagnostic.candidateId)) {
+                                candidateFailure("rtc", message, diagnostic,
+                                    candidateTimeouts, candidateSockets, candidateDiagnostics);
+                                return;
+                            }
                             transportFailure("rtc", message);
-                        });
+                        };
+                        if (openingSynchronously[0]) {
+                            handle.run();
+                        } else {
+                            workerHandler.post(handle);
+                        }
                     }
 
                     @Override
                     public void onRtcClosed(int code, String reason) {
-                        workerHandler.post(() -> {
+                        Runnable handle = () -> {
                             if (stopped || rtcBackend != self() || generation == null
                                 || transportNetworkGeneration != networkGeneration) {
                                 return;
                             }
                             if (isAuthRtcClose(code, reason)) {
                                 authFailure("auth-close-" + code, reason == null ? "rtc signaling auth closed" : reason);
+                            } else if (committedCandidate == null
+                                || !committedCandidate.candidateId.equals(diagnostic.candidateId)) {
+                                candidateFailure("rtc-closed-" + code,
+                                    reason == null ? "rtc closed" : reason,
+                                    diagnostic,
+                                    candidateTimeouts, candidateSockets, candidateDiagnostics);
                             } else {
                                 transportFailure("rtc-closed-" + code, reason);
                             }
-                        });
+                        };
+                        if (openingSynchronously[0]) {
+                            handle.run();
+                        } else {
+                            workerHandler.post(handle);
+                        }
                     }
 
                     @Override
@@ -1335,14 +1371,14 @@ public class AndroidConnectionService extends Service {
             try {
                 backend.open();
             } catch (RuntimeException error) {
-                workerHandler.post(() -> {
-                    if (stopped || rtcBackend != backend || generation == null
-                        || transportNetworkGeneration != networkGeneration) {
-                        return;
-                    }
-            candidateFailure("rtc-open-rejected", String.valueOf(error.getMessage()), diagnostic,
-                        candidateTimeouts, candidateSockets, candidateDiagnostics);
-                });
+                if (stopped || rtcBackend != backend || generation == null
+                    || transportNetworkGeneration != networkGeneration) {
+                    return;
+                }
+                candidateFailure("rtc-open-rejected", String.valueOf(error.getMessage()), diagnostic,
+                    candidateTimeouts, candidateSockets, candidateDiagnostics);
+            } finally {
+                openingSynchronously[0] = false;
             }
         }
 
@@ -1358,13 +1394,13 @@ public class AndroidConnectionService extends Service {
                 }
                 return candidates;
             }
-            String bridgeLanHost = nonEmpty(target.lanHost) ? target.lanHost : target.bridgeHost;
-            if (nonEmpty(bridgeLanHost) && isLocalLanHost(bridgeLanHost)) {
+            if (resolveSameSubnetLanHost() != null) {
                 addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.LAN);
             }
-            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
             addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV6);
             addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.IPV4);
+            addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT);
+            addCandidate(candidates, seenUrls, AndroidConnectionServiceRoutePolicy.Path.TAILSCALE);
             if (candidates.isEmpty()) {
                 addRtcCandidate(candidates, AndroidConnectionServiceRoutePolicy.Path.RTC_RELAY);
             }
@@ -1474,12 +1510,38 @@ public class AndroidConnectionService extends Service {
             }
         }
 
+        private String resolveSameSubnetLanHost() {
+            if (target.lanHosts != null) {
+                for (String host : target.lanHosts) {
+                    if (nonEmpty(host) && isLocalLanHost(host)) {
+                        return host.trim();
+                    }
+                }
+            }
+            if (nonEmpty(target.lanHost) && isLocalLanHost(target.lanHost)) {
+                return target.lanHost.trim();
+            }
+            if (nonEmpty(target.bridgeHost) && isLocalLanHost(target.bridgeHost)) {
+                return target.bridgeHost.trim();
+            }
+            return null;
+        }
+
         private String hostFor(AndroidConnectionServiceRoutePolicy.Path path) {
             switch (path) {
                 case LAN:
-                    if (nonEmpty(target.lanHost)) return target.lanHost;
-                    if (nonEmpty(target.bridgeHost) && isLocalLanHost(target.bridgeHost)) {
-                        return target.bridgeHost;
+                    String sameSubnetLan = resolveSameSubnetLanHost();
+                    if (sameSubnetLan != null) {
+                        return sameSubnetLan;
+                    }
+                    if (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL) {
+                        if (nonEmpty(target.lanHost)) return target.lanHost;
+                        if (target.lanHosts != null && !target.lanHosts.isEmpty()) {
+                            return target.lanHosts.get(0);
+                        }
+                        if (nonEmpty(target.bridgeHost) && !isLikelyTailscale(target.bridgeHost)) {
+                            return target.bridgeHost;
+                        }
                     }
                     return null;
                 case TAILSCALE:
@@ -1492,7 +1554,9 @@ public class AndroidConnectionService extends Service {
                     return null;
                 case IPV4:
                     if (nonEmpty(target.ipv4Host)) return target.ipv4Host;
-                    if (!isLikelyTailscale(target.bridgeHost) && !isLikelyIpv6(target.bridgeHost)) {
+                    if (!isLikelyTailscale(target.bridgeHost) && !isLikelyIpv6(target.bridgeHost)
+                        && (routePolicy.mode == AndroidConnectionServiceRoutePolicy.Mode.MANUAL
+                            || !isPrivateOrLoopbackIpv4(target.bridgeHost))) {
                         return target.bridgeHost;
                     }
                     return null;
@@ -1506,6 +1570,26 @@ public class AndroidConnectionService extends Service {
                 default:
                     return null;
             }
+        }
+
+        private boolean isPrivateOrLoopbackIpv4(String host) {
+            if (host == null || host.trim().isEmpty()) return false;
+            String value = host.trim();
+            if (value.contains("://")) {
+                value = value.replaceFirst("^[a-z]+://", "").split("/", 2)[0].split(":", 2)[0];
+            }
+            String[] parts = value.split("\\.");
+            if (parts.length != 4) return false;
+            try {
+                int first = Integer.parseInt(parts[0]);
+                int second = Integer.parseInt(parts[1]);
+                if (first == 10 || first == 127) return true;
+                if (first == 192 && second == 168) return true;
+                if (first == 172 && second >= 16 && second <= 31) return true;
+            } catch (NumberFormatException ignored) {
+                return false;
+            }
+            return false;
         }
 
         private boolean isLocalLanHost(String host) {

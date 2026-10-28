@@ -317,17 +317,19 @@ function TerminalSessionDrawerComponent({
         unfilteredByCwd.set(cwd, items);
       }
     }
+    const roleRank = (role?: string) => (role === 'ceo' ? 0 : role === 'master' ? 1 : 2);
     const entries = Array.from(groups, ([cwd, rawItems]) => {
-      const items = [...rawItems].sort((a, b) => {
-        const aMaster = a.collab?.role === 'master' ? 0 : 1;
-        const bMaster = b.collab?.role === 'master' ? 0 : 1;
-        return aMaster - bMaster;
-      });
+      const items = [...rawItems].sort((a, b) => roleRank(a.collab?.role) - roleRank(b.collab?.role));
       const visibleIds = new Set(items.map((item) => item.id));
       const otherItems = (unfilteredByCwd.get(cwd) || []).filter((item) => !visibleIds.has(item.id));
       return { cwd, items, otherItems };
     });
     return entries.sort((a, b) => {
+      const aCeo = a.items.some((s) => s.collab?.role === 'ceo') || a.otherItems.some((s) => s.collab?.role === 'ceo') ? 0 : 1;
+      const bCeo = b.items.some((s) => s.collab?.role === 'ceo') || b.otherItems.some((s) => s.collab?.role === 'ceo') ? 0 : 1;
+      if (aCeo !== bCeo) {
+        return aCeo - bCeo;
+      }
       const aActive = a.items.some((s) => s.active) || a.otherItems.some((s) => s.active) ? 0 : 1;
       const bActive = b.items.some((s) => s.active) || b.otherItems.some((s) => s.active) ? 0 : 1;
       if (aActive !== bActive) {
@@ -1111,7 +1113,13 @@ function TerminalSessionDrawerComponent({
                 {session.collab ? (
                   <span
                     data-testid={`terminal-session-drawer-collab-${session.id}`}
-                    aria-label={session.collab.role === 'master' ? 'MASTER' : 'WORKER'}
+                    aria-label={
+                      session.collab.role === 'ceo'
+                        ? 'CEO'
+                        : session.collab.role === 'master'
+                          ? 'MASTER'
+                          : 'WORKER'
+                    }
                     style={{
                       minWidth: '30px',
                       padding: '2px 6px',
@@ -1120,18 +1128,28 @@ function TerminalSessionDrawerComponent({
                       fontSize: '11px',
                       fontWeight: 800,
                       flexShrink: 0,
-                      border: session.collab.role === 'master'
-                        ? '1px solid var(--zterm-settings-success)'
-                        : '1px solid var(--zterm-settings-warning)',
-                      background: session.collab.role === 'master'
-                        ? 'var(--zterm-settings-success-soft)'
-                        : 'var(--zterm-settings-warning-soft)',
-                      color: session.collab.role === 'master'
-                        ? 'var(--zterm-settings-success)'
-                        : 'var(--zterm-settings-warning)',
+                      border: session.collab.role === 'ceo'
+                        ? '1px solid var(--zterm-panel-accent-border)'
+                        : session.collab.role === 'master'
+                          ? '1px solid var(--zterm-settings-success)'
+                          : '1px solid var(--zterm-settings-warning)',
+                      background: session.collab.role === 'ceo'
+                        ? 'var(--zterm-panel-accent-soft)'
+                        : session.collab.role === 'master'
+                          ? 'var(--zterm-settings-success-soft)'
+                          : 'var(--zterm-settings-warning-soft)',
+                      color: session.collab.role === 'ceo'
+                        ? 'var(--zterm-panel-accent)'
+                        : session.collab.role === 'master'
+                          ? 'var(--zterm-settings-success)'
+                          : 'var(--zterm-settings-warning)',
                     }}
                   >
-                    {session.collab.role === 'master' ? 'MASTER' : 'WORKER'}
+                    {session.collab.role === 'ceo'
+                      ? 'CEO'
+                      : session.collab.role === 'master'
+                        ? 'MASTER'
+                        : 'WORKER'}
                   </span>
                 ) : null}
                 {slotTone ? (

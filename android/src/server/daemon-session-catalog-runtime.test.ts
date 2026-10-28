@@ -1438,4 +1438,131 @@ describe('daemon session catalog runtime', () => {
       },
     });
   });
+
+  it('matches collab role when catalog stableId omits socketPath on the default socket while list-sessions outputs socket_path', async () => {
+    const defaultSocketStableId = buildTmuxSessionStableId({
+      serverPid: '2329',
+      sessionId: '$75',
+      createdAt: 1793147288,
+    });
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: '$75\tzterm-1\t/Users/fanzhang/.tmux/run/tmux-501/default\t2329\t1793147288',
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return { ok: true as const, stdout: 'zterm-1\t1234\tcodex' };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => ['zterm-1']),
+      listTerminalSessionCatalog: () => [
+        {
+          name: 'zterm-1',
+          backend: 'tmux',
+          stableId: defaultSocketStableId,
+          cwd: '/Volumes/extension/code/zterm',
+        },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabWho: vi.fn(async () => ({
+        workers: [
+          {
+            display_name: 'Jenny',
+            role: 'master',
+            agent_state: 'working',
+            transport: {
+              kind: 'tmux',
+              endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+              namespace: '$75',
+            },
+          },
+        ],
+      })),
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled[0]?.collab).toEqual({
+      role: 'master',
+      displayName: 'Jenny',
+      agentState: 'working',
+    });
+    runtime.dispose();
+  });
+
+  it('resolves host-wide CEO session from collab ceo status and worker_id', async () => {
+    const ceoStableId = buildTmuxSessionStableId({
+      serverPid: '2329',
+      sessionId: '$29',
+      createdAt: 1793138252,
+    });
+    const runTmuxAsync = vi.fn(async (args: string[]) => {
+      if (args[0] === 'list-sessions') {
+        return {
+          ok: true as const,
+          stdout: '$29\tworkspace-1\t/Users/fanzhang/.tmux/run/tmux-501/default\t2329\t1793138252',
+        };
+      }
+      if (args[0] === 'list-panes') {
+        return { ok: true as const, stdout: 'workspace-1\t1234\tcodex' };
+      }
+      return { ok: true as const, stdout: 'idle' };
+    });
+    const runtime = createDaemonSessionCatalogRuntime({
+      listTmuxSessions: vi.fn(() => ['workspace-1']),
+      listTerminalSessionCatalog: () => [
+        {
+          name: 'workspace-1',
+          backend: 'tmux',
+          stableId: ceoStableId,
+          cwd: '/Users/fanzhang/.collab/workspace',
+        },
+      ],
+      runTmuxAsyncAcrossSockets: (args) => runTmuxAsync(args),
+      runTmuxAsyncForSession: (args) => runTmuxAsync(args),
+      readProcessGroup: () => ({ groupId: 'pg-1', alive: true }),
+      runCollabCeoStatus: vi.fn(async () => ({
+        ceo: {
+          granted_by: 'codex-session-ceo-bob',
+          name: 'Bob',
+          workspace: '/Users/fanzhang',
+        },
+        default_workspace: '/Users/fanzhang/.collab/workspace',
+        worker_id: 'codex-session-ceo-bob',
+      })),
+      runCollabWho: vi.fn(async ({ cwd }: { cwd: string }) => {
+        if (cwd === '/Users/fanzhang') {
+          return {
+            workers: [
+              {
+                id: 'codex-session-ceo-bob',
+                display_name: 'Bob',
+                role: 'worker',
+                agent_state: 'idle',
+                transport: {
+                  kind: 'tmux',
+                  endpoint: '/Users/fanzhang/.tmux/run/tmux-501/default',
+                  namespace: '$29',
+                },
+              },
+            ],
+          };
+        }
+        return { workers: [] };
+      }),
+    });
+
+    const sampled = await runtime.refresh();
+    expect(sampled[0]?.collab).toEqual({
+      role: 'ceo',
+      displayName: 'Bob',
+      agentState: 'idle',
+    });
+    runtime.dispose();
+  });
 });
