@@ -1181,7 +1181,10 @@ export function createRemoteWindowMessageRuntime(input?: {
           handled = true;
           pendingStreamQuality.delete(msg.payload.requestId);
           clearPendingTimeout(pending);
-          if (msg.payload.status === 'applied') {
+          if (
+            msg.payload.status === 'applied'
+            || msg.payload.status === 'degraded-unknown-bitrate'
+          ) {
             pending.resolve(msg.payload);
           } else {
             const error = new Error(msg.payload.error?.message || 'Remote window stream quality rejected');

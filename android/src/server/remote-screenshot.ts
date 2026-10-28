@@ -19,7 +19,7 @@ export function resolveRemoteScreenshotErrorMessage(error: unknown, timeoutMs: n
   }
 
   if (PERMISSION_PATTERN.test(rawMessage)) {
-    return 'zterm-daemon 缺少系统截图权限，请在 Mac 系统设置 -> 隐私与安全性 -> 屏幕与系统音频录制 中允许 zterm-daemon，然后重新运行 zterm-daemon install-service';
+    return 'zterm-daemon 缺少系统截图权限。请重新运行 zterm-daemon install-service：安装步骤会弹出系统授权窗口，点允许即可；或到 系统设置 -> 隐私与安全性 -> 屏幕与系统音频录制 中允许 zterm-daemon';
   }
 
   if (NO_DISPLAY_PATTERN.test(rawMessage)) {

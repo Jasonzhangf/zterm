@@ -11,6 +11,7 @@ import {
   getSessionTargetTransportRuntime,
   getSessionTransportTargetKey,
   getTargetTerminalTransport,
+  getTargetTransportTraversalDiagnostics,
   getTargetControlTransport,
   getTargetTransportRuntime,
   listTargetTransportRuntimes,
@@ -584,5 +585,35 @@ describe('session transport runtime store', () => {
 
     expect(getSessionTargetTerminalMuxReady(store, 'session-1')).toBe(false);
     expect(getSessionTargetTerminalMuxReady(store, 'session-2')).toBe(false);
+  });
+
+  it('projects traversal route and round-trip facts from the physical transport', () => {
+    const store = createSessionTransportRuntimeStore();
+    upsertSessionTransportRuntime(store, 'session-diag', makeHost());
+    const targetKey = getSessionTransportRuntime(store, 'session-diag')!.targetKey;
+    const controlDiagnostics = {
+      mode: 'auto' as const,
+      resolvedPath: 'lan' as const,
+      stage: 'open' as const,
+      attempts: [],
+      selectedIcePair: { roundTripTimeMs: 12 },
+    };
+    const terminalDiagnostics = { ...controlDiagnostics, resolvedPath: 'rtc-relay' as const };
+
+    // No transport yet: the caller must treat this as unknown, not as a default.
+    expect(getTargetTransportTraversalDiagnostics(store, targetKey)).toBeNull();
+    expect(getTargetTransportTraversalDiagnostics(store, 'missing-target')).toBeNull();
+
+    setTargetControlTransport(store, targetKey, {
+      ...makeSocket('control-diag'),
+      getDiagnostics: () => controlDiagnostics,
+    } as any);
+    expect(getTargetTransportTraversalDiagnostics(store, targetKey)).toBe(controlDiagnostics);
+
+    setTargetTerminalTransport(store, targetKey, {
+      ...makeSocket('terminal-diag'),
+      getDiagnostics: () => terminalDiagnostics,
+    } as any);
+    expect(getTargetTransportTraversalDiagnostics(store, targetKey)).toBe(terminalDiagnostics);
   });
 });

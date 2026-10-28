@@ -1,5 +1,5 @@
 import type { Host } from './types';
-import type { BridgeTransportSocket } from './traversal/types';
+import type { BridgeTransportSocket, TraversalDiagnostics } from './traversal/types';
 import {
   bindTerminalChannelSession,
   clearTerminalChannelSession,
@@ -505,6 +505,22 @@ export function getTargetControlTransport(
   targetKey: string,
 ) {
   return store.targets.get(targetKey)?.controlTransport || null;
+}
+
+/**
+ * Read-only projection of the route and round-trip facts of a target's
+ * physical transport. The A-2 session status line consumes this so the route
+ * label and the network delay come from the traversal owner instead of being
+ * inferred from the UI. It never mutates transport state, and it returns null
+ * when no transport exists yet, so callers must not invent a default value.
+ */
+export function getTargetTransportTraversalDiagnostics(
+  store: SessionTransportRuntimeStore,
+  targetKey: string,
+): TraversalDiagnostics | null {
+  const targetRuntime = store.targets.get(targetKey);
+  const socket = targetRuntime?.terminalTransport || targetRuntime?.controlTransport || null;
+  return socket ? socket.getDiagnostics() : null;
 }
 
 export function getSessionTargetControlTransport(

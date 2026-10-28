@@ -16,10 +16,13 @@ import {
 } from '../../lib/remote-window-quality-controller';
 import {
   applyRemoteWindowMaxFrameRate,
+  applyRemoteWindowZoomCaptureProfile,
   clearRemoteWindowVideoObservationWindow,
   createRemoteWindowVideoAdaptiveState,
+  getRemoteWindowSourceRect,
   resolveRemoteWindowVideoAdaptiveDecision,
   resolveInitialRemoteWindowVideoProfile,
+  resolveRemoteWindowZoomCaptureFactor,
   type RemoteWindowQualityMaxFrameRate,
   type RemoteWindowNetworkQualityInput,
   type RemoteWindowVideoAdaptiveState,
@@ -49,6 +52,12 @@ export interface UseRemoteWindowQualityOptions {
   videoPreference: RemoteWindowVideoPreference;
   maxBitrateCapBps?: number | null;
   maxFrameRateFps?: RemoteWindowQualityMaxFrameRate;
+  /**
+   * Live projection zoom. >= 2 engages a raised capture ceiling; below the
+   * release threshold it returns to the base resolution. The sticky factor
+   * lives in the pure `resolveRemoteWindowZoomCaptureFactor` owner.
+   */
+  zoomScale?: number;
   target?: RemoteWindowStreamTargetManifest | null;
   updateStreamQuality?: RemoteWindowQualityUpdater;
   collectStatsRef: RefObject<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>;
@@ -114,6 +123,7 @@ export function useRemoteWindowQuality({
   videoPreference,
   maxBitrateCapBps,
   maxFrameRateFps = 30,
+  zoomScale,
   target,
   updateStreamQuality,
   collectStatsRef,
@@ -142,7 +152,7 @@ export function useRemoteWindowQuality({
   const adaptiveIdentityRef = useRef<string | null>(null);
   qualityApplyStateRef.current = qualityApplyState;
 
-  const desiredProfile = useMemo(() => {
+  const baseDesiredProfile = useMemo(() => {
     const profile = resolveInitialRemoteWindowVideoProfile(
       videoPreference,
       null,
@@ -156,6 +166,22 @@ export function useRemoteWindowQuality({
       ...applyRemoteWindowMaxFrameRate(profile, maxFrameRateFps),
     };
   }, [maxBitrateCapBps, maxFrameRateFps, target, videoPreference]);
+
+  // B-2 zoom-aware capture ceiling. The factor is sticky across the release
+  // threshold, so only a real change of zoom band produces a new profile (and
+  // therefore a new quality request).
+  const zoomCaptureFactorRef = useRef(1);
+  const effectiveZoomScale = Number.isFinite(zoomScale) ? Number(zoomScale) : 1;
+  const zoomCaptureFactor = resolveRemoteWindowZoomCaptureFactor(
+    zoomCaptureFactorRef.current,
+    effectiveZoomScale,
+  );
+  zoomCaptureFactorRef.current = zoomCaptureFactor;
+  const desiredProfile = useMemo(() => applyRemoteWindowZoomCaptureProfile(baseDesiredProfile, {
+    factor: zoomCaptureFactor,
+    source: target ? getRemoteWindowSourceRect(target) : null,
+    maxBitrateCapBps,
+  }), [baseDesiredProfile, maxBitrateCapBps, target, zoomCaptureFactor]);
   const desiredProfileRef = useRef(desiredProfile);
   const maxFrameRateFpsRef = useRef(maxFrameRateFps);
   desiredProfileRef.current = desiredProfile;
@@ -277,12 +303,27 @@ export function useRemoteWindowQuality({
     if (qualityApplyStateRef.current.phase === 'rejected' && qualityApplyStateRef.current.unsupported) {
       return;
     }
+    // The pinned wrtc build rejects negotiated encoding updates, so the
+    // encoder keeps its previous bitrate. An automatic bitrate ladder would
+    // keep requesting a budget that can never apply, so stop dispatch here
+    // while the manual path and capture-profile requests stay available.
+    if (
+      qualityApplyStateRef.current.acknowledged?.senderParametersDegraded
+        .some((lane) => lane.lane === 'focus')
+    ) {
+      return;
+    }
     if (qualityApplyStateRef.current.acknowledged === null) {
       return;
     }
-    const autoProfile = {
-      ...applyRemoteWindowMaxFrameRate(decision.profile, maxFrameRateFpsRef.current),
-    };
+    const autoProfile = applyRemoteWindowZoomCaptureProfile(
+      applyRemoteWindowMaxFrameRate(decision.profile, maxFrameRateFpsRef.current),
+      {
+        factor: zoomCaptureFactorRef.current,
+        source: target ? getRemoteWindowSourceRect(target) : null,
+        maxBitrateCapBps,
+      },
+    );
     requestQualityRef.current?.({
       sessionId: activeSessionId ?? '',
       streamId: streamId ?? '',
@@ -297,7 +338,7 @@ export function useRemoteWindowQuality({
       origin: 'adaptive',
       adaptiveState: decision.state,
     });
-  }, [activeSessionId, streamId, target, targetId, videoPreference]);
+  }, [activeSessionId, maxBitrateCapBps, streamId, target, targetId, videoPreference]);
 
   const requestAcknowledgedQuality = useCallback((options: RemoteWindowQueuedQuality) => {
     if (!updateStreamQuality || !mediaPlan) {
@@ -538,6 +579,7 @@ export function useRemoteWindowQuality({
           ? qualityApplyState.unsupported ? 'unsupported' as const : 'rejected' as const
           : 'idle' as const,
     lastAck: qualityApplyState.acknowledged,
+    senderParametersDegraded: qualityApplyState.acknowledged?.senderParametersDegraded ?? [],
     failureMessage: qualityApplyState.phase === 'rejected' ? qualityApplyState.message : null,
     failureCode: qualityApplyState.phase === 'rejected' ? qualityApplyState.code : null,
     networkQuality,

@@ -574,7 +574,18 @@ vi.mock('./hooks/useSessionHistoryStorage', () => ({
 
 const openTerminalPageSpy = vi.fn();
 const fetchTmuxSessionsMock = vi.fn();
+const fetchTmuxSessionCatalogMock = vi.fn();
 const createTmuxSessionMock = vi.fn();
+
+function defaultRemoteSessionNamesForTarget(target: { bridgeHost?: string; bridgePort?: number }) {
+  if (target?.bridgeHost === '100.127.23.27' && target?.bridgePort === 3333) {
+    return ['alpha', 'beta', 'zterm', 'session-s1', 'session-s2', 'session-shared'];
+  }
+  if (target?.bridgeHost === '127.0.0.1' && target?.bridgePort === 3333) {
+    return ['session-s1', 'session-s2', 'session-shared', 'shared', 'alpha', 'beta'];
+  }
+  return [];
+}
 
 const tmuxPickerHarness = vi.hoisted(() => {
   let latestProps: any = null;
@@ -866,6 +877,7 @@ vi.mock('./pages/TerminalPage', () => ({
 vi.mock('./lib/tmux-sessions', () => ({
   createTmuxSession: (...args: unknown[]) => createTmuxSessionMock(...args),
   fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
+  fetchTmuxSessionCatalog: (...args: unknown[]) => fetchTmuxSessionCatalogMock(...args),
 }));
 
 import { AppContent } from './App';
@@ -878,17 +890,16 @@ describe('App dynamic refresh matrix', () => {
     openTerminalPageSpy.mockClear();
     terminalPageRenderSpy.mockClear();
     fetchTmuxSessionsMock.mockReset();
+    fetchTmuxSessionCatalogMock.mockReset();
     createTmuxSessionMock.mockReset();
     createTmuxSessionMock.mockResolvedValue([]);
     connectionsPageHarness.reset();
     fetchTmuxSessionsMock.mockImplementation(async (target: { bridgeHost?: string; bridgePort?: number }) => {
-      if (target?.bridgeHost === '100.127.23.27' && target?.bridgePort === 3333) {
-        return ['alpha', 'beta', 'zterm', 'session-s1', 'session-s2', 'session-shared'];
-      }
-      if (target?.bridgeHost === '127.0.0.1' && target?.bridgePort === 3333) {
-        return ['session-s1', 'session-s2', 'session-shared', 'shared', 'alpha', 'beta'];
-      }
-      return [];
+      return defaultRemoteSessionNamesForTarget(target);
+    });
+    fetchTmuxSessionCatalogMock.mockImplementation(async (target: { bridgeHost?: string; bridgePort?: number }) => {
+      const sessionNames = defaultRemoteSessionNamesForTarget(target);
+      return { sessionNames, sessionCatalog: [] };
     });
     sessionHarness.reset();
     hostHarness.reset();
@@ -1467,7 +1478,13 @@ describe('App dynamic refresh matrix', () => {
     ]);
 
     sessionHarness.createSession.mockClear();
-    fetchTmuxSessionsMock.mockResolvedValueOnce(['zterm', 'agentpi']);
+    fetchTmuxSessionCatalogMock.mockResolvedValueOnce({
+      sessionNames: ['zterm', 'agentpi'],
+      sessionCatalog: [
+        { backend: 'tmux', stableId: 'tmux:1:1:1', name: 'zterm' },
+        { backend: 'tmux', stableId: 'tmux:1:2:1', name: 'agentpi' },
+      ],
+    });
     sessionHarness.createSession.mockReturnValueOnce('runtime:mac-studio:agentpi');
     openTerminalPageSpy.mockClear();
     await act(async () => {
@@ -1475,7 +1492,7 @@ describe('App dynamic refresh matrix', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+    expect(fetchTmuxSessionCatalogMock).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: '100.66.1.82',
         bridgePort: 3333,
@@ -1543,7 +1560,7 @@ describe('App dynamic refresh matrix', () => {
       ]),
     }));
 
-    fetchTmuxSessionsMock.mockClear();
+    fetchTmuxSessionCatalogMock.mockClear();
     sessionHarness.createSession.mockClear();
     await act(async () => {
       props.onOpenSavedConnection(relayHost);
@@ -1551,7 +1568,7 @@ describe('App dynamic refresh matrix', () => {
       await Promise.resolve();
     });
 
-    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+    expect(fetchTmuxSessionCatalogMock).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: '100.66.1.82',
         bridgePort: 3333,

@@ -740,10 +740,17 @@ export async function startScreenCaptureKitFrameSource(
       return;
     }
     const exitDetail = `code=${code ?? 'null'} signal=${signal ?? 'null'}`;
+    // The helper's ScreenCaptureKit failure text carries no target identity, so
+    // the requested window set and crop rect go into the daemon log here. Without
+    // them an SCStream start failure cannot be attributed to a stale catalog
+    // window id or to a TCC/permission problem.
+    const targetDetail = `windowId=${captureConfig.windowId ?? 'null'}`
+      + ` composite=[${(captureConfig.compositeWindows ?? []).map((window) => window.windowId).join(',')}]`
+      + ` rect=${captureConfig.cropRect.x},${captureConfig.cropRect.y},${captureConfig.cropRect.width},${captureConfig.cropRect.height}`;
     rejectPendingCaptureUpdates(new Error(`ScreenCaptureKit capture process exited ${exitDetail}`));
     const stderrDetail = truncateRemoteWindowErrorMessage(stderrBuffer);
     fail(new Error(
-      `ScreenCaptureKit capture process exited ${exitDetail}`
+      `ScreenCaptureKit capture process exited ${exitDetail} (${targetDetail})`
       + (stderrDetail ? `: ${stderrDetail}` : ''),
     ));
   }

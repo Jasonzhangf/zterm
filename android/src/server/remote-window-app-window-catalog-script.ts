@@ -62,6 +62,10 @@ var axAppCache: [Int32: AXUIElement] = [:]
 func axApp(for pid: Int32) -> AXUIElement? {
     if let cached = axAppCache[pid] { return cached }
     let app = AXUIElementCreateApplication(pid)
+    // 无响应的 app 会让 AX 查询一直阻塞到默认的约 6s 消息超时；几个这样的 app 就能把整份
+    // catalog 推过 daemon 的 15s 超时（实测 44.5s），使选择器里一个 app 窗口都没有。这里
+    // 按 app 快速失败，把总耗时压到 app 数量 × 0.2s 以内（实测 ~6s，留出负载余量）。
+    AXUIElementSetMessagingTimeout(app, 0.2)
     axAppCache[pid] = app
     return app
 }

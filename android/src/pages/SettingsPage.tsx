@@ -443,12 +443,6 @@ export function SettingsPage({
           </div>
         </div>
 
-        <div data-testid="settings-session-drawer-filter" style={settingsSectionStyle()}>
-          <SettingsSectionTitle>会话抽屉筛选</SettingsSectionTitle>
-          <div style={{ fontSize: '13px', lineHeight: 1.6, color: settingsTheme.muted }}>
-            Collab 角色由 daemon 只读投影决定。请在会话抽屉内切换筛选模式，并隐藏或恢复会话。
-          </div>
-        </div>
         </SettingsGroup>
 
         <SettingsGroup title="诊断与输入">

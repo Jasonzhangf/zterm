@@ -322,6 +322,46 @@ label:focus {
   --neo-accent: var(--zterm-neo-accent);
 }
 
+.zterm-neo-drawer .amb-button[data-amb-flat="true"] {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+.zterm-neo-drawer .amb-button[data-amb-flat="true"]:active {
+  transform: none;
+}
+
+.zterm-neo-drawer .amb-field {
+  box-shadow: none !important;
+  text-shadow: none !important;
+}
+
+.zterm-neo-drawer [data-testid="terminal-session-drawer-host-rail"]::-webkit-scrollbar {
+  display: none;
+}
+
+.zterm-neo-drawer .zterm-session-drawer-icon-button {
+  box-shadow: none !important;
+}
+
+.zterm-neo-drawer .zterm-session-drawer-icon-button:hover,
+.zterm-neo-drawer .zterm-session-drawer-icon-button:active {
+  background: var(--zterm-panel-surface) !important;
+}
+
+/*
+ * Android WebView keeps stale row text in the shared terminal layer when the
+ * drawer scrolls or changes filters. Promote the list, folder groups, and rows
+ * to their own compositor layers so every scroll/filter pass repaints cleanly.
+ */
+.zterm-neo-drawer [data-testid="terminal-session-drawer-list"],
+.zterm-neo-drawer div[data-testid^="terminal-session-drawer-folder-"],
+.zterm-neo-drawer div[data-testid^="terminal-session-drawer-row-"] {
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
 .zterm-connection-status-strip {
   color: var(--zterm-skeu-text) !important;
 }

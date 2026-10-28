@@ -100,4 +100,23 @@ describe('RemoteWindowVideoContent view owner', () => {
     rerender(<RemoteWindowVideoContent streamStarted={false} streamStatus="idle" {...common} />);
     expect(screen.getByText('等待视频流')).toBeTruthy();
   });
+
+  it('names the post-connect gap instead of reusing the idle text', () => {
+    const common = {
+      target,
+      receiverAttached: true,
+      overviewCropVisible: false,
+      videoHasPlayed: false,
+      focusedVideoStyle: null,
+      ...refs,
+      onVideoLifecycle: vi.fn(),
+    };
+    const { rerender } = render(<RemoteWindowVideoContent streamStarted streamStatus="awaiting-first-data" {...common} />);
+    expect(screen.getByTestId('remote-window-stage-status').textContent).toBe('已连接，正在传输数据');
+    rerender(<RemoteWindowVideoContent streamStarted streamStatus="awaiting-first-frame" {...common} />);
+    expect(screen.getByTestId('remote-window-stage-status').textContent).toBe('正在接收画面数据');
+    // The stage chip disappears once frames actually play.
+    rerender(<RemoteWindowVideoContent streamStarted streamStatus="streaming" {...common} videoHasPlayed />);
+    expect(screen.queryByTestId('remote-window-stage-status')).toBeNull();
+  });
 });

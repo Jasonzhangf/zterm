@@ -532,8 +532,7 @@
       "parent_module_id": "daemon.runtime",
       "owner_feature": "daemon.dagpipe_bridge",
       "responsibility": "Native DAGpipe load boundary and thin TS bridge for daemon-side graph execution gates.",
-      "owned_resources": [
-      ],
+      "owned_resources": [],
       "consumed_resources": [],
       "pending_resources": [],
       "public_interfaces": [
@@ -1325,7 +1324,9 @@
         "src/server/remote-window-app-window-catalog-script.ts",
         "src/server/remote-window-iterm2-catalog-script.ts",
         "src/server/remote-window-input-script.ts",
-        "src/server/remote-window-screen-capture-script.ts"
+        "src/server/remote-window-screen-capture-script.ts",
+        "src/server/macos-swift-script.ts",
+        "src/server/macos-swift-script.test.ts"
       ]
     },
     {
@@ -2420,6 +2421,7 @@
         "src/components/terminal/TerminalSessionDrawer.tsx",
         "src/components/terminal/TerminalSessionDrawerContent.tsx",
         "src/components/terminal/TerminalSessionDrawerFolderMenu.tsx",
+        "src/components/terminal/TerminalSessionDrawerIcons.tsx",
         "src/components/terminal/TerminalSessionDrawerNewSessionDialog.tsx",
         "src/components/terminal/TerminalSessionDrawerSlotMenu.tsx",
         "src/components/terminal/TerminalTabSwipeSurface.tsx",
@@ -2439,7 +2441,8 @@
       "responsibility": "Own Android remote-window picker/floating/fullscreen overlay projection, video receiver projection, touch/action classification, screenshot intent, bitrate UI, and IME/QuickBar avoidance.",
       "owned_resources": [
         "resource.remote_window_overlay",
-        "resource.remote_window_touch_action"
+        "resource.remote_window_touch_action",
+        "resource.remote_window_frame_projection"
       ],
       "consumed_resources": [
         "resource.ui_projection",
@@ -2449,8 +2452,7 @@
       "pending_resources": [
         "resource.remote_window_canvas_encode",
         "resource.remote_window_quality_control",
-        "resource.remote_window_input_delivery_client",
-        "resource.remote_window_frame_projection"
+        "resource.remote_window_input_delivery_client"
       ],
       "public_interfaces": [
         "src/components/terminal/RemoteWindowOverlay.tsx",

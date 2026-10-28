@@ -4,6 +4,7 @@ import type {
   RemoteWindowStreamStartRequestV2Payload,
   RemoteWindowStreamStatusPayload,
 } from '@zterm/shared/protocol';
+import { validateStreamTargetForCapture } from './remote-window-capture';
 import { makeRemoteWindowVideoProfileFixture } from './remote-window-video-profile-test-fixture';
 import { createRemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 
@@ -67,18 +68,26 @@ function makePeerConnection() {
  * implementation whose factory promise settles after real I/O, which the
  * previous `await Promise.resolve()` test could not exercise.
  */
-function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectSource?: boolean } = {}) {
+function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectSource?: boolean | 'zero-frame' | 'other'; rejectOverviewSource?: boolean; deferOverviewSource?: boolean } = {}) {
   const peerConnection = makePeerConnection();
   const statuses: RemoteWindowStreamStatusPayload[] = [];
   const frameConsumer = vi.fn();
   let onFrame: ((frame: { width: number; height: number; rgba: Uint8Array; capturedAtMs?: number }) => void) | null = null;
   let releaseFactory: () => void = () => undefined;
+  let releaseOverviewFactory: () => void = () => undefined;
   let resolveEmitted: () => void = () => undefined;
+  let factoryCalls = 0;
   const factoryEmitted = new Promise<void>((resolve) => {
     resolveEmitted = resolve;
   });
   const factoryGate = new Promise<void>((resolve) => {
     releaseFactory = resolve;
+  });
+  // The overview lane starts a second capture after the focus lane. This gate
+  // holds that second factory call pending so tests can observe the window
+  // between the two capture-ready transitions.
+  const overviewFactoryGate = new Promise<void>((resolve) => {
+    releaseOverviewFactory = resolve;
   });
   const captureSource = {
     captureEpoch: 0,
@@ -108,6 +117,7 @@ function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectS
     }),
     rgbaToI420: vi.fn(),
     captureSourceFactory: vi.fn(async (_target, options) => {
+      factoryCalls += 1;
       onFrame = options.onFrame;
       // A legal capture implementation emits its first frame before this
       // factory promise resolves.
@@ -120,9 +130,21 @@ function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectS
       resolveEmitted();
       // Hold the factory pending across a real event-loop turn so the daemon
       // cannot rely on microtask ordering for capture-source assignment.
+      if (factoryCalls > 1 && input.deferOverviewSource) {
+        await overviewFactoryGate;
+      }
       await factoryGate;
       if (input.rejectSource) {
-        throw new Error('remote window capture source failed to start');
+        // 'zero-frame' reproduces the live Air case: the child started its
+        // SCStream and then delivered no frame within the startup timeout.
+        throw new Error(input.rejectSource === 'zero-frame'
+          ? 'ScreenCaptureKit capture did not produce a frame before timeout after 20000ms while the SCStream was running'
+          : input.rejectSource === 'other'
+            ? 'ScreenCaptureKit capture failed to start: Unable to find window'
+            : 'remote window capture source failed to start');
+      }
+      if (input.rejectOverviewSource && factoryCalls > 1) {
+        throw new Error('remote window overview capture did not produce a frame before timeout after 20000ms');
       }
       return captureSource;
     }),
@@ -133,7 +155,7 @@ function makeDeferredCaptureRuntime(input: { frameCapturedAtMs?: number; rejectS
     )),
     runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
   });
-  return { runtime, statuses, frameConsumer, captureSource, releaseFactory, factoryEmitted, getOnFrame: () => onFrame };
+  return { runtime, statuses, frameConsumer, captureSource, releaseFactory, releaseOverviewFactory, factoryEmitted, getOnFrame: () => onFrame };
 }
 
 describe('remote window stream daemon v2 contract', () => {
@@ -328,6 +350,63 @@ describe('remote window stream daemon v2 contract', () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     expect(harness.frameConsumer).not.toHaveBeenCalled();
     expect(harness.statuses.filter((status) => status.phase === 'streaming')).toHaveLength(0);
+    await harness.runtime.dispose();
+  });
+
+  it('names the focus zero-frame startup timeout apart from a failure to reach capture', async () => {
+    // Live evidence from the Air: the child printed
+    // "capture started (SCStream)" and then produced no frame. Reporting that
+    // as focus-capture-start hides the fact that the stream itself came up.
+    const harness = makeDeferredCaptureRuntime({ rejectSource: 'zero-frame' });
+    const payload = start('capture-zero-frame');
+    const started = harness.runtime.startStream(payload, {
+      sendStatus: (status) => {
+        harness.statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    await harness.factoryEmitted;
+    harness.releaseFactory();
+    const startedResult = await started;
+    expect(startedResult).toMatchObject({
+      streamId: payload.streamId,
+      code: 'remote_window_stream_start_failed',
+      failureStage: 'focus-capture-first-frame',
+    });
+    await harness.runtime.dispose();
+  });
+
+  it('keeps a non-zero-frame capture rejection on the capture-start stage', async () => {
+    const harness = makeDeferredCaptureRuntime({ rejectSource: 'other' });
+    const payload = start('capture-other-failure');
+    const started = harness.runtime.startStream(payload, {
+      sendStatus: (status) => {
+        harness.statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    await harness.factoryEmitted;
+    harness.releaseFactory();
+    const startedResult = await started;
+    expect(startedResult).toMatchObject({
+      streamId: payload.streamId,
+      code: 'remote_window_stream_start_failed',
+      failureStage: 'focus-capture-start',
+    });
     await harness.runtime.dispose();
   });
 
@@ -822,5 +901,656 @@ describe('remote window stream daemon v2 contract', () => {
       error: expect.objectContaining({ code: 'remote_window_stream_quality_unsupported' }),
     }));
     await runtime.dispose();
+  });
+
+  it('applies a composite quality request while the overview lane capture source is unassigned', async () => {
+    // Regression for: a composite (overview-plus-focus) stream starts its
+    // overview capture after the focus lane. Applying the group there used to
+    // reject the whole request as `quality_unsupported`, so the focus capture
+    // profile never followed the requested budget — observed on device as a
+    // zoomed pinch that requested a larger capture ceiling while the capture
+    // stayed at the base size.
+    const harness = makeDeferredCaptureRuntime({ deferOverviewSource: true });
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('quality-overview-race'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'window-2',
+          title: 'Example 2',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      },
+    };
+    let qualityResult: Promise<unknown> | null = null;
+    const started = harness.runtime.startStream(payload, {
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+        qualityResult = harness.runtime.updateStreamQuality!({
+          requestId: 'rw-quality-overview-race',
+          streamId: payload.streamId,
+          streamGroupId: payload.streamId,
+          mediaPlan: 'overview-plus-focus',
+          mediaPlanVersion: 2,
+          revision: 1,
+          targetId: payload.target.streamTargetId,
+          videoProfile: profile(),
+        });
+      },
+    });
+    const flush = async (turns = 8) => {
+      for (let turn = 0; turn < turns; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    };
+    // Let the handshake reach sendOffer, where the client fires its quality
+    // request; the focus capture factory is still gated at this point.
+    await flush();
+    expect(qualityResult).not.toBeNull();
+    // The focus lane becomes ready first; the overview lane capture is still
+    // pending. The request must still apply, because the overview lane has no
+    // capture source to profile yet and must not block the focus lane.
+    harness.releaseFactory();
+    await flush();
+    await expect(qualityResult!).resolves.toEqual(expect.objectContaining({
+      status: 'applied',
+      streamId: payload.streamId,
+      revision: 1,
+    }));
+    harness.releaseOverviewFactory();
+    await started;
+    await harness.runtime.dispose();
+  });
+
+  it('keeps the focus lane streaming when the overview lane capture cannot start', async () => {
+    // Regression for: a composite (multi-window) target whose overview capture never
+    // produced a frame failed the whole start with `remote_window_stream_start_failed`
+    // at `overview-capture-start`. On device the client then retried the same request
+    // (9 × 20s timeout observed), so a multi-window app group never became usable even
+    // though the focus lane and its input path were fine.
+    const harness = makeDeferredCaptureRuntime({ rejectOverviewSource: true });
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('overview-lane-unavailable'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'window-2',
+          title: 'Example 2',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      },
+    };
+    const started = harness.runtime.startStream(payload, {
+      sendStatus: (status) => {
+        harness.statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    harness.releaseFactory();
+    await expect(started).resolves.toMatchObject({
+      streamId: payload.streamId,
+      mediaPlanVersion: 2,
+    });
+    expect(harness.statuses.some((status) => (
+      status.lane === 'overview' && /overview lane unavailable/u.test(status.message ?? '')
+    ))).toBe(true);
+    expect(harness.captureSource.stop).not.toHaveBeenCalled();
+    await harness.runtime.dispose();
+  });
+
+  it('keeps the focus lane streaming when a composite overview window is outside the display', async () => {
+    const peerConnection = makePeerConnection();
+    const statuses: RemoteWindowStreamStatusPayload[] = [];
+    const captureTargets: RemoteWindowStreamStartRequestV2Payload['target'][] = [];
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track', stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async (nextTarget, options) => {
+        captureTargets.push(nextTarget);
+        validateStreamTargetForCapture(nextTarget);
+        options.onFrame({
+          width: 800,
+          height: 600,
+          rgba: new Uint8Array(800 * 600 * 4),
+          capturedAtMs: 1_000_000,
+        });
+        return captureSource;
+      }),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('overview-out-of-display'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        videoTarget: {
+          ...target().videoTarget,
+          windowBoundsTopLeftPx: { x: 1390, y: 30, width: 2450, height: 2046 },
+          cropRectTopLeftPx: { x: 1390, y: 30, width: 2450, height: 2046 },
+        },
+        capture: {
+          source: 'ScreenCaptureKit',
+          coordinateSpace: 'macos-top-left-px',
+          scale: 1,
+          displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
+          createdAt: '2026-10-28T00:00:00.000Z',
+        },
+        compositeWindows: [{
+          windowId: 'composite-offscreen',
+          title: 'Computer Use Controls',
+          windowBoundsTopLeftPx: { x: 3518, y: 418, width: 360, height: 352 },
+          cropRectTopLeftPx: { x: 3518, y: 418, width: 360, height: 352 },
+        }],
+      },
+    };
+
+    const started = runtime.startStream(payload, {
+      sendStatus: (status) => {
+        statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+
+    await expect(started).resolves.toMatchObject({
+      streamId: payload.streamId,
+      mediaPlanVersion: 2,
+    });
+    expect(captureTargets).toHaveLength(2);
+    expect(captureTargets[0].compositeWindows).toBeUndefined();
+    expect(captureTargets[1].compositeWindows).toHaveLength(1);
+    expect(statuses.some((status) => (
+      status.lane === 'overview'
+      && /overview lane unavailable: remote window target frame is outside display/u.test(status.message ?? '')
+    ))).toBe(true);
+    expect(captureSource.stop).not.toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it('keeps the focus lane streaming when the overview capture fails after it started', async () => {
+    // The overview lane is optional at every point of its life, not only at
+    // start. A capture error after the first frame used to call the whole-group
+    // stop owner, which closed a healthy focus picture and its input path.
+    const peerConnection = makePeerConnection();
+    const statuses: RemoteWindowStreamStatusPayload[] = [];
+    const laneFrames: Array<(frame: {
+      width: number;
+      height: number;
+      rgba: Uint8Array;
+      capturedAtMs?: number;
+    }) => void> = [];
+    const laneErrors: Array<(error: Error) => void> = [];
+    const videoSourceOnFrame = vi.fn();
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: `video-track-${laneFrames.length}`, stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: videoSourceOnFrame,
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async (_nextTarget, options) => {
+        laneFrames.push(options.onFrame);
+        laneErrors.push(options.onError);
+        return captureSource;
+      }),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const flush = async (turns = 6) => {
+      for (let turn = 0; turn < turns; turn += 1) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      }
+    };
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('overview-error-after-start'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'composite-live',
+          title: 'Computer Use Controls',
+          windowBoundsTopLeftPx: { x: 100, y: 100, width: 360, height: 352 },
+          cropRectTopLeftPx: { x: 100, y: 100, width: 360, height: 352 },
+        }],
+      },
+    };
+    const started = runtime.startStream(payload, {
+      sendStatus: (status) => {
+        statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    await expect(started).resolves.toMatchObject({
+      streamId: payload.streamId,
+      mediaPlanVersion: 2,
+    });
+    expect(laneErrors).toHaveLength(2);
+
+    // Both lanes are live; now the optional overview capture reports a runtime
+    // failure. Only that lane may be released.
+    laneErrors[1](new Error('overview SCStream stopped unexpectedly'));
+    await flush();
+
+    expect(captureSource.stop).toHaveBeenCalledTimes(1);
+    expect(statuses.some((status) => (
+      status.lane === 'overview'
+      && /overview lane unavailable: overview SCStream stopped unexpectedly/u.test(status.message ?? '')
+    ))).toBe(true);
+
+    // The focus lane still dispatches frames to its own video source.
+    const framesBefore = videoSourceOnFrame.mock.calls.length;
+    laneFrames[0]({
+      width: 800,
+      height: 600,
+      rgba: new Uint8Array(800 * 600 * 4),
+      capturedAtMs: 1_000_000,
+    });
+    await flush();
+    expect(videoSourceOnFrame.mock.calls.length).toBeGreaterThan(framesBefore);
+
+    // And the stream is still alive for a quality transaction.
+    await expect(runtime.updateStreamQuality!({
+      requestId: 'rw-quality-after-overview-error',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: profile(),
+    })).resolves.toMatchObject({ status: 'applied', streamId: payload.streamId });
+    await runtime.dispose();
+  });
+
+  it('acks the encoder bitrate actually in force when sender parameters are rejected', async () => {
+    // The pinned wrtc build rejects negotiated encoding updates. The capture
+    // profile still changes, but the ACK must report the previous encoder
+    // bitrate and the degraded lane instead of projecting the requested one.
+    const peerConnection = {
+      localDescription: null as RTCSessionDescriptionInit | null,
+      connectionState: 'connected' as RTCPeerConnectionState,
+      iceConnectionState: 'connected' as RTCIceConnectionState,
+      close: vi.fn(),
+      addTrack: vi.fn(() => ({
+        getParameters: () => ({ encodings: [{ maxBitrate: 1_000_000, maxFramerate: 30 }] }),
+        setParameters: vi.fn(async () => {
+          throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+        }),
+      })),
+      createOffer: vi.fn(async () => ({ type: 'offer' as const, sdp: 'offer-sdp' })),
+      setLocalDescription: vi.fn(async (description: RTCSessionDescriptionInit) => {
+        peerConnection.localDescription = description;
+      }),
+      setRemoteDescription: vi.fn(async () => undefined),
+      addIceCandidate: vi.fn(async () => undefined),
+    };
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track', stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async () => captureSource),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const payload = start('degraded-quality-ack');
+    await startRuntimeStream(runtime, payload);
+
+    await expect(runtime.updateStreamQuality!({
+      requestId: 'rw-quality-degraded',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: { ...profile(), maxCaptureWidth: 1200, maxCaptureHeight: 750, maxFrameRateFps: 24 },
+    })).resolves.toMatchObject({
+      status: 'applied',
+      appliedVideoProfile: { maxBitrateBps: 1_000_000 },
+      appliedGroupBudget: { totalMaxBitrateBps: 1_000_000, focus: { maxBitrateBps: 1_000_000 } },
+      senderParametersDegraded: [{ lane: 'focus', reason: 'InvalidStateError' }],
+    });
+    expect(captureSource.updateVideoProfile).toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it('reports an unknown previous bitrate as degraded instead of the requested cap', async () => {
+    // A rejected setParameters() with no prior maxBitrate means the encoder
+    // runs unbounded (0). The ACK must carry a 0 bitrate, never the requested
+    // 6 Mbps.
+    const peerConnection = {
+      localDescription: null as RTCSessionDescriptionInit | null,
+      connectionState: 'connected' as RTCPeerConnectionState,
+      iceConnectionState: 'connected' as RTCIceConnectionState,
+      close: vi.fn(),
+      addTrack: vi.fn(() => ({
+        getParameters: () => ({ encodings: [{ rid: 'f' }] }),
+        setParameters: vi.fn(async () => {
+          throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+        }),
+      })),
+      createOffer: vi.fn(async () => ({ type: 'offer' as const, sdp: 'offer-sdp' })),
+      setLocalDescription: vi.fn(async (description: RTCSessionDescriptionInit) => {
+        peerConnection.localDescription = description;
+      }),
+      setRemoteDescription: vi.fn(async () => undefined),
+      addIceCandidate: vi.fn(async () => undefined),
+    };
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track', stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async () => captureSource),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const payload = start('unknown-bitrate-ack');
+    await startRuntimeStream(runtime, payload);
+
+    const result = await runtime.updateStreamQuality!({
+      requestId: 'rw-quality-unknown-bitrate',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'single-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: { ...profile(), maxCaptureWidth: 1200, maxCaptureHeight: 750, maxFrameRateFps: 24 },
+    });
+    expect(result).toMatchObject({
+      status: 'degraded-unknown-bitrate',
+      appliedVideoProfile: { maxBitrateBps: 0 },
+      appliedGroupBudget: { totalMaxBitrateBps: 0, focus: { maxBitrateBps: 0 } },
+      senderParametersDegraded: [{ lane: 'focus', reason: 'InvalidStateError' }],
+    });
+    expect(result).not.toMatchObject({ appliedVideoProfile: { maxBitrateBps: 6_000_000 } });
+    expect(captureSource.updateVideoProfile).toHaveBeenCalled();
+    await runtime.dispose();
+  });
+
+  it('projects the applied group total into the acknowledged profile for a composite request', async () => {
+    // Regression for: the ACK used the focus share as
+    // RemoteWindowVideoProfile.maxBitrateBps, but that field is the group total
+    // (resolveRemoteWindowStreamGroupBudget subtracts the overview allocation
+    // from it). The client stores appliedVideoProfile as the acknowledged
+    // profile, so a 6 Mbps group with a 250 kbps overview was reported as
+    // 5.75 Mbps and disagreed with appliedGroupBudget.
+    const harness = makeDeferredCaptureRuntime();
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('quality-group-total'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'window-2',
+          title: 'Example 2',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      },
+    };
+    const started = harness.runtime.startStream(payload, {
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    harness.releaseFactory();
+    await started;
+    const result = await harness.runtime.updateStreamQuality!({
+      requestId: 'rw-quality-group-total',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: profile(),
+    });
+    expect(result).toMatchObject({
+      status: 'applied',
+      appliedVideoProfile: { maxBitrateBps: 6_000_000, overviewMaxBitrateBps: 250_000 },
+      appliedGroupBudget: {
+        totalMaxBitrateBps: 6_000_000,
+        focus: { maxBitrateBps: 5_750_000 },
+        overview: { maxBitrateBps: 250_000 },
+      },
+    });
+    const applied = result as {
+      appliedVideoProfile?: { maxBitrateBps: number };
+      appliedGroupBudget?: { totalMaxBitrateBps: number };
+    };
+    expect(applied.appliedVideoProfile?.maxBitrateBps)
+      .toBe(applied.appliedGroupBudget?.totalMaxBitrateBps);
+    await harness.runtime.dispose();
+  });
+
+  it('keeps the applied profile equal to the applied group total when both composite senders reject updates', async () => {
+    // The group total is recomputed from the bitrates actually in force. With
+    // both lanes rejected, the two previous 1 Mbps encodings stay live, so the
+    // acknowledged profile and appliedGroupBudget must both say 2 Mbps.
+    const peerConnection = {
+      localDescription: null as RTCSessionDescriptionInit | null,
+      connectionState: 'connected' as RTCPeerConnectionState,
+      iceConnectionState: 'connected' as RTCIceConnectionState,
+      close: vi.fn(),
+      addTrack: vi.fn(() => ({
+        getParameters: () => ({ encodings: [{ maxBitrate: 1_000_000, maxFramerate: 30 }] }),
+        setParameters: vi.fn(async () => {
+          throw Object.assign(new Error(''), { name: 'InvalidStateError' });
+        }),
+      })),
+      createOffer: vi.fn(async () => ({ type: 'offer' as const, sdp: 'offer-sdp' })),
+      setLocalDescription: vi.fn(async (description: RTCSessionDescriptionInit) => {
+        peerConnection.localDescription = description;
+      }),
+      setRemoteDescription: vi.fn(async () => undefined),
+      addIceCandidate: vi.fn(async () => undefined),
+    };
+    const captureSource = {
+      captureEpoch: 0,
+      width: 800,
+      height: 600,
+      frameRate: 30,
+      maxCaptureWidth: 1440,
+      maxCaptureHeight: 900,
+      updateTarget: vi.fn(async () => undefined),
+      updateVideoProfile: vi.fn(async () => undefined),
+      stop: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      arch: 'arm64',
+      captureBinary: '/tmp/zterm-daemon',
+      nowMs: () => 1_000_000,
+      peerConnectionFactory: () => peerConnection as unknown as RTCPeerConnection,
+      rtcSessionDescriptionFactory: (description) => description as RTCSessionDescription,
+      rtcIceCandidateFactory: (candidate) => candidate as RTCIceCandidate,
+      videoSourceFactory: () => ({
+        createTrack: () => ({ id: 'video-track', stop: vi.fn() }) as unknown as MediaStreamTrack,
+        onFrame: vi.fn(),
+      }),
+      rgbaToI420: vi.fn(),
+      captureSourceFactory: vi.fn(async () => captureSource),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+    const payload: RemoteWindowStreamStartRequestV2Payload = {
+      ...start('degraded-group-total'),
+      mediaPlan: 'overview-plus-focus',
+      target: {
+        ...target(),
+        compositeWindows: [{
+          windowId: 'window-2',
+          title: 'Example 2',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        }],
+      },
+    };
+    await startRuntimeStream(runtime, payload);
+    const result = await runtime.updateStreamQuality!({
+      requestId: 'rw-quality-degraded-group-total',
+      streamId: payload.streamId,
+      streamGroupId: payload.streamId,
+      mediaPlan: 'overview-plus-focus',
+      mediaPlanVersion: 2,
+      revision: 1,
+      targetId: payload.target.streamTargetId,
+      videoProfile: profile(),
+    });
+    expect(result).toMatchObject({
+      status: 'applied',
+      appliedVideoProfile: { maxBitrateBps: 2_000_000, overviewMaxBitrateBps: 1_000_000 },
+      appliedGroupBudget: {
+        totalMaxBitrateBps: 2_000_000,
+        focus: { maxBitrateBps: 1_000_000 },
+        overview: { maxBitrateBps: 1_000_000 },
+      },
+      senderParametersDegraded: [
+        { lane: 'focus', reason: 'InvalidStateError' },
+        { lane: 'overview', reason: 'InvalidStateError' },
+      ],
+    });
+    await runtime.dispose();
+  });
+
+  it('reports the transport chroma capability so clarity tiers cannot offer 4:4:4', async () => {
+    // The video path is capture(BGRA) -> I420 -> VP8, and VP8 has no 4:4:4 profile.
+    // The capability must say so, because a 4:4:4 clarity tier would be a lie the
+    // encoder cannot honour (measured 4:2:0 text loss: 73-80% of saturated pixels
+    // move by more than 16 levels).
+    const harness = makeDeferredCaptureRuntime();
+    const payload = start('chroma-capability');
+    const started = harness.runtime.startStream(payload, {
+      sendStatus: (status) => {
+        harness.statuses.push(status);
+      },
+      sendOffer: (offer) => {
+        void harness.runtime.acceptAnswer!({
+          requestId: offer.requestId,
+          streamId: offer.streamId,
+          mediaPlanVersion: 2,
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+        });
+      },
+    });
+    harness.releaseFactory();
+    await started;
+    const capability = harness.statuses.find((status) => status.stage === 'capability-verified')?.capability;
+    expect(capability?.chromaFormats).toEqual(['420']);
+    await harness.runtime.dispose();
   });
 });

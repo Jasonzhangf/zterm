@@ -146,10 +146,43 @@ func captureScreen(to outputPath: String, windowId: String? = nil, rect: Capture
 
 @main
 struct ZtermDaemonEntry {
+  /// One bounded wait for a Screen Recording grant that macOS applies after the
+  /// dialog closes. Bounded so `install-service` can never hang on a user who
+  /// walks away from the dialog, and never polls without an end.
+  static let permissionGrantDeadlineSeconds: TimeInterval = 120
+
+  static func permissionGrantDeadline() -> Date {
+    Date().addingTimeInterval(permissionGrantDeadlineSeconds)
+  }
+
+  /// Install-time permission step. It must REQUEST the grant, not only ask
+  /// whether one already exists: without the request macOS never shows its
+  /// dialog, the Privacy list gets no zterm entry, and the user is left to find
+  /// the panel and pick the binary by hand.
+  static func requestScreenCapturePermission() -> Bool {
+    if hasScreenCapturePermission() {
+      return true
+    }
+    // The install step must say what it is waiting for: silence here made a
+    // missing grant look like a hang, and nothing said that macOS owns the dialog.
+    FileHandle.standardError.write(Data(
+      "Screen Recording permission is not granted; requesting it now. Answer the macOS dialog for zterm-daemon.\n".utf8
+    ))
+    CGRequestScreenCaptureAccess()
+    let deadline = permissionGrantDeadline()
+    while Date() < deadline {
+      if hasScreenCapturePermission() {
+        return true
+      }
+      Thread.sleep(forTimeInterval: 0.25)
+    }
+    return hasScreenCapturePermission()
+  }
+
   static func main() {
     let args = CommandLine.arguments
     if args.dropFirst().first == "--permission-probe" {
-      guard hasScreenCapturePermission() else {
+      guard requestScreenCapturePermission() else {
         fail("Screen Recording permission is required; grant zterm-daemon in macOS Privacy settings", code: 5)
       }
       exit(0)

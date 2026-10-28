@@ -805,7 +805,7 @@ export function createDaemonSessionCatalogRuntime(
     const priorProjection = new Map<string, TerminalSessionCollabProjection>();
     for (const entry of current) {
       if (entry.collab) {
-        priorProjection.set(entry.name, entry.collab);
+        priorProjection.set(nativeTmuxKey(entry), entry.collab);
       }
     }
     const nextEntries = await sampleCollabProjection(current);
@@ -817,7 +817,7 @@ export function createDaemonSessionCatalogRuntime(
     const nextProjection = new Map<string, TerminalSessionCollabProjection>();
     for (const entry of nextEntries) {
       if (entry.collab) {
-        nextProjection.set(entry.name, entry.collab);
+        nextProjection.set(nativeTmuxKey(entry), entry.collab);
       }
     }
     if (projectionsEqual(priorProjection, nextProjection)) {

@@ -2672,12 +2672,15 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Reusable rule: permission preflight, runtime capability, and installed service entry must resolve to one installed executable identity. Never introduce a helper app or environment-variable alternate path; missing permission/capability must stop with a typed error.
 Tags: #daemon-permission #screen-recording #single-tcc-identity #no-fallback #emulator-large-refresh
 
-## 2026-08-24 Screen Recording preflight is read-only
+## 2026-10-16 Screen Recording grant belongs to the install step
 
-- This entry supersedes the same-day statement that the probe may call `CGRequestScreenCaptureAccess()` and poll. The installed `zterm-daemon` permission check may call `CGPreflightScreenCaptureAccess()` once only. It must never request, wait, poll, retry, reset TCC, or switch executables.
-- Missing Screen Recording permission is an allowed explicit failure: `--permission-probe` and `remote-window-capture` exit 5 before capture allocation. Permission must be granted explicitly in macOS System Settings; the daemon does not initiate the grant flow.
-- Verified installed binary SHA-256 `25dbfb2a6ce4ad8b51916f3daaed1a4f72ff11155a031b339ab349ee12c21829` imports `_CGPreflightScreenCaptureAccess` and has no `_CGRequestScreenCaptureAccess`; probe completes in 459 ms with the currently granted permission. Emulator `0.1.3.2719` 100000-line refresh retained 47 continuous rows in all 100 samples with zero empty/gap/discontinuity samples.
-Tags: #daemon-permission #preflight-only #no-request #no-poll #no-fallback
+- This entry supersedes the 2026-08-24 read-only entry. The permission decision changed by explicit user instruction: the grant must be requested by the install flow, never left to the user to add manually.
+- The install-time `--permission-probe` now REQUESTS the grant. It calls `CGPreflightScreenCaptureAccess()` once, calls `CGRequestScreenCaptureAccess()` exactly once when permission is missing, then waits under one bounded deadline (`permissionGrantDeadlineSeconds`, 120 s) and re-checks that one value. Exit 0 on grant, 5 when the deadline passes.
+- The runtime `remote-window-capture` child stays preflight-only and exits 5 before capture allocation. It must never request, wait, or poll: the grant decision belongs to the install step and a running stream must never block on a dialog.
+- Live root cause on the Air, 2026-10-15: only preflighting meant macOS never prompted, the Privacy list had no zterm entry, and the capture child passed its preflight but delivered zero frames. `Screen Recording permission` appeared zero times in the daemon log and `exited code=5` zero times, because the child never exited during the 20 s startup timeout. A started-but-zero-frame start is now named explicitly by `buildScreenCaptureKitStartupTimeoutMessage`.
+- Neither path may reset TCC state or change the TCC executable identity. The 2026-08-24 SHA-256 and no-fallback observations for the old binary remain historical facts about that build, not the current contract.
+- Decision truth: `android/docs/decisions/2026-07-19-remote-window-stream-truth.md` "Explicit Errors" and `android/docs/testing/remote-window-stream-test-design.md` daemon stream owner; gate `android/src/server/remote-screenshot-daemon-blackbox.test.ts` requests at install time while the capture child stays preflight-only.
+Tags: #daemon-permission #screen-recording #install-time-request #preflight-only-runtime #no-fallback
 
 ## 2026-08-24 remote-window capture/quality explicit failure
 

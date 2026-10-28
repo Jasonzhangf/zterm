@@ -188,6 +188,9 @@ import {
   type TraversalRelayDeviceSnapshot,
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
+import type { TraversalDiagnostics } from '../lib/traversal/types';
+import { resolveRemoteWindowRouteLabel } from '../components/terminal/remote-window-overlay-helpers';
+import type { RemoteWindowRouteLatencyFacts } from '../components/terminal/remote-window-overlay-helpers';
 import type {
   RemoteWindowControlMessage,
   RemoteWindowInputDeliveryOutcomeV1,
@@ -455,6 +458,7 @@ interface TerminalPageProps {
   sessionGroups?: SessionGroupHistory[];
   activeSession: Session | null;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
+  getSessionTraversalDiagnostics?: (sessionId: string) => TraversalDiagnostics | null;
   sessionBufferStore?: SessionRenderBufferStore | null;
   inputResetEpochBySession?: Record<string, number>;
   followResetEpoch?: number;
@@ -582,6 +586,7 @@ function TerminalPageComponent({
   sessionGroups = [],
   activeSession,
   getSessionDebugMetrics,
+  getSessionTraversalDiagnostics,
   sessionBufferStore = null,
   inputResetEpochBySession,
   followResetEpoch = 0,
@@ -1424,12 +1429,25 @@ function TerminalPageComponent({
           .filter((session) => session.name.trim() && session.cwd?.trim())
           .map((session) => [session.name.trim(), session.cwd!.trim()] as const),
       ].filter(([name]) => sessionNames.includes(name)));
-      const sessionCollabByName = Object.fromEntries([
+      const mergedCollabByName = Object.fromEntries([
         ...Object.entries(existingGroup?.sessionCollabByName || {}),
         ...catalogSessions
           .filter((session) => session.name.trim() && session.collab?.role && session.collab?.displayName)
           .map((session) => [session.name.trim(), session.collab!] as const),
-      ].filter(([name]) => sessionNames.includes(name)));
+      ]);
+      // A live catalog row that exists without a collab projection is
+      // authoritative. Clear any stored historical role so a deregistered,
+      // ambiguous, or failed-resample session stays unclassified instead of
+      // resurrecting an obsolete master/worker from history.
+      for (const name of sessionNames) {
+        const liveSession = catalogSessions.find((session) => session.name.trim() === name);
+        if (liveSession && !(liveSession.collab?.role && liveSession.collab?.displayName)) {
+          delete mergedCollabByName[name];
+        }
+      }
+      const sessionCollabByName = Object.fromEntries(
+        Object.entries(mergedCollabByName).filter(([name]) => sessionNames.includes(name)),
+      );
       const lastOpenedSessionName = existingGroup?.lastOpenedSessionName?.trim();
       return [{
         id: `daemon:${daemonHostId}`,
@@ -2609,6 +2627,18 @@ function TerminalPageComponent({
   }, [clearTerminalFocusRetries, isAndroid, setAndroidEditorActive]);
 
   const uiSessionMetrics = uiSession ? getSessionDebugMetrics?.(uiSession.id) || null : null;
+  // A-2: the route label and the network round trip come from the traversal
+  // owner. When the transport is not resolved yet the value stays null, so the
+  // status line keeps its stage wording instead of inventing numbers. Frame
+  // latency is not measured on this path yet and stays null on purpose.
+  const uiSessionTraversal = uiSession ? getSessionTraversalDiagnostics?.(uiSession.id) || null : null;
+  const uiSessionRouteLatencyFacts: RemoteWindowRouteLatencyFacts | null = uiSessionTraversal
+    ? {
+        routeLabel: resolveRemoteWindowRouteLabel(uiSessionTraversal.resolvedPath),
+        networkRttMs: uiSessionTraversal.selectedIcePair?.roundTripTimeMs ?? null,
+        frameLatencyMs: null,
+      }
+    : null;
   const uiSessionEffectiveStatus = uiSession
     ? resolveEffectiveConnectionStatus(uiSession, uiSessionMetrics)
     : null;
@@ -4137,6 +4167,7 @@ function TerminalPageComponent({
               activeSessionId: uiSessionId,
               appForegroundActive,
               streamInvalidation: remoteWindowStreamInvalidation,
+              routeLatencyFacts: uiSessionRouteLatencyFacts,
               requestTargets: onRequestRemoteWindowTargets,
               startStream: onRequestRemoteWindowStreamStart,
               updateStreamQuality: onUpdateRemoteWindowStreamQuality,

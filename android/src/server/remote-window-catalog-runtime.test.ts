@@ -676,4 +676,34 @@ describe('remote window catalog runtime owner', () => {
       injectedAtMs: 0,
     })).resolves.toMatchObject({ status: 'failed' });
   });
+
+  it('projects app windows from the daemon snapshot without a second enumeration', async () => {
+    // Regression for: the composite auto-add/remove poll called a live
+    // app-window enumeration every 3s. Each live call compiles and runs an
+    // inline Swift script (about 1s), which starved the capture read path of a
+    // composite stream. The poll must read the daemon-owned snapshot.
+    const runMacosAppWindowCatalog = vi.fn(async () => JSON.stringify({
+      windows: [{
+        windowId: 'window-1',
+        ownerName: 'Terminal',
+        appBundleId: 'com.apple.Terminal',
+        pid: 42,
+        title: 'solo',
+        frame: { x: 0, y: 0, width: 800, height: 600 },
+        displayBoundsTopLeftPx: { x: 0, y: 0, width: 1920, height: 1080 },
+      }],
+    }));
+    const runIterm2Python = vi.fn(async () => JSON.stringify({ windows: [] }));
+    const runtime = createRuntime('darwin', { runIterm2Python, runMacosAppWindowCatalog });
+
+    runtime.warm();
+    await vi.waitFor(() => {
+      expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(1);
+    });
+
+    const targets = await runtime.listAppWindowTargets();
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(1);
+    expect(targets.map((target) => target.videoTarget.windowId)).toEqual(['window-1']);
+    runtime.dispose();
+  });
 });

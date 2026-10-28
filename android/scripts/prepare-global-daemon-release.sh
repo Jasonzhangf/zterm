@@ -782,13 +782,16 @@ try {
   }
   execFileSync(process.env.ZTERM_DAEMON_NATIVE, ['--permission-probe'], {
     stdio: 'pipe',
-    timeout: 20000,
+    timeout: 180000,
   });
 } catch (error) {
   const stderr = error && error.stderr ? String(error.stderr) : '';
   const message = error && error.message ? String(error.message) : String(error);
-  console.error('ScreenCaptureKit permission preflight failed.');
-  console.error('Open macOS System Settings -> Privacy & Security -> Screen Recording, allow zterm-daemon, then rerun zterm-daemon install-service.');
+  const timedOut = /ETIMEDOUT|timed out/u.test(message);
+  console.error(timedOut
+    ? 'ScreenCaptureKit permission was not granted before the 180s deadline.'
+    : 'ScreenCaptureKit permission preflight failed.');
+  console.error('Grant Screen Recording to ' + process.env.ZTERM_DAEMON_NATIVE + ' in System Settings -> Privacy & Security -> Screen & System Audio Recording by clicking + and adding that exact file. macOS 26 refused to show a grant dialog for this binary, so the add button is the supported path.');
   if (stderr.trim()) console.error(stderr.trim());
   if (message.trim()) console.error(message.trim());
   process.exit(1);

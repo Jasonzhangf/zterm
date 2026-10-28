@@ -6,6 +6,7 @@ import type {
   RemoteWindowStreamTargetManifest,
 } from '@zterm/shared/protocol';
 import { MACOS_REMOTE_WINDOW_INPUT_SWIFT } from './remote-window-scripts';
+import { resolveCachedSwiftScript } from './macos-swift-script';
 import { REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS } from './remote-window-support';
 
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
@@ -763,10 +764,14 @@ export function createDefaultRemoteWindowInputHelper(options: {
     const createProcess = options.processFactory || ((command, args, spawnOptions) => (
       spawn(command, args, spawnOptions) as RemoteWindowInputHelperChildProcess
     ));
-    const currentChild = createProcess(options.swiftBinary, ['-swift-version', '5', '-e', MACOS_REMOTE_WINDOW_INPUT_SWIFT], {
-      windowsHide: true,
-      env: process.env,
-    });
+    // The helper is the daemon's persistent input process; starting it through
+    // the compiler costs seconds and starves the app window catalog refresh.
+    // The daemon compiles this source once before the helper is warmed.
+    const cached = resolveCachedSwiftScript(MACOS_REMOTE_WINDOW_INPUT_SWIFT, '5');
+    const spawnOptions = { windowsHide: true, env: process.env };
+    const currentChild = cached
+      ? createProcess(cached.command, cached.args, spawnOptions)
+      : createProcess(options.swiftBinary, ['-swift-version', '5', '-e', MACOS_REMOTE_WINDOW_INPUT_SWIFT], spawnOptions);
     child = currentChild;
     ready = false;
     currentChild.stdout.setEncoding('utf8');

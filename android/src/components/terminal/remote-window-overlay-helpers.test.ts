@@ -10,6 +10,8 @@ import {
   toFloatingOverlayClampRect,
   formatTargetKind,
   isRemoteWindowChromeTarget,
+  formatRemoteWindowRouteLatency,
+  resolveRemoteWindowRouteLabel,
   resolveAspectRect,
   resolveZoomedContentRect,
   resolveRemoteWindowContainerViewport,
@@ -371,5 +373,37 @@ describe('remote-window-overlay-helpers', () => {
       message: 'boom',
     });
     expect(resolveRemoteWindowCloseResult(undefined)).toMatchObject({ kind: 'outcome', phase: 'unverified' });
+  });
+
+  it('renders route and network delay separately from frame delay', () => {
+    expect(formatRemoteWindowRouteLatency({ routeLabel: '局域网直连', networkRttMs: 12, frameLatencyMs: null }))
+      .toBe('局域网直连 · 12 ms');
+    expect(formatRemoteWindowRouteLatency({ routeLabel: '中继', networkRttMs: 86.4, frameLatencyMs: 41.6 }))
+      .toBe('中继 · 86 ms · 帧延迟 42 ms');
+  });
+
+  it('keeps the two delays apart when the route is not resolved yet', () => {
+    // A known RTT without a route must not be dropped, and must not be
+    // promoted into a route label.
+    expect(formatRemoteWindowRouteLatency({ routeLabel: null, networkRttMs: 12, frameLatencyMs: null }))
+      .toBe('网络 12 ms');
+    expect(formatRemoteWindowRouteLatency({ routeLabel: null, networkRttMs: null, frameLatencyMs: 33 }))
+      .toBe('帧延迟 33 ms');
+  });
+
+  it('renders nothing when every fact is unknown instead of showing zero', () => {
+    expect(formatRemoteWindowRouteLatency(null)).toBeNull();
+    expect(formatRemoteWindowRouteLatency({ routeLabel: null, networkRttMs: null, frameLatencyMs: null })).toBeNull();
+    expect(formatRemoteWindowRouteLatency({ routeLabel: '  ', networkRttMs: null, frameLatencyMs: null })).toBeNull();
+    expect(formatRemoteWindowRouteLatency({ routeLabel: null, networkRttMs: Number.NaN, frameLatencyMs: null })).toBeNull();
+  });
+
+  it('maps only known traversal paths to a route label', () => {
+    expect(resolveRemoteWindowRouteLabel('lan')).toBe('局域网直连');
+    expect(resolveRemoteWindowRouteLabel('rtc-relay')).toBe('中继');
+    // An unresolved or unknown path must not become a fake route name.
+    expect(resolveRemoteWindowRouteLabel(null)).toBeNull();
+    expect(resolveRemoteWindowRouteLabel(undefined)).toBeNull();
+    expect(resolveRemoteWindowRouteLabel('unknown-path')).toBeNull();
   });
 });

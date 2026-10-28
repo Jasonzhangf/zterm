@@ -54,6 +54,7 @@ export interface UseRemoteWindowPlaybackOptions {
   overviewVideoElementRef: RefObject<HTMLVideoElement | null>;
   onVideoDebug?: (snapshot: RemoteWindowVideoDebugSnapshot) => void;
   onDecodedFrameSize?: (size: { width: number; height: number }) => void;
+  onFirstDecodedFrame?: (info: { streamId: string; width: number; height: number }) => void;
   onProjectionError?: (message: string) => void;
   commitDecodedFrame?: (commit: DecodedFrameCommit) => boolean;
 }
@@ -69,6 +70,7 @@ export function useRemoteWindowPlayback({
   overviewVideoElementRef,
   onVideoDebug,
   onDecodedFrameSize,
+  onFirstDecodedFrame,
   onProjectionError,
   commitDecodedFrame,
 }: UseRemoteWindowPlaybackOptions) {
@@ -266,7 +268,13 @@ export function useRemoteWindowPlayback({
           decodedFrameSubscribersRef.current.forEach((subscriber) => subscriber({ video, lane: 'focus', presentedFrames }));
           if (!isCurrentPlayback(video, stream, track, epoch)) return;
           playbackStatsRef.current.framesReceived += 1;
-          playbackStatsRef.current.decodedFirstFrameAt ??= Date.now();
+          if (playbackStatsRef.current.decodedFirstFrameAt === null) {
+            playbackStatsRef.current.decodedFirstFrameAt = Date.now();
+            // First real decoded frame is the only truth for the streaming
+            // stage. Capture-started proves data left the Mac; this proves a
+            // frame reached the screen surface.
+            onFirstDecodedFrame?.({ streamId: receiverPlaybackBinding?.streamId ?? '', width, height });
+          }
           if (!videoHasPlayedRef.current) reveal(video, stream, track, epoch, 'frame');
           const received = playbackStatsRef.current.framesReceived;
           if (received === 1 || received % 60 === 0) {
@@ -304,6 +312,7 @@ export function useRemoteWindowPlayback({
   }, [
     isCurrentPlayback,
     onDecodedFrameSize,
+    onFirstDecodedFrame,
     commitDecodedFrame,
     receiverPlaybackBinding,
     onProjectionError,

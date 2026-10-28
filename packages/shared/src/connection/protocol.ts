@@ -352,11 +352,33 @@ export type RemoteWindowStreamFailureStage =
   | 'target-validation'
   | 'offer-apply'
   | 'focus-capture-start'
+  | 'focus-capture-first-frame'
   | 'input-helper-warm'
   | 'overview-capture-start'
   | 'answer-create'
   | 'answer-apply'
   | 'track-attach';
+
+/**
+ * Session stage as the user sees it. The two post-connect stages are the gap
+ * between a working transport and a visible picture: the client can be
+ * attached and still show nothing. `awaiting-first-data` closes only on a real
+ * daemon `capture-started` event, and `awaiting-first-frame` closes only on a
+ * real decoded frame. A UI timer must not advance either stage.
+ */
+export type RemoteWindowSessionStage =
+  | 'idle'
+  | 'resolving-route'
+  | 'signaling'
+  | 'negotiating-media'
+  | 'awaiting-first-data'
+  | 'awaiting-first-frame'
+  | 'streaming'
+  | 'reconnecting'
+  | 'error';
+
+/** Chroma subsampling format of the encoded video lane. */
+export type RemoteWindowStreamChromaFormat = '420' | '422' | '444';
 
 export interface RemoteWindowStreamCapabilityTelemetry {
   mediaPlan: RemoteWindowStreamMediaPlan;
@@ -365,6 +387,13 @@ export interface RemoteWindowStreamCapabilityTelemetry {
   maxVideoLanes: 1 | 2;
   screenCaptureKit: true;
   typedPerLaneStatus: true;
+  /**
+   * Chroma subsampling formats this transport can carry. The video path is
+   * capture(BGRA) -> I420 -> VP8, and VP8 has no 4:4:4 profile, so the honest
+   * value is `['420']`. Clarity tiers must gate on this field instead of offering
+   * a 4:4:4 tier the encoder cannot carry.
+   */
+  chromaFormats: readonly RemoteWindowStreamChromaFormat[];
   preflight: {
     wrtc: 'available';
     abi: 'supported';
@@ -575,6 +604,64 @@ export interface RemoteWindowStreamIceCandidatePayload {
   candidate: RemoteWindowStreamIceCandidate;
 }
 
+/**
+ * Daemon-observed latency telemetry for one stream. Every field is optional and
+ * nullable because a sample is only meaningful once the encoder and the remote
+ * inbound report have produced data. These values are measurements, never
+ * control state: no owner may derive routing, quality or lifecycle decisions
+ * from them.
+ */
+export interface RemoteWindowStreamLatencyTelemetry {
+  /** Window the rolling samples below cover. */
+  sampleWindowMs?: number | null;
+  /** Capture timestamp -> encoder handoff, last frame (ms). */
+  captureToEncodeMs?: number | null;
+  /** Capture timestamp -> encoder handoff, rolling median (ms). */
+  captureToEncodeP50Ms?: number | null;
+  /** Capture timestamp -> encoder handoff, rolling 95th percentile (ms). */
+  captureToEncodeP95Ms?: number | null;
+  /** Encoder time per encoded frame from outbound-rtp totals (ms). */
+  encodeMsPerFrame?: number | null;
+  /** Pacer/send delay per sent packet from outbound-rtp totals (ms). */
+  packetSendDelayMs?: number | null;
+  /** Frames the capture source delivered to the daemon per second in the window. */
+  capturedFps?: number | null;
+  /**
+   * Frames the daemon handed to the encoder per second in the window. It is
+   * lower than `capturedFps` whenever the frame-age policy or the latest-frame
+   * slot discards capture frames, so the two together separate a slow capture
+   * source from a drop policy that discards what the source produced.
+   */
+  dispatchedFps?: number | null;
+  /** Frames the encoder produced per second in the window. */
+  encodedFps?: number | null;
+  /** Outbound payload bitrate in the window (bits/s). */
+  sentBitrateBps?: number | null;
+  /** Negotiated outbound video codec, e.g. `video/VP8`. */
+  codecMimeType?: string | null;
+  /** remote-inbound-rtp round trip time (ms). */
+  networkRttMs?: number | null;
+  /** remote-inbound-rtp jitter (ms). */
+  networkJitterMs?: number | null;
+  /** Lost/sent packet ratio in the window (0..1). */
+  packetLossRatio?: number | null;
+  /** Input path: daemon receive -> macOS injection complete, rolling median (ms). */
+  inputInjectP50Ms?: number | null;
+  /** Input path: daemon receive -> macOS injection complete, 95th percentile (ms). */
+  inputInjectP95Ms?: number | null;
+  /** Input path sample count behind the two percentiles. */
+  inputInjectSamples?: number | null;
+  /**
+   * Capture resolution the daemon actually runs after the applied video
+   * profile. It is the encoder's input size, so it is the honest witness of a
+   * zoom-aware capture raise: the client's requested `maxCaptureWidth` is only
+   * an intention until the daemon reports what it captured.
+   */
+  captureWidth?: number | null;
+  /** Capture height the daemon actually runs after the applied video profile. */
+  captureHeight?: number | null;
+}
+
 export interface RemoteWindowStreamStatusPayload {
   requestId?: string;
   streamId: string;
@@ -588,6 +675,7 @@ export interface RemoteWindowStreamStatusPayload {
   frameAgeMs?: number;
   frameWidth?: number;
   frameHeight?: number;
+  latency?: RemoteWindowStreamLatencyTelemetry;
   message?: string;
   canvasLayout?: RemoteWindowCanvasLayoutV1;
   /** Typed cleanup result attached to the terminal remote-window stop status. */
@@ -673,10 +761,29 @@ export interface RemoteWindowStreamQualityResultPayload {
   revision: number;
   purpose?: RemoteWindowStreamPurpose;
   targetId: string;
-  status: 'applied' | 'rejected';
+  /**
+   * `degraded-unknown-bitrate` means the capture profile applied but a sender
+   * rejected the bitrate update while its previous bitrate is unknown. The
+   * applied budget then reports an unbounded (`0`) bitrate for that lane
+   * instead of inventing the requested limit.
+   */
+  status: 'applied' | 'degraded-unknown-bitrate' | 'rejected';
   requestedVideoProfile: RemoteWindowVideoProfile;
   appliedVideoProfile?: RemoteWindowVideoProfile;
   appliedGroupBudget?: RemoteWindowStreamGroupBudget;
+  /**
+   * Lanes whose negotiated sender encodings could not be updated, so the
+   * encoder kept its previous bitrate. The capture profile in
+   * `appliedVideoProfile` and the capture fields of `appliedGroupBudget` did
+   * apply; only the bitrate/frame-rate part of the group budget is missing for
+   * these lanes. A runtime whose `RTCRtpSender.setParameters()` rejects every
+   * negotiated update (observed in the pinned @roamhq/wrtc build) reports the
+   * lane here instead of failing the whole request.
+   */
+  senderParametersDegraded?: Array<{
+    lane: 'focus' | 'overview';
+    reason: string;
+  }>;
   error?: {
     code: string;
     message: string;

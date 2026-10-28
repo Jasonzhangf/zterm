@@ -3259,6 +3259,75 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:OneStop-1')).toBeTruthy();
   });
 
+  it('drops a historical Collab role when the live catalog row carries none', async () => {
+    // A session that was previously classified (master/worker) but now appears
+    // in the live catalog without a collab projection must stay unclassified,
+    // not resurrect the stale role under only-master / hide-worker.
+    const master = makeSession('master');
+    master.daemonHostId = 'daemon-a';
+    master.sessionName = 'zterm-3';
+    master.title = 'master tab';
+    const subagent = makeSession('sub');
+    subagent.daemonHostId = 'daemon-a';
+    subagent.sessionName = 'zterm-subagent-rw-ui-0906';
+    subagent.title = 'subagent tab';
+    const sessions = [master, subagent];
+    const sessionGroups = [{
+      id: 'daemon:daemon-a',
+      name: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      authToken: 'token-a',
+      sessionNames: ['zterm-3', 'zterm-subagent-rw-ui-0906', 'OneStop-1'],
+      // Stale historical classification that the live catalog must override.
+      sessionCollabByName: {
+        'zterm-3': { role: 'master' as const, displayName: 'Jenny' },
+        'zterm-subagent-rw-ui-0906': { role: 'worker' as const, displayName: 'Alice' },
+      },
+      lastOpenedAt: 1,
+    }];
+    const relayDevices = [makeRelayDevice({
+      hostId: 'daemon-a',
+      deviceName: 'Daemon A',
+      sessions: ['zterm-3', 'zterm-subagent-rw-ui-0906', 'OneStop-1'],
+      // Live catalog has no collab projection for these rows.
+      sessionCollab: {},
+    })];
+    const view = render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={sessionGroups}
+        relayDevices={relayDevices}
+        activeSession={master}
+        sessionDrawerFilterConfig={{ version: 2, mode: 'only-master', hiddenSessionNames: [] }}
+        onSessionDrawerFilterConfigChange={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={vi.fn()}
+        onCloseDrawerRemoteSession={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+    swipeOpenPortraitDrawer();
+    await waitFor(() => expect(
+      screen.getByTestId('terminal-session-drawer-count').textContent,
+    ).toBe('显示 0 / 3 个会话'));
+    // No master row survived the stale-role clear.
+    expect(screen.queryByTestId('terminal-session-drawer-row-master')).toBeNull();
+    expect(screen.queryByTestId('terminal-session-drawer-collab-master')).toBeNull();
+    view.unmount();
+  });
+
   it('shows the truthful all-hidden empty state and count through the page', async () => {
     renderVisibilityFixture({
       sessionDrawerFilterConfig: {

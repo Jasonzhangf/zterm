@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'child_process';
 import { WebSocket, type RawData } from 'ws';
+import { prepareSwiftScript } from './macos-swift-script';
 import type {
   RemoteWindowStreamRect,
   RemoteWindowStreamTargetManifest,
@@ -602,11 +603,15 @@ export function runDefaultIterm2Python(
   });
 }
 
-export function runDefaultMacosAppWindowCatalog(
+export async function runDefaultMacosAppWindowCatalog(
   script: string,
   options: { swiftBinary: string; timeoutMs: number },
 ): Promise<string> {
-  return runInlineScript(options.swiftBinary, ['-e', script], {
+  const command = await prepareSwiftScript({
+    swiftBinary: options.swiftBinary,
+    source: script,
+  });
+  return runInlineScript(command.command, command.args, {
     timeoutMs: options.timeoutMs,
     timeoutMessage: 'macOS app window catalog timed out',
     fallbackMessage: 'macOS app window catalog failed',

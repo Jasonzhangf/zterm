@@ -750,6 +750,101 @@ export function formatTargetSubtitle(target: RemoteWindowStreamTargetManifest) {
   return [tmux, `${geometry.width}x${geometry.height}`, route, inputMode].filter(Boolean).join(' · ');
 }
 
+export type RemoteWindowStageStatus = 'starting' | 'awaiting-first-frame' | 'streaming' | 'error';
+
+/**
+ * Stage contract projection. Each stage names a different user action, so
+ * text must not collapse them. Data-only stage keeps the Mac's capture state;
+ * awaiting-first-frame names the real gap between data and a visible frame.
+ */
+export function formatRemoteWindowStageLabel(status: string) {
+  if (status === 'awaiting-first-data') {
+    return '已连接，正在传输数据';
+  }
+  if (status === 'awaiting-first-frame') {
+    return '正在接收画面数据';
+  }
+  if (status === 'streaming') {
+    return '画面已到达';
+  }
+  if (status === 'starting') {
+    return '正在建立视频流';
+  }
+  if (status === 'error') {
+    return '视频流启动失败';
+  }
+  return '等待视频流';
+}
+
+export interface RemoteWindowRouteLatencyFacts {
+  /** Resolved traversal path label, for example 局域网直连 or 中继. Null means unknown. */
+  routeLabel: string | null;
+  /** Traversal round trip, not a frame latency. Null means unmeasured. */
+  networkRttMs: number | null;
+  /** Decode-to-present latency. Null means unmeasured. */
+  frameLatencyMs: number | null;
+}
+
+/**
+ * Builds the A-2 session line. Network delay and frame delay stay separate
+ * numbers because they point at different user actions, and an unmeasured
+ * value is omitted instead of being rendered as zero.
+ */
+export function formatRemoteWindowRouteLatency(facts: RemoteWindowRouteLatencyFacts | null): string | null {
+  if (!facts) {
+    return null;
+  }
+  const routeLabel = (facts.routeLabel || '').trim();
+  const networkRttMs = Number.isFinite(facts.networkRttMs) ? Math.round(Number(facts.networkRttMs)) : null;
+  const frameLatencyMs = Number.isFinite(facts.frameLatencyMs) ? Math.round(Number(facts.frameLatencyMs)) : null;
+  if (!routeLabel && networkRttMs === null && frameLatencyMs === null) {
+    return null;
+  }
+  const parts: string[] = [];
+  if (routeLabel) {
+    parts.push(networkRttMs === null ? routeLabel : `${routeLabel} · ${networkRttMs} ms`);
+  } else if (networkRttMs !== null) {
+    parts.push(`网络 ${networkRttMs} ms`);
+  }
+  if (frameLatencyMs !== null) {
+    parts.push(`帧延迟 ${frameLatencyMs} ms`);
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * The quality ACK's applied profile already carries the encoder bitrate that
+ * is actually in force. This suffix names the lanes whose requested budget the
+ * pinned wrtc build rejected, so "confirmed" never hides a missing change.
+ */
+export function formatRemoteWindowSenderDegradedSuffix(
+  lanes: ReadonlyArray<{ lane: 'focus' | 'overview' }>,
+): string {
+  return lanes.length === 0 ? '' : ` · 码率未生效：${lanes.map((lane) => lane.lane).join('、')}`;
+}
+
+/**
+ * Maps the traversal owner's resolved path to a short user label. Unknown or
+ * missing paths return null so the caller keeps the plain stage wording.
+ */
+export function resolveRemoteWindowRouteLabel(resolvedPath: string | null | undefined): string | null {
+  switch (resolvedPath) {
+    case 'lan':
+      return '局域网直连';
+    case 'tailscale':
+      return 'Tailscale 线路';
+    case 'ipv4':
+    case 'ipv6':
+      return '公网直连';
+    case 'rtc-direct':
+      return 'P2P 直连';
+    case 'rtc-relay':
+      return '中继';
+    default:
+      return null;
+  }
+}
+
 export interface RemoteWindowAppTargetGroup {
   groupId: string;
   appBundleId: string;
@@ -796,10 +891,18 @@ export function buildRemoteWindowAppTargetGroups(
       targets: [target],
     });
   }
-  return Array.from(groups.values()).map((group) => ({
-    ...group,
-    targets: group.targets.slice().sort((left, right) => remoteWindowTargetArea(right) - remoteWindowTargetArea(left)),
-  }));
+  return Array.from(groups.values()).map((group) => {
+    const targets = group.targets.slice().sort((left, right) => remoteWindowTargetArea(right) - remoteWindowTargetArea(left));
+    // 组的入口点击的是 targets[0]（面积最大的窗口），所以标签必须描述同一个窗口。
+    // 原先标签取目录顺序里第一个窗口（前台窗），当前台窗不是最大窗时，用户看到的标题
+    // 与实际串流/注入的窗口不是同一个：picker 说 A，视频里是 B，键盘输入也进 B。
+    const primary = targets[0];
+    return {
+      ...group,
+      targets,
+      title: primary?.videoTarget.title || group.title,
+    };
+  });
 }
 
 export function safeRemoteWindowGroupId(groupId: string) {
