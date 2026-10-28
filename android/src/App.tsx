@@ -807,6 +807,7 @@ export function AppContent({
     switchSession,
     renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     runtimeActiveSessionId: state.activeSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,

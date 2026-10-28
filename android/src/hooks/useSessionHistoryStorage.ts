@@ -109,7 +109,7 @@ function normalizeGroupEntry(
   const sessionCollabByName = candidate.sessionCollabByName && typeof candidate.sessionCollabByName === 'object'
     ? Object.fromEntries(Object.entries(candidate.sessionCollabByName).filter(([name, collab]) => (
       sessionNames.includes(name)
-      && Boolean(collab && typeof collab === 'object' && (collab.role === 'master' || collab.role === 'worker') && typeof collab.displayName === 'string' && collab.displayName.trim())
+      && Boolean(collab && typeof collab === 'object' && (collab.role === 'ceo' || collab.role === 'master' || collab.role === 'worker') && typeof collab.displayName === 'string' && collab.displayName.trim())
     )).map(([name, collab]) => [name, {
       role: collab!.role,
       displayName: collab!.displayName.trim(),

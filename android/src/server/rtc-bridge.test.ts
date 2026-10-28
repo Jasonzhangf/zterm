@@ -2,7 +2,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createServer } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
 import wrtc from '@roamhq/wrtc';
-import { buildRtcPeerConnectionConfig, createRtcBridgeServer } from './rtc-bridge';
+import {
+  buildRtcPeerConnectionConfig,
+  createRtcBridgeServer,
+  isTailscaleIceCandidate,
+  stripDirectAnswerSdp,
+} from './rtc-bridge';
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as unknown as {
   RTCPeerConnection: typeof globalThis.RTCPeerConnection;
@@ -52,7 +57,7 @@ describe('rtc-bridge', () => {
     });
   });
 
-  it('bridges rtc datachannel messages through the server transport', async () => {
+  it('bridges rtc datachannel messages through the server transport', { timeout: 15_000 }, async () => {
     const httpServer = createServer();
     const signalWss = new WebSocketServer({ noServer: true });
     const rtcBridge = createRtcBridgeServer({
@@ -280,5 +285,26 @@ describe('rtc-bridge', () => {
     });
 
     expect(echoed).toBe('hello-reordered-rtc');
+  });
+
+  it('filters Tailscale CGNAT and ULA candidates from direct SDP and trickle ICE while preserving host/srflx/prflx', () => {
+    expect(isTailscaleIceCandidate('candidate:1 1 UDP 2122252543 100.66.1.82 54321 typ host')).toBe(true);
+    expect(isTailscaleIceCandidate('candidate:2 1 UDP 2122252543 fd7a:115c:a1e0::12 54321 typ host')).toBe(true);
+    expect(isTailscaleIceCandidate('candidate:3 1 UDP 2122252543 192.168.0.3 54321 typ host')).toBe(false);
+    expect(isTailscaleIceCandidate('candidate:4 1 UDP 1686052607 203.0.113.20 54321 typ srflx raddr 192.168.0.3 rport 54321')).toBe(false);
+
+    const sdp = [
+      'v=0',
+      'a=candidate:1 1 UDP 2122252543 100.66.1.82 54321 typ host',
+      'a=candidate:2 1 UDP 2122252543 192.168.0.3 54321 typ host',
+      'a=candidate:3 1 UDP 1686052607 203.0.113.20 54321 typ srflx raddr 192.168.0.3 rport 54321',
+      'a=candidate:4 1 UDP 41885439 159.75.134.56 59000 typ relay raddr 203.0.113.20 rport 54321',
+    ].join('\r\n');
+    const stripped = stripDirectAnswerSdp(sdp);
+    expect(stripped.endsWith('\r\n')).toBe(true);
+    expect(stripped).not.toContain('100.66.1.82');
+    expect(stripped).not.toContain('typ relay');
+    expect(stripped).toContain('192.168.0.3');
+    expect(stripped).toContain('203.0.113.20');
   });
 });

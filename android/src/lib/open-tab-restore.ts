@@ -333,17 +333,42 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
     }
     try {
       if (options.onSessionCatalogFetched && typeof fetchTmuxSessionCatalog === 'function') {
-        const catalog = await withTimeout(fetchTmuxSessionCatalog(
-          {
-            bridgeHost: target.bridgeHost,
-            bridgePort: target.bridgePort,
-            daemonHostId: target.daemonHostId,
-            authToken: target.authToken,
-            relayHostId: target.daemonHostId,
-            terminalBackend: target.terminalBackend,
-          },
-          traversalSettings,
-        ), OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS, `fetchTmuxSessions:${targetKey}`);
+        let catalog: TerminalSessionCatalog;
+        try {
+          catalog = await withTimeout(fetchTmuxSessionCatalog(
+            {
+              bridgeHost: target.bridgeHost,
+              bridgePort: target.bridgePort,
+              daemonHostId: target.daemonHostId,
+              authToken: target.authToken,
+              relayHostId: target.daemonHostId,
+              terminalBackend: target.terminalBackend,
+            },
+            traversalSettings,
+          ), OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS, `fetchTmuxSessions:${targetKey}`);
+        } catch (primaryError) {
+          const relayDevice = target.daemonHostId
+            ? (options.relayDevices || []).find((device) => device.daemon.connected && device.daemon.hostId.trim() === target.daemonHostId?.trim())
+            : undefined;
+          const directEndpoint = (relayDevice?.daemon.endpoints || []).find((endpoint) => (
+            endpoint.kind === 'tailscale' && endpoint.host?.trim() && endpoint.port
+          )) || (relayDevice?.daemon.endpoints || []).find((endpoint) => endpoint.host?.trim() && endpoint.port);
+          if (!relayDevice || (!directEndpoint?.host?.trim() && !relayDevice.daemon.endpoints?.length)) {
+            throw primaryError;
+          }
+          catalog = await withTimeout(fetchTmuxSessionCatalog(
+            {
+              bridgeHost: directEndpoint?.host?.trim() || target.bridgeHost,
+              bridgePort: directEndpoint?.port || target.bridgePort,
+              daemonHostId: target.daemonHostId,
+              authToken: directEndpoint?.authToken || target.authToken,
+              relayHostId: target.daemonHostId,
+              terminalBackend: target.terminalBackend,
+              ...(relayDevice.daemon.endpoints?.length ? { relayEndpointCandidates: relayDevice.daemon.endpoints } : {}),
+            },
+            traversalSettings,
+          ), OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS, `fetchTmuxSessions:${targetKey}:relay`);
+        }
         if (catalog.sessionCatalog.length > 0) {
           options.onSessionCatalogFetched(targetKey, catalog.sessionCatalog);
         }

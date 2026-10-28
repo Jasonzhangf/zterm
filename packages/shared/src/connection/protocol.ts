@@ -1236,7 +1236,7 @@ export interface TerminalSessionCatalogEntry {
 }
 
 export interface TerminalSessionCollabProjection {
-  role: 'master' | 'worker';
+  role: 'ceo' | 'master' | 'worker';
   displayName: string;
   agentState?: string;
 }

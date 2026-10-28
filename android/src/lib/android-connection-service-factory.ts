@@ -6,6 +6,10 @@ import { buildTransportTargetKey } from './session-transport-runtime';
 import { AndroidConnectionServiceTransportSocket } from './android-connection-service-socket';
 import type { AndroidConnectionServiceTarget } from './android-connection-service-commands';
 import type { BridgeSettings } from './bridge-settings';
+import {
+  defaultClientControlDirectoryRuntime,
+  mergeHostWithClientControlDirectory,
+} from './client-control-directory-runtime';
 import type { BridgeTransportSocket } from './traversal/types';
 import { isLikelyTailscaleHost, isPrivateLanIpv4Host, parseEndpointHost } from './network-target';
 import {
@@ -16,35 +20,56 @@ import {
   runDagpipePhase8Connection,
 } from './dagpipe-native-client';
 
-export type AndroidConnectionServiceTraversalSettings = Pick<
+export type AndroidConnectionServiceTraversalSettings = Partial<Pick<
   BridgeSettings,
   'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'traversalRelay'
->;
+>>;
 
 export function buildAndroidConnectionServiceTarget(
-  host: Host,
+  rawHost: Host,
   settings?: AndroidConnectionServiceTraversalSettings,
 ): AndroidConnectionServiceTarget {
-  const turnUrl = settings?.traversalRelay?.turnUrl?.trim() || settings?.turnServerUrl?.trim() || '';
-  const turnUsername = settings?.traversalRelay?.turnUsername?.trim() || settings?.turnUsername?.trim() || '';
-  const turnCredential = settings?.traversalRelay?.turnCredential || settings?.turnCredential || '';
+  const host = mergeHostWithClientControlDirectory(
+    rawHost,
+    defaultClientControlDirectoryRuntime,
+  );
+  const confirmedRelaySettings = defaultClientControlDirectoryRuntime.readRelaySettings();
+  const traversalRelay = settings?.traversalRelay || confirmedRelaySettings || undefined;
+  const turnUrl = traversalRelay?.turnUrl?.trim() || settings?.turnServerUrl?.trim() || '';
+  const turnUsername = traversalRelay?.turnUsername?.trim() || settings?.turnUsername?.trim() || '';
+  const turnCredential = traversalRelay?.turnCredential || settings?.turnCredential || '';
   const signalUrl = host.signalUrl?.trim()
-    || settings?.traversalRelay?.wsClientUrl?.trim()
+    || traversalRelay?.wsClientUrl?.trim()
     || settings?.signalUrl?.trim()
     || '';
-  const signalFromRelay = Boolean(settings?.traversalRelay?.wsClientUrl?.trim())
+  const signalFromRelay = Boolean(traversalRelay?.wsClientUrl?.trim())
     && !host.signalUrl?.trim();
   const signalToken = signalFromRelay
-    ? settings?.traversalRelay?.accessToken?.trim() || ''
+    ? traversalRelay?.accessToken?.trim() || ''
     : '';
-  const relayDeviceId = host.relayDeviceId?.trim()
-    || settings?.traversalRelay?.deviceId?.trim()
+  const relayDeviceId = traversalRelay?.deviceId?.trim()
+    || host.relayDeviceId?.trim()
     || '';
-  const directoryLanHost = host.relayEndpointCandidates
-    ?.find((candidate) => candidate.kind === 'lan' && candidate.host)?.host;
+  const directoryLanHosts = (host.relayEndpointCandidates || [])
+    .filter((candidate) => candidate.kind === 'lan' && candidate.host?.trim())
+    .map((candidate) => candidate.host!.trim());
   const bridgeLanHost = isPrivateLanIpv4Host(parseEndpointHost(host.bridgeHost))
-    ? host.bridgeHost
+    ? host.bridgeHost.trim()
     : '';
+  const lanHosts = [...new Set([
+    ...directoryLanHosts,
+    ...(bridgeLanHost ? [bridgeLanHost] : []),
+  ])];
+  const directoryLanHost = lanHosts[0] || '';
+  const directoryTailscaleHost = host.relayEndpointCandidates
+    ?.find((candidate) => candidate.kind === 'tailscale' && candidate.host?.trim())?.host?.trim() || '';
+  const directoryIpv6Host = host.relayEndpointCandidates
+    ?.find((candidate) => candidate.kind === 'ipv6' && candidate.host?.trim())?.host?.trim() || '';
+  const directoryIpv4Host = host.relayEndpointCandidates
+    ?.find((candidate) => candidate.kind === 'ipv4' && candidate.host?.trim())?.host?.trim() || '';
+  const tailscaleHost = host.tailscaleHost?.trim() || directoryTailscaleHost;
+  const ipv6Host = host.ipv6Host?.trim() || directoryIpv6Host;
+  const ipv4Host = host.ipv4Host?.trim() || directoryIpv4Host;
   return {
     targetKey: buildTransportTargetKey(host),
     bridgeHost: host.bridgeHost,
@@ -52,12 +77,13 @@ export function buildAndroidConnectionServiceTarget(
     ...((directoryLanHost || bridgeLanHost)
       ? { lanHost: directoryLanHost || bridgeLanHost }
       : {}),
+    ...(lanHosts.length > 0 ? { lanHosts } : {}),
     ...(host.authToken ? { authToken: host.authToken } : {}),
     ...(host.daemonHostId ? { daemonHostId: host.daemonHostId } : {}),
     ...(host.relayHostId ? { relayHostId: host.relayHostId } : {}),
-    ...(host.tailscaleHost ? { tailscaleHost: host.tailscaleHost } : {}),
-    ...(host.ipv6Host ? { ipv6Host: host.ipv6Host } : {}),
-    ...(host.ipv4Host ? { ipv4Host: host.ipv4Host } : {}),
+    ...(tailscaleHost ? { tailscaleHost } : {}),
+    ...(ipv6Host ? { ipv6Host } : {}),
+    ...(ipv4Host ? { ipv4Host } : {}),
     ...(signalUrl ? { signalUrl } : {}),
     ...(signalToken ? { signalToken } : {}),
     ...(signalFromRelay ? { signalUrlFromRelay: true } : {}),

@@ -20,9 +20,9 @@ import type {
 
 export const AUTO_TRIAL_WEBSOCKET_PATH_PRIORITY: TraversalResolvedPath[] = [
   'lan',
-  'tailscale',
   'ipv6',
   'ipv4',
+  'tailscale',
 ];
 
 function resolveTraversalPathOrder(

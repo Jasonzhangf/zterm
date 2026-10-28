@@ -40,6 +40,7 @@ interface PeerState {
   requestOrigin: string;
   transport: RtcPeerTransport;
   peerConnection: RTCPeerConnection | null;
+  iceTransportPolicy: RTCIceTransportPolicy;
   ready: boolean;
   stale: boolean;
   staleTimer: ReturnType<typeof setTimeout> | null;
@@ -50,8 +51,36 @@ interface PeerState {
   pendingIceCandidates: RTCIceCandidateInit[];
 }
 
+const RTC_DISCONNECTED_GRACE_MS = 10_000;
+
 function resolveRtcIceTransportPolicy(value: unknown): RTCIceTransportPolicy {
   return value === 'relay' ? 'relay' : 'all';
+}
+
+export function isTailscaleIceCandidate(rawCandidate: string): boolean {
+  if (!rawCandidate) {
+    return false;
+  }
+  return /\b100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.\d{1,3}\.\d{1,3}\b/.test(rawCandidate)
+    || /fd7a:115c:a1e0:/i.test(rawCandidate);
+}
+
+export function isDirectEligibleIceCandidate(rawCandidate: string): boolean {
+  if (!rawCandidate || isTailscaleIceCandidate(rawCandidate)) {
+    return false;
+  }
+  return /\btyp\s+(host|srflx|prflx)\b/i.test(rawCandidate);
+}
+
+export function stripDirectAnswerSdp(sdp: string): string {
+  if (typeof sdp !== 'string') {
+    return '';
+  }
+  const stripped = sdp
+    .split(/\r?\n/)
+    .filter((line) => line.length > 0 && (!line.startsWith('a=candidate:') || isDirectEligibleIceCandidate(line)))
+    .join('\r\n');
+  return stripped ? `${stripped}\r\n` : '';
 }
 
 export function buildRtcPeerConnectionConfig(payload?: Record<string, unknown>): RTCConfiguration {
@@ -200,6 +229,7 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       requestOrigin,
       transport: new RtcPeerTransport(peerId, requestOrigin),
       peerConnection: null,
+      iceTransportPolicy: 'all',
       ready: false,
       stale: false,
       staleTimer: null,
@@ -256,15 +286,19 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     if (peer.peerConnection || peer.ready) {
       peer.transport.close('rtc peer replaced by new init');
     }
+    const config = buildRtcPeerConnectionConfig(payload);
     peer.peerConnection = null;
+    peer.iceTransportPolicy = config.iceTransportPolicy || 'all';
     peer.ready = false;
     peer.offerAccepted = false;
     peer.pendingIceCandidates = [];
-    const peerConnection = new RTCPeerConnection(buildRtcPeerConnectionConfig(payload));
+    const peerConnection = new RTCPeerConnection(config);
     peer.peerConnection = peerConnection;
     let connectionTimeout: ReturnType<typeof setTimeout> | undefined;
+    let disconnectedTimeout: ReturnType<typeof setTimeout> | undefined;
     peer.transport.adopt(peerConnection, () => {
       if (connectionTimeout !== undefined) globalThis.clearTimeout(connectionTimeout);
+      if (disconnectedTimeout !== undefined) globalThis.clearTimeout(disconnectedTimeout);
       if (peer.peerConnection === peerConnection) {
         peer.peerConnection = null;
         peer.ready = false;
@@ -274,9 +308,14 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       if (peer.peerConnection !== peerConnection || !event.candidate) {
         return;
       }
+      const candidatePayload = event.candidate.toJSON() as Record<string, unknown>;
+      if (peer.iceTransportPolicy !== 'relay'
+        && !isDirectEligibleIceCandidate(String(candidatePayload.candidate || candidatePayload.address || ''))) {
+        return;
+      }
       peer.emitSignal({
         type: 'rtc-candidate',
-        payload: event.candidate.toJSON() as Record<string, unknown>,
+        payload: candidatePayload,
       });
     };
     peerConnection.ondatachannel = (event) => {
@@ -313,14 +352,45 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       if (state !== 'new' && state !== 'checking') {
         globalThis.clearTimeout(connectionTimeout);
       }
-      if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+      if (state === 'connected' || state === 'completed') {
+        if (disconnectedTimeout !== undefined) {
+          globalThis.clearTimeout(disconnectedTimeout);
+          disconnectedTimeout = undefined;
+        }
+        return;
+      }
+      if (state === 'failed' || state === 'closed') {
+        if (disconnectedTimeout !== undefined) {
+          globalThis.clearTimeout(disconnectedTimeout);
+          disconnectedTimeout = undefined;
+        }
         if (!peer.ready) {
           peer.emitSignal({
             type: 'rtc-error',
             payload: { message: `rtc ice connection ${state}` },
           });
-          if (peer.peerConnection === peerConnection) peer.transport.close(`rtc ice connection ${state}`);
         }
+        if (peer.peerConnection === peerConnection) peer.transport.close(`rtc ice connection ${state}`);
+        return;
+      }
+      if (state === 'disconnected') {
+        if (disconnectedTimeout !== undefined) {
+          globalThis.clearTimeout(disconnectedTimeout);
+        }
+        disconnectedTimeout = globalThis.setTimeout(() => {
+          disconnectedTimeout = undefined;
+          if (peer.peerConnection !== peerConnection || peerConnection.iceConnectionState !== 'disconnected') {
+            return;
+          }
+          if (!peer.ready) {
+            peer.emitSignal({
+              type: 'rtc-error',
+              payload: { message: 'rtc ice connection disconnected' },
+            });
+          }
+          peer.transport.close('rtc ice connection disconnected');
+        }, RTC_DISCONNECTED_GRACE_MS);
+        disconnectedTimeout.unref?.();
       }
     };
   }
@@ -371,7 +441,8 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
         return;
       }
       peer.offerAccepted = true;
-      const sdp = typeof message.payload?.sdp === 'string' ? message.payload.sdp : '';
+      const rawSdp = typeof message.payload?.sdp === 'string' ? message.payload.sdp : '';
+      const sdp = peer.iceTransportPolicy !== 'relay' ? stripDirectAnswerSdp(rawSdp) : rawSdp;
       await peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
       if (!current()) return;
       const answer = await peerConnection.createAnswer();
@@ -380,15 +451,22 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       if (!current()) return;
       await flushPendingIceCandidates(peer, peerConnection);
       if (!current()) return;
+      const answerSdp = peer.iceTransportPolicy !== 'relay'
+        ? stripDirectAnswerSdp(answer.sdp || '')
+        : answer.sdp;
       peer.emitSignal({
         type: 'rtc-answer',
-        payload: { sdp: answer.sdp, type: answer.type },
+        payload: { sdp: answerSdp, type: answer.type },
       });
       return;
     }
 
     if (message.type === 'rtc-candidate' && message.payload?.candidate) {
       const candidate = message.payload as RTCIceCandidateInit;
+      if (peer.iceTransportPolicy !== 'relay'
+        && !isDirectEligibleIceCandidate(String(candidate.candidate || ''))) {
+        return;
+      }
       if (!peer.offerAccepted || !peerConnection.remoteDescription) {
         peer.pendingIceCandidates.push(candidate);
         return;

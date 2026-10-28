@@ -326,6 +326,7 @@ export function createTerminalControlRuntime(
 
   function readTmuxSessionTargets(): TmuxTerminalSessionTarget[] {
     const targets: TmuxTerminalSessionTarget[] = [];
+    const seenNativeTargets = new Set<string>();
     let firstError: unknown;
     let reached = false;
     for (const socketPath of tmuxSocketTargets()) {
@@ -356,6 +357,11 @@ export function createTerminalControlRuntime(
           ) {
             continue;
           }
+          const nativeKey = `tmux\u0000${serverPid}\u0000${sessionId}\u0000${createdAt}`;
+          if (seenNativeTargets.has(nativeKey)) {
+            continue;
+          }
+          seenNativeTargets.add(nativeKey);
           targets.push({
             backend: 'tmux',
             sessionName,

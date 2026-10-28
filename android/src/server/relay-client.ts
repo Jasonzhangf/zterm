@@ -144,7 +144,7 @@ export function buildRelayTmuxSessionSnapshots(
       ...(typeof entry.cwd === 'string' && entry.cwd.trim() ? { cwd: entry.cwd.trim() } : {}),
       ...(!options?.omitCollab
         && entry.collab
-        && (entry.collab.role === 'master' || entry.collab.role === 'worker')
+        && (entry.collab.role === 'ceo' || entry.collab.role === 'master' || entry.collab.role === 'worker')
         && entry.collab.displayName.trim()
         ? {
             collab: {

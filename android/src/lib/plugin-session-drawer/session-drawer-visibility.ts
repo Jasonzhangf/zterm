@@ -107,7 +107,7 @@ export function resolveSessionNameForVisibility(input: {
 export function classifySessionDrawerVisibility(
   collab: TerminalSessionCollabProjection | null | undefined,
 ): SessionDrawerFilterClass {
-  if (collab?.role === 'master') {
+  if (collab?.role === 'ceo' || collab?.role === 'master') {
     return 'master';
   }
   if (collab?.role === 'worker') {

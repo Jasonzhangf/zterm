@@ -31,6 +31,7 @@ export interface AndroidConnectionServiceTarget {
   bridgeHost: string;
   bridgePort: number;
   lanHost?: string;
+  lanHosts?: string[];
   authToken?: string;
   daemonHostId?: string;
   relayHostId?: string;
@@ -141,13 +142,21 @@ function parseTarget(value: unknown): AndroidConnectionServiceTarget {
     throw new Error('invalid Android connection service target port');
   }
   const optionalString = (candidate: unknown) => (
-    typeof candidate === 'string' && candidate.trim() ? candidate : undefined
+    typeof candidate === 'string' && candidate.trim() ? candidate.trim() : undefined
   );
+  const lanHosts = Array.isArray(value.lanHosts)
+    ? [...new Set(
+        value.lanHosts
+          .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+          .map((item) => item.trim()),
+      )]
+    : [];
   return {
     targetKey: value.targetKey.trim(),
     bridgeHost: value.bridgeHost.trim(),
     bridgePort,
     ...(optionalString(value.lanHost) ? { lanHost: optionalString(value.lanHost) } : {}),
+    ...(lanHosts.length > 0 ? { lanHosts } : {}),
     ...(optionalString(value.authToken) ? { authToken: optionalString(value.authToken) } : {}),
     ...(optionalString(value.daemonHostId) ? { daemonHostId: optionalString(value.daemonHostId) } : {}),
     ...(optionalString(value.relayHostId) ? { relayHostId: optionalString(value.relayHostId) } : {}),

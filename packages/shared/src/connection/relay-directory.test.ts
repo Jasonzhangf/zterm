@@ -15,6 +15,11 @@ describe('relay directory control payload contract', () => {
       }],
       sessions: [{
         name: 'main',
+        collab: {
+          role: 'ceo',
+          displayName: 'Bob',
+          agentState: 'idle',
+        },
         updatedAt: '2026-07-28T07:00:00.000Z',
       }],
       publishedAt: '2026-07-28T07:00:00.000Z',
