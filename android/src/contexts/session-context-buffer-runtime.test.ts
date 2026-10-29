@@ -348,7 +348,29 @@ describe('session-context-buffer-runtime inactive gating', () => {
       },
       repairDispatchedRevisions: [11],
     });
-    const requestSessionBufferSync = vi.fn(() => true);
+    // Wire the head handler straight into the real request runtime so this case
+    // proves the revision-reset recovery actually reaches the wire, not just that
+    // a callback was invoked.
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const sessionPullStateRef = { current: new Map() };
+    const requestSessionBufferSync = (sid: string, requestOptions?: any) => requestSessionBufferSyncRuntime({
+      sessionId: sid,
+      requestOptions,
+      refs: {
+        stateRef: refs.stateRef,
+        sessionVisibleRangeRef: refs.sessionVisibleRangeRef,
+        sessionHeadStoreRef: refs.sessionHeadStoreRef,
+        sessionPullStateRef,
+        tailRefreshStoreRef: refs.tailRefreshStoreRef,
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
 
     handleBufferHeadRuntime({
       sessionId,
@@ -357,7 +379,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       availableStartIndex: 0,
       availableEndIndex: 1,
       refs,
-      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionTransportSocket: () => ws,
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate: vi.fn(() => false),
       scheduleSessionRenderCommit: vi.fn(),
@@ -371,11 +393,14 @@ describe('session-context-buffer-runtime inactive gating', () => {
       error: null,
       repairDispatchedRevisions: [],
     });
-    expect(requestSessionBufferSync).toHaveBeenCalledTimes(1);
-    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, expect.objectContaining({
-      reason: 'buffer-head-revision-reset',
-      purpose: 'tail-refresh',
-    }));
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const resetRequest = JSON.parse(String(sendSocketPayload.mock.calls[0][2]));
+    expect(resetRequest.type).toBe('buffer-sync-request');
+    expect(resetRequest.payload).toMatchObject({
+      knownRevision: 12,
+      targetHeadRevision: 11,
+    });
+    expect(resetRequest.payload.requestEndIndex).toBeGreaterThan(resetRequest.payload.requestStartIndex);
 
     refs.bufferFrameAssemblyRef.current.set(sessionId, {
       pending: null,
@@ -396,7 +421,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       availableStartIndex: 0,
       availableEndIndex: 1,
       refs,
-      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionTransportSocket: () => ws,
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate: vi.fn(() => false),
       scheduleSessionRenderCommit: vi.fn(),
@@ -411,6 +436,82 @@ describe('session-context-buffer-runtime inactive gating', () => {
       },
       repairDispatchedRevisions: [11],
     });
+  });
+
+  it('dispatches a real recovery wire request after a daemon revision reset keeps the stale local window', () => {
+    const sessionId = 'session-revision-reset-wire';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: Array.from({ length: 120 }, (_, index) => `row-${index}`),
+      startIndex: 0,
+      endIndex: 120,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 120,
+      cols: 80,
+      rows: 24,
+      revision: 12,
+      cacheLines: 1000,
+    });
+    // Review-1 counterexample: local buffer revision 12 over [0,120), renderer
+    // demand [96,120), and the restarted daemon reports a lower head revision 1
+    // over [0,120) with changed body. The whole visible window already lies inside
+    // the retained local range, so a numeric `head <= local` suppression would eat
+    // the recovery request and the renderer would keep showing stale rows.
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      visibleRangeEntries: [[sessionId, { startIndex: 96, endIndex: 120, viewportRows: 24 }]],
+    });
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const requestSessionBufferSync = (sid: string, requestOptions?: any) => requestSessionBufferSyncRuntime({
+      sessionId: sid,
+      requestOptions,
+      refs: {
+        stateRef: refs.stateRef,
+        sessionVisibleRangeRef: refs.sessionVisibleRangeRef,
+        sessionHeadStoreRef: refs.sessionHeadStoreRef,
+        sessionPullStateRef: { current: new Map() },
+        tailRefreshStoreRef: refs.tailRefreshStoreRef,
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 1,
+      latestEndIndex: 120,
+      availableStartIndex: 0,
+      availableEndIndex: 120,
+      refs,
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const message = JSON.parse(String(sendSocketPayload.mock.calls[0][2]));
+    expect(message.type).toBe('buffer-sync-request');
+    expect(message.payload).toMatchObject({
+      knownRevision: 12,
+      localStartIndex: 0,
+      localEndIndex: 120,
+      targetHeadRevision: 1,
+    });
+    // A real authoritative recovery window must reach the wire; suppression by the
+    // retained stale local range is exactly the regression under test.
+    expect(message.payload.requestEndIndex).toBeGreaterThan(message.payload.requestStartIndex);
+    expect(message.payload.requestStartIndex).toBeGreaterThanOrEqual(96);
+    expect(message.payload.requestEndIndex).toBeLessThanOrEqual(120);
   });
 
   it('does not apply sparse buffer-sync after a revision gap and requests an authoritative tail window', () => {
@@ -5202,13 +5303,12 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
-  // Accepted connection-recovery semantics: a higher daemon head revision alone does
-  // not clear the in-flight arbitration guard. The in-flight pull (target 6) already
-  // covers the exact visible window [96,120) for the current local snapshot
-  // (known 5 / local 0..120), and an unaffected higher head (7) does not by itself
-  // justify a duplicate body pull. The same-end content-change counterexample in the
-  // red suite still forces a refresh only when the daemon content actually differs.
-  it('does not reissue a visible-window tail refresh when an unaffected higher head revision already has an in-flight pull covering the exact range', () => {
+  // A stale (expired) in-flight pull cannot settle a request by range coverage alone.
+  // Here the daemon head moved past the pull target (6) and the local base (5) to 7,
+  // so the retained local rows and the expired pull both belong to an older revision
+  // epoch. Coverage of [96,120) does not prove the current head body was received or
+  // has no gap, so the runtime must reissue the visible-window tail refresh.
+  it('reissues a visible-window tail refresh when the expired in-flight pull targets an older head than the local base', () => {
     const sessionId = 'session-1';
     const session = {
       ...makeSession(sessionId),
@@ -5267,8 +5367,19 @@ describe('session-context-buffer-runtime inactive gating', () => {
       resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
     });
 
-    expect(requested).toBe(false);
-    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(requested).toBe(true);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'buffer-sync-request',
+      payload: expect.objectContaining({
+        knownRevision: 5,
+        localStartIndex: 0,
+        localEndIndex: 120,
+        requestStartIndex: 96,
+        requestEndIndex: 120,
+        targetHeadRevision: 7,
+      }),
+    });
   });
 
   it('sends an explicit revision-gap repair window even when the visible range is stale', () => {
@@ -6396,6 +6507,10 @@ describe('connection recovery visible-window planning (plan_and_dispatch_visible
       liveHeads: [],
     });
 
+    // Zero dispatches must fail: the missing visible rows beyond the committed range
+    // have to produce at least one real body window. The empty-set and per-window
+    // checks below are vacuous when nothing was sent, so pin a non-empty dispatch.
+    expect(result.bodySyncWindows.length).toBeGreaterThan(0);
     const emptyWindows = result.bodySyncWindows.filter(
       (window) => !(window.requestEndIndex > window.requestStartIndex),
     );
