@@ -499,6 +499,93 @@ describe('daemon /app file route reservation', () => {
   });
 });
 
+describe('daemon /app file route peer reconnect retry (review-8)', () => {
+  it('rebinds the route to a new peer transport on a same-id retry after the peer disconnects', async () => {
+    const root = await registry.root();
+    const bridgeB = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
+
+    // Every connectPeer() call returns a fresh socket pair whose server side
+    // answers as daemon-b, so a retry after a disconnect can re-establish a
+    // live transport instead of reusing the closed one.
+    const clientSockets: FakeSocket[] = [];
+    const makeSocket = () => {
+      const [client, server] = socketPair();
+      attachPeerTransport(bridgeB, server);
+      clientSockets.push(client);
+      return client as unknown as WebSocket;
+    };
+
+    const bridgeA = await createBridge({
+      root: join(root, 'a'),
+      deviceId: 'device-a',
+      daemonHostId: 'daemon-a',
+      createWebSocket: () => makeSocket(),
+    });
+    const local = captureLink('local', 'device-a', 'daemon-a');
+    const messageId = `retry-${randomUUID()}`;
+    const transferId = messageId;
+    const data = Buffer.alloc(4, 7);
+    const file = sendFileMetadata(data, transferId, 'retry.bin');
+    const startFrame = (requestId: string): AppClientFrame => ({
+      type: 'app-send-file-start',
+      payload: { requestId, messageId, target: peerTarget(bridgeB), subject: 'retry', file },
+    });
+
+    // First start succeeds over peer transport #1.
+    local.frames.length = 0;
+    await bridgeA.runtime.handleFrame(local.link, startFrame(randomUUID()));
+    expect(await waitForFrames(local.frames, (f) => f.type === 'app-send-result' && f.payload.status === 'receiving')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'receiving' },
+    });
+    expect(clientSockets).toHaveLength(1);
+
+    // The peer transport drops, but the local /app link stays open (a client
+    // reconnect retry uses the same local connection and transfer id).
+    clientSockets[0].close();
+    await new Promise((done) => setTimeout(done, 25));
+
+    // Same-id retry must reconnect and rebind the registered route to transport #2.
+    local.frames.length = 0;
+    await bridgeA.runtime.handleFrame(local.link, startFrame(randomUUID()));
+    expect(await waitForFrames(local.frames, (f) => f.type === 'app-send-result' && f.payload.status === 'receiving')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'receiving' },
+    });
+    expect(clientSockets).toHaveLength(2);
+
+    // Chunk and commit must now travel over the rebuilt transport and finish.
+    local.frames.length = 0;
+    await bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-file-chunk',
+      payload: { requestId: randomUUID(), messageId, transferId, offset: 0, chunkIndex: 0, dataBase64: data.toString('base64') },
+    });
+    expect(await waitForFrames(local.frames, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { persistedOffset: data.length },
+    });
+
+    local.frames.length = 0;
+    await bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-file-commit',
+      payload: { requestId: randomUUID(), messageId, transferId },
+    });
+    expect(await waitForFrames(local.frames, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+
+    const bPath = join(
+      bridgeB.appRootDir,
+      'app-inbox/files',
+      encodeAppPathSegment('daemon-a'),
+      encodeAppPathSegment(messageId),
+      file.fileName,
+    );
+    expect((await readFile(bPath)).equals(data)).toBe(true);
+  });
+});
+
 describe('daemon /app inbox capacity counts message bodies (P1-C)', () => {
   function peerLink() {
     return captureLink('peer', 'device-a', 'daemon-a');
