@@ -406,6 +406,85 @@ describe('zterm app CLI surface', () => {
     expect(result).toMatchObject({ payload: { transferId: originalTransferId, messageId: originalTransferId } });
   });
 
+  it('exits 3 when a stream send receives a normal app-send-result with status resultUnknown', async () => {
+    const prepared = await context({
+      stdin: JSON.stringify({ type: 'send', peer: 'device-peer', subject: 'subject', body: 'body' }),
+      request: (frame) => {
+        if (frame.type === 'app-send-message') {
+          return {
+            type: 'app-send-result',
+            payload: {
+              requestId: frame.payload.requestId,
+              messageId: frame.payload.messageId,
+              status: 'resultUnknown',
+              stage: 'result_unknown',
+            },
+          };
+        }
+        return {
+          type: 'app-error',
+          payload: appErrorPayload({ code: 'invalid_state', stage: 'cli', message: 'unexpected frame' }),
+        };
+      },
+    });
+    const code = await runAppCommand(['stream', '--json'], prepared.context);
+    expect(code, 'stream send should exit 3 on resultUnknown').toBe(3);
+    const frames = ndjson(prepared.stdout.text());
+    const result = frames.at(-1);
+    expect(result).toMatchObject({ type: 'app-send-result', payload: { status: 'resultUnknown', stage: 'result_unknown' } });
+    const sent = prepared.frames[0]!;
+    const originalMessageId = sent.type === 'app-send-message' ? sent.payload.messageId : '';
+    expect(originalMessageId.length).toBeGreaterThan(0);
+    expect(result).toMatchObject({ payload: { messageId: originalMessageId } });
+    // No second command is read once resultUnknown forces exit 3.
+    expect(prepared.frames.length).toBe(1);
+  });
+
+  it('exits 3 when a stream send-file start returns resultUnknown (no chunk/commit) for empty and non-empty files', async () => {
+    for (const [label, bytes] of [['empty', 0], ['non-empty', 48_000]] as const) {
+      const home = await mkdtemp(join(tmpdir(), 'zterm-cli-stream-start-unknown-'));
+      roots.push(home);
+      const filePath = join(home, 'payload.bin');
+      await writeFile(filePath, Buffer.alloc(bytes));
+      const prepared = await context({
+        stdin: JSON.stringify({ type: 'send-file', peer: 'device-peer', file: filePath, subject: 'file', messageId: `${label}-id` }),
+        request: (frame) => {
+          if (frame.type === 'app-send-file-start') {
+            return {
+              type: 'app-send-result',
+              payload: {
+                requestId: frame.payload.requestId,
+                messageId: frame.payload.messageId,
+                transferId: frame.payload.file.transferId,
+                status: 'resultUnknown',
+                stage: 'result_unknown',
+              },
+            };
+          }
+          return {
+            type: 'app-error',
+            payload: appErrorPayload({ code: 'invalid_state', stage: 'file-chunk', message: 'no active transfer', messageId: 'messageId' in frame.payload ? frame.payload.messageId : undefined, transferId: 'transferId' in frame.payload ? frame.payload.transferId : undefined }),
+          };
+        },
+      });
+      const code = await runAppCommand(['stream', '--json'], prepared.context);
+      expect(code, `${label} stream file should exit 3`).toBe(3);
+      const frames = ndjson(prepared.stdout.text());
+      const last = frames.at(-1);
+      expect(last, `${label} stream file should end on structured resultUnknown`).toMatchObject({
+        type: 'app-send-result',
+        payload: { status: 'resultUnknown', stage: 'result_unknown' },
+      });
+      const start = prepared.frames[0]!;
+      const originalTransferId = start.type === 'app-send-file-start' ? start.payload.file.transferId : '';
+      expect(originalTransferId.length).toBeGreaterThan(0);
+      expect(last).toMatchObject({ payload: { transferId: originalTransferId, messageId: originalTransferId } });
+      // No chunk or commit request may follow a resultUnknown start.
+      expect(prepared.frames.filter((frame) => frame.type !== 'app-send-file-start')).toHaveLength(0);
+      expect(JSON.stringify(prepared.stdout.text())).not.toContain('invalid_state');
+    }
+  });
+
   it('returns structured resultUnknown (exit 3) when file-start reports resultUnknown with no chunk/commit fallback', async () => {
     for (const [label, bytes] of [['empty', 0], ['non-empty', 48_000]] as const) {
       const home = await mkdtemp(join(tmpdir(), 'zterm-cli-start-unknown-'));

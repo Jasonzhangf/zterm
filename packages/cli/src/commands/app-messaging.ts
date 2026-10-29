@@ -557,6 +557,9 @@ async function handleStreamCommand(
           },
         });
         await emitFrame(context.stdout, result);
+        if (result.type === 'app-send-result' && result.payload.status === 'resultUnknown') {
+          return 3;
+        }
       } catch (error) {
         if (error instanceof AppCliError && error.code === 'result_unknown') {
           await emitFrame(context.stdout, {
@@ -588,6 +591,9 @@ async function handleStreamCommand(
           described,
         );
         await emitFrame(context.stdout, result);
+        if (result.type === 'app-send-result' && result.payload.status === 'resultUnknown') {
+          return 3;
+        }
       } catch (error) {
         if (error instanceof AppCliError && error.code === 'result_unknown') {
           await emitFrame(context.stdout, {
