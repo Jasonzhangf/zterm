@@ -4,13 +4,22 @@ import {
   DRAWER_MAX_WIDTH,
   SWIPE_CLOSE_THRESHOLD_PX,
   SWIPE_CLOSE_VERTICAL_TOLERANCE_PX,
+  DRAWER_TOUCH_TARGET_PX,
   UNSCOPED_HOST_GROUP_KEY,
   UNSCOPED_HOST_GROUP_LABEL,
+  describeAgentState,
+  describeCollabRole,
   resolveSessionGroupSlotTone,
   shortenFolderLabel,
 } from './terminal-session-drawer-helpers';
 import { TerminalSessionDrawerFolderMenu } from './TerminalSessionDrawerFolderMenu';
-import { DrawerCloseIcon, DrawerHideIcon } from './TerminalSessionDrawerIcons';
+import {
+  DrawerCloseIcon,
+  DrawerChevronIcon,
+  DrawerFolderIcon,
+  DrawerMoreIcon,
+  DrawerRestoreIcon,
+} from './TerminalSessionDrawerIcons';
 import { TerminalSessionDrawerNewSessionDialog } from './TerminalSessionDrawerNewSessionDialog';
 import { TerminalSessionDrawerSlotMenu } from './TerminalSessionDrawerSlotMenu';
 import { getServerIdentityTone } from '../../lib/server-identity';
@@ -20,12 +29,52 @@ import type {
   TerminalSessionDrawerProps,
 } from '../../lib/plugin-session-drawer/session-drawer-contract';
 import {
+  classifySessionDrawerVisibility,
   SESSION_DRAWER_FILTER_LABELS,
   SESSION_DRAWER_FILTER_MODES,
 } from '../../lib/plugin-session-drawer/session-drawer-visibility';
 export const TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX = 56;
 export const TERMINAL_SESSION_DRAWER_ROW_TITLE_FONT_SIZE_PX = 13;
-export const TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX = 10;
+export const TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX = 11;
+
+type DrawerToneStyle = { color: string; background: string; border: string };
+
+const DRAWER_TONE_STYLES: Record<string, DrawerToneStyle> = {
+  success: {
+    color: 'var(--zterm-settings-success)',
+    background: 'var(--zterm-settings-success-soft)',
+    border: 'var(--zterm-settings-success)',
+  },
+  warning: {
+    color: 'var(--zterm-settings-warning)',
+    background: 'var(--zterm-settings-warning-soft)',
+    border: 'var(--zterm-settings-warning)',
+  },
+  accent: {
+    color: 'var(--zterm-panel-accent)',
+    background: 'var(--zterm-panel-accent-soft)',
+    border: 'var(--zterm-panel-accent-border)',
+  },
+  danger: {
+    color: 'var(--zterm-panel-danger)',
+    background: 'var(--zterm-panel-danger-soft)',
+    border: 'var(--zterm-panel-danger-border)',
+  },
+  neutral: {
+    color: 'var(--zterm-panel-muted)',
+    background: 'var(--zterm-panel-surface)',
+    border: 'var(--zterm-panel-border)',
+  },
+  unclassified: {
+    color: 'var(--zterm-panel-muted)',
+    background: 'transparent',
+    border: 'var(--zterm-panel-border)',
+  },
+};
+
+function drawerToneStyle(tone: string): DrawerToneStyle {
+  return DRAWER_TONE_STYLES[tone] ?? DRAWER_TONE_STYLES.neutral;
+}
 export function terminalSessionDrawerHiddenRestoreTestId(sessionName: string): string {
   const safeName = sessionName
     .trim()
@@ -74,8 +123,6 @@ function TerminalSessionDrawerComponent({
   const focusReturnTargetRef = useRef<HTMLElement | null>(null);
   const suppressNextClickRef = useRef(false);
   const selectionPressRef = useRef<{ sessionId: string; x: number; y: number } | null>(null);
-  const closeTouchHandledRef = useRef<string | null>(null);
-  const hideTouchHandledRef = useRef<string | null>(null);
   const [slotMenu, setSlotMenu] = useState<{
     sessionId: string;
     title: string;
@@ -89,6 +136,7 @@ function TerminalSessionDrawerComponent({
     terminalBackend: 'tmux' | 'herdr';
   } | null>(null);
   const [folderMenu, setFolderMenu] = useState<{ cwd: string; x: number; y: number } | null>(null);
+  const [hiddenTrayExpanded, setHiddenTrayExpanded] = useState(false);
   const isDrawerChromeElement = (element: Element | null) => {
     if (!(element instanceof HTMLElement)) {
       return false;
@@ -147,10 +195,9 @@ function TerminalSessionDrawerComponent({
     onCloseSession(sessionId);
   };
   const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
-    if (!onAssignSessionGroupSlot && !onHideSession) {
+    if (!onAssignSessionGroupSlot && !onHideSession && !onCloseSession) {
       return;
     }
-    suppressNextClickRef.current = true;
     setSlotMenu({
       sessionId: session.id,
       title: session.title,
@@ -289,6 +336,30 @@ function TerminalSessionDrawerComponent({
   // Total sessions before drawer filtering. When the prop is absent, fall back
   // to the rows we have plus hidden ones so states stay truthful.
   const totalSessionCount = unfilteredSessionCount ?? sessions.length + hiddenSessionCount;
+  // Truthful per-mode counts for the segmented control. Counts are scoped to
+  // the selected host's non-hidden sessions and fall back to the visible rows
+  // when the caller does not project an unfiltered list. A session without a
+  // Collab projection counts as visible outside "仅 Master" and is never
+  // silently dropped.
+  const segmentCounts = useMemo(() => {
+    const scope = visibleUnfilteredSessions.length > 0 ? visibleUnfilteredSessions : visibleSessions;
+    let master = 0;
+    let nonWorker = 0;
+    for (const session of scope) {
+      const sessionClass = classifySessionDrawerVisibility(session.collab);
+      if (sessionClass === 'master') {
+        master += 1;
+      }
+      if (sessionClass !== 'worker') {
+        nonWorker += 1;
+      }
+    }
+    return {
+      all: scope.length,
+      'only-master': master,
+      'hide-worker': nonWorker,
+    } satisfies Record<(typeof SESSION_DRAWER_FILTER_MODES)[number], number>;
+  }, [visibleSessions, visibleUnfilteredSessions]);
   const hasHostScopedSummaries = hostSummaries.length > 0;
   // Empty-state truth belongs to the selected host. A persisted hidden name on
   // another host is still restorable from the tray, but it is never a live
@@ -302,37 +373,77 @@ function TerminalSessionDrawerComponent({
     ? (selectedHostSummary?.hiddenSessionCount ?? 0)
     : hiddenSessionCount;
   const cwdGroups = useMemo(() => {
-    const groups = new Map<string, TerminalSessionDrawerItem[]>();
-    for (const session of visibleSessions) {
-      const cwd = session.cwd?.trim() || 'cwd 未知';
-      const items = groups.get(cwd) || [];
-      items.push(session);
-      groups.set(cwd, items);
+    interface DrawerFolder {
+      cwd: string;
+      /** Primary rows rendered by default for this project folder. */
+      items: TerminalSessionDrawerItem[];
+      /** Unclassified sessions kept visible (with an explicit 未识别 marker). */
+      unclassifiedItems: TerminalSessionDrawerItem[];
+      /** Role-filtered sessions revealed on demand behind "+N 窗口". */
+      otherItems: TerminalSessionDrawerItem[];
     }
-    const unfilteredByCwd = new Map<string, TerminalSessionDrawerItem[]>();
+    const groups = new Map<string, DrawerFolder>();
+    const ensureFolder = (cwd: string): DrawerFolder => {
+      let folder = groups.get(cwd);
+      if (!folder) {
+        folder = { cwd, items: [], unclassifiedItems: [], otherItems: [] };
+        groups.set(cwd, folder);
+      }
+      return folder;
+    };
+    for (const session of visibleSessions) {
+      ensureFolder(session.cwd?.trim() || 'cwd 未知').items.push(session);
+    }
     if (activeFilterMode === 'only-master' && visibleUnfilteredSessions.length > 0) {
+      const visibleIds = new Set(visibleSessions.map((session) => session.id));
+      const othersByCwd = new Map<string, TerminalSessionDrawerItem[]>();
       for (const session of visibleUnfilteredSessions) {
+        if (visibleIds.has(session.id)) {
+          continue;
+        }
         const cwd = session.cwd?.trim() || 'cwd 未知';
-        const items = unfilteredByCwd.get(cwd) || [];
-        items.push(session);
-        unfilteredByCwd.set(cwd, items);
+        const folder = ensureFolder(cwd);
+        if (classifySessionDrawerVisibility(session.collab) === 'unclassified') {
+          folder.unclassifiedItems.push(session);
+        } else {
+          const others = othersByCwd.get(cwd) || [];
+          others.push(session);
+          othersByCwd.set(cwd, others);
+        }
+      }
+      for (const [cwd, others] of othersByCwd) {
+        ensureFolder(cwd).otherItems.push(...others);
       }
     }
     const roleRank = (role?: string) => (role === 'ceo' ? 0 : role === 'master' ? 1 : 2);
-    const entries = Array.from(groups, ([cwd, rawItems]) => {
-      const items = [...rawItems].sort((a, b) => roleRank(a.collab?.role) - roleRank(b.collab?.role));
-      const visibleIds = new Set(items.map((item) => item.id));
-      const otherItems = (unfilteredByCwd.get(cwd) || []).filter((item) => !visibleIds.has(item.id));
-      return { cwd, items, otherItems };
-    });
+    const entries = Array.from(groups.values()).map((folder) => ({
+      ...folder,
+      items: [...folder.items].sort((a, b) => roleRank(a.collab?.role) - roleRank(b.collab?.role)),
+      otherItems: [...folder.otherItems].sort((a, b) => roleRank(a.collab?.role) - roleRank(b.collab?.role)),
+      unclassifiedItems: [...folder.unclassifiedItems].sort((a, b) => a.title.localeCompare(b.title)),
+    }));
     return entries.sort((a, b) => {
-      const aCeo = a.items.some((s) => s.collab?.role === 'ceo') || a.otherItems.some((s) => s.collab?.role === 'ceo') ? 0 : 1;
-      const bCeo = b.items.some((s) => s.collab?.role === 'ceo') || b.otherItems.some((s) => s.collab?.role === 'ceo') ? 0 : 1;
+      const folderHasCeo = (folder: typeof a) => (
+        folder.items.some((s) => s.collab?.role === 'ceo')
+        || folder.otherItems.some((s) => s.collab?.role === 'ceo')
+        || folder.unclassifiedItems.some((s) => s.collab?.role === 'ceo')
+      );
+      const folderHasActive = (folder: typeof a) => (
+        folder.items.some((s) => s.active)
+        || folder.otherItems.some((s) => s.active)
+        || folder.unclassifiedItems.some((s) => s.active)
+      );
+      const folderHasMaster = (folder: typeof a) => (
+        folder.items.some((s) => s.collab?.role === 'master')
+        || folder.otherItems.some((s) => s.collab?.role === 'master')
+      );
+      const aCeo = folderHasCeo(a) ? 0 : 1;
+      const bCeo = folderHasCeo(b) ? 0 : 1;
       if (aCeo !== bCeo) {
         return aCeo - bCeo;
       }
-      const aActive = a.items.some((s) => s.active) || a.otherItems.some((s) => s.active) ? 0 : 1;
-      const bActive = b.items.some((s) => s.active) || b.otherItems.some((s) => s.active) ? 0 : 1;
+      const aActive = folderHasActive(a) ? 0 : 1;
+      const bActive = folderHasActive(b) ? 0 : 1;
       if (aActive !== bActive) {
         return aActive - bActive;
       }
@@ -341,8 +452,8 @@ function TerminalSessionDrawerComponent({
       if (aUnknown !== bUnknown) {
         return aUnknown - bUnknown;
       }
-      const aMaster = a.items.some((s) => s.collab?.role === 'master') ? 0 : 1;
-      const bMaster = b.items.some((s) => s.collab?.role === 'master') ? 0 : 1;
+      const aMaster = folderHasMaster(a) ? 0 : 1;
+      const bMaster = folderHasMaster(b) ? 0 : 1;
       if (aMaster !== bMaster) {
         return aMaster - bMaster;
       }
@@ -353,10 +464,22 @@ function TerminalSessionDrawerComponent({
     });
   }, [activeFilterMode, visibleSessions, visibleUnfilteredSessions]);
   const activeFolderCwd = cwdGroups.find((group) => (
-    group.items.some((session) => session.active) || group.otherItems.some((session) => session.active)
+    group.items.some((session) => session.active)
+    || group.otherItems.some((session) => session.active)
+    || group.unclassifiedItems.some((session) => session.active)
   ))?.cwd
     || cwdGroups[0]?.cwd
     || null;
+  // Rows the list actually paints, including explicit unclassified rows that
+  // only-master keeps visible. Role-filtered rows behind "+N 窗口" are not
+  // counted until the user opens them.
+  const displayedSessionCount = useMemo(
+    () => cwdGroups.reduce(
+      (total, folder) => total + folder.items.length + folder.unclassifiedItems.length,
+      0,
+    ),
+    [cwdGroups],
+  );
   const [expandedFolderCwd, setExpandedFolderCwd] = useState<string | null>(activeFolderCwd);
   const [collapsedMasterFolders, setCollapsedMasterFolders] = useState<Set<string>>(() => new Set());
   const [expandedOtherFoldersInMasterMode, setExpandedOtherFoldersInMasterMode] = useState<Set<string>>(() => new Set());
@@ -414,6 +537,317 @@ function TerminalSessionDrawerComponent({
     }
     onOpenQuickTabPicker(newSessionDraft.hostKey, { sessionName, cwd, terminalBackend: newSessionDraft.terminalBackend });
     setNewSessionDraft(null);
+  };
+
+  const renderSessionRow = (session: TerminalSessionDrawerItem) => {
+    const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
+    const role = describeCollabRole(session.collab?.role);
+    const roleTone = drawerToneStyle(role.tone);
+    const agent = describeAgentState(session.collab?.agentState);
+    const agentTone = agent ? drawerToneStyle(agent.tone) : null;
+    return (
+      <div
+        key={session.stableKey}
+        role="treeitem"
+        aria-level={3}
+        data-tree-level="3"
+        data-active={session.active ? 'true' : 'false'}
+        data-testid={`terminal-session-drawer-row-${session.id}`}
+        data-terminal-backend={session.terminalBackend ?? 'tmux'}
+        onContextMenu={(event) => {
+          event.preventDefault();
+          setFolderMenu(null);
+          suppressNextClickRef.current = true;
+          openSlotMenu(session, event.clientX, event.clientY);
+        }}
+        onTouchStart={(event) => {
+          const touch = event.touches[0];
+          if (!touch) {
+            return;
+          }
+          clearLongPressTimer();
+          longPressTimerRef.current = window.setTimeout(() => {
+            longPressTimerRef.current = null;
+            setFolderMenu(null);
+            suppressNextClickRef.current = true;
+            openSlotMenu(session, touch.clientX, touch.clientY);
+          }, 420);
+        }}
+        onTouchMove={clearLongPressTimer}
+        onTouchEnd={clearLongPressTimer}
+        onTouchCancel={clearLongPressTimer}
+        style={{
+          minHeight: `${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`,
+          width: '100%',
+          padding: 0,
+          margin: '1px 0',
+          borderRadius: '10px',
+          border: slotTone ? `1px solid ${slotTone.border}` : '1px solid transparent',
+          background: slotTone
+            ? slotTone.background
+            : session.active
+              ? 'var(--zterm-panel-active)'
+              : 'transparent',
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) auto',
+          alignItems: 'stretch',
+          columnGap: '2px',
+          color: 'var(--zterm-panel-text)',
+          opacity: 1,
+          overflow: 'visible',
+          position: 'relative',
+          boxShadow: session.active && !slotTone
+            ? 'inset 3px 0 0 var(--zterm-panel-accent)'
+            : 'none',
+        }}
+      >
+        <AmbientButton
+          type="button"
+          data-amb-flat="true"
+          data-testid={`terminal-session-drawer-select-${session.id}`}
+          onMouseDown={(event) => {
+            selectionPressRef.current = {
+              sessionId: session.id,
+              x: event.clientX,
+              y: event.clientY,
+            };
+          }}
+          onTouchStart={(event) => {
+            const touch = event.touches[0];
+            if (!touch) {
+              selectionPressRef.current = null;
+              return;
+            }
+            selectionPressRef.current = {
+              sessionId: session.id,
+              x: touch.clientX,
+              y: touch.clientY,
+            };
+          }}
+          onTouchMove={(event) => {
+            const press = selectionPressRef.current;
+            const touch = event.touches[0];
+            if (
+              !press
+              || press.sessionId !== session.id
+              || !touch
+              || Math.hypot(touch.clientX - press.x, touch.clientY - press.y) > 8
+            ) {
+              selectionPressRef.current = null;
+            }
+          }}
+          onTouchCancel={() => {
+            if (selectionPressRef.current?.sessionId === session.id) {
+              selectionPressRef.current = null;
+            }
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            const pointerClick = event.detail > 0;
+            const pressStartedOnThisRow = selectionPressRef.current?.sessionId === session.id;
+            selectionPressRef.current = null;
+            if (pointerClick && !pressStartedOnThisRow) {
+              event.preventDefault();
+              return;
+            }
+            if (suppressNextClickRef.current) {
+              event.preventDefault();
+              suppressNextClickRef.current = false;
+              return;
+            }
+            onSelectSession(session.id);
+          }}
+          style={{
+            height: '100%',
+            minHeight: `${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`,
+            minWidth: 0,
+            border: 'none',
+            background: 'transparent',
+            color: 'inherit',
+            textAlign: 'left',
+            padding: '9px 4px 9px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'stretch',
+            gap: '3px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+            <span
+              title={session.title}
+              style={{
+                flex: '1 1 auto',
+                minWidth: 0,
+                fontSize: `${TERMINAL_SESSION_DRAWER_ROW_TITLE_FONT_SIZE_PX}px`,
+                fontWeight: 700,
+                lineHeight: 1.25,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {session.title}
+            </span>
+            {slotTone ? (
+              <span
+                data-testid={`terminal-session-drawer-slot-${session.id}`}
+                title={`布局位置：${slotTone.label}`}
+                style={{
+                  flexShrink: 0,
+                  padding: '1px 7px',
+                  borderRadius: '999px',
+                  background: slotTone.background,
+                  color: slotTone.color,
+                  textAlign: 'center',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  border: `1px solid ${slotTone.border}`,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {slotTone.label}
+              </span>
+            ) : null}
+          </div>
+          <div
+            title={session.subtitle}
+            style={{
+              minWidth: 0,
+              fontSize: `${TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX}px`,
+              lineHeight: 1.25,
+              color: 'var(--zterm-panel-muted)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {session.subtitle}
+          </div>
+          <div
+            data-testid={`terminal-session-drawer-row-chip-${session.id}`}
+            style={{
+              display: 'flex',
+              flexDirection: 'row',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              justifyContent: 'flex-start',
+              gap: '8px',
+              minWidth: 0,
+              padding: '2px 0 0',
+              borderRadius: 0,
+              border: 'none',
+              background: 'transparent',
+            }}
+          >
+            <span
+              data-testid={`terminal-session-drawer-collab-${session.id}`}
+              title={session.collab?.displayName
+                ? `${role.label} · ${session.collab.displayName}`
+                : `角色：${role.label}`}
+              aria-label={`角色：${role.label}`}
+              style={{
+                flexShrink: 0,
+                padding: '1px 8px',
+                borderRadius: '999px',
+                border: `1px ${role.tone === 'unclassified' ? 'dashed' : 'solid'} ${roleTone.border}`,
+                background: roleTone.background,
+                color: roleTone.color,
+                fontSize: '12px',
+                fontWeight: 800,
+                lineHeight: 1.5,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {role.label}
+            </span>
+            {agent && agentTone ? (
+              <span
+                data-testid={`terminal-session-drawer-agent-${session.id}`}
+                title={`Agent 状态：${agent.label}`}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  flexShrink: 0,
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: agentTone.color,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '999px',
+                    background: agentTone.color,
+                    flexShrink: 0,
+                  }}
+                />
+                {agent.label}
+              </span>
+            ) : null}
+            {session.paneLabel ? (
+              <span
+                title={`Pane ${session.paneLabel}`}
+                style={{
+                  flexShrink: 0,
+                  padding: '1px 7px',
+                  borderRadius: '999px',
+                  border: '1px solid var(--zterm-panel-accent-border)',
+                  background: 'var(--zterm-panel-accent-soft)',
+                  color: 'var(--zterm-panel-accent)',
+                  textAlign: 'center',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {session.paneLabel}
+              </span>
+            ) : null}
+          </div>
+        </AmbientButton>
+        <AmbientButton
+          type="button"
+          data-amb-flat="true"
+          aria-label={`更多操作 ${session.title}`}
+          data-testid={`terminal-session-drawer-more-${session.id}`}
+          onTouchStart={(event) => {
+            event.stopPropagation();
+            clearLongPressTimer();
+          }}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const rect = event.currentTarget.getBoundingClientRect();
+            openSlotMenu(session, rect.left, rect.bottom);
+          }}
+          style={{
+            alignSelf: 'center',
+            justifySelf: 'end',
+            width: `${DRAWER_TOUCH_TARGET_PX}px`,
+            minWidth: `${DRAWER_TOUCH_TARGET_PX}px`,
+            height: `${DRAWER_TOUCH_TARGET_PX}px`,
+            minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
+            margin: '0 4px',
+            padding: 0,
+            borderRadius: '10px',
+            border: 'none',
+            background: 'transparent',
+            color: 'var(--zterm-panel-muted)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+          className="zterm-session-drawer-icon-button"
+        >
+          <DrawerMoreIcon />
+        </AmbientButton>
+      </div>
+    );
   };
 
   return (
@@ -535,7 +969,7 @@ function TerminalSessionDrawerComponent({
         <div
           data-testid="terminal-session-drawer-header"
           style={{
-            padding: `${Math.max(8, topInsetPx + 4)}px 10px 6px`,
+            padding: `${Math.max(8, topInsetPx + 4)}px 12px 8px`,
             borderBottom: '1px solid var(--zterm-panel-border)',
             display: 'flex',
             flexDirection: 'column',
@@ -543,15 +977,15 @@ function TerminalSessionDrawerComponent({
             gap: '8px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }}>
-              <span style={{ minWidth: 0, fontSize: '15px', fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--zterm-panel-text)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', minWidth: 0 }}>
+              <span style={{ minWidth: 0, fontSize: '17px', fontWeight: 800, lineHeight: 1.2, letterSpacing: '-0.01em', color: 'var(--zterm-panel-text)' }}>
                 会话
               </span>
               <div
                 data-testid="terminal-session-drawer-count"
                 style={{
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 600,
                   lineHeight: 1.3,
                   color: 'var(--zterm-panel-muted)',
@@ -561,7 +995,7 @@ function TerminalSessionDrawerComponent({
                   textOverflow: 'ellipsis',
                 }}
               >
-                显示 {visibleSessions.length} / {totalSessionCount} 个会话
+                显示 {displayedSessionCount} / {totalSessionCount} 个会话
               </div>
             </div>
             <AmbientButton
@@ -572,10 +1006,12 @@ function TerminalSessionDrawerComponent({
               ref={closeButtonRef}
               onClick={requestCloseDrawer}
               style={{
-                width: '40px',
-                height: '40px',
+                width: `${DRAWER_TOUCH_TARGET_PX}px`,
+                minWidth: `${DRAWER_TOUCH_TARGET_PX}px`,
+                height: `${DRAWER_TOUCH_TARGET_PX}px`,
+                minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
                 padding: 0,
-                borderRadius: '8px',
+                borderRadius: '10px',
                 border: 'none',
                 background: 'transparent',
                 color: 'var(--zterm-panel-text)',
@@ -584,54 +1020,83 @@ function TerminalSessionDrawerComponent({
                 alignItems: 'center',
                 justifyContent: 'center',
               }}
+              className="zterm-session-drawer-icon-button"
             >
-              <DrawerCloseIcon size={18} />
+              <DrawerCloseIcon size={20} />
             </AmbientButton>
           </div>
           <div
             data-testid="terminal-session-drawer-filter"
             role="group"
-            aria-label="会话抽屉筛选"
+            aria-label="按 Collab 角色筛选会话；未识别会话单独标记"
             style={{
               display: 'flex',
-              gap: '2px',
+              gap: '4px',
               minWidth: 0,
-              padding: '2px',
-              borderRadius: '9px',
-              background: 'color-mix(in srgb, var(--zterm-panel-surface) 72%, transparent)',
+              padding: '4px',
+              borderRadius: '11px',
+              background: 'var(--zterm-panel-surface)',
               border: '1px solid var(--zterm-panel-border)',
             }}
           >
             {SESSION_DRAWER_FILTER_MODES.map((mode) => {
               const selected = (filterMode ?? 'all') === mode;
+              const count = segmentCounts[mode];
               return (
                 <AmbientButton
                   key={mode}
                   type="button"
                   data-amb-flat="true"
                   aria-pressed={selected}
+                  aria-label={`${SESSION_DRAWER_FILTER_LABELS[mode]}，${count} 个会话`}
                   data-testid={`terminal-session-drawer-filter-${mode}`}
                   onClick={() => onFilterModeChange?.(mode)}
                   style={{
-                    flex: '1 1 auto',
+                    flex: '1 1 0',
                     minWidth: 0,
-                    minHeight: '40px',
-                    height: '40px',
-                    padding: '0 5px',
-                    borderRadius: '6px',
+                    minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
+                    height: `${DRAWER_TOUCH_TARGET_PX}px`,
+                    padding: '0 6px',
+                    borderRadius: '8px',
                     border: selected
                       ? '1px solid var(--zterm-panel-accent-border)'
                       : '1px solid transparent',
                     background: selected ? 'var(--zterm-panel-active)' : 'transparent',
                     color: selected ? 'var(--zterm-panel-active-text)' : 'var(--zterm-panel-muted)',
-                    fontSize: '11px',
+                    fontSize: '12px',
                     fontWeight: selected ? 800 : 600,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
+                    display: 'inline-flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '2px',
                   }}
                 >
-                  {SESSION_DRAWER_FILTER_LABELS[mode]}
+                  <span
+                    style={{
+                      minWidth: 0,
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      lineHeight: 1.15,
+                    }}
+                  >
+                    {SESSION_DRAWER_FILTER_LABELS[mode]}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      minWidth: 0,
+                      color: selected ? 'var(--zterm-panel-accent)' : 'var(--zterm-panel-muted)',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {count}
+                  </span>
                 </AmbientButton>
               );
             })}
@@ -696,13 +1161,13 @@ function TerminalSessionDrawerComponent({
                     onClick={() => setSelectedHostKey(group.groupKey)}
                     style={{
                       width: 'auto',
-                      minHeight: '40px',
+                      minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
                       flexShrink: 0,
-                      padding: '0 9px',
+                      padding: '0 10px',
                       border: isActive
                         ? '1px solid var(--zterm-panel-accent-border)'
                         : '1px solid transparent',
-                      borderRadius: '7px',
+                      borderRadius: '10px',
                       background: isActive ? 'var(--zterm-panel-active)' : 'transparent',
                       color: isActive ? 'var(--zterm-panel-active-text)' : 'var(--zterm-panel-text)',
                       fontSize: '12px',
@@ -771,7 +1236,7 @@ function TerminalSessionDrawerComponent({
               role="group"
               style={{
                 borderBottom: '1px solid color-mix(in srgb, var(--zterm-panel-border) 68%, transparent)',
-                paddingBottom: '4px',
+                paddingBottom: '2px',
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 0 }}>
@@ -782,6 +1247,7 @@ function TerminalSessionDrawerComponent({
                   aria-level={2}
                   data-tree-level="2"
                   data-testid={`terminal-session-drawer-folder-button-${folder.cwd}`}
+                  title={folder.cwd}
                   aria-label={`${isFolderExpanded ? '折叠' : '展开'}目录 ${shortenFolderLabel(folder.cwd)}`}
                   onClick={(event) => {
                     if (suppressNextClickRef.current) {
@@ -832,22 +1298,33 @@ function TerminalSessionDrawerComponent({
                   style={{
                     flex: '1 1 0',
                     minWidth: 0,
-                    minHeight: '40px',
-                    padding: '0 4px',
-                    borderRadius: 0,
+                    minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
+                    padding: '0 8px',
+                    borderRadius: '10px',
                     border: 'none',
                     background: 'transparent',
                     color: 'var(--zterm-panel-text)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '6px',
+                    gap: '8px',
                     textAlign: 'left',
-                    fontSize: '12px',
+                    fontSize: '13px',
                     fontWeight: 700,
                   }}
                 >
-                  <span aria-hidden="true" style={{ color: 'var(--zterm-panel-muted)', fontSize: '11px' }}>
-                    {isFolderExpanded ? '▾' : '▸'}
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      display: 'inline-flex',
+                      color: 'var(--zterm-panel-muted)',
+                      transform: isFolderExpanded ? 'rotate(90deg)' : 'none',
+                      transition: 'transform 160ms cubic-bezier(0.2, 0, 0, 1)',
+                    }}
+                  >
+                    <DrawerChevronIcon size={14} />
+                  </span>
+                  <span aria-hidden="true" style={{ display: 'inline-flex', color: 'var(--zterm-settings-accent)' }}>
+                    <DrawerFolderIcon size={15} />
                   </span>
                   <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {shortenFolderLabel(folder.cwd)}
@@ -860,7 +1337,7 @@ function TerminalSessionDrawerComponent({
                       flexShrink: 0,
                     }}
                   >
-                    {displayedItems.length}
+                    {folder.items.length + folder.unclassifiedItems.length + folder.otherItems.length}
                   </span>
                 </AmbientButton>
                 {activeFilterMode === 'only-master' && folder.otherItems.length > 0 ? (
@@ -892,9 +1369,9 @@ function TerminalSessionDrawerComponent({
                     }}
                     style={{
                       flexShrink: 0,
-                      minHeight: '40px',
-                      padding: '0 8px',
-                      borderRadius: '7px',
+                      minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
+                      padding: '0 10px',
+                      borderRadius: '10px',
                       border: othersExpanded
                         ? '1px solid var(--zterm-panel-accent-border)'
                         : '1px solid var(--zterm-panel-border)',
@@ -904,7 +1381,7 @@ function TerminalSessionDrawerComponent({
                       color: othersExpanded
                         ? 'var(--zterm-panel-active-text)'
                         : 'var(--zterm-panel-muted)',
-                      fontSize: '11px',
+                      fontSize: '12px',
                       fontWeight: 700,
                       whiteSpace: 'nowrap',
                     }}
@@ -915,376 +1392,52 @@ function TerminalSessionDrawerComponent({
               </div>
               {isFolderExpanded ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '2px' }}>
-                  {displayedItems.map((session) => {
-            const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
-            const activeRowBackground = slotTone
-              ? slotTone.background
-              : session.active
-              ? 'var(--zterm-panel-active)'
-              : 'var(--zterm-panel-surface)';
-            return (
-            <div
-              key={session.stableKey}
-              role="treeitem"
-              aria-level={3}
-              data-tree-level="3"
-              data-active={session.active ? 'true' : 'false'}
-              data-testid={`terminal-session-drawer-row-${session.id}`}
-              data-terminal-backend={session.terminalBackend ?? 'tmux'}
-              onContextMenu={(event) => {
-                event.preventDefault();
-                setFolderMenu(null);
-                openSlotMenu(session, event.clientX, event.clientY);
-              }}
-              onTouchStart={(event) => {
-                const touch = event.touches[0];
-                if (!touch) {
-                  return;
-                }
-                clearLongPressTimer();
-                longPressTimerRef.current = window.setTimeout(() => {
-                  longPressTimerRef.current = null;
-                  setFolderMenu(null);
-                  openSlotMenu(session, touch.clientX, touch.clientY);
-                }, 420);
-              }}
-              onTouchMove={clearLongPressTimer}
-              onTouchEnd={clearLongPressTimer}
-              onTouchCancel={clearLongPressTimer}
-              style={{
-                minHeight: `${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`,
-                width: '100%',
-                padding: 0,
-                borderRadius: '6px',
-                border: slotTone
-                  ? `1px solid ${slotTone.border}`
-                  : '1px solid transparent',
-                background: slotTone
-                  ? slotTone.background
-                  : session.active
-                  ? activeRowBackground
-                  : 'transparent',
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1fr) auto',
-                alignItems: 'stretch',
-                columnGap: '6px',
-                color: 'var(--zterm-panel-text)',
-                opacity: 1,
-                overflow: 'visible',
-                position: 'relative',
-                boxShadow: session.active && !slotTone
-                  ? 'inset 3px 0 0 var(--zterm-panel-accent)'
-                  : 'none',
-              }}
-            >
-                <AmbientButton
-                  type="button"
-                  data-amb-flat="true"
-                  data-testid={`terminal-session-drawer-select-${session.id}`}
-                  onMouseDown={(event) => {
-                    selectionPressRef.current = {
-                      sessionId: session.id,
-                      x: event.clientX,
-                      y: event.clientY,
-                    };
-                  }}
-                  onTouchStart={(event) => {
-                    const touch = event.touches[0];
-                    if (!touch) {
-                      selectionPressRef.current = null;
-                      return;
-                    }
-                    selectionPressRef.current = {
-                      sessionId: session.id,
-                      x: touch.clientX,
-                      y: touch.clientY,
-                    };
-                  }}
-                  onTouchMove={(event) => {
-                    const press = selectionPressRef.current;
-                    const touch = event.touches[0];
-                    if (
-                      !press
-                      || press.sessionId !== session.id
-                      || !touch
-                      || Math.hypot(touch.clientX - press.x, touch.clientY - press.y) > 8
-                    ) {
-                      selectionPressRef.current = null;
-                    }
-                  }}
-                  onTouchCancel={() => {
-                    if (selectionPressRef.current?.sessionId === session.id) {
-                      selectionPressRef.current = null;
-                    }
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    const pointerClick = event.detail > 0;
-                    const pressStartedOnThisRow = selectionPressRef.current?.sessionId === session.id;
-                    selectionPressRef.current = null;
-                    if (pointerClick && !pressStartedOnThisRow) {
-                      event.preventDefault();
-                      return;
-                    }
-                    if (suppressNextClickRef.current) {
-                      event.preventDefault();
-                      suppressNextClickRef.current = false;
-                      return;
-                    }
-                    onSelectSession(session.id);
-                  }}
-                  style={{
-                  height: '100%',
-                  minHeight: `${TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX}px`,
-                  minWidth: 0,
-                  border: 'none',
-                  background: 'transparent',
-                  color: 'inherit',
-                  textAlign: 'left',
-                  padding: '8px 4px 8px 12px',
-                }}
-              >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: `${TERMINAL_SESSION_DRAWER_ROW_TITLE_FONT_SIZE_PX}px`,
-                    fontWeight: 700,
-                    lineHeight: 1.25,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {session.title}
-                </div>
-                <div
-                  style={{
-                    marginTop: '3px',
-                    fontSize: `${TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX}px`,
-                    lineHeight: 1.25,
-                    color: 'var(--zterm-panel-muted)',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {session.subtitle}
-                </div>
-              </div>
-              </AmbientButton>
-
-              <div
-                data-testid={`terminal-session-drawer-row-chip-${session.id}`}
-                style={{
-                  alignSelf: 'center',
-                  justifySelf: 'end',
-                  display: 'flex',
-                  flexDirection: 'row',
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                  justifyContent: 'flex-end',
-                  gap: '4px',
-                  padding: '4px 0',
-                  borderRadius: 0,
-                  border: 'none',
-                  background: 'transparent',
-                }}
-              >
-                {session.paneLabel ? (
-                  <span
-                    style={{
-                      minWidth: '26px',
-                      padding: '2px 6px',
-                      borderRadius: '999px',
-                      border: '1px solid var(--zterm-panel-accent-border)',
-                      background: 'var(--zterm-panel-accent-soft)',
-                      color: 'var(--zterm-panel-accent)',
-                      textAlign: 'center',
-                      fontSize: '9px',
-                      fontWeight: 800,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {session.paneLabel}
-                  </span>
-                ) : null}
-                {session.collab ? (
-                  <span
-                    data-testid={`terminal-session-drawer-collab-${session.id}`}
-                    aria-label={
-                      session.collab.role === 'ceo'
-                        ? 'CEO'
-                        : session.collab.role === 'master'
-                          ? 'MASTER'
-                          : 'WORKER'
-                    }
-                    style={{
-                      minWidth: '30px',
-                      padding: '2px 6px',
-                      borderRadius: '999px',
-                      textAlign: 'center',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      flexShrink: 0,
-                      border: session.collab.role === 'ceo'
-                        ? '1px solid var(--zterm-panel-accent-border)'
-                        : session.collab.role === 'master'
-                          ? '1px solid var(--zterm-settings-success)'
-                          : '1px solid var(--zterm-settings-warning)',
-                      background: session.collab.role === 'ceo'
-                        ? 'var(--zterm-panel-accent-soft)'
-                        : session.collab.role === 'master'
-                          ? 'var(--zterm-settings-success-soft)'
-                          : 'var(--zterm-settings-warning-soft)',
-                      color: session.collab.role === 'ceo'
-                        ? 'var(--zterm-panel-accent)'
-                        : session.collab.role === 'master'
-                          ? 'var(--zterm-settings-success)'
-                          : 'var(--zterm-settings-warning)',
-                    }}
-                  >
-                    {session.collab.role === 'ceo'
-                      ? 'CEO'
-                      : session.collab.role === 'master'
-                        ? 'MASTER'
-                        : 'WORKER'}
-                  </span>
-                ) : null}
-                {slotTone ? (
-                  <span
-                    data-testid={`terminal-session-drawer-slot-${session.id}`}
-                    style={{
-                      minWidth: '30px',
-                      padding: '2px 6px',
-                      borderRadius: '999px',
-                      background: slotTone.background,
-                      color: slotTone.color,
-                      textAlign: 'center',
-                      fontSize: '9px',
-                      fontWeight: 800,
-                      border: `1px solid ${slotTone.border}`,
-                      flexShrink: 0,
-                    }}
-                  >
-                    {slotTone.label}
-                  </span>
-                ) : null}
-                {onHideSession ? (
-                  <AmbientButton
-                    type="button"
-                    data-amb-flat="true"
-                    aria-label={`隐藏 ${session.title}`}
-                    data-testid={`terminal-session-drawer-hide-${session.id}`}
-                    onTouchStart={(event) => {
-                      event.stopPropagation();
-                      clearLongPressTimer();
-                    }}
-                    onTouchEnd={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      hideTouchHandledRef.current = session.id;
-                      onHideSession(session.id);
-                    }}
-                    onTouchCancel={(event) => {
-                      event.stopPropagation();
-                      if (hideTouchHandledRef.current === session.id) {
-                        hideTouchHandledRef.current = null;
-                      }
-                    }}
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      if (hideTouchHandledRef.current === session.id) {
-                        hideTouchHandledRef.current = null;
-                        return;
-                      }
-                      onHideSession(session.id);
-                    }}
-                    style={{
-                      width: '40px',
-                      minWidth: '40px',
-                      maxWidth: '40px',
-                      height: '40px',
-                      minHeight: '40px',
-                      maxHeight: '40px',
-                      padding: 0,
-                      border: 'none',
-                      borderRadius: '8px',
-                      background: 'transparent',
-                      color: 'var(--zterm-panel-muted)',
-                      pointerEvents: 'auto',
-                      flexShrink: 0,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                    className="zterm-session-drawer-icon-button"
-                  >
-                    <DrawerHideIcon />
-                  </AmbientButton>
-                ) : null}
-                <AmbientButton
-                  type="button"
-                  data-amb-flat="true"
-                  aria-label={`关闭 ${session.title}`}
-                  data-testid={`terminal-session-drawer-close-${session.id}`}
-                  onTouchStart={(event) => {
-                    event.stopPropagation();
-                    clearLongPressTimer();
-                  }}
-                  onTouchEnd={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    closeTouchHandledRef.current = session.id;
-                    activateCloseSession(session.id);
-                  }}
-                  onTouchCancel={(event) => {
-                    event.stopPropagation();
-                    if (closeTouchHandledRef.current === session.id) {
-                      closeTouchHandledRef.current = null;
-                    }
-                  }}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    if (closeTouchHandledRef.current === session.id) {
-                      closeTouchHandledRef.current = null;
-                      return;
-                    }
-                    activateCloseSession(session.id);
-                  }}
-                  style={{
-                    width: '40px',
-                    minWidth: '40px',
-                    maxWidth: '40px',
-                    height: '40px',
-                    minHeight: '40px',
-                    maxHeight: '40px',
-                    padding: 0,
-                    border: 'none',
-                    borderRadius: '8px',
-                    background: 'transparent',
-                    color: 'var(--zterm-panel-danger)',
-                    pointerEvents: 'auto',
-                    flexShrink: 0,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                  className="zterm-session-drawer-icon-button"
-                >
-                  <DrawerCloseIcon />
-                </AmbientButton>
-              </div>
-            </div>
-            );
-                  })}
+                  {activeFilterMode === 'only-master' && folder.items.length === 0 ? (
+                    <div
+                      data-testid={`terminal-session-drawer-folder-no-master-${folder.cwd}`}
+                      style={{
+                        margin: '2px 0',
+                        padding: '8px 12px',
+                        borderRadius: '10px',
+                        border: '1px dashed var(--zterm-panel-border)',
+                        background: 'var(--zterm-panel-surface)',
+                        color: 'var(--zterm-panel-muted)',
+                        fontSize: '12px',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      该项目无 master
+                    </div>
+                  ) : null}
+                  {displayedItems.map(renderSessionRow)}
+                  {folder.unclassifiedItems.length > 0 ? (
+                    <>
+                      <div
+                        data-testid={`terminal-session-drawer-folder-unclassified-${folder.cwd}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '8px 8px 0',
+                          color: 'var(--zterm-panel-muted)',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                        }}
+                      >
+                        未识别（无 Collab 身份）
+                        <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                          {folder.unclassifiedItems.length}
+                        </span>
+                      </div>
+                      {folder.unclassifiedItems.map(renderSessionRow)}
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>
             );
           })}
-          {visibleSessions.length === 0 && (
+          {cwdGroups.length === 0 && (
             (activeFilterMode !== 'all' && hasKnownSessions) ? (
               <div
                 data-testid="terminal-session-drawer-empty-filter"
@@ -1303,13 +1456,18 @@ function TerminalSessionDrawerComponent({
                 }}
               >
                 <span>当前筛选没有匹配的 session。</span>
+                <span>
+                  {activeFilterMode === 'only-master'
+                    ? '未识别 Collab 身份的会话仍会单独标记；切换到“全部”可查看 worker 会话。'
+                    : '切换到“全部”可查看被隐藏的 worker 会话。'}
+                </span>
                 <AmbientButton
                   type="button"
                   data-amb-flat="true"
                   data-testid="terminal-session-drawer-empty-filter-reset"
                   onClick={() => onFilterModeChange?.('all')}
                   style={{
-                    minHeight: '36px',
+                    minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
                     padding: '0 14px',
                     borderRadius: '10px',
                     border: '1px solid var(--zterm-panel-accent-border)',
@@ -1347,7 +1505,7 @@ function TerminalSessionDrawerComponent({
                   data-testid="terminal-session-drawer-empty-hidden-restore"
                   onClick={onRestoreAllHiddenSessions}
                   style={{
-                    minHeight: '36px',
+                    minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
                     padding: '0 14px',
                     borderRadius: '10px',
                     border: '1px solid var(--zterm-panel-accent-border)',
@@ -1379,25 +1537,58 @@ function TerminalSessionDrawerComponent({
             )
           )}
         </div>
+        </div>
         {hiddenSessionCount > 0 ? (
           <div
             data-testid="terminal-session-drawer-hidden-tray"
             style={{
-              margin: '4px 0 0',
-              padding: '8px 2px 2px',
-              borderRadius: 0,
-              border: 'none',
+              flexShrink: 0,
               borderTop: '1px solid var(--zterm-panel-border)',
-              background: 'transparent',
+              background: 'var(--zterm-panel-surface)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '6px',
+              maxHeight: '40vh',
+              minHeight: 0,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--zterm-panel-muted)' }}>
-                已隐藏 {hiddenSessionCount}
-              </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '4px 8px' }}>
+              <AmbientButton
+                type="button"
+                data-amb-flat="true"
+                aria-expanded={hiddenTrayExpanded}
+                aria-label={`${hiddenTrayExpanded ? '收起' : '展开'}已隐藏会话`}
+                data-testid="terminal-session-drawer-hidden-tray-toggle"
+                onClick={() => setHiddenTrayExpanded((current) => !current)}
+                style={{
+                  flex: '1 1 0',
+                  minWidth: 0,
+                  minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
+                  padding: '0 4px',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--zterm-panel-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  textAlign: 'left',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                }}
+              >
+                <span
+                  aria-hidden="true"
+                  style={{
+                    display: 'inline-flex',
+                    transform: hiddenTrayExpanded ? 'rotate(90deg)' : 'none',
+                    transition: 'transform 160ms cubic-bezier(0.2, 0, 0, 1)',
+                  }}
+                >
+                  <DrawerChevronIcon size={14} />
+                </span>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  已隐藏 {hiddenSessionCount}
+                </span>
+              </AmbientButton>
               <AmbientButton
                 type="button"
                 data-amb-flat="true"
@@ -1405,13 +1596,14 @@ function TerminalSessionDrawerComponent({
                 data-testid="terminal-session-drawer-restore-hidden"
                 onClick={onRestoreAllHiddenSessions}
                 style={{
-                  minHeight: '40px',
+                  flexShrink: 0,
+                  minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
                   padding: '0 12px',
-                  borderRadius: '6px',
+                  borderRadius: '10px',
                   border: '1px solid var(--zterm-panel-border)',
-                  background: 'transparent',
+                  background: 'var(--zterm-panel-bg)',
                   color: 'var(--zterm-panel-text)',
-                  fontSize: '11px',
+                  fontSize: '12px',
                   fontWeight: 700,
                   whiteSpace: 'nowrap',
                 }}
@@ -1419,50 +1611,69 @@ function TerminalSessionDrawerComponent({
                 恢复全部
               </AmbientButton>
             </div>
-            {hiddenSessionNames.map((hiddenName) => (
+            {hiddenTrayExpanded ? (
               <div
-                key={hiddenName}
-                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                style={{
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '4px',
+                  padding: '0 8px 8px',
+                }}
               >
-                <span
-                  style={{
-                    flex: '1 1 0',
-                    minWidth: 0,
-                    fontSize: '12px',
-                    color: 'var(--zterm-panel-text)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {hiddenName}
-                </span>
-                <AmbientButton
-                  type="button"
-                  data-amb-flat="true"
-                  aria-label={`恢复 ${hiddenName}`}
-                  data-testid={terminalSessionDrawerHiddenRestoreTestId(hiddenName)}
-                  onClick={() => onRestoreHiddenSession?.(hiddenName)}
-                  style={{
-                    flexShrink: 0,
-                    minHeight: '40px',
-                    padding: '0 12px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--zterm-panel-border)',
-                    background: 'transparent',
-                    color: 'var(--zterm-panel-text)',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  恢复
-                </AmbientButton>
+                {hiddenSessionNames.map((hiddenName) => (
+                  <div
+                    key={hiddenName}
+                    style={{ display: 'flex', alignItems: 'center', gap: '8px', minHeight: `${DRAWER_TOUCH_TARGET_PX}px` }}
+                  >
+                    <span
+                      title={hiddenName}
+                      style={{
+                        flex: '1 1 0',
+                        minWidth: 0,
+                        fontSize: '12px',
+                        color: 'var(--zterm-panel-text)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {hiddenName}
+                    </span>
+                    <AmbientButton
+                      type="button"
+                      data-amb-flat="true"
+                      aria-label={`恢复 ${hiddenName}`}
+                      data-testid={terminalSessionDrawerHiddenRestoreTestId(hiddenName)}
+                      onClick={() => onRestoreHiddenSession?.(hiddenName)}
+                      style={{
+                        flexShrink: 0,
+                        minHeight: `${DRAWER_TOUCH_TARGET_PX}px`,
+                        minWidth: `${DRAWER_TOUCH_TARGET_PX}px`,
+                        padding: '0 12px',
+                        borderRadius: '10px',
+                        border: '1px solid var(--zterm-panel-border)',
+                        background: 'var(--zterm-panel-bg)',
+                        color: 'var(--zterm-panel-text)',
+                        fontSize: '12px',
+                        fontWeight: 700,
+                        whiteSpace: 'nowrap',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <DrawerRestoreIcon size={14} />
+                      <span>恢复</span>
+                    </AmbientButton>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : null}
           </div>
         ) : null}
-        </div>
         {folderMenu ? (
           <TerminalSessionDrawerFolderMenu
             cwd={folderMenu.cwd}
@@ -1480,11 +1691,12 @@ function TerminalSessionDrawerComponent({
             axis={sessionGroupLayoutAxis}
             onAssign={(sessionId, slot) => {
               onAssignSessionGroupSlot?.(sessionId, slot);
-              suppressNextClickRef.current = true;
             }}
             onHide={(sessionId) => {
               onHideSession?.(sessionId);
-              suppressNextClickRef.current = true;
+            }}
+            onCloseSession={(sessionId) => {
+              activateCloseSession(sessionId);
             }}
             onClose={() => setSlotMenu(null)}
           />
@@ -1535,6 +1747,7 @@ function TerminalSessionDrawerComponent({
               width: '100%',
               height: 'auto',
               minHeight: '56px',
+              marginTop: 'auto',
               borderRadius: 0,
               padding: `8px 10px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,
               borderTop: '1px solid var(--zterm-panel-border)',

@@ -2769,7 +2769,8 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(resolvedSwipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     await waitFor(() => expect(screen.getByText('remote-beta')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:remote-beta'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-remote:daemon:daemon-a::session:remote-beta'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
     fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
     expect(onCloseSession).not.toHaveBeenCalled();
@@ -2834,7 +2835,8 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-s1'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
 
     expect(onCloseSession).toHaveBeenCalledWith('s1', 'terminal-session-drawer-close-button');
     expect(onCloseSession).toHaveBeenCalledTimes(1);
@@ -2889,7 +2891,8 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-s1'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
 
     expect(onCloseSession).toHaveBeenCalledWith('s1', 'terminal-session-drawer-close-button');
     expect(onCloseDrawerRemoteSession).not.toHaveBeenCalled();
@@ -2945,7 +2948,8 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     await waitFor(() => expect(screen.getByText('remote-beta')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:remote-beta'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-remote:daemon:daemon-a::session:remote-beta'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
     fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
     await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('无法关闭 remote-beta'));
@@ -3238,7 +3242,7 @@ describe('TerminalPage portrait session drawer', () => {
     return page;
   }
 
-  it('projects only-master drawer rows and hides subagent plus unclassified names', async () => {
+  it('projects only-master drawer rows, hides worker rows, and keeps unclassified sessions visible', async () => {
     renderVisibilityFixture({
       sessionDrawerFilterConfig: visibilityFilterConfig,
     });
@@ -3246,14 +3250,16 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-row-master')).toBeTruthy());
     expect(screen.queryByTestId('terminal-session-drawer-row-sub')).toBeNull();
-    expect(screen.queryByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:OneStop-1')).toBeNull();
-    expect(screen.queryByText('OneStop-1')).toBeNull();
-    // 1 visible master row out of the 3 pre-filter catalog sessions.
-    expect(screen.getByTestId('terminal-session-drawer-count').textContent).toBe('显示 1 / 3 个会话');
+    // A real session without a Collab projection stays visible with an explicit marker.
+    expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:OneStop-1')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-folder-unclassified-/Users/jason')).toBeTruthy();
+    expect(screen.getByText('OneStop-1')).toBeTruthy();
+    // 2 visible rows (master + unclassified) out of the 3 catalog sessions.
+    expect(screen.getByTestId('terminal-session-drawer-count').textContent).toBe('显示 2 / 3 个会话');
 
-    // Expanding other windows under the project folder reveals subagent and unclassified rows on demand.
+    // Expanding other windows under the project folder reveals the worker row on demand.
     const expandOthers = screen.getByTestId('terminal-session-drawer-folder-expand-others-/Users/jason');
-    expect(expandOthers.textContent).toContain('+2 窗口');
+    expect(expandOthers.textContent).toContain('+1 窗口');
     fireEvent.click(expandOthers);
     expect(screen.getByTestId('terminal-session-drawer-row-sub')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:OneStop-1')).toBeTruthy();
@@ -3321,10 +3327,12 @@ describe('TerminalPage portrait session drawer', () => {
     swipeOpenPortraitDrawer();
     await waitFor(() => expect(
       screen.getByTestId('terminal-session-drawer-count').textContent,
-    ).toBe('显示 0 / 3 个会话'));
-    // No master row survived the stale-role clear.
-    expect(screen.queryByTestId('terminal-session-drawer-row-master')).toBeNull();
-    expect(screen.queryByTestId('terminal-session-drawer-collab-master')).toBeNull();
+    ).toBe('显示 3 / 3 个会话'));
+    // The row survives, but the stale master projection must not resurrect.
+    expect(screen.getByTestId('terminal-session-drawer-row-master')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-collab-master').textContent).toBe('未识别');
+    // Without any projection every real row is still visible as 未识别.
+    expect(screen.getByTestId('terminal-session-drawer-folder-unclassified-/Users/jason')).toBeTruthy();
     view.unmount();
   });
 
@@ -3387,10 +3395,11 @@ describe('TerminalPage portrait session drawer', () => {
       .toBeTruthy();
     expect(screen.queryByTestId('terminal-session-drawer-empty-hidden')).toBeNull();
     // The hidden name remains restorable from the tray.
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-hidden-tray-toggle'));
     expect(screen.getByTestId('terminal-session-drawer-restore-hidden-stale-hidden')).toBeTruthy();
   });
 
-  it('shows the role-filter empty state for the selected host only', async () => {
+  it('shows a no-master notice and reveal control for a host with only workers', async () => {
     render(
       <TerminalPage
         sessions={[makeSession('live')]}
@@ -3412,6 +3421,11 @@ describe('TerminalPage portrait session drawer', () => {
             hostId: 'daemon-workers',
             deviceName: 'Workers Host',
             sessions: ['zterm-1', 'zterm-2', 'zterm-3'],
+            sessionCollab: {
+              'zterm-1': { role: 'worker', displayName: 'Alice' },
+              'zterm-2': { role: 'worker', displayName: 'Bob' },
+              'zterm-3': { role: 'worker', displayName: 'Carol' },
+            },
           }),
         ]}
         onSessionDrawerFilterConfigChange={vi.fn()}
@@ -3433,9 +3447,11 @@ describe('TerminalPage portrait session drawer', () => {
 
     const workersHost = await screen.findByTestId('terminal-session-drawer-host-daemon-workers');
     fireEvent.click(workersHost);
-    expect(await screen.findByTestId('terminal-session-drawer-empty-filter')).toBeTruthy();
-    expect(screen.getByTestId('terminal-session-drawer-empty-filter').textContent)
-      .toContain('当前筛选没有匹配的 session');
+    expect(await screen.findByTestId('terminal-session-drawer-folder-no-master-/Users/jason')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-folder-no-master-/Users/jason').textContent)
+      .toContain('该项目无 master');
+    expect(screen.getByTestId('terminal-session-drawer-folder-expand-others-/Users/jason').textContent)
+      .toContain('+3 窗口');
     expect(screen.queryByTestId('terminal-session-drawer-empty-host')).toBeNull();
   });
 
@@ -3461,8 +3477,9 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-view-master')).toBeTruthy();
 
     swipeOpenPortraitDrawer();
-    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-close-master')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-master'));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-more-master')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-master'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
 
     expect(onCloseSession).toHaveBeenCalledWith('master', 'terminal-session-drawer-close-button');
     expect(onCloseSession).not.toHaveBeenCalledWith('sub', expect.anything());
@@ -3487,7 +3504,8 @@ describe('TerminalPage portrait session drawer', () => {
 
     swipeOpenPortraitDrawer();
     await waitFor(() => expect(screen.getByText('OneStop-1')).toBeTruthy());
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:OneStop-1'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-remote:daemon:daemon-a::session:OneStop-1'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
     fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
     await waitFor(() => expect(screen.getByTestId('zterm-dialog-message').textContent).toContain('无法关闭 OneStop-1'));
@@ -3518,7 +3536,7 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-row-master')).toBeTruthy());
     expect(screen.queryByTestId('terminal-session-drawer-row-sub')).toBeNull();
-    expect(screen.queryByText('OneStop-1')).toBeNull();
+    expect(screen.getByText('OneStop-1')).toBeTruthy();
     expect(
       getItemSpy.mock.calls.some((call) => call[0] === SESSION_DRAWER_FILTER_STORAGE_KEY),
     ).toBe(false);
@@ -3622,12 +3640,14 @@ describe('TerminalPage portrait session drawer', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-row-master')).toBeTruthy());
     const masterBadge = screen.getByTestId('terminal-session-drawer-collab-master');
-    expect(masterBadge.textContent).toBe('MASTER');
+    expect(masterBadge.textContent).toBe('Master');
     const workerBadge = screen.getByTestId('terminal-session-drawer-collab-sub');
-    expect(workerBadge.textContent).toBe('WORKER');
-    expect(screen.queryByTestId('terminal-session-drawer-collab-remote:daemon:daemon-a::session:OneStop-1')).toBeNull();
+    expect(workerBadge.textContent).toBe('Worker');
+    expect(screen.getByTestId('terminal-session-drawer-collab-remote:daemon:daemon-a::session:OneStop-1').textContent)
+      .toBe('未识别');
 
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-hide-master'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-master'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-hide'));
     expect(onSessionDrawerFilterConfigChange).toHaveBeenCalledWith(expect.objectContaining({
       hiddenSessionNames: ['zterm-3'],
     }));
@@ -3641,6 +3661,7 @@ describe('TerminalPage portrait session drawer', () => {
       onSessionDrawerFilterConfigChange,
     });
     expect(await screen.findByTestId('terminal-session-drawer-hidden-tray')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-hidden-tray-toggle'));
     fireEvent.click(screen.getByTestId('terminal-session-drawer-restore-hidden-zterm-3'));
     expect(onSessionDrawerFilterConfigChange).toHaveBeenCalledWith(expect.objectContaining({
       hiddenSessionNames: ['OneStop-1'],
@@ -3887,7 +3908,8 @@ it('routes a Herdr remote drawer close through the typed backend target', async 
 
   const herdrRow = await screen.findByTestId('terminal-session-drawer-row-remote:daemon:daemon-a::session:herdr-only');
   await waitFor(() => expect(within(herdrRow).getByText('herdr-only')).toBeTruthy());
-  fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:herdr-only'));
+  fireEvent.click(screen.getByTestId('terminal-session-drawer-more-remote:daemon:daemon-a::session:herdr-only'));
+  fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
   fireEvent.click(await screen.findByTestId('zterm-dialog-confirm'));
 
   expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
@@ -3949,7 +3971,8 @@ it('surfaces the Herdr backend label in the close dialog and keeps the dialog on
   });
   fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-  fireEvent.click(screen.getByTestId('terminal-session-drawer-close-remote:daemon:daemon-a::session:herdr-only'));
+  fireEvent.click(screen.getByTestId('terminal-session-drawer-more-remote:daemon:daemon-a::session:herdr-only'));
+  fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
 
   const dialog = await screen.findByTestId('zterm-dialog');
   const dialogMessage = screen.getByTestId('zterm-dialog-message').textContent || '';
