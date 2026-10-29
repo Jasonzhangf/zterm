@@ -65,7 +65,7 @@ describe('multi-pane refresh truth', () => {
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
-        sessionHeadStoreRef: { current: { getLiveHead: () => null } },
+        sessionHeadStoreRef: { current: { getLiveHead: () => ({ revision: 2, latestEndIndex: 1, availableStartIndex: 0, availableEndIndex: 1, seenAt: 1 }) } },
         sessionPullStateRef: { current: new Map() },
         tailRefreshStoreRef: { current: createSessionTailRefreshStore() },
       };
