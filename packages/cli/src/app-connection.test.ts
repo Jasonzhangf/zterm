@@ -119,4 +119,78 @@ describe('AppClientConnection', () => {
     await expect(pending).rejects.toMatchObject({ code: 'unauthorized' });
     expect(socket.terminated).toBe(true);
   });
+
+  it('rejects a send request answered by an app-pong with the same requestId', async () => {
+    const socket = new FakeWebSocket();
+    const connection = await AppClientConnection.connect({
+      config,
+      createWebSocket: () => socket as unknown as WsType,
+    });
+    const pending = connection.request({
+      type: 'app-send-message',
+      payload: { requestId: 'send-1', messageId: 'msg-1', subject: 's', body: 'b' },
+    });
+    socket.receive({ type: 'app-pong', payload: { requestId: 'send-1', sentAt: 1, receivedAt: 2 } });
+
+    await expect(pending).rejects.toMatchObject({ code: 'unexpected_response_type' });
+  });
+
+  it('rejects a send request answered by an app-status-result with the same requestId', async () => {
+    const socket = new FakeWebSocket();
+    const connection = await AppClientConnection.connect({
+      config,
+      createWebSocket: () => socket as unknown as WsType,
+    });
+    const pending = connection.request({
+      type: 'app-send-message',
+      payload: { requestId: 'send-1', messageId: 'msg-1', subject: 's', body: 'b' },
+    });
+    socket.receive({ type: 'app-status-result', payload: { requestId: 'send-1', messageId: 'msg-1', found: true } });
+
+    await expect(pending).rejects.toMatchObject({ code: 'unexpected_response_type' });
+  });
+
+  it('rejects a send result whose messageId does not match the request', async () => {
+    const socket = new FakeWebSocket();
+    const connection = await AppClientConnection.connect({
+      config,
+      createWebSocket: () => socket as unknown as WsType,
+    });
+    const pending = connection.request({
+      type: 'app-send-message',
+      payload: { requestId: 'send-1', messageId: 'msg-1', subject: 's', body: 'b' },
+    });
+    socket.receive({
+      type: 'app-send-result',
+      payload: { requestId: 'send-1', messageId: 'other-msg', status: 'received', stage: 'received' },
+    });
+
+    await expect(pending).rejects.toMatchObject({ code: 'response_id_mismatch' });
+  });
+
+  it('settles a send request on a matching app-send-result and a status request on app-status-result', async () => {
+    const sendSocket = new FakeWebSocket();
+    const sendConnection = await AppClientConnection.connect({
+      config,
+      createWebSocket: () => sendSocket as unknown as WsType,
+    });
+    const sendPending = sendConnection.request({
+      type: 'app-send-message',
+      payload: { requestId: 'send-1', messageId: 'msg-1', subject: 's', body: 'b' },
+    });
+    sendSocket.receive({ type: 'app-send-result', payload: { requestId: 'send-1', messageId: 'msg-1', status: 'received', stage: 'received' } });
+    await expect(sendPending).resolves.toMatchObject({ type: 'app-send-result', payload: { messageId: 'msg-1' } });
+
+    const statusSocket = new FakeWebSocket();
+    const statusConnection = await AppClientConnection.connect({
+      config,
+      createWebSocket: () => statusSocket as unknown as WsType,
+    });
+    const statusPending = statusConnection.request({
+      type: 'app-status',
+      payload: { requestId: 'status-1', messageId: 'msg-1' },
+    });
+    statusSocket.receive({ type: 'app-status-result', payload: { requestId: 'status-1', messageId: 'msg-1', found: true } });
+    await expect(statusPending).resolves.toMatchObject({ type: 'app-status-result' });
+  });
 });

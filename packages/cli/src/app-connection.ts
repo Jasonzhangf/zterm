@@ -18,7 +18,37 @@ type PendingRequest = {
   resolve: (frame: AppServerFrame) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+  allowedTypes: ReadonlySet<AppServerFrame['type']>;
+  expectedMessageId?: string;
 };
+
+type SettlementContract = {
+  allowedTypes: ReadonlySet<AppServerFrame['type']>;
+  expectedMessageId?: string;
+};
+
+/**
+ * Bind each outgoing request to the response frame type(s) that may legitimately settle it.
+ * A same-requestId frame of any other type must not resolve the request, otherwise a stray
+ * `app-pong`/`app-status-result` could be reported as a successful send.
+ */
+function settlementFor(frame: AppClientFrame): SettlementContract {
+  switch (frame.type) {
+    case 'app-send-message':
+    case 'app-send-file-start':
+    case 'app-send-file-chunk':
+    case 'app-send-file-commit':
+      return { allowedTypes: new Set(['app-send-result']), expectedMessageId: frame.payload.messageId };
+    case 'app-ack':
+    case 'app-consume':
+    case 'app-status':
+      return { allowedTypes: new Set(['app-status-result']) };
+    case 'app-ping':
+      return { allowedTypes: new Set(['app-pong']) };
+    default:
+      return { allowedTypes: new Set() };
+  }
+}
 
 const CONNECT_TIMEOUT_MS = 10_000;
 
@@ -105,9 +135,34 @@ export class AppClientConnection {
       if (typeof requestId !== 'string') return;
       const pending = this.pending.get(requestId);
       if (!pending) return;
+      if (frame.type !== 'app-error') {
+        if (!pending.allowedTypes.has(frame.type)) {
+          this.settleReject(requestId, pending, new AppCliError(
+            'unexpected_response_type',
+            `local /app returned ${frame.type} while waiting for ${[...pending.allowedTypes].join('/')}`,
+          ));
+          return;
+        }
+        if (pending.expectedMessageId !== undefined) {
+          const responseMessageId = (frame.payload as { messageId?: unknown }).messageId;
+          if (responseMessageId !== pending.expectedMessageId) {
+            this.settleReject(requestId, pending, new AppCliError(
+              'response_id_mismatch',
+              `local /app returned a response for messageId ${String(responseMessageId)} while waiting for ${pending.expectedMessageId}`,
+            ));
+            return;
+          }
+        }
+      }
       clearTimeout(pending.timer);
       this.pending.delete(requestId);
       pending.resolve(frame);
+  }
+
+  private settleReject(requestId: string, pending: PendingRequest, error: AppCliError) {
+    clearTimeout(pending.timer);
+    this.pending.delete(requestId);
+    pending.reject(error);
   }
 
   private rejectAllPending(error: AppCliError) {
@@ -227,12 +282,13 @@ export class AppClientConnection {
       return Promise.reject(new AppCliError('invalid_frame', 'requestId is required', 2));
     }
     return new Promise<AppServerFrame>((resolve, reject) => {
+      const contract = settlementFor(frame);
       const timer = setTimeout(() => {
         this.pending.delete(requestId);
         reject(new AppCliError('result_unknown', 'local /app request timed out'));
       }, this.requestTimeoutMs);
       timer.unref?.();
-      this.pending.set(requestId, { resolve, reject, timer });
+      this.pending.set(requestId, { resolve, reject, timer, allowedTypes: contract.allowedTypes, expectedMessageId: contract.expectedMessageId });
       this.ws.send(JSON.stringify(frame), (error) => {
         if (!error) return;
         const pending = this.pending.get(requestId);

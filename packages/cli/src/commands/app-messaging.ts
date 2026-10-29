@@ -310,7 +310,11 @@ async function runFileTransfer(
       payload: appErrorPayload({ code: 'invalid_frame', stage: 'cli', message: 'unexpected file-start response', messageId, transferId: messageId }),
     };
   }
-  if (start.payload.status === 'received' || start.payload.status === 'delivered' || start.payload.status === 'consumed') {
+  // Only continue into chunk/commit when the remote is durably receiving this transfer.
+  // For any other start outcome (received/delivered/consumed/resultUnknown/rejected/unreachable)
+  // return the start frame unchanged so its original transferId survives and no downstream
+  // chunk/commit can overwrite an uncertain start with invalid_state.
+  if (start.payload.status !== 'receiving') {
     return start;
   }
   let offset = start.payload.persistedOffset ?? 0;
@@ -518,7 +522,7 @@ async function handleStreamCommand(
   line: string,
   context: AppCommandContext,
   connection: AppClientConnection,
-) {
+): Promise<number | undefined> {
   let command: Record<string, unknown>;
   try {
     const parsed = JSON.parse(line) as unknown;
@@ -540,17 +544,29 @@ async function handleStreamCommand(
         typeof command.daemonHostId === 'string' ? command.daemonHostId : undefined,
       );
       const messageId = requireIdentitySegment(typeof command.messageId === 'string' ? command.messageId : randomUUID());
-      const result = await connection.request({
-        type: 'app-send-message',
-        payload: {
-          requestId: requestId(),
-          messageId,
-          target,
-          subject: typeof command.subject === 'string' ? command.subject : '',
-          body: typeof command.body === 'string' ? command.body : '',
-        },
-      });
-      await emitFrame(context.stdout, result);
+      const sendRequestId = requestId();
+      try {
+        const result = await connection.request({
+          type: 'app-send-message',
+          payload: {
+            requestId: sendRequestId,
+            messageId,
+            target,
+            subject: typeof command.subject === 'string' ? command.subject : '',
+            body: typeof command.body === 'string' ? command.body : '',
+          },
+        });
+        await emitFrame(context.stdout, result);
+      } catch (error) {
+        if (error instanceof AppCliError && error.code === 'result_unknown') {
+          await emitFrame(context.stdout, {
+            type: 'app-send-result',
+            payload: { requestId: sendRequestId, messageId, status: 'resultUnknown', stage: 'result_unknown' },
+          });
+          return 3;
+        }
+        throw error;
+      }
       return;
     }
     if (kind === 'send-file') {
@@ -562,15 +578,26 @@ async function handleStreamCommand(
         typeof command.daemonHostId === 'string' ? command.daemonHostId : undefined,
       );
       const messageId = requireIdentitySegment(typeof command.messageId === 'string' ? command.messageId : randomUUID());
-      const result = await runFileTransfer(
-        connection,
-        target,
-        messageId,
-        typeof command.subject === 'string' ? command.subject : '',
-        command.file,
-        described,
-      );
-      await emitFrame(context.stdout, result);
+      try {
+        const result = await runFileTransfer(
+          connection,
+          target,
+          messageId,
+          typeof command.subject === 'string' ? command.subject : '',
+          command.file,
+          described,
+        );
+        await emitFrame(context.stdout, result);
+      } catch (error) {
+        if (error instanceof AppCliError && error.code === 'result_unknown') {
+          await emitFrame(context.stdout, {
+            type: 'app-send-result',
+            payload: { requestId: requestId(), messageId, transferId: messageId, status: 'resultUnknown', stage: 'result_unknown' },
+          });
+          return 3;
+        }
+        throw error;
+      }
       return;
     }
     if (kind === 'ack' || kind === 'consume') {
@@ -649,7 +676,8 @@ async function runStream(args: readonly string[], context: AppCommandContext): P
     for await (const line of lines) {
       if (aborted || context.signal.aborted) break;
       if (!line.trim()) continue;
-      await handleStreamCommand(line, context, connection);
+      const exitSignal = await handleStreamCommand(line, context, connection);
+      if (exitSignal !== undefined) return exitSignal;
     }
     return aborted || context.signal.aborted ? 130 : 1;
   } finally {

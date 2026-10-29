@@ -8,6 +8,7 @@ import type { AccountClient } from '../account-client.js';
 import type { AppClientConnection } from '../app-connection.js';
 import { AppCliError } from '../app-target-resolution.js';
 import {
+  appErrorPayload,
   type AppClientFrame,
   type AppServerFrame,
 } from '../../../shared/src/connection/app-protocol.js';
@@ -363,5 +364,86 @@ describe('zterm app CLI surface', () => {
     expect(frames[0]).toMatchObject({ type: 'app-ready', payload: { requestId: 'hello-1' } });
     expect(frames.map((frame) => frame.type)).toEqual(['app-ready', 'app-status-result', 'app-status-result']);
     expect(prepared.stderr.text()).toBe('');
+  });
+
+  it('emits structured resultUnknown with the original messageId when a stream send drops before receipt', async () => {
+    const prepared = await context({
+      stdin: JSON.stringify({ type: 'send', peer: 'device-peer', subject: 'subject', body: 'body' }),
+      request: () => {
+        throw new AppCliError('result_unknown', 'local /app connection closed before receipt');
+      },
+    });
+    const code = await runAppCommand(['stream', '--json'], prepared.context);
+    expect(code).toBe(3);
+    const frames = ndjson(prepared.stdout.text());
+    const result = frames.at(-1);
+    expect(result).toMatchObject({ type: 'app-send-result', payload: { status: 'resultUnknown', stage: 'result_unknown' } });
+    const sent = prepared.frames[0]!;
+    const originalMessageId = sent.type === 'app-send-message' ? sent.payload.messageId : '';
+    expect(originalMessageId.length).toBeGreaterThan(0);
+    expect(result).toMatchObject({ payload: { messageId: originalMessageId } });
+  });
+
+  it('emits structured resultUnknown with the original transferId when a stream send-file drops before receipt', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'zterm-cli-stream-file-'));
+    roots.push(home);
+    const filePath = join(home, 'payload.bin');
+    await writeFile(filePath, Buffer.alloc(16));
+    const prepared = await context({
+      stdin: JSON.stringify({ type: 'send-file', peer: 'device-peer', file: filePath, subject: 'file' }),
+      request: () => {
+        throw new AppCliError('result_unknown', 'local /app connection closed before receipt');
+      },
+    });
+    const code = await runAppCommand(['stream', '--json'], prepared.context);
+    expect(code).toBe(3);
+    const frames = ndjson(prepared.stdout.text());
+    const result = frames.at(-1);
+    expect(result).toMatchObject({ type: 'app-send-result', payload: { status: 'resultUnknown', stage: 'result_unknown' } });
+    const sent = prepared.frames[0]!;
+    const originalTransferId = sent.type === 'app-send-file-start' ? sent.payload.file.transferId : '';
+    expect(originalTransferId.length).toBeGreaterThan(0);
+    expect(result).toMatchObject({ payload: { transferId: originalTransferId, messageId: originalTransferId } });
+  });
+
+  it('returns structured resultUnknown (exit 3) when file-start reports resultUnknown with no chunk/commit fallback', async () => {
+    for (const [label, bytes] of [['empty', 0], ['non-empty', 48_000]] as const) {
+      const home = await mkdtemp(join(tmpdir(), 'zterm-cli-start-unknown-'));
+      roots.push(home);
+      const filePath = join(home, 'payload.bin');
+      await writeFile(filePath, Buffer.alloc(bytes));
+      const prepared = await context({
+        request: (frame) => {
+          if (frame.type === 'app-send-file-start') {
+            return {
+              type: 'app-send-result',
+              payload: {
+                requestId: frame.payload.requestId,
+                messageId: frame.payload.messageId,
+                transferId: frame.payload.file.transferId,
+                status: 'resultUnknown',
+                stage: 'result_unknown',
+              },
+            };
+          }
+          return {
+            type: 'app-error',
+            payload: appErrorPayload({ code: 'invalid_state', stage: 'file-chunk', message: 'no active transfer', messageId: 'messageId' in frame.payload ? frame.payload.messageId : undefined, transferId: 'transferId' in frame.payload ? frame.payload.transferId : undefined }),
+          };
+        },
+      });
+      const code = await runAppCommand([
+        'send-file', '--peer', 'device-peer', '--message-id', `${label}-id`,
+        '--file', filePath, '--subject', 'file',
+      ], prepared.context);
+      expect(code, `${label} file should exit 3`).toBe(3);
+      const last = ndjson(prepared.stdout.text()).at(-1);
+      expect(last, `${label} file should end on structured resultUnknown`).toMatchObject({
+        type: 'app-send-result',
+        payload: { status: 'resultUnknown', stage: 'result_unknown' },
+      });
+      // The downstream invalid_state must not overwrite the start result.
+      expect(JSON.stringify(prepared.stdout.text())).not.toContain('invalid_state');
+    }
   });
 });
