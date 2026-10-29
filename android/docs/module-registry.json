@@ -3250,6 +3250,7 @@
       ],
       "required_gates": [
         "scripts/app-version.test.ts",
+        "scripts/prepare-update-bundle.test.mjs",
         "scripts/verify-update-bundle.mjs",
         "src/lib/module-registry-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts"
