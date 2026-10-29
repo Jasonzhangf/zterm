@@ -21,6 +21,7 @@
     "./node/daemon-config-projection": "./src/node/daemon-config-projection.ts",
     "./types": "./src/connection/types.ts",
     "./protocol": "./src/connection/protocol.ts",
+    "./app-protocol": "./src/connection/app-protocol.ts",
     "./relay-directory": "./src/connection/relay-directory.ts",
     "./mobile-config": "./src/connection/mobile-config.ts",
     "./tmux-session-name": "./src/connection/tmux-session-name.ts",

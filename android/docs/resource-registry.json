@@ -4252,6 +4252,105 @@
         "docs/decisions/2026-10-20-remote-cli.md",
         "docs/modules/project-modules.md"
       ]
+    },
+    {
+      "resource_id": "resource.daemon_app_messaging",
+      "resource_type": "daemon_durable_state",
+      "identity": "Daemon durable app Inbox and Outbox records, dedupe state, delivery state, file staging, and completed file truth",
+      "owner_feature": "daemon.app_messaging",
+      "truth_store": "daemon app root <encoded-sender>/<encoded-message> records and files",
+      "allowed_operations": [
+        "read_inbox",
+        "write_inbox",
+        "read_outbox",
+        "write_outbox",
+        "ack_record",
+        "consume_record",
+        "stage_file",
+        "publish_completed_file",
+        "resume_transfer"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.tmux_session"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/daemon-app-messaging-transport.test.ts",
+        "src/server/daemon-app-gateway.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json"
+      ]
+    },
+    {
+      "resource_id": "resource.daemon_app_gateway",
+      "resource_type": "daemon_physical_transport",
+      "identity": "Authenticated /app WebSocket admission, connection lifetime, frame validation, and bounded physical send state",
+      "owner_feature": "daemon.app_gateway",
+      "truth_store": "src/server/daemon-app-websocket-runtime.ts",
+      "allowed_operations": [
+        "admit_authenticated_connection",
+        "validate_frame",
+        "send_frame",
+        "release_connection"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.daemon_input_queue"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/daemon-app-gateway.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md"
+      ]
+    },
+    {
+      "resource_id": "resource.app_protocol",
+      "resource_type": "shared_contract",
+      "identity": "App messaging protocol v1 frames, limits, stable identifiers, results, and typed errors",
+      "owner_feature": "shared.app_protocol",
+      "truth_store": "packages/shared/src/connection/app-protocol.ts",
+      "allowed_operations": [
+        "parse_client_frame",
+        "parse_server_frame",
+        "build_client_frame",
+        "build_server_frame",
+        "validate_limits"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.daemon_process"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "packages/shared/src/connection/app-protocol.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md"
+      ]
     }
   ],
   "required_indirect_relations": [

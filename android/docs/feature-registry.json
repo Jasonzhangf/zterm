@@ -3727,6 +3727,135 @@
         "docs/wiki/mainline-call-map.json",
         "docs/testing/android-notification-session-actions-test-design.md"
       ]
+    },
+    {
+      "feature_id": "daemon.app_messaging",
+      "title": "Daemon durable app inbox and outbox",
+      "domain": "daemon-messaging",
+      "owners": [
+        "src/server/daemon-app-messaging-runtime.ts",
+        "src/server/daemon-app-messaging-store.ts"
+      ],
+      "allowed_paths": [
+        "src/server/daemon-app-messaging-runtime.ts",
+        "src/server/daemon-app-messaging-store.ts",
+        "src/server/daemon-app-messaging-transport.test.ts",
+        "android/scripts/app-messaging-e2e.ts",
+        "android/scripts/app-messaging-test-daemon.ts",
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json",
+        "docs/dagpipe/README.md"
+      ],
+      "forbidden_paths": [
+        "src/traversal-relay/",
+        "native/android/",
+        "mac/",
+        "win/",
+        "packages/shared/src/terminal/"
+      ],
+      "required_gates": [
+        "src/server/daemon-app-messaging-transport.test.ts",
+        "src/server/daemon-app-gateway.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json",
+        "docs/dagpipe/README.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.app_gateway",
+      "title": "Authenticated daemon app WebSocket gateway",
+      "domain": "daemon-messaging",
+      "owners": [
+        "src/server/daemon-app-websocket-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/daemon-app-websocket-runtime.ts",
+        "src/server/daemon-app-gateway.test.ts",
+        "src/server/daemon-app-messaging-transport.test.ts",
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json"
+      ],
+      "forbidden_paths": [
+        "src/traversal-relay/",
+        "src/pages/",
+        "src/components/",
+        "native/android/"
+      ],
+      "required_gates": [
+        "src/server/daemon-app-gateway.test.ts",
+        "src/server/daemon-app-messaging-transport.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json"
+      ]
+    },
+    {
+      "feature_id": "shared.app_protocol",
+      "title": "Shared app messaging protocol v1 contracts",
+      "domain": "shared-contract",
+      "owners": [
+        "packages/shared/src/connection/app-protocol.ts"
+      ],
+      "allowed_paths": [
+        "packages/shared/src/connection/app-protocol.ts",
+        "packages/shared/src/connection/app-protocol.test.ts",
+        "packages/shared/package.json",
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/pages/",
+        "src/components/",
+        "native/android/"
+      ],
+      "required_gates": [
+        "packages/shared/src/connection/app-protocol.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json"
+      ]
+    },
+    {
+      "feature_id": "cli.app_messaging",
+      "title": "zterm app CLI messaging commands",
+      "domain": "client-cli",
+      "owners": [
+        "packages/cli/src/commands/app-messaging.ts",
+        "packages/cli/src/app-connection.ts",
+        "packages/cli/src/app-target-resolution.ts"
+      ],
+      "allowed_paths": [
+        "packages/cli/src/commands/app-messaging.ts",
+        "packages/cli/src/commands/app-messaging.test.ts",
+        "packages/cli/src/app-connection.ts",
+        "packages/cli/src/app-target-resolution.ts",
+        "packages/cli/src/main.ts",
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "native/android/",
+        "mac/",
+        "win/",
+        "src/traversal-relay/"
+      ],
+      "required_gates": [
+        "packages/cli/src/commands/app-messaging.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json"
+      ]
     }
   ]
 }

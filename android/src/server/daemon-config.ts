@@ -71,6 +71,7 @@ export interface DaemonRuntimeConfig {
   authToken: string;
   terminalCacheLines: number;
   sessionName: string;
+  deviceId: string;
   daemonHostId: string;
   configPath: string;
   configFound: boolean;
@@ -238,10 +239,10 @@ export function resolveDaemonRuntimeConfig(options?: {
   const relayPassword = asString(env.ZTERM_TRAVERSAL_PASSWORD) || asString(relayConfig.password);
   const relayHostId = asString(env.ZTERM_TRAVERSAL_HOST_ID) || asString(relayConfig.hostId);
   const relayDefaultHostName = hostname().trim();
-  const relayDeviceId =
+  const configuredDeviceId =
     asString(env.ZTERM_TRAVERSAL_DEVICE_ID) ||
-    asString(relayConfig.deviceId) ||
-    relayDefaultHostName;
+    asString(relayConfig.deviceId);
+  const relayDeviceId = configuredDeviceId || relayDefaultHostName;
   const relayDeviceName =
     asString(env.ZTERM_TRAVERSAL_DEVICE_NAME) ||
     asString(relayConfig.deviceName) ||
@@ -280,6 +281,7 @@ export function resolveDaemonRuntimeConfig(options?: {
     authToken,
     terminalCacheLines,
     sessionName,
+    deviceId: configuredDeviceId,
     daemonHostId,
     configPath: path,
     configFound: found,

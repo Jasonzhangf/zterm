@@ -1,0 +1,236 @@
+{
+  "id": "daemon.app_messaging",
+  "version": "0.2",
+  "inputs": [
+    {
+      "id": "arc.request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "extract_app_request",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.app_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "validate_app_request",
+      "operator": "shared.app_protocol.validate",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.app_request"
+      ],
+      "output": {
+        "id": "arc.app_validated_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "resolve_app_route",
+      "operator": "cli.app_messaging.resolve_route",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.app_validated_request"
+      ],
+      "output": {
+        "id": "arc.app_route",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "admit_app_connection",
+      "operator": "daemon.app_gateway.admit_connection",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.app_route"
+      ],
+      "output": {
+        "id": "arc.app_connection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "prepare_app_operation",
+      "operator": "daemon.app_messaging.prepare_operation",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.app_connection"
+      ],
+      "output": {
+        "id": "arc.app_operation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "execute_app_operation",
+      "operator": "daemon.app_messaging.execute_operation",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.app_operation"
+      ],
+      "output": {
+        "id": "arc.app_outcome",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "publish_app_observation",
+      "operator": "daemon.app_messaging.publish_observation",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.app_outcome"
+      ],
+      "output": {
+        "id": "arc.app_observation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_app_request",
+      "operator": "cli.app_messaging.settle",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.app_observation"
+      ],
+      "output": {
+        "id": "arc.app_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "extract_app_request",
+      "to": "validate_app_request",
+      "arc_id": "arc.app_request"
+    },
+    {
+      "from": "validate_app_request",
+      "to": "resolve_app_route",
+      "arc_id": "arc.app_validated_request"
+    },
+    {
+      "from": "resolve_app_route",
+      "to": "admit_app_connection",
+      "arc_id": "arc.app_route"
+    },
+    {
+      "from": "admit_app_connection",
+      "to": "prepare_app_operation",
+      "arc_id": "arc.app_connection"
+    },
+    {
+      "from": "prepare_app_operation",
+      "to": "execute_app_operation",
+      "arc_id": "arc.app_operation"
+    },
+    {
+      "from": "execute_app_operation",
+      "to": "publish_app_observation",
+      "arc_id": "arc.app_outcome"
+    },
+    {
+      "from": "publish_app_observation",
+      "to": "settle_app_request",
+      "arc_id": "arc.app_observation"
+    }
+  ],
+  "outputs": [
+    "arc.app_result"
+  ]
+}

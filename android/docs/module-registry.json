@@ -3585,6 +3585,119 @@
         "packages/cli/src/",
         "packages/cli/bin/"
       ]
+    },
+    {
+      "module_id": "daemon.app_messaging",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "daemon.app_messaging",
+      "responsibility": "Own durable app Inbox and Outbox truth, dedupe, delivery state, replay, file staging, resume, integrity validation, and atomic completed-file publication.",
+      "owned_resources": [
+        "resource.daemon_app_messaging"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/daemon-app-messaging-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.mirror_store",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.tmux_session",
+        "resource.daemon_input_queue"
+      ],
+      "canonical_docs": [
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/server/daemon-app-messaging-transport.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/daemon-app-messaging-runtime.ts",
+        "src/server/daemon-app-messaging-store.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.app_gateway",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "daemon.app_gateway",
+      "responsibility": "Own authenticated /app WebSocket admission, protocol frame validation, connection lifetime, physical send backpressure, and release; business state stays in daemon.app_messaging.",
+      "owned_resources": [
+        "resource.daemon_app_gateway"
+      ],
+      "consumed_resources": [
+        "resource.daemon_app_messaging",
+        "resource.app_protocol"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/daemon-app-websocket-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.mirror_store",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.daemon_input_queue"
+      ],
+      "canonical_docs": [
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/server/daemon-app-gateway.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/daemon-app-websocket-runtime.ts"
+      ]
+    },
+    {
+      "module_id": "shared.app_protocol",
+      "runtime_side": "shared",
+      "level": 1,
+      "parent_module_id": "shared.contract",
+      "owner_feature": "shared.app_protocol",
+      "responsibility": "Own app messaging protocol v1 frames, field validation, identifier rules, size limits, results, and typed errors; no transport, file I/O, or account requests.",
+      "owned_resources": [
+        "resource.app_protocol"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "packages/shared/src/connection/app-protocol.ts"
+      ],
+      "forbidden_resources": [
+        "resource.mirror_store",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.daemon_process"
+      ],
+      "canonical_docs": [
+        "docs/decisions/2026-10-28-cli-cross-machine-messaging.md",
+        "docs/dagpipe/daemon-app-messaging.graph.json",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "packages/shared/src/connection/app-protocol.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "packages/shared/src/connection/app-protocol.ts"
+      ]
     }
   ]
 }

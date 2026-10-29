@@ -7,7 +7,7 @@ Status: accepted for implementation
 Provide a non-interactive zterm CLI transport that Collab can use to deliver
 structured messages and files between two authenticated zterm daemons. Collab
 keeps ownership of CEO/master identities, recipient routing, business
-p persistence, queueing, and consumption. zterm owns device discovery,
+persistence, queueing, and consumption. zterm owns device discovery,
 authentication, transport, durable inbox storage, file landing, transfer
 receipts, and connection status.
 
@@ -161,13 +161,21 @@ Daemon root:
 
 ```text
 ~/.zterm/app-inbox/
-  records/<messageId>.json
-  files/<messageId>/<safe-file-name>
-  staging/<transferId>.part
-  staging/<transferId>.json
+  records/<encoded-sender-daemon-host-id>/<encoded-message-id>.json
+  files/<encoded-sender-daemon-host-id>/<encoded-message-id>/<safe-file-name>
+  staging/<encoded-sender-daemon-host-id>/<encoded-transfer-id>.part
+  staging/<encoded-sender-daemon-host-id>/<encoded-transfer-id>.json
 ~/.zterm/app-outbox/
-  records/<messageId>.json
+  records/<encoded-target-daemon-host-id>/<encoded-message-id>.json
 ```
+
+The public `messageId` and `transferId` do not change. A path segment uses
+base64url without padding over the UTF-8 identity bytes. Empty identities and
+identities longer than 191 UTF-8 bytes are rejected, so each encoded segment is
+at most 255 ASCII bytes. Raw network identity values are never concatenated
+into a path. Inbox and file assets are partitioned by sending daemon; Outbox
+records are partitioned by target daemon. The safe file name remains a validated
+single basename and cannot escape its message directory.
 
 Inbox record states:
 
@@ -197,9 +205,25 @@ Limits:
 - Acked/consumed record retention: 7 days; unacknowledged data is never
   silently evicted. If admission would exceed the inbox limit, return
   `inbox_full`; the sender must report the failure.
-- Stream outbound queue: 4 MiB. If the local client cannot drain, close the
-  local stream with `slow_consumer`; durable data remains in the inbox for the
-  next handshake.
+- Slow-consumer pending limit: 4 MiB of application-undelivered inbound work
+  per local stream, with a 20 second grace period. Pending bytes count the
+  serialized durable inbound events sent to that stream and not yet
+  acknowledged or consumed by the application. Pending messages count distinct
+  unacknowledged `messageId` values. An event's pending age starts when it is
+  enqueued to the stream. `last_progress_ms` advances only on application ACK
+  or consume progress.
+- Close the local stream with code `4008` and reason `slow_consumer` only when
+  pending bytes exceed 4 MiB, the oldest pending event exceeds the grace
+  period, and there has been no ACK progress. Send `app-error` with code
+  `slow_consumer` before the close while the socket is open. A matching ACK or
+  consume, or dropping below the limit, clears the closure condition. A late
+  ACK is idempotent.
+- Transport buffering, including `ws.bufferedAmount`, is not the closure
+  signal. Loopback kernel buffering must not hide an application that has
+  stopped acknowledging inbound events.
+- `4008` closes only the stream. It does not delete durable inbox records or
+  files and does not change `received` state. A fresh stream replays the
+  unacknowledged records once.
 
 Records and file metadata use write-temp, fsync, and rename. Files are not
 published until chunk count, total bytes, and SHA-256 match. `.part` files are
