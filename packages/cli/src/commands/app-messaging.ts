@@ -43,12 +43,13 @@ export const APP_HELP = `用法：
   zterm app stream [--json]
   zterm app send --peer <deviceId> [--daemon-host-id <hostId>] [--message-id <id>] --subject <text> --body <text>
   zterm app send-file --peer <deviceId> [--daemon-host-id <hostId>] [--message-id <id>] --file <path> [--subject <text>]
-  zterm app status --message-id <id> [--remote --peer <deviceId>]
-  zterm app ack --message-id <id>
-  zterm app consume --message-id <id>
+  zterm app status --message-id <id> [--sender-daemon-host-id <hostId>] [--remote --peer <deviceId>]
+  zterm app ack --message-id <id> [--sender-daemon-host-id <hostId>]
+  zterm app consume --message-id <id> [--sender-daemon-host-id <hostId>]
   zterm app --help
 
-stream 默认输出逐行 JSON。send 的成功状态是远端 received；resultUnknown 时退出码为 3。`;
+stream 默认输出逐行 JSON。send 的成功状态是远端 received；resultUnknown 时退出码为 3。
+本地连接断开时 stream 输出 app-connection-state（含 close code/reason）与无关联 app-error。`;
 
 const STREAM_HELP = `用法：
   zterm app stream [--json]
@@ -56,9 +57,9 @@ const STREAM_HELP = `用法：
 建立一条本地 /app WebSocket，输出逐行 JSON 事件，并从 stdin 读取逐行 JSON 命令：
   {"type":"send","peer":"<deviceId>","subject":"...","body":"..."}
   {"type":"send-file","peer":"<deviceId>","file":"/path","subject":"..."}
-  {"type":"status","messageId":"...","remote":false}
-  {"type":"ack","messageId":"..."}
-  {"type":"consume","messageId":"..."}
+  {"type":"status","messageId":"...","senderDaemonHostId":"...","remote":false}
+  {"type":"ack","messageId":"...","senderDaemonHostId":"..."}
+  {"type":"consume","messageId":"...","senderDaemonHostId":"..."}
 stdin 关闭时退出码为 1。`;
 
 const SEND_HELP = `用法：
@@ -72,17 +73,17 @@ const SEND_FILE_HELP = `用法：
 流式发送 256 MiB 以内文件。分片为 16 KiB，支持同 ID/transferId 断点恢复。`;
 
 const STATUS_HELP = `用法：
-  zterm app status --message-id <id> [--remote --peer <deviceId>]
+  zterm app status --message-id <id> [--sender-daemon-host-id <hostId>] [--remote --peer <deviceId>]
 
 查询本地 Inbox 或 Outbox。--remote 时经本地 daemon 查询目标 peer 的发送者作用域。`;
 
 const ACK_HELP = `用法：
-  zterm app ack --message-id <id>
+  zterm app ack --message-id <id> [--sender-daemon-host-id <hostId>]
 
 把本地 Inbox 记录从 received 推进到 delivered。重复 ack 幂等。`;
 
 const CONSUME_HELP = `用法：
-  zterm app consume --message-id <id>
+  zterm app consume --message-id <id> [--sender-daemon-host-id <hostId>]
 
 把本地 Inbox 记录从 delivered 推进到 consumed。未 delivered 时明确失败。`;
 
@@ -391,13 +392,25 @@ async function runSend(args: readonly string[], context: AppCommandContext): Pro
   const messageId = requireIdentitySegment(optionalFlag(flags, 'message-id') ?? randomUUID());
   const target = await resolveTarget(context, peer, optionalFlag(flags, 'daemon-host-id'));
   const connection = await connectLocal(context);
+  const request = { type: 'app-send-message' as const, payload: { requestId: requestId(), messageId, target, subject, body } };
   try {
-    const result = await connection.request({
-      type: 'app-send-message',
-      payload: { requestId: requestId(), messageId, target, subject, body },
-    });
+    const result = await connection.request(request);
     await emitFrame(context.stdout, result);
     return exitCodeFor(result);
+  } catch (error) {
+    if (error instanceof AppCliError && error.code === 'result_unknown') {
+      await emitFrame(context.stdout, {
+        type: 'app-send-result',
+        payload: {
+          requestId: request.payload.requestId,
+          messageId,
+          status: 'resultUnknown',
+          stage: 'result_unknown',
+        },
+      });
+      return 3;
+    }
+    throw error;
   } finally {
     connection.close();
   }
@@ -420,6 +433,21 @@ async function runSendFile(args: readonly string[], context: AppCommandContext):
     const result = await runFileTransfer(connection, target, messageId, subject, filePath, described);
     await emitFrame(context.stdout, result);
     return exitCodeFor(result);
+  } catch (error) {
+    if (error instanceof AppCliError && error.code === 'result_unknown') {
+      await emitFrame(context.stdout, {
+        type: 'app-send-result',
+        payload: {
+          requestId: requestId(),
+          messageId,
+          transferId: messageId,
+          status: 'resultUnknown',
+          stage: 'result_unknown',
+        },
+      });
+      return 3;
+    }
+    throw error;
   } finally {
     connection.close();
   }
@@ -430,8 +458,9 @@ async function runStatus(args: readonly string[], context: AppCommandContext): P
     await writeText(context.stdout, `${STATUS_HELP}\n`);
     return 0;
   }
-  const flags = parseFlags(args, ['message-id', 'remote', 'peer'], ['remote']);
+  const flags = parseFlags(args, ['message-id', 'sender-daemon-host-id', 'remote', 'peer'], ['remote']);
   const messageId = requireIdentitySegment(requiredFlag(flags, 'message-id'));
+  const senderDaemonHostId = optionalFlag(flags, 'sender-daemon-host-id');
   const remote = flags.remote === true;
   const peer = optionalFlag(flags, 'peer');
   if (remote && !peer) throw usage('--remote requires --peer');
@@ -444,6 +473,7 @@ async function runStatus(args: readonly string[], context: AppCommandContext): P
       payload: {
         requestId: requestId(),
         messageId,
+        ...(senderDaemonHostId ? { senderDaemonHostId } : {}),
         remote,
         ...(target ? { target } : {}),
       },
@@ -464,13 +494,18 @@ async function runSettle(
     await writeText(context.stdout, `${kind === 'ack' ? ACK_HELP : CONSUME_HELP}\n`);
     return 0;
   }
-  const flags = parseFlags(args, ['message-id']);
+  const flags = parseFlags(args, ['message-id', 'sender-daemon-host-id']);
   const messageId = requireIdentitySegment(requiredFlag(flags, 'message-id'));
+  const senderDaemonHostId = optionalFlag(flags, 'sender-daemon-host-id');
   const connection = await connectLocal(context);
   try {
     const result = await connection.request({
       type: kind === 'ack' ? 'app-ack' : 'app-consume',
-      payload: { requestId: requestId(), messageId },
+      payload: {
+        requestId: requestId(),
+        messageId,
+        ...(senderDaemonHostId ? { senderDaemonHostId } : {}),
+      },
     });
     await emitFrame(context.stdout, result);
     return exitCodeFor(result);
@@ -540,22 +575,38 @@ async function handleStreamCommand(
     }
     if (kind === 'ack' || kind === 'consume') {
       const messageId = requireIdentitySegment(typeof command.messageId === 'string' ? command.messageId : '');
+      const senderDaemonHostId = typeof command.senderDaemonHostId === 'string' && command.senderDaemonHostId
+        ? command.senderDaemonHostId
+        : undefined;
       const result = await connection.request({
         type: kind === 'ack' ? 'app-ack' : 'app-consume',
-        payload: { requestId: requestId(), messageId },
+        payload: {
+          requestId: requestId(),
+          messageId,
+          ...(senderDaemonHostId ? { senderDaemonHostId } : {}),
+        },
       });
       await emitFrame(context.stdout, result);
       return;
     }
     if (kind === 'status') {
       const messageId = requireIdentitySegment(typeof command.messageId === 'string' ? command.messageId : '');
+      const senderDaemonHostId = typeof command.senderDaemonHostId === 'string' && command.senderDaemonHostId
+        ? command.senderDaemonHostId
+        : undefined;
       const remote = command.remote === true;
       const target = remote
         ? await resolveTarget(context, String(command.peer ?? ''), typeof command.daemonHostId === 'string' ? command.daemonHostId : undefined)
         : undefined;
       const result = await connection.request({
         type: 'app-status',
-        payload: { requestId: requestId(), messageId, remote, ...(target ? { target } : {}) },
+        payload: {
+          requestId: requestId(),
+          messageId,
+          ...(senderDaemonHostId ? { senderDaemonHostId } : {}),
+          remote,
+          ...(target ? { target } : {}),
+        },
       });
       await emitFrame(context.stdout, result);
       return;

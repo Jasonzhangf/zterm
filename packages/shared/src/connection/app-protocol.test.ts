@@ -11,6 +11,7 @@ import {
   encodeAppPathSegment,
   validateAppClientFrame,
   validateAppFileMetadata,
+  validateAppServerFrame,
   validateMessageBody,
   validateSafeFileName,
 } from './app-protocol';
@@ -97,6 +98,55 @@ describe('app protocol v1', () => {
     expectCode(() => validateAppClientFrame({
       type: 'app-ping',
       payload: { requestId: 'r1', sentAt: Number.NaN },
+    }), 'invalid_frame');
+  });
+
+  it('accepts an omitted file subject while keeping the subject type check', () => {
+    const file = validateAppFileMetadata({
+      transferId: 'transfer-1',
+      fileName: 'evidence.bin',
+      totalBytes: 40_000,
+      chunkCount: computeAppChunkCount(40_000),
+      sha256: 'a'.repeat(64),
+    }, 'test');
+    const frame = validateAppClientFrame({
+      type: 'app-send-file-start',
+      payload: { requestId: 'r1', messageId: 'm1', subject: '', file },
+    });
+    expect(frame).toMatchObject({ type: 'app-send-file-start', payload: { subject: '' } });
+    expectCode(() => validateAppClientFrame({
+      type: 'app-send-file-start',
+      payload: { requestId: 'r1', messageId: 'm1', subject: 42, file },
+    }), 'invalid_frame');
+  });
+
+  it('validates server frames at runtime and rejects malformed payloads', () => {
+    const ready = validateAppServerFrame({
+      type: 'app-ready',
+      payload: {
+        requestId: 'r1',
+        protocolVersion: 1,
+        deviceId: 'device-b',
+        daemonHostId: 'daemon-b',
+        capabilities: {},
+      },
+    });
+    expect(ready).toMatchObject({ type: 'app-ready', payload: { requestId: 'r1' } });
+
+    expectCode(() => validateAppServerFrame(null), 'invalid_frame');
+    expectCode(() => validateAppServerFrame({ type: 'app-ready' }), 'invalid_frame');
+    expectCode(() => validateAppServerFrame({ type: 'app-unknown', payload: {} }), 'invalid_frame');
+    expectCode(() => validateAppServerFrame({
+      type: 'app-ready',
+      payload: { requestId: 'r1', protocolVersion: 2, deviceId: 'device-b', daemonHostId: 'daemon-b', capabilities: {} },
+    }), 'invalid_version');
+    expectCode(() => validateAppServerFrame({
+      type: 'app-send-result',
+      payload: { requestId: 'r1', messageId: 'm1', status: 'bogus', stage: 'sent' },
+    }), 'invalid_frame');
+    expectCode(() => validateAppServerFrame({
+      type: 'app-inbound-message',
+      payload: { messageId: 'm1', senderDeviceId: 'a', senderDaemonHostId: 'a', receiverDeviceId: 'b', receiverDaemonHostId: 'b', subject: '', body: '', state: 'bogus', receivedAt: 'now' },
     }), 'invalid_frame');
   });
 });

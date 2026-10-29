@@ -248,6 +248,19 @@ export class DaemonAppMessagingStore {
     return readJson<AppStagingMetadata>(this.stagingMetaPath(senderDaemonHostId, transferId));
   }
 
+  async hasStagingKey(senderDaemonHostId: string, messageId: string): Promise<boolean> {
+    const all = await this.listStagingMetadata();
+    return all.some(
+      (meta) => meta.senderDaemonHostId === senderDaemonHostId && meta.messageId === messageId,
+    );
+  }
+
+  async findStagingKey(senderDaemonHostId: string, messageId: string): Promise<AppStagingMetadata | null> {
+    const all = await this.listStagingMetadata();
+    return all.find(
+      (meta) => meta.senderDaemonHostId === senderDaemonHostId && meta.messageId === messageId,
+    ) ?? null;
+  }
   async openStagingPart(metadata: AppStagingMetadata) {
     await mkdir(this.stagingDir(metadata.senderDaemonHostId), { recursive: true });
     await mkdir(this.filesDir(metadata.senderDaemonHostId, metadata.messageId), { recursive: true });

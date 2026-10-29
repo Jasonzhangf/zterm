@@ -267,6 +267,8 @@ export interface AppConnectionStatePayload {
   requestId: string;
   state: 'connected' | 'disconnected' | 'peer-connected' | 'peer-disconnected';
   daemonHostId?: string;
+  code?: number;
+  reason?: string;
 }
 
 export interface AppErrorPayload {
@@ -309,6 +311,17 @@ function requiredString(value: unknown, field: string, stage: string): string {
   return value;
 }
 
+function stringValue(value: unknown, field: string, stage: string): string {
+  if (typeof value !== 'string') {
+    throw new AppProtocolError({
+      code: 'invalid_frame',
+      message: `${field} must be a string`,
+      stage,
+    });
+  }
+  return value;
+}
+
 function requiredInteger(value: unknown, field: string, stage: string, min: number): number {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < min) {
     throw new AppProtocolError({
@@ -320,8 +333,93 @@ function requiredInteger(value: unknown, field: string, stage: string, min: numb
   return value;
 }
 
+function requiredBoolean(value: unknown, field: string, stage: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new AppProtocolError({
+      code: 'invalid_frame',
+      message: `${field} must be a boolean`,
+      stage,
+    });
+  }
+  return value;
+}
+
+function requiredFiniteNumber(value: unknown, field: string, stage: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new AppProtocolError({
+      code: 'invalid_frame',
+      message: `${field} must be a finite number`,
+      stage,
+    });
+  }
+  return value;
+}
+
+function optionalIntegerValue(value: unknown, field: string, stage: string, min: number): number | undefined {
+  return value === undefined ? undefined : requiredInteger(value, field, stage, min);
+}
+
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function optionalStringValue(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+const APP_RECORD_STATES: readonly AppRecordState[] = ['received', 'delivered', 'consumed', 'rejected'];
+const APP_SEND_STATUSES: readonly AppSendResultStatus[] = [
+  'received',
+  'delivered',
+  'consumed',
+  'rejected',
+  'resultUnknown',
+  'unreachable',
+  'receiving',
+];
+const APP_SEND_STAGES: readonly AppSendResultPayload['stage'][] = [
+  'prepared',
+  'sent',
+  'received',
+  'result_unknown',
+];
+const APP_ERROR_CODES: readonly AppErrorCode[] = [
+  'invalid_version',
+  'invalid_frame',
+  'missing_identity',
+  'unauthorized',
+  'forbidden_role',
+  'message_id_conflict',
+  'message_too_large',
+  'file_too_large',
+  'invalid_file_name',
+  'invalid_chunk',
+  'chunk_conflict',
+  'transfer_conflict',
+  'transfer_incomplete',
+  'integrity_mismatch',
+  'inbox_full',
+  'not_found',
+  'ambiguous_message_id',
+  'invalid_state',
+  'slow_consumer',
+  'unreachable',
+  'result_unknown',
+  'source_changed',
+  'storage_error',
+  'cancelled',
+  'internal_error',
+];
+
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], field: string, stage: string): T {
+  if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) {
+    throw new AppProtocolError({
+      code: 'invalid_frame',
+      message: `${field} must be one of ${allowed.join(', ')}`,
+      stage,
+    });
+  }
+  return value as T;
 }
 
 export function assertAppProtocolVersion(value: unknown): 1 {
@@ -404,7 +502,7 @@ export function validateAppClientFrame(value: unknown): AppClientFrame {
         payload: {
           requestId: requiredString(payload.requestId, 'requestId', 'file-start'),
           messageId: requiredString(payload.messageId, 'messageId', 'file-start'),
-          subject: requiredString(payload.subject, 'subject', 'file-start'),
+          subject: stringValue(payload.subject, 'subject', 'file-start'),
           file: validateAppFileMetadata(payload.file, 'file-start'),
           target: optionalAppTarget(payload.target, 'file-start'),
         },
@@ -474,6 +572,157 @@ export function validateAppClientFrame(value: unknown): AppClientFrame {
     }
     default:
       throw new AppProtocolError({ code: 'invalid_frame', message: `unsupported frame: ${value.type}`, stage: 'frame' });
+  }
+}
+
+export function validateAppServerFrame(value: unknown): AppServerFrame {
+  if (!isRecord(value) || typeof value.type !== 'string' || !isRecord(value.payload)) {
+    throw new AppProtocolError({
+      code: 'invalid_frame',
+      message: 'server frame must have a type and payload object',
+      stage: 'frame',
+    });
+  }
+  const payload = value.payload;
+  switch (value.type) {
+    case 'app-ready': {
+      const requestId = requiredString(payload.requestId, 'requestId', 'ready');
+      assertAppProtocolVersion(payload.protocolVersion);
+      return {
+        type: 'app-ready',
+        payload: {
+          requestId,
+          protocolVersion: APP_PROTOCOL_VERSION,
+          deviceId: requiredString(payload.deviceId, 'deviceId', 'ready'),
+          daemonHostId: requiredString(payload.daemonHostId, 'daemonHostId', 'ready'),
+          capabilities: isRecord(payload.capabilities)
+            ? payload.capabilities as unknown as AppCapabilities
+            : (() => {
+                throw new AppProtocolError({
+                  code: 'invalid_frame',
+                  message: 'capabilities must be an object',
+                  stage: 'ready',
+                  requestId,
+                });
+              })(),
+        },
+      };
+    }
+    case 'app-inbound-message':
+      return {
+        type: 'app-inbound-message',
+        payload: {
+          messageId: requiredString(payload.messageId, 'messageId', 'inbound'),
+          senderDeviceId: requiredString(payload.senderDeviceId, 'senderDeviceId', 'inbound'),
+          senderDaemonHostId: requiredString(payload.senderDaemonHostId, 'senderDaemonHostId', 'inbound'),
+          receiverDeviceId: requiredString(payload.receiverDeviceId, 'receiverDeviceId', 'inbound'),
+          receiverDaemonHostId: requiredString(payload.receiverDaemonHostId, 'receiverDaemonHostId', 'inbound'),
+          subject: stringValue(payload.subject, 'subject', 'inbound'),
+          body: stringValue(payload.body, 'body', 'inbound'),
+          state: oneOf(payload.state, APP_RECORD_STATES, 'state', 'inbound'),
+          receivedAt: requiredString(payload.receivedAt, 'receivedAt', 'inbound'),
+        },
+      };
+    case 'app-inbound-file':
+      return {
+        type: 'app-inbound-file',
+        payload: {
+          messageId: requiredString(payload.messageId, 'messageId', 'inbound'),
+          transferId: requiredString(payload.transferId, 'transferId', 'inbound'),
+          senderDeviceId: requiredString(payload.senderDeviceId, 'senderDeviceId', 'inbound'),
+          senderDaemonHostId: requiredString(payload.senderDaemonHostId, 'senderDaemonHostId', 'inbound'),
+          receiverDeviceId: requiredString(payload.receiverDeviceId, 'receiverDeviceId', 'inbound'),
+          receiverDaemonHostId: requiredString(payload.receiverDaemonHostId, 'receiverDaemonHostId', 'inbound'),
+          subject: stringValue(payload.subject, 'subject', 'inbound'),
+          fileName: validateSafeFileName(payload.fileName, 'inbound'),
+          totalBytes: requiredInteger(payload.totalBytes, 'totalBytes', 'inbound', 0),
+          sha256: requiredString(payload.sha256, 'sha256', 'inbound'),
+          absolutePath: requiredString(payload.absolutePath, 'absolutePath', 'inbound'),
+          state: oneOf(payload.state, APP_RECORD_STATES, 'state', 'inbound'),
+          receivedAt: requiredString(payload.receivedAt, 'receivedAt', 'inbound'),
+        },
+      };
+    case 'app-send-result': {
+      const requestId = requiredString(payload.requestId, 'requestId', 'send-result');
+      return {
+        type: 'app-send-result',
+        payload: {
+          requestId,
+          messageId: requiredString(payload.messageId, 'messageId', 'send-result'),
+          transferId: optionalStringValue(payload.transferId),
+          absolutePath: optionalStringValue(payload.absolutePath),
+          status: oneOf(payload.status, APP_SEND_STATUSES, 'status', 'send-result'),
+          stage: oneOf(payload.stage, APP_SEND_STAGES, 'stage', 'send-result'),
+          persistedOffset: optionalIntegerValue(payload.persistedOffset, 'persistedOffset', 'send-result', 0),
+        },
+      };
+    }
+    case 'app-status-result': {
+      const requestId = requiredString(payload.requestId, 'requestId', 'status-result');
+      return {
+        type: 'app-status-result',
+        payload: {
+          requestId,
+          messageId: requiredString(payload.messageId, 'messageId', 'status-result'),
+          found: requiredBoolean(payload.found, 'found', 'status-result'),
+          kind: payload.kind === undefined ? undefined : oneOf(payload.kind, ['inbox', 'outbox'] as const, 'kind', 'status-result'),
+          senderDaemonHostId: optionalStringValue(payload.senderDaemonHostId),
+          targetDaemonHostId: optionalStringValue(payload.targetDaemonHostId),
+          state: payload.state === undefined ? undefined : oneOf(payload.state, APP_RECORD_STATES, 'state', 'status-result'),
+          transferId: optionalStringValue(payload.transferId),
+          absolutePath: optionalStringValue(payload.absolutePath),
+          outboxState: payload.outboxState === undefined
+            ? undefined
+            : oneOf(payload.outboxState, ['pending', 'sent', 'received', 'result_unknown', 'failed'] as const, 'outboxState', 'status-result'),
+          ambiguous: payload.ambiguous === undefined ? undefined : requiredBoolean(payload.ambiguous, 'ambiguous', 'status-result'),
+        },
+      };
+    }
+    case 'app-connection-state': {
+      const requestId = requiredString(payload.requestId, 'requestId', 'connection-state');
+      return {
+        type: 'app-connection-state',
+        payload: {
+          requestId,
+          state: oneOf(
+            payload.state,
+            ['connected', 'disconnected', 'peer-connected', 'peer-disconnected'] as const,
+            'state',
+            'connection-state',
+          ),
+          daemonHostId: optionalStringValue(payload.daemonHostId),
+          code: optionalIntegerValue(payload.code, 'code', 'connection-state', 1000),
+          reason: optionalStringValue(payload.reason),
+        },
+      };
+    }
+    case 'app-error': {
+      const requestId = optionalStringValue(payload.requestId);
+      return {
+        type: 'app-error',
+        payload: {
+          requestId,
+          messageId: optionalStringValue(payload.messageId),
+          transferId: optionalStringValue(payload.transferId),
+          code: oneOf(payload.code, APP_ERROR_CODES, 'code', 'error'),
+          stage: stringValue(payload.stage, 'stage', 'error'),
+          message: stringValue(payload.message, 'message', 'error'),
+        },
+      };
+    }
+    case 'app-pong': {
+      const requestId = requiredString(payload.requestId, 'requestId', 'pong');
+      return {
+        type: 'app-pong',
+        payload: {
+          requestId,
+          sentAt: requiredFiniteNumber(payload.sentAt, 'sentAt', 'pong'),
+          receivedAt: requiredFiniteNumber(payload.receivedAt, 'receivedAt', 'pong'),
+        },
+      };
+    }
+    default:
+      throw new AppProtocolError({ code: 'invalid_frame', message: `unsupported server frame: ${value.type}`, stage: 'frame' });
   }
 }
 

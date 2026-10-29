@@ -123,6 +123,24 @@ export function createDaemonAppGateway(options: DaemonAppGatewayOptions): Daemon
     let slowConsumerTimer: ReturnType<typeof setTimeout> | null = null;
     let slowConsumerClosed = false;
     const pendingMessages = new Map<string, { bytes: number; enqueuedAt: number }>();
+    const pendingWrite = (frame: AppServerFrame, bytes: number) => {
+      if (frame.type === 'app-connection-state' || (frame.type === 'app-error' && frame.payload.requestId === undefined)) {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify(frame));
+        }
+        return;
+      }
+      if (frame.type === 'app-inbound-message' || frame.type === 'app-inbound-file') {
+        trackPendingInbound(frame, bytes);
+      }
+      const text = JSON.stringify(frame);
+      ws.send(text, (error) => {
+        if (error) {
+          ws.close(1011, 'send failed');
+        }
+      });
+    };
+
     const slowConsumerGraceMs = options.slowConsumerGraceMs ?? SLOW_CONSUMER_GRACE_MS;
     const remoteLoopback = isLoopbackAddress(request.socket.remoteAddress);
     const handshakeTimer = setTimeout(() => {
@@ -204,13 +222,23 @@ export function createDaemonAppGateway(options: DaemonAppGatewayOptions): Daemon
       ws.close(4008, 'slow_consumer');
     }
 
+    function inboundPendingKey(frame: AppServerFrame): string | null {
+      if (frame.type === 'app-inbound-message') {
+        return `${frame.payload.senderDaemonHostId}\u0000${frame.payload.messageId}`;
+      }
+      if (frame.type === 'app-inbound-file') {
+        return `${frame.payload.senderDaemonHostId}\u0000${frame.payload.messageId}`;
+      }
+      return null;
+    }
+
     function trackPendingInbound(frame: AppServerFrame, bytes: number) {
       if (!link || link.role !== 'local') return;
-      if (frame.type !== 'app-inbound-message' && frame.type !== 'app-inbound-file') return;
-      const messageId = frame.payload.messageId;
-      if (pendingMessages.has(messageId)) return;
+      const key = inboundPendingKey(frame);
+      if (!key) return;
+      if (pendingMessages.has(key)) return;
       const currentTime = Date.now();
-      pendingMessages.set(messageId, { bytes, enqueuedAt: currentTime });
+      pendingMessages.set(key, { bytes, enqueuedAt: currentTime });
       pendingBytes += bytes;
       if (pendingBytes > APP_STREAM_OUTBOUND_QUEUE_BYTES && overLimitSince === null) {
         overLimitSince = currentTime;
@@ -218,10 +246,19 @@ export function createDaemonAppGateway(options: DaemonAppGatewayOptions): Daemon
       if (pendingBytes > APP_STREAM_OUTBOUND_QUEUE_BYTES) scheduleSlowConsumerCheck();
     }
 
-    function acknowledgePending(messageId: string) {
-      const pending = pendingMessages.get(messageId);
+    function acknowledgePending(senderDaemonHostId: string | undefined, messageId: string) {
+      let key: string | null = null;
+      if (senderDaemonHostId) {
+        const candidate = `${senderDaemonHostId}\u0000${messageId}`;
+        if (pendingMessages.has(candidate)) key = candidate;
+      } else {
+        const matches = [...pendingMessages.keys()].filter((entry) => entry.endsWith(`\u0000${messageId}`));
+        if (matches.length === 1) key = matches[0]!;
+      }
+      if (key === null) return;
+      const pending = pendingMessages.get(key);
       if (!pending) return;
-      pendingMessages.delete(messageId);
+      pendingMessages.delete(key);
       pendingBytes = Math.max(0, pendingBytes - pending.bytes);
       lastAckProgressAt = Date.now();
       if (pendingBytes <= APP_STREAM_OUTBOUND_QUEUE_BYTES) {
@@ -237,12 +274,7 @@ export function createDaemonAppGateway(options: DaemonAppGatewayOptions): Daemon
       if (ws.readyState !== WebSocket.OPEN) return false;
       const text = JSON.stringify(frame);
       const bytes = Buffer.byteLength(text, 'utf8');
-      ws.send(text, (error) => {
-        if (error) {
-          ws.close(1011, 'send failed');
-        }
-      });
-      trackPendingInbound(frame, bytes);
+      pendingWrite(frame, bytes);
       return true;
     }
 
@@ -262,6 +294,15 @@ export function createDaemonAppGateway(options: DaemonAppGatewayOptions): Daemon
         daemonHostId: options.daemonHostId,
         remoteLoopback,
       });
+    const initError = options.messaging.getInitializationError();
+    if (initError) {
+      throw new AppProtocolError({
+        code: 'storage_error',
+        message: `app messaging is unavailable: ${initError.message}`,
+        stage: 'admission',
+        requestId: hello.requestId,
+      });
+    }
       helloSeen = true;
       clearTimeout(handshakeTimer);
       const connectionId = `app-${randomUUID()}`;
@@ -335,9 +376,9 @@ export function createDaemonAppGateway(options: DaemonAppGatewayOptions): Daemon
         return;
       }
       void options.messaging.handleFrame(link, frame)
-        .then(() => {
-          if (frame.type === 'app-ack' || frame.type === 'app-consume') {
-            acknowledgePending(frame.payload.messageId);
+        .then((result) => {
+          if (result.settled && result.messageId) {
+            acknowledgePending(result.senderDaemonHostId, result.messageId);
           }
         })
         .catch((error: unknown) => {

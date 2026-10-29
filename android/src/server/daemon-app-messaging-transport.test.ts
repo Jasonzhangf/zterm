@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type WebSocket from 'ws';
 import {
   APP_FILE_CHUNK_BYTES,
+  computeAppChunkCount,
   encodeAppPathSegment,
   type AppClientFrame,
   type AppServerFrame,
@@ -303,6 +304,75 @@ describe('daemon /app transport', () => {
     expect(conflict).toMatchObject({ type: 'app-error', payload: { code: 'message_id_conflict' } });
   });
 
+  it('rejects a parallel transfer and a racing message that reuse a staged message key', async () => {
+    const root = await tempRoot();
+    const bridgeB = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
+    const peer = captureLink('peer', 'device-a', 'daemon-a');
+    const request = async (frame: AppClientFrame) => {
+      peer.frames.length = 0;
+      await bridgeB.runtime.handleFrame(peer.link, frame);
+      return waitForFrames(peer.frames, () => true);
+    };
+    const bytes = Buffer.alloc(10_000, 7);
+    const messageId = `file-${randomUUID()}`;
+    const metadata = (transferId: string) => ({
+      transferId,
+      fileName: 'a.bin',
+      totalBytes: bytes.length,
+      chunkCount: computeAppChunkCount(bytes.length),
+      sha256: sha256(bytes),
+    });
+    const first = await request({
+      type: 'app-send-file-start',
+      payload: { requestId: randomUUID(), messageId, subject: 'x', file: metadata(`t1-${randomUUID()}`) },
+    });
+    expect(first).toMatchObject({ type: 'app-send-result', payload: { status: 'receiving' } });
+
+    const parallel = await request({
+      type: 'app-send-file-start',
+      payload: { requestId: randomUUID(), messageId, subject: 'x', file: metadata(`t2-${randomUUID()}`) },
+    });
+    expect(parallel).toMatchObject({ type: 'app-error', payload: { code: 'message_id_conflict' } });
+
+    const racingMessage = await request({
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId, subject: 'x', body: 'racing' },
+    });
+    expect(racingMessage).toMatchObject({ type: 'app-error', payload: { code: 'message_id_conflict' } });
+  });
+
+  it('keeps two senders with the same messageId independent for scoped ack', async () => {
+    const root = await tempRoot();
+    const bridgeB = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
+    const sent = async (senderDaemonHostId: string) => {
+      const sender = captureLink('peer', `device-${senderDaemonHostId}`, senderDaemonHostId);
+      sender.frames.length = 0;
+      await bridgeB.runtime.handleFrame(sender.link, {
+        type: 'app-send-message',
+        payload: { requestId: randomUUID(), messageId: 'shared', subject: 'shared', body: senderDaemonHostId },
+      });
+      return waitForFrames(sender.frames, (frame) => frame.type === 'app-send-result');
+    };
+    await sent('daemon-a');
+    await sent('daemon-c');
+
+    const local = captureLink('local', 'device-b', 'daemon-b');
+    await bridgeB.runtime.handleFrame(local.link, {
+      type: 'app-ack',
+      payload: { requestId: randomUUID(), messageId: 'shared', senderDaemonHostId: 'daemon-a' },
+    });
+    const acked = await waitForFrames(local.frames, (frame) => frame.type === 'app-status-result');
+    expect(acked).toMatchObject({ type: 'app-status-result', payload: { senderDaemonHostId: 'daemon-a', state: 'delivered' } });
+
+    local.frames.length = 0;
+    await bridgeB.runtime.handleFrame(local.link, {
+      type: 'app-status',
+      payload: { requestId: randomUUID(), messageId: 'shared', senderDaemonHostId: 'daemon-c' },
+    });
+    const other = await waitForFrames(local.frames, (frame) => frame.type === 'app-status-result');
+    expect(other).toMatchObject({ type: 'app-status-result', payload: { senderDaemonHostId: 'daemon-c', state: 'received' } });
+  });
+
   it('accepts files only after commit and enforces integrity and resume', async () => {
     const root = await tempRoot();
     const bridgeB = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
@@ -461,6 +531,67 @@ describe('daemon /app transport', () => {
     const committed = await waitForFrames(peer2.frames, () => true);
     expect(committed).toMatchObject({ type: 'app-send-result', payload: { status: 'received' } });
     expect((await readFile(finalPath)).equals(bytes)).toBe(true);
+  });
+
+  it('completes a self-target file transfer and settles its outbox', async () => {
+    const root = await tempRoot();
+    const bridge = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
+    const local = captureLink('local', 'device-b', 'daemon-b');
+    const selfTarget = {
+      deviceId: 'device-b',
+      daemonHostId: 'daemon-b',
+      wsUrl: 'ws://self/loopback',
+      authToken: 'test-token',
+    };
+    const request = async (frame: AppClientFrame) => {
+      local.frames.length = 0;
+      await bridge.runtime.handleFrame(local.link, frame);
+      return waitForFrames(local.frames, () => true);
+    };
+    const bytes = Buffer.alloc(5_000, 9);
+    const messageId = `self-${randomUUID()}`;
+    const transferId = `self-transfer-${randomUUID()}`;
+    const file = {
+      transferId,
+      fileName: 'self.bin',
+      totalBytes: bytes.length,
+      chunkCount: computeAppChunkCount(bytes.length),
+      sha256: sha256(bytes),
+    };
+
+    const start = await request({
+      type: 'app-send-file-start',
+      payload: { requestId: randomUUID(), messageId, target: selfTarget, subject: 'self', file },
+    });
+    expect(start).toMatchObject({ type: 'app-send-result', payload: { status: 'receiving' } });
+    for (let chunkIndex = 0; chunkIndex < file.chunkCount; chunkIndex += 1) {
+      const offset = chunkIndex * APP_FILE_CHUNK_BYTES;
+      const chunk = bytes.subarray(offset, offset + APP_FILE_CHUNK_BYTES);
+      const result = await request({
+        type: 'app-send-file-chunk',
+        payload: { requestId: randomUUID(), messageId, transferId, offset, chunkIndex, dataBase64: chunk.toString('base64') },
+      });
+      expect(result).toMatchObject({ type: 'app-send-result', payload: { persistedOffset: offset + chunk.length } });
+    }
+    const committed = await request({
+      type: 'app-send-file-commit',
+      payload: { requestId: randomUUID(), messageId, transferId },
+    });
+    expect(committed).toMatchObject({ type: 'app-send-result', payload: { status: 'received' } });
+
+    const finalPath = join(
+      bridge.appRootDir,
+      'app-inbox/files',
+      encodeAppPathSegment('daemon-b'),
+      encodeAppPathSegment(messageId),
+      file.fileName,
+    );
+    expect((await readFile(finalPath)).equals(bytes)).toBe(true);
+    const outbox = JSON.parse(await readFile(
+      join(bridge.appRootDir, 'app-outbox/records', encodeAppPathSegment('daemon-b'), `${encodeAppPathSegment(messageId)}.json`),
+      'utf8',
+    )) as { state: string };
+    expect(outbox.state).toBe('received');
   });
 
   it('reports resultUnknown after a transport loss following send and unreachable when offline', async () => {

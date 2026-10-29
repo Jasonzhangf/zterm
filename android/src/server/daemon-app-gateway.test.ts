@@ -43,9 +43,10 @@ function fakeMessaging(): DaemonAppMessagingRuntime {
   return {
     initialize: async () => undefined,
     dispose: () => undefined,
+    getInitializationError: () => null,
     getCapabilities: () => ({}) as never,
     getIdentity: () => ({ deviceId: 'device-b', daemonHostId: 'daemon-b' }),
-    handleFrame: async () => undefined,
+    handleFrame: async () => ({ settled: false }),
     subscribeLocal: async () => undefined,
     revokeLink: () => undefined,
   };
@@ -153,7 +154,14 @@ async function openGatewayHarness(options: {
     ...baseMessaging,
     handleFrame: async (link, frame) => {
       handledFrames.push(frame);
-      if (options.runtime) await options.runtime.handleFrame(link, frame);
+      if (options.runtime) return options.runtime.handleFrame(link, frame);
+      // Simulate a successful settlement for ack/consume so the gateway
+      // clears pending and updates ACK progress. When a test supplies a
+      // runtime that returns settled=false, the gateway must not clear.
+      if (frame.type === 'app-ack' || frame.type === 'app-consume') {
+        return { settled: true, messageId: frame.payload.messageId, senderDaemonHostId: frame.payload.senderDaemonHostId };
+      }
+      return { settled: false };
     },
     subscribeLocal: async (link) => {
       resolveLink(link);
@@ -203,13 +211,13 @@ async function openGatewayHarness(options: {
   return harness;
 }
 
-function sendInboundMessage(harness: GatewayHarness, messageId: string, bytes = APP_MAX_MESSAGE_BYTES) {
+function sendInboundMessage(harness: GatewayHarness, messageId: string, bytes = APP_MAX_MESSAGE_BYTES, senderDaemonHostId = 'daemon-a') {
   if (!harness.link.send({
     type: 'app-inbound-message',
     payload: {
       messageId,
       senderDeviceId: 'device-a',
-      senderDaemonHostId: 'daemon-a',
+      senderDaemonHostId,
       receiverDeviceId: 'device-b',
       receiverDaemonHostId: 'daemon-b',
       subject: 'slow consumer test',
@@ -332,6 +340,37 @@ describe('daemon app gateway upgrade boundary', () => {
   });
 });
 
+describe('daemon app initialization isolation', () => {
+  it('keeps /app unavailable with a storage error while messaging init failed', async () => {
+    const socket = new FakeGatewaySocket();
+    vi.spyOn(WebSocketServer.prototype, 'handleUpgrade').mockImplementation((_request, _socket, _head, callback) => {
+      callback(socket as unknown as WebSocket, _request);
+    });
+    const messaging: DaemonAppMessagingRuntime = {
+      ...fakeMessaging(),
+      getInitializationError: () => new Error('staging recovery failed'),
+    };
+    const gateway = createDaemonAppGateway({
+      requiredAuthToken: 'gateway-token',
+      daemonHostId: 'daemon-b',
+      deviceId: 'device-b',
+      messaging,
+    });
+    try {
+      const rejected = fakeSocket();
+      expect(gateway.handleServerUpgrade(upgradeRequest('/app', 'Bearer gateway-token'), rejected.socket, Buffer.alloc(0))).toBe(true);
+      socket.receive({ type: 'app-hello', payload: hello() });
+      await waitUntil(() => socket.closeEvents.length === 1);
+      const error = socket.frames.find((frame) => frame.type === 'app-error');
+      expect(error).toMatchObject({ type: 'app-error', payload: { code: 'storage_error' } });
+      expect(socket.frames.some((frame) => frame.type === 'app-ready')).toBe(false);
+      expect(socket.closeEvents[0]).toEqual({ code: 4003, reason: 'admission rejected' });
+    } finally {
+      gateway.dispose();
+    }
+  });
+});
+
 describe('daemon app application-level slow consumer', () => {
   it('closes a drained local stream after pending bytes stay over the limit for the grace period', async () => {
     const harness = await openGatewayHarness({ slowConsumerGraceMs: 500 });
@@ -396,6 +435,50 @@ describe('daemon app application-level slow consumer', () => {
     expect(harness.closeEvents).toHaveLength(0);
 
     await waitUntil(() => harness.closeEvents.length === 1, 1_000);
+    expect(harness.closeEvents[0]).toEqual({ code: 4008, reason: 'slow_consumer' });
+  });
+
+  it('does not clear pending when ack or consume settlement fails', async () => {
+    const rejecting: DaemonAppMessagingRuntime = {
+      ...fakeMessaging(),
+      handleFrame: async () => ({ settled: false }),
+    };
+    const harness = await openGatewayHarness({ slowConsumerGraceMs: 300, runtime: rejecting });
+    const bytes = 1_000_000;
+    const messageIds = Array.from({ length: 5 }, (_, index) => `reject-${index + 1}`);
+
+    for (const messageId of messageIds) {
+      sendInboundMessage(harness, messageId, bytes);
+      await Promise.resolve();
+    }
+    await harness.waitForMessages(messageIds);
+
+    for (let attempt = 0; attempt < 20 && harness.closeEvents.length === 0; attempt += 1) {
+      sendClientFrame(harness, {
+        type: 'app-consume',
+        payload: { requestId: `reject-consume-${attempt}`, messageId: messageIds[0]!, senderDaemonHostId: 'daemon-a' },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+
+    await waitUntil(() => harness.closeEvents.length === 1, 1_500);
+    expect(harness.closeEvents[0]).toEqual({ code: 4008, reason: 'slow_consumer' });
+  });
+
+  it('counts pending bytes per sender so a shared messageId does not dedupe', async () => {
+    const harness = await openGatewayHarness({ slowConsumerGraceMs: 300 });
+    const bytes = 1_000_000;
+    const messageIds = Array.from({ length: 4 }, (_, index) => `shared-${index + 1}`);
+
+    for (const messageId of messageIds) {
+      sendInboundMessage(harness, messageId, bytes);
+      await Promise.resolve();
+    }
+    // A second sender reuses one messageId; the composite key must keep it.
+    sendInboundMessage(harness, messageIds[0]!, bytes, 'daemon-c');
+    await harness.waitForMessages([...messageIds, messageIds[0]!]);
+
+    await waitUntil(() => harness.closeEvents.length === 1, 1_500);
     expect(harness.closeEvents[0]).toEqual({ code: 4008, reason: 'slow_consumer' });
   });
 

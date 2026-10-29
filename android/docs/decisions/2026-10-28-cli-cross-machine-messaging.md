@@ -76,9 +76,10 @@ zterm app send --peer <deviceId> [--daemon-host-id <hostId>] \
   [--message-id <id>] --subject <text> --body <text>
 zterm app send-file --peer <deviceId> [--daemon-host-id <hostId>] \
   [--message-id <id>] --file <path> [--subject <text>]
-zterm app status --message-id <id> [--remote --peer <deviceId>]
-zterm app ack --message-id <id>
-zterm app consume --message-id <id>
+zterm app status --message-id <id> [--sender-daemon-host-id <hostId>] \
+  [--remote --peer <deviceId>]
+zterm app ack --message-id <id> [--sender-daemon-host-id <hostId>]
+zterm app consume --message-id <id> [--sender-daemon-host-id <hostId>]
 ```
 
 `stream` is the normal Collab integration. It establishes one persistent local
@@ -91,6 +92,9 @@ The stream handshake includes `protocolVersion`, `clientInstanceId`, `deviceId`,
 Connection state and errors are pushed on the same stream. The stream exits
 non-zero only when the initial handshake fails or stdin closes; a later peer
 disconnect is an event and may recover without hiding the durable record.
+The local daemon stream is a physical connection: an unrequested `app-error`
+such as `slow_consumer` and the physical `close` code/reason are emitted as
+events, so the caller can reopen a stream and replay unacked records.
 
 `send` and `send-file` are one-shot wrappers over the same local protocol. They
 use a stable message ID. If the connection closes after transmission but before
@@ -209,9 +213,10 @@ Limits:
   per local stream, with a 20 second grace period. Pending bytes count the
   serialized durable inbound events sent to that stream and not yet
   acknowledged or consumed by the application. Pending messages count distinct
-  unacknowledged `messageId` values. An event's pending age starts when it is
-  enqueued to the stream. `last_progress_ms` advances only on application ACK
-  or consume progress.
+  unacknowledged `(senderDaemonHostId, messageId)` keys, so two senders that
+  reuse one `messageId` stay independent. An event's pending age starts when it
+  is enqueued to the stream. `last_progress_ms` advances only on a settled ACK
+  or consume, never on a rejected or failing one.
 - Close the local stream with code `4008` and reason `slow_consumer` only when
   pending bytes exceed 4 MiB, the oldest pending event exceeds the grace
   period, and there has been no ACK progress. Send `app-error` with code

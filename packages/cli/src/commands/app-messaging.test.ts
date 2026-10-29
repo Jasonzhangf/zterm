@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SharedConfigStore } from '../../../shared/src/node/shared-config.js';
 import type { AccountClient } from '../account-client.js';
 import type { AppClientConnection } from '../app-connection.js';
+import { AppCliError } from '../app-target-resolution.js';
 import {
   type AppClientFrame,
   type AppServerFrame,
@@ -33,6 +34,7 @@ function collector() {
 async function context(options: {
   request: (frame: AppClientFrame) => AppServerFrame;
   stdin?: string;
+  connect?: AppCommandContext['connect'];
 }) {
   const home = await mkdtemp(join(tmpdir(), 'zterm-cli-app-'));
   roots.push(home);
@@ -117,7 +119,7 @@ async function context(options: {
       ZTERM_TRAVERSAL_DEVICE_ID: 'device-local',
       ZTERM_TRAVERSAL_HOST_ID: 'daemon-local',
     },
-    connect: async () => fakeConnection,
+    connect: options.connect ?? (async () => fakeConnection),
   };
   return { context: commandContext, stdout, stderr, frames };
 }
@@ -196,6 +198,64 @@ describe('zterm app CLI surface', () => {
       type: 'app-send-result',
       payload: { status: 'resultUnknown' },
     });
+  });
+
+  it('returns structured resultUnknown with the generated ID when the request drops', async () => {
+    const prepared = await context({
+      request: () => {
+        throw new AppCliError('result_unknown', 'local /app connection closed before receipt');
+      },
+    });
+    const code = await runAppCommand([
+      'send', '--peer', 'device-peer', '--subject', 'subject', '--body', 'body',
+    ], prepared.context);
+    expect(code).toBe(3);
+    const sent = prepared.frames[0]!;
+    const messageId = sent.type === 'app-send-message' ? sent.payload.messageId : '';
+    expect(messageId.length).toBeGreaterThan(0);
+    expect(ndjson(prepared.stdout.text())[0]).toMatchObject({
+      type: 'app-send-result',
+      payload: { messageId, status: 'resultUnknown', stage: 'result_unknown' },
+    });
+  });
+
+  it('emits unrequested app-error and connection close events on the stream', async () => {
+    const streamConnection = {
+      ready: {
+        requestId: 'hello-1',
+        protocolVersion: 1,
+        deviceId: 'device-local',
+        daemonHostId: 'daemon-local',
+        capabilities: {},
+      },
+      async request() {
+        throw new AppCliError('internal_error', 'unused');
+      },
+      close() {},
+    } as unknown as AppClientConnection;
+    const prepared = await context({
+      request: () => streamConnection.ready as never,
+      connect: async (options) => {
+        options.onEvent?.({
+          type: 'app-error',
+          payload: { requestId: undefined, messageId: undefined, transferId: undefined, code: 'slow_consumer', stage: 'publish', message: 'slow consumer' },
+        });
+        options.onEvent?.({
+          type: 'app-connection-state',
+          payload: { requestId: 'event-1', state: 'disconnected', daemonHostId: 'daemon-local', code: 4008, reason: 'slow_consumer' },
+        });
+        return streamConnection;
+      },
+    });
+    const code = await runAppCommand(['stream', '--json'], prepared.context);
+    expect(code).toBe(1);
+    const types = ndjson(prepared.stdout.text()).map((frame) => frame.type);
+    expect(types).toContain('app-error');
+    expect(types).toContain('app-connection-state');
+    const disconnected = ndjson(prepared.stdout.text()).find(
+      (frame) => frame.type === 'app-connection-state',
+    );
+    expect(disconnected).toMatchObject({ payload: { code: 4008, reason: 'slow_consumer' } });
   });
 
   it('streams a file, rejects invalid files, and covers status/ack/consume', async () => {

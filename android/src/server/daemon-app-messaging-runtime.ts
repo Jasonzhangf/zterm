@@ -12,6 +12,7 @@ import {
   AppProtocolError,
   appErrorPayload,
   validateAppFileMetadata,
+  validateAppServerFrame,
   validateAppTarget,
   validateMessageBody,
   validateSafeFileName,
@@ -62,9 +63,10 @@ export interface DaemonAppMessagingRuntimeOptions {
 export interface DaemonAppMessagingRuntime {
   initialize: () => Promise<void>;
   dispose: () => void;
+  getInitializationError: () => Error | null;
   getCapabilities: () => typeof APP_CAPABILITIES;
   getIdentity: () => { deviceId: string; daemonHostId: string };
-  handleFrame: (link: AppLink, frame: AppClientFrame) => Promise<void>;
+  handleFrame: (link: AppLink, frame: AppClientFrame) => Promise<{ settled: boolean; messageId?: string; senderDaemonHostId?: string }>;
   subscribeLocal: (link: AppLink) => Promise<void>;
   revokeLink: (linkId: string) => void;
 }
@@ -223,8 +225,9 @@ export function createDaemonAppMessagingRuntime(
   });
   const subscribers = new Map<string, AppLink>();
   const peerLinks = new Map<string, PeerLink>();
-  const activeFileSends = new Map<string, { target: AppTarget; link: PeerLink; messageId: string }>();
+  const activeFileSends = new Map<string, { target: AppTarget; link?: PeerLink; messageId: string }>();
   let initialized = false;
+  let initializationError: Error | null = null;
   let retentionTimer: ReturnType<typeof setInterval> | null = null;
 
   const createSocket = options.createWebSocket ?? ((url: string, authToken: string) => new WebSocket(url, {
@@ -316,33 +319,24 @@ export function createDaemonAppMessagingRuntime(
     peerLinks.set(key, peer);
 
     ws.on('message', (raw: WebSocket.RawData) => {
-      let parsed: unknown;
       try {
-        parsed = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8'));
-      } catch {
-        return;
-      }
-      if (!parsed || typeof parsed !== 'object') return;
-      const frame = parsed as AppServerFrame;
-      const requestId = 'payload' in frame && frame.payload && typeof frame.payload === 'object'
-        ? (frame.payload as { requestId?: unknown }).requestId
-        : undefined;
-      if (frame.type === 'app-ready' && typeof requestId === 'string') {
-        const pending = peer.pending.get(requestId);
-        if (pending) {
-          clearTimeout(pending.timer);
-          peer.pending.delete(requestId);
-          peer.ready = true;
-          pending.resolve(frame);
+        const parsed: unknown = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8'));
+        const frame = validateAppServerFrame(parsed);
+        handlePeerFrame(peer, frame);
+      } catch (error) {
+        const requestId = resolvePeerRequestIdFromRaw(raw);
+        for (const [id, pending] of [...peer.pending]) {
+          if (requestId === undefined || id === requestId) {
+            clearTimeout(pending.timer);
+            peer.pending.delete(id);
+            pending.reject(new PeerLinkError(
+              'invalid_frame',
+              `peer returned an invalid frame: ${error instanceof Error ? error.message : String(error)}`,
+              false,
+            ));
+          }
         }
-        return;
       }
-      if (typeof requestId !== 'string') return;
-      const pending = peer.pending.get(requestId);
-      if (!pending) return;
-      clearTimeout(pending.timer);
-      peer.pending.delete(requestId);
-      pending.resolve(frame);
     });
     ws.on('close', () => {
       void closePeerLink(peer, 'peer closed');
@@ -396,12 +390,54 @@ export function createDaemonAppMessagingRuntime(
       throw error;
     });
 
-    if (ready.type !== 'app-ready' || ready.payload.daemonHostId !== target.daemonHostId) {
-      await closePeerLink(peer, 'peer identity mismatch');
-      throw new PeerLinkError('unreachable', 'peer returned a different daemon identity', false);
+    if (
+      ready.type !== 'app-ready'
+      || ready.payload.protocolVersion !== APP_PROTOCOL_VERSION
+      || ready.payload.daemonHostId !== target.daemonHostId
+      || ready.payload.deviceId !== target.deviceId
+    ) {
+      await closePeerLink(peer, 'peer identity or version mismatch');
+      throw new PeerLinkError('unreachable', 'peer returned a different daemon identity or protocol version', false);
     }
     notifyPeerState('peer-connected', target.daemonHostId);
     return peer;
+  }
+
+  function resolvePeerRequestIdFromRaw(raw: WebSocket.RawData): unknown {
+    try {
+      const parsed: unknown = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const payload = (parsed as { payload?: unknown }).payload;
+        if (payload && typeof payload === 'object') {
+          return (payload as { requestId?: unknown }).requestId;
+        }
+      }
+      return undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function handlePeerFrame(peer: PeerLink, frame: AppServerFrame) {
+      const requestId = 'payload' in frame && frame.payload && typeof frame.payload === 'object'
+        ? (frame.payload as { requestId?: unknown }).requestId
+        : undefined;
+      if (frame.type === 'app-ready' && typeof requestId === 'string') {
+        const pending = peer.pending.get(requestId);
+        if (pending) {
+          clearTimeout(pending.timer);
+          peer.pending.delete(requestId);
+          peer.ready = true;
+          pending.resolve(frame);
+        }
+        return;
+      }
+      if (typeof requestId !== 'string') return;
+      const pending = peer.pending.get(requestId);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      peer.pending.delete(requestId);
+      pending.resolve(frame);
   }
 
   async function probePeerLink(peer: PeerLink): Promise<boolean> {
@@ -642,6 +678,12 @@ export function createDaemonAppMessagingRuntime(
           { deviceId: options.deviceId, daemonHostId: options.daemonHostId },
           { ...payload, file },
         );
+        if (result.type === 'app-send-result' && result.payload.status === 'receiving') {
+          activeFileSends.set(file.transferId, {
+            target,
+            messageId: payload.messageId,
+          });
+        }
         link.send(result);
         return;
       }
@@ -699,6 +741,9 @@ export function createDaemonAppMessagingRuntime(
         link.send(response);
         return;
       }
+      if (!active.link) {
+        throw new AppProtocolError({ code: 'invalid_state', message: 'peer transport is not active', stage: 'file-chunk', transferId: payload.transferId });
+      }
       const response = await peerRequest(active.link, { type: 'app-send-file-chunk', payload });
       if (response.type === 'app-error') {
         await updateOutbox(active.target.daemonHostId, payload.messageId, 'failed', response.payload.code);
@@ -738,8 +783,15 @@ export function createDaemonAppMessagingRuntime(
           { deviceId: options.deviceId, daemonHostId: options.daemonHostId },
           payload,
         );
+        if (response.type === 'app-send-result' && (response.payload.status === 'received' || response.payload.status === 'delivered' || response.payload.status === 'consumed')) {
+          await updateOutbox(active.target.daemonHostId, payload.messageId, 'received');
+          activeFileSends.delete(payload.transferId);
+        }
         link.send(response);
         return;
+      }
+      if (!active.link) {
+        throw new AppProtocolError({ code: 'invalid_state', message: 'peer transport is not active', stage: 'file-commit', transferId: payload.transferId });
       }
       const response = await peerRequest(active.link, { type: 'app-send-file-commit', payload });
       if (response.type === 'app-error') {
@@ -786,6 +838,14 @@ export function createDaemonAppMessagingRuntime(
         }
         return existing.state;
       }
+      if (await store.hasStagingKey(sender.daemonHostId, payload.messageId)) {
+        throw new AppProtocolError({
+          code: 'message_id_conflict',
+          message: 'messageId is already being received as a file transfer',
+          stage: 'inbound',
+          messageId: payload.messageId,
+        });
+      }
       const record: AppInboxRecord = {
         schemaVersion: 1,
         senderDeviceId: sender.deviceId,
@@ -823,6 +883,15 @@ export function createDaemonAppMessagingRuntime(
         }
         return peerResultFrame(payload.requestId, payload.messageId, existingRecord.state === 'received' ? 'received' : existingRecord.state === 'rejected' ? 'rejected' : 'received', 'received', {
           transferId: file.transferId,
+        });
+      }
+      const sameKeyStaging = await store.findStagingKey(sender.daemonHostId, payload.messageId);
+      if (sameKeyStaging && sameKeyStaging.transferId !== file.transferId) {
+        throw new AppProtocolError({
+          code: 'message_id_conflict',
+          message: 'messageId is already being received as a different transfer',
+          stage: 'inbound-file',
+          messageId: payload.messageId,
         });
       }
       const existingStaging = await store.readStagingMetadata(sender.daemonHostId, file.transferId);
@@ -956,6 +1025,15 @@ export function createDaemonAppMessagingRuntime(
           absolutePath: existing.file.absolutePath,
         });
       }
+      if (existing) {
+        throw new AppProtocolError({
+          code: 'message_id_conflict',
+          message: 'messageId already exists for a different transfer',
+          stage: 'file-commit',
+          messageId: payload.messageId,
+          transferId: payload.transferId,
+        });
+      }
       const metadata = await store.readStagingMetadata(sender.daemonHostId, payload.transferId);
       if (!metadata || metadata.messageId !== payload.messageId) {
         throw new AppProtocolError({ code: 'not_found', message: 'transfer staging record not found', stage: 'file-commit', transferId: payload.transferId });
@@ -1034,25 +1112,25 @@ export function createDaemonAppMessagingRuntime(
     messageId: string,
     senderDaemonHostId: string | undefined,
     targetState: 'delivered' | 'consumed',
-  ): Promise<AppInboxRecord> {
+  ): Promise<{ changed: boolean; record: AppInboxRecord }> {
     return store.runExclusive(async () => {
       const record = await resolveInboxRecord(messageId, senderDaemonHostId);
       if (record.state === 'rejected') {
         throw new AppProtocolError({ code: 'invalid_state', message: 'rejected messages cannot advance', stage: 'ack', messageId });
       }
       if (targetState === 'delivered') {
-        if (record.state !== 'received') return record;
+        if (record.state !== 'received') return { changed: false, record };
         const next: AppInboxRecord = { ...record, state: 'delivered', deliveredAt: nowIso(now) };
         await store.writeInboxRecord(next);
-        return next;
+        return { changed: true, record: next };
       }
       if (record.state === 'received') {
         throw new AppProtocolError({ code: 'invalid_state', message: 'consume requires delivered state', stage: 'consume', messageId });
       }
-      if (record.state === 'consumed') return record;
+      if (record.state === 'consumed') return { changed: false, record };
       const next: AppInboxRecord = { ...record, state: 'consumed', consumedAt: nowIso(now) };
       await store.writeInboxRecord(next);
-      return next;
+      return { changed: true, record: next };
     });
   }
 
@@ -1123,16 +1201,21 @@ export function createDaemonAppMessagingRuntime(
   return {
     async initialize() {
       if (initialized) return;
-      await store.initialize();
-      const recovered = await store.runExclusive(() => store.recoverStaging());
-      await recoverOutbox();
-      await store.runExclusive(() => store.cleanupRetention(now(), retentionMs));
-      for (const record of recovered) publishRecord(record);
-      retentionTimer = setInterval(() => {
-        void store.runExclusive(() => store.cleanupRetention(now(), retentionMs)).catch(() => undefined);
-      }, options.retentionIntervalMs ?? 60 * 60 * 1000);
-      retentionTimer.unref?.();
-      initialized = true;
+      try {
+        await store.initialize();
+        const recovered = await store.runExclusive(() => store.recoverStaging());
+        await recoverOutbox();
+        await store.runExclusive(() => store.cleanupRetention(now(), retentionMs));
+        for (const record of recovered) publishRecord(record);
+        retentionTimer = setInterval(() => {
+          void store.runExclusive(() => store.cleanupRetention(now(), retentionMs)).catch(() => undefined);
+        }, options.retentionIntervalMs ?? 60 * 60 * 1000);
+        retentionTimer.unref?.();
+        initialized = true;
+        initializationError = null;
+      } catch (error) {
+        initializationError = error instanceof Error ? error : new Error(String(error));
+      }
     },
 
     dispose() {
@@ -1149,6 +1232,11 @@ export function createDaemonAppMessagingRuntime(
       }
       activeFileSends.clear();
       initialized = false;
+      initializationError = null;
+    },
+
+    getInitializationError() {
+      return initializationError;
     },
 
     getCapabilities() {
@@ -1178,7 +1266,7 @@ export function createDaemonAppMessagingRuntime(
       subscribers.delete(linkId);
     },
 
-    async handleFrame(link, frame) {
+    async handleFrame(link, frame): Promise<{ settled: boolean; messageId?: string; senderDaemonHostId?: string }> {
       const requestId = frameRequestId(frame);
       const messageId = 'messageId' in frame.payload && typeof frame.payload.messageId === 'string'
         ? frame.payload.messageId
@@ -1187,14 +1275,25 @@ export function createDaemonAppMessagingRuntime(
         ? frame.payload.transferId
         : undefined;
       try {
+        if (initializationError) {
+          throw new AppProtocolError({
+            code: 'storage_error',
+            message: `app messaging is unavailable: ${initializationError.message}`,
+            stage: 'admission',
+            requestId,
+          });
+        }
         if (frame.type === 'app-ack' || frame.type === 'app-consume') {
           if (link.role !== 'local') {
             throw new AppProtocolError({ code: 'forbidden_role', message: 'peer connections cannot ack or consume', stage: 'admission' });
           }
           const state = frame.type === 'app-ack' ? 'delivered' : 'consumed';
-          const record = await settleLocalState(frame.payload.messageId, frame.payload.senderDaemonHostId, state);
-          link.send({ type: 'app-status-result', payload: recordStatusPayload(record, frame.payload.requestId) });
-          return;
+          const settled = await settleLocalState(frame.payload.messageId, frame.payload.senderDaemonHostId, state);
+          link.send({ type: 'app-status-result', payload: recordStatusPayload(settled.record, frame.payload.requestId) });
+          if (settled.changed) {
+            return { settled: true, messageId: settled.record.messageId, senderDaemonHostId: settled.record.senderDaemonHostId };
+          }
+          return { settled: false };
         }
 
         switch (frame.type) {
@@ -1205,40 +1304,40 @@ export function createDaemonAppMessagingRuntime(
               const state = await receiveMessage(link, frame.payload);
               link.send(peerResultFrame(frame.payload.requestId, frame.payload.messageId, state === 'rejected' ? 'rejected' : 'received', 'received'));
             }
-            return;
+            return { settled: false };
           case 'app-send-file-start':
             if (link.role === 'local') {
               await sendFileStartFromLocal(link, frame.payload);
             } else {
               link.send(await receiveFileStart(link, frame.payload));
             }
-            return;
+            return { settled: false };
           case 'app-send-file-chunk':
             if (link.role === 'local') {
               await forwardFileChunk(link, frame.payload);
             } else {
               link.send(await receiveFileChunk(link, frame.payload));
             }
-            return;
+            return { settled: false };
           case 'app-send-file-commit':
             if (link.role === 'local') {
               await forwardFileCommit(link, frame.payload);
             } else {
               link.send(await receiveFileCommit(link, frame.payload));
             }
-            return;
+            return { settled: false };
           case 'app-status':
             if (link.role === 'peer') {
               await peerStatus(link, frame.payload.requestId, frame.payload.messageId, frame.payload.senderDaemonHostId);
-              return;
+              return { settled: false };
             }
             if (frame.payload.remote) {
               const target = validateAppTarget(frame.payload.target, 'status');
               await remoteStatus(link, frame.payload.requestId, frame.payload.messageId, target);
-              return;
+              return { settled: false };
             }
             await localStatus(link, frame.payload.requestId, frame.payload.messageId, frame.payload.senderDaemonHostId);
-            return;
+            return { settled: false };
           case 'app-ping':
             link.send({
               type: 'app-pong',
@@ -1248,13 +1347,15 @@ export function createDaemonAppMessagingRuntime(
                 receivedAt: now(),
               },
             });
-            return;
+            return { settled: false };
           default:
             throw new AppProtocolError({ code: 'invalid_frame', message: `unsupported frame: ${(frame as { type?: string }).type}`, stage: 'dispatch' });
         }
       } catch (error) {
         sendError(link, error, requestId, messageId, transferId);
+        return { settled: false };
       }
+      return { settled: false };
     },
   };
 }

@@ -6,6 +6,7 @@ import {
   type AppClientFrame,
   type AppReadyPayload,
   type AppServerFrame,
+  validateAppServerFrame,
 } from '../../shared/src/connection/app-protocol.js';
 import {
   AppCliError,
@@ -18,6 +19,8 @@ type PendingRequest = {
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 };
+
+const CONNECT_TIMEOUT_MS = 10_000;
 
 export interface AppClientConnectionOptions {
   config: LocalAppDaemonConfig;
@@ -48,16 +51,54 @@ export class AppClientConnection {
     this.onEvent = onEvent;
 
     ws.on('message', (raw) => {
-      let frame: AppServerFrame;
       try {
-        frame = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8')) as AppServerFrame;
+        const parsed: unknown = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8'));
+        const frame = validateAppServerFrame(parsed);
+        this.handleServerFrame(frame);
       } catch {
-        return;
+        this.rejectAllPending(new AppCliError('invalid_frame', 'local /app returned an invalid frame'));
       }
-      if (frame.type === 'app-inbound-message' || frame.type === 'app-inbound-file' || frame.type === 'app-connection-state') {
+    });
+
+    ws.on('close', (_code, reason) => {
+      this.closed = true;
+      this.onEvent?.({
+        type: 'app-connection-state',
+        payload: {
+          requestId: `event-${randomUUID()}`,
+          state: 'disconnected',
+          daemonHostId: this.ready.daemonHostId,
+          code: _code,
+          reason: reason.toString(),
+        },
+      });
+      this.rejectAllPending(new AppCliError('result_unknown', `local /app connection closed: ${reason.toString() || 'no reason'}`));
+    });
+    ws.on('error', (error) => {
+      this.closed = true;
+      this.onEvent?.({
+        type: 'app-connection-state',
+        payload: {
+          requestId: `event-${randomUUID()}`,
+          state: 'disconnected',
+          daemonHostId: this.ready.daemonHostId,
+          code: 1006,
+          reason: error.message,
+        },
+      });
+      this.rejectAllPending(new AppCliError('result_unknown', `local /app connection failed: ${error.message}`));
+    });
+  }
+
+  private handleServerFrame(frame: AppServerFrame) {
+    if (frame.type === 'app-inbound-message' || frame.type === 'app-inbound-file' || frame.type === 'app-connection-state') {
         this.onEvent?.(frame);
         return;
-      }
+    }
+    if (frame.type === 'app-error' && frame.payload.requestId === undefined) {
+      this.onEvent?.(frame);
+      return;
+    }
       const requestId = 'payload' in frame && frame.payload && typeof frame.payload === 'object'
         ? (frame.payload as { requestId?: unknown }).requestId
         : undefined;
@@ -67,24 +108,14 @@ export class AppClientConnection {
       clearTimeout(pending.timer);
       this.pending.delete(requestId);
       pending.resolve(frame);
-    });
+  }
 
-    ws.on('close', () => {
-      this.closed = true;
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(new AppCliError('result_unknown', 'local /app connection closed before a correlated result'));
-      }
-      this.pending.clear();
-    });
-    ws.on('error', (error) => {
-      this.closed = true;
-      for (const pending of this.pending.values()) {
-        clearTimeout(pending.timer);
-        pending.reject(new AppCliError('result_unknown', `local /app connection failed: ${error.message}`));
-      }
-      this.pending.clear();
-    });
+  private rejectAllPending(error: AppCliError) {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+    }
+    this.pending.clear();
   }
 
   static async connect(options: AppClientConnectionOptions): Promise<AppClientConnection> {
@@ -92,24 +123,36 @@ export class AppClientConnection {
       headers: { Authorization: `Bearer ${authToken}` },
     }));
     const ws = createSocket(buildLocalAppUrl(options.config), options.config.authToken);
-    let authFailure: AppCliError | null = null;
-    ws.once('unexpected-response', (_request, response) => {
-      authFailure = new AppCliError(
-        response.statusCode === 401 ? 'unauthorized' : 'unreachable',
-        `local /app upgrade rejected with HTTP ${response.statusCode}`,
-      );
-    });
+    let connectTimeout: ReturnType<typeof setTimeout> | null = null;
     try {
       if (options.signal?.aborted) throw new AppCliError('cancelled', 'operation cancelled');
       await Promise.race([
         once(ws, 'open').then(() => undefined),
         new Promise<never>((_resolve, reject) => {
+          connectTimeout = setTimeout(() => {
+            reject(new AppCliError('unreachable', 'local /app connection timed out'));
+          }, options.requestTimeoutMs ?? CONNECT_TIMEOUT_MS);
+          connectTimeout.unref?.();
+          ws.once('unexpected-response', (_request, response) => {
+            if (connectTimeout) {
+              clearTimeout(connectTimeout);
+              connectTimeout = null;
+            }
+            response.resume();
+            reject(new AppCliError(
+              response.statusCode === 401 ? 'unauthorized' : 'unreachable',
+              `local /app upgrade rejected with HTTP ${response.statusCode}`,
+            ));
+          });
           ws.once('error', (error) => reject(new AppCliError('unreachable', `cannot connect to local daemon /app: ${error.message}`)));
           options.signal?.addEventListener('abort', () => reject(new AppCliError('cancelled', 'operation cancelled')), { once: true });
         }),
       ]);
     } catch (error) {
-      if (authFailure) throw authFailure;
+      if (connectTimeout) {
+        clearTimeout(connectTimeout);
+        connectTimeout = null;
+      }
       try {
         ws.terminate();
       } catch {
@@ -127,19 +170,20 @@ export class AppClientConnection {
       }, timeoutMs);
       timer.unref?.();
       const onMessage = (raw: WebSocket.RawData) => {
-        let frame: AppServerFrame;
         try {
-          frame = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8')) as AppServerFrame;
+          const parsed: unknown = JSON.parse(typeof raw === 'string' ? raw : Buffer.from(raw as ArrayBuffer).toString('utf8'));
+          const frame = validateAppServerFrame(parsed);
+          if (frame.type === 'app-ready' && frame.payload.requestId === requestId) {
+            cleanup();
+            resolve(frame.payload);
+          }
+          if (frame.type === 'app-error' && frame.payload.requestId === requestId) {
+            cleanup();
+            reject(new AppCliError(frame.payload.code, frame.payload.message));
+          }
         } catch {
-          return;
-        }
-        if (frame.type === 'app-ready' && frame.payload.requestId === requestId) {
           cleanup();
-          resolve(frame.payload);
-        }
-        if (frame.type === 'app-error' && frame.payload.requestId === requestId) {
-          cleanup();
-          reject(new AppCliError(frame.payload.code, frame.payload.message));
+          reject(new AppCliError('invalid_frame', 'local /app returned an invalid handshake frame'));
         }
       };
       const onClose = () => {
