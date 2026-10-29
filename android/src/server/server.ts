@@ -800,22 +800,48 @@ relayHostClient = createTraversalRelayHostClient({
   listTerminalSessionCatalog,
 });
 
-const appMessagingRuntime = createDaemonAppMessagingRuntime({
-  appRootDir: WTERM_HOME_DIR,
-  deviceId: DAEMON_CONFIG.deviceId,
-  daemonHostId: DAEMON_CONFIG.daemonHostId,
-});
-await appMessagingRuntime.initialize().catch((error: unknown) => {
+async function startAppMessagingGateway() {
+  const appMessagingRuntime = createDaemonAppMessagingRuntime({
+    appRootDir: WTERM_HOME_DIR,
+    deviceId: DAEMON_CONFIG.deviceId,
+    daemonHostId: DAEMON_CONFIG.daemonHostId,
+  });
+  await appMessagingRuntime.initialize().catch((error: unknown) => {
+    console.error(
+      `[${logTimePrefix()}] app messaging initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+  let appGateway: ReturnType<typeof createDaemonAppGateway> | null = null;
+  try {
+    appGateway = createDaemonAppGateway({
+      requiredAuthToken: REQUIRED_AUTH_TOKEN,
+      daemonHostId: DAEMON_CONFIG.daemonHostId,
+      deviceId: DAEMON_CONFIG.deviceId,
+      messaging: appMessagingRuntime,
+      log: (message) => console.warn(`[${logTimePrefix()}] ${message}`),
+    });
+  } catch (error: unknown) {
+    console.error(
+      `[${logTimePrefix()}] app messaging gateway unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  server.on('upgrade', (request, socket, head) => {
+    if (appGateway?.handleServerUpgrade(request, socket, head)) return;
+    handleServerUpgrade(request, socket, head);
+  });
+  server.on('close', () => {
+    appGateway?.dispose();
+    appMessagingRuntime.dispose();
+  });
+  server.listen(PORT, HOST, () => {
+    handleDaemonServerListening();
+  });
+}
+void startAppMessagingGateway().catch((error: unknown) => {
   console.error(
-    `[${logTimePrefix()}] app messaging initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+    `[${logTimePrefix()}] app messaging gateway startup failed: ${error instanceof Error ? error.message : String(error)}`,
   );
-});
-const appGateway = createDaemonAppGateway({
-  requiredAuthToken: REQUIRED_AUTH_TOKEN,
-  daemonHostId: DAEMON_CONFIG.daemonHostId,
-  deviceId: DAEMON_CONFIG.deviceId,
-  messaging: appMessagingRuntime,
-  log: (message) => console.warn(`[${logTimePrefix()}] ${message}`),
 });
 
 wss.on('connection', handleWebSocketConnection);
@@ -837,19 +863,6 @@ wss.on('close', () => {
 
 server.on('error', (error) => {
   handleDaemonServerError(error);
-});
-
-server.on('upgrade', (request, socket, head) => {
-  if (appGateway.handleServerUpgrade(request, socket, head)) return;
-  handleServerUpgrade(request, socket, head);
-});
-server.on('close', () => {
-  appGateway.dispose();
-  appMessagingRuntime.dispose();
-});
-
-server.listen(PORT, HOST, () => {
-  handleDaemonServerListening();
 });
 
 process.on('SIGINT', () => shutdownDaemon('SIGINT', 0));
