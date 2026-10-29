@@ -6259,3 +6259,190 @@ describe('P5 post-apply catchup trimming', () => {
     );
   });
 });
+
+describe('connection recovery visible-window planning (plan_and_dispatch_visible_window)', () => {
+  const COMMITTED_START_INDEX = 1165;
+  const COMMITTED_END_INDEX = 2165;
+  const COMMITTED_REVISION = 14;
+  const VISIBLE_WINDOW_ROWS = 24;
+  const COMMITTED_VISIBLE_WINDOW = {
+    startIndex: COMMITTED_END_INDEX - VISIBLE_WINDOW_ROWS,
+    endIndex: COMMITTED_END_INDEX,
+    viewportRows: VISIBLE_WINDOW_ROWS,
+  };
+
+  function makeRecoveredCommittedSession(sessionId: string): TestSession {
+    return {
+      ...makeSession(sessionId),
+      buffer: createSessionBufferState({
+        lines: Array.from(
+          { length: COMMITTED_END_INDEX - COMMITTED_START_INDEX },
+          (_, index) => `row-${COMMITTED_START_INDEX + index}`,
+        ),
+        startIndex: COMMITTED_START_INDEX,
+        endIndex: COMMITTED_END_INDEX,
+        bufferHeadStartIndex: COMMITTED_START_INDEX,
+        bufferTailEndIndex: COMMITTED_END_INDEX,
+        cols: 80,
+        rows: VISIBLE_WINDOW_ROWS,
+        revision: COMMITTED_REVISION,
+        cacheLines: 1000,
+      }),
+      daemonHeadRevision: 0,
+      daemonHeadEndIndex: 0,
+    };
+  }
+
+  function dispatchVisibleWindowRequest(options: {
+    session: TestSession;
+    visibleRange: { startIndex: number; endIndex: number; viewportRows: number };
+    requestOptions: Parameters<typeof requestSessionBufferSyncRuntime>[0]['requestOptions'];
+    liveHeads?: Array<[string, any]>;
+  }) {
+    const sessionId = options.session.id;
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const requested = requestSessionBufferSyncRuntime({
+      sessionId,
+      requestOptions: options.requestOptions,
+      refs: {
+        stateRef: { current: { sessions: [options.session], activeSessionId: sessionId } },
+        sessionVisibleRangeRef: { current: new Map([[sessionId, options.visibleRange]]) },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(options.liveHeads || []),
+        sessionPullStateRef: { current: new Map() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => options.session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
+    const messages = sendSocketPayload.mock.calls.map((call) => JSON.parse(String(call[2])));
+    return {
+      requested,
+      headRequestCount: messages.filter((message) => message?.type === 'buffer-head-request').length,
+      bodySyncWindows: messages
+        .filter((message) => message?.type === 'buffer-sync-request')
+        .map((message) => ({
+          requestStartIndex: message.payload?.requestStartIndex,
+          requestEndIndex: message.payload?.requestEndIndex,
+          knownRevision: message.payload?.knownRevision,
+          localStartIndex: message.payload?.localStartIndex,
+          localEndIndex: message.payload?.localEndIndex,
+          targetHeadRevision: message.payload?.targetHeadRevision,
+        })),
+    };
+  }
+
+  // Failure mode 1: unknown daemon head must not degrade into an empty [0,0) body request
+  // that the daemon answers with an unbounded mirror burst.
+  it('waits for head instead of dispatching an empty body window when committed rows exist and head is unknown', () => {
+    const session = makeRecoveredCommittedSession('session-recovery-unknown-head');
+    const result = dispatchVisibleWindowRequest({
+      session,
+      visibleRange: COMMITTED_VISIBLE_WINDOW,
+      requestOptions: {
+        reason: 'buffer-head-resume-tail',
+        purpose: 'tail-refresh',
+        headOverride: null,
+      },
+      liveHeads: [],
+    });
+
+    expect(result.bodySyncWindows).toEqual([]);
+    expect(result.headRequestCount).toBeLessThanOrEqual(1);
+  });
+
+  // Failure mode 1 (bounded alternative): when the planner does dispatch a body window
+  // without head facts, it must stay inside the known visible demand, never [0,0).
+  it('keeps an unknown-head body window bounded by the visible demand instead of falling back to [0,0)', () => {
+    const session = makeRecoveredCommittedSession('session-recovery-visible-jump');
+    const advancedVisibleRange = {
+      startIndex: COMMITTED_END_INDEX,
+      endIndex: COMMITTED_END_INDEX + VISIBLE_WINDOW_ROWS,
+      viewportRows: VISIBLE_WINDOW_ROWS,
+    };
+    const result = dispatchVisibleWindowRequest({
+      session,
+      visibleRange: advancedVisibleRange,
+      requestOptions: {
+        reason: 'buffer-head-resume-tail',
+        purpose: 'tail-refresh',
+        headOverride: null,
+      },
+      liveHeads: [],
+    });
+
+    const emptyWindows = result.bodySyncWindows.filter(
+      (window) => !(window.requestEndIndex > window.requestStartIndex),
+    );
+    expect(emptyWindows).toEqual([]);
+    for (const window of result.bodySyncWindows) {
+      expect(window.requestStartIndex).toBeGreaterThanOrEqual(advancedVisibleRange.startIndex);
+      expect(window.requestEndIndex).toBeLessThanOrEqual(advancedVisibleRange.endIndex);
+    }
+  });
+
+  // Failure mode 2: rows already committed in the local sparse buffer must not be
+  // requested again while head truth is unchanged.
+  it('does not re-request visible rows already committed in the local sparse buffer', () => {
+    const session = makeRecoveredCommittedSession('session-recovery-covered');
+    const result = dispatchVisibleWindowRequest({
+      session,
+      visibleRange: COMMITTED_VISIBLE_WINDOW,
+      requestOptions: {
+        reason: 'buffer-head-update',
+        purpose: 'tail-refresh',
+        headOverride: {
+          daemonHeadRevision: COMMITTED_REVISION,
+          daemonHeadEndIndex: COMMITTED_END_INDEX,
+        },
+      },
+      liveHeads: [[session.id, {
+        revision: COMMITTED_REVISION,
+        latestEndIndex: COMMITTED_END_INDEX,
+        availableStartIndex: COMMITTED_START_INDEX,
+        availableEndIndex: COMMITTED_END_INDEX,
+        seenAt: 1,
+      }]],
+    });
+
+    expect(result.bodySyncWindows).toEqual([]);
+  });
+
+  // Failure mode 3 (anti-regression counterexample): a bounded planner must still
+  // refresh when the same visible window end carries changed daemon content.
+  it('still refreshes the visible tail when same-end window content changed', () => {
+    const session = makeRecoveredCommittedSession('session-recovery-content-change');
+    const result = dispatchVisibleWindowRequest({
+      session,
+      visibleRange: COMMITTED_VISIBLE_WINDOW,
+      requestOptions: {
+        reason: 'buffer-head-update',
+        purpose: 'tail-refresh',
+        headOverride: {
+          daemonHeadRevision: COMMITTED_REVISION + 1,
+          daemonHeadEndIndex: COMMITTED_END_INDEX,
+        },
+      },
+      liveHeads: [[session.id, {
+        revision: COMMITTED_REVISION + 1,
+        latestEndIndex: COMMITTED_END_INDEX,
+        availableStartIndex: COMMITTED_START_INDEX,
+        availableEndIndex: COMMITTED_END_INDEX,
+        seenAt: 2,
+      }]],
+    });
+
+    expect(result.bodySyncWindows).toEqual([
+      expect.objectContaining({
+        requestStartIndex: COMMITTED_VISIBLE_WINDOW.startIndex,
+        requestEndIndex: COMMITTED_VISIBLE_WINDOW.endIndex,
+        knownRevision: COMMITTED_REVISION,
+        targetHeadRevision: COMMITTED_REVISION + 1,
+      }),
+    ]);
+  });
+});

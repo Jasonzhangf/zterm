@@ -1519,8 +1519,14 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     private static AndroidConnectionStateMachine readyStateMachine() {
+        return readyStateMachine(target());
+    }
+
+    private static AndroidConnectionStateMachine readyStateMachine(
+        AndroidConnectionServiceTarget target
+    ) {
         AndroidConnectionStateMachine stateMachine = new AndroidConnectionStateMachine(snapshot -> { });
-        stateMachine.dispatch(AndroidConnectionServiceEvent.bindTarget(target()), 1L);
+        stateMachine.dispatch(AndroidConnectionServiceEvent.bindTarget(target), 1L);
         stateMachine.dispatch(AndroidConnectionServiceEvent.transportOpening("gen-1"), 2L);
         stateMachine.dispatch(AndroidConnectionServiceEvent.muxReady(
             "gen-1",
@@ -1639,8 +1645,12 @@ public final class AndroidConnectionServiceTransportTest {
     }
 
     private static AndroidConnectionServiceTarget target() {
+        return target("target-a");
+    }
+
+    private static AndroidConnectionServiceTarget target(String targetKey) {
         return new AndroidConnectionServiceTarget.Builder()
-            .targetKey("target-a")
+            .targetKey(targetKey)
             .bridgeHost("127.0.0.1")
             .bridgePort(3333)
             .build();
@@ -2574,5 +2584,119 @@ public final class AndroidConnectionServiceTransportTest {
         } finally {
             AndroidConnectionService.resetForTests();
         }
+    }
+
+    @Test
+    public void scopedNetworkGenerationChangeFencesOnlyAffectedTargetKeepingHealthyTargetSendable()
+        throws Exception {
+        // Accepted owner contract (android/docs/dagpipe/connection-recovery.graph.json):
+        // a network generation change must invalidate ONLY the affected target's native
+        // generation and send eligibility. A target whose route dependency did not
+        // change keeps its generation, heartbeat and channel send eligibility.
+        //
+        // Current product code compares both send gates against a single service-global
+        // networkGeneration, so a scoped retirement still fences the healthy target.
+        // This case pins the desired behaviour and must fail until send eligibility is
+        // scoped to the per-target generation.
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            setField(service, "networkGeneration", 0L);
+
+            AndroidConnectionServiceTarget targetA = target("target-a");
+            AndroidConnectionServiceTarget targetB = target("target-b");
+            Object runtimeA = newRuntime(service, targetA);
+            Object runtimeB = newRuntime(service, targetB);
+            registerRuntime(service, targetA.targetKey, runtimeA);
+            registerRuntime(service, targetB.targetKey, runtimeB);
+
+            List<String> sentA = new ArrayList<>();
+            List<String> sentB = new ArrayList<>();
+            configureHealthyRuntime(runtimeA, targetA, sentA, "channel-a");
+            configureHealthyRuntime(runtimeB, targetB, sentB, "channel-b");
+
+            // Sanity: both targets can send a target-level frame before any network event.
+            sendTargetMessage(runtimeA, "pre-a");
+            sendTargetMessage(runtimeB, "pre-b");
+            assertEquals("healthy target A must send before any network event", 1, sentA.size());
+            assertEquals("healthy target B must send before any network event", 1, sentB.size());
+
+            // A default-network event that affects only target A's route advances the
+            // service network epoch and retires only the affected target. Target B is
+            // untouched because its route dependency did not change.
+            setField(service, "networkGeneration", 1L);
+            invokeRetireForNetworkChange(runtimeA, "scoped-default-network-change");
+
+            int sentABefore = sentA.size();
+            sendTargetMessage(runtimeA, "post-a");
+            sendChannelMessage(runtimeA, "channel-a");
+            assertEquals(
+                "affected target A must drop old-generation target sends",
+                sentABefore, sentA.size());
+
+            int sentBBefore = sentB.size();
+            sendTargetMessage(runtimeB, "post-b");
+            sendChannelMessage(runtimeB, "channel-b");
+            assertEquals(
+                "healthy target B must keep heartbeat/target send after an unrelated "
+                    + "target's network generation change",
+                sentBBefore + 1, sentB.size());
+            assertEquals(
+                "healthy target B must keep channel send after an unrelated "
+                    + "target's network generation change",
+                sentBBefore + 2, sentB.size());
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    private static void registerRuntime(
+        AndroidConnectionService service, String targetKey, Object runtime
+    ) throws Exception {
+        Field targetsField = AndroidConnectionService.class.getDeclaredField("targets");
+        targetsField.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> targets = (Map<String, Object>) targetsField.get(service);
+        targets.put(targetKey, runtime);
+    }
+
+    private static void configureHealthyRuntime(
+        Object runtime, AndroidConnectionServiceTarget target, List<String> sent, String channelId
+    ) throws Exception {
+        setField(runtime, "stateMachine", readyStateMachine(target));
+        setField(runtime, "generation", "gen-1");
+        setField(runtime, "transportNetworkGeneration", 0L);
+        setField(runtime, "socket", fakeSocket(sent, true));
+        setDesiredChannel(runtime, channelId, "shell");
+        setDesiredChannelOpened(runtime, channelId, true);
+    }
+
+    private static void sendTargetMessage(Object runtime, String requestId) throws Exception {
+        Method sendTargetMessage = runtime.getClass().getDeclaredMethod(
+            "sendTargetMessage", String.class, JSONObject.class);
+        sendTargetMessage.setAccessible(true);
+        JSONObject message = new JSONObject().put("op", "ping");
+        Field targetField = runtime.getClass().getDeclaredField("target");
+        targetField.setAccessible(true);
+        String targetKey = ((AndroidConnectionServiceTarget) targetField.get(runtime)).targetKey;
+        AndroidConnectionCommand targetCommand = AndroidConnectionCommand.targetMessage(
+            targetKey, requestId, message);
+        sendTargetMessage.invoke(runtime, targetCommand.requestId, targetCommand.targetMessage);
+    }
+
+    private static void sendChannelMessage(Object runtime, String channelId) throws Exception {
+        Method sendChannelMessage = runtime.getClass().getDeclaredMethod(
+            "sendChannelMessage", String.class, JSONObject.class);
+        sendChannelMessage.setAccessible(true);
+        sendChannelMessage.invoke(runtime, channelId, new JSONObject().put("text", "hello"));
+    }
+
+    private static void invokeRetireForNetworkChange(Object runtime, String reason)
+        throws Exception {
+        Method retire = runtime.getClass().getDeclaredMethod(
+            "retireForNetworkChange", String.class);
+        retire.setAccessible(true);
+        retire.invoke(runtime, reason);
     }
 }

@@ -1,3 +1,10 @@
+# 2026-10-28 drawer 3229 network-identity red test repair
+
+- Red test: `test:android-network-identity` failed 2/147 in `App.dynamic-refresh.test.tsx` because the saved-connection path now reads `fetchTmuxSessionCatalog` for Collab metadata, while the test only mocked the legacy `fetchTmuxSessions` list.
+- Root owner: the product path in `useSessionOpenActions.ts` is correct for the drawer Collab filter. The App test mock was stale and could not represent the catalog response.
+- Repair: the test now mocks `fetchTmuxSessionCatalog`, keeps the legacy list mock for unaffected paths, and verifies the saved direct/Relay identities through the catalog owner.
+- Evidence: targeted 7 files pass 147/147. The full 3229 build is still running; APK, installed-device and OTA evidence remain pending.
+
 # 2026-10-27 standard tmux session path live deployment
 
 - The milestone code was already on main, but the running daemon still executed the published 0.1.3 bundle, so the new discovery never reached production. Root cause: launchd starts a fixed path `~/.zterm/releases/zterm-daemon/0.1.3/runtime/server.cjs`, and the daemon process environment has no `TMUX_TMPDIR`, so it kept falling back to the daemon-owned `~/.zterm/tmux` socket.
@@ -410,3 +417,27 @@ Packaged Electron app.asar 内 DevTools 默认被禁用。`--remote-debugging-po
 - Drawer acceptance: 全部 20/20, 仅 master 8/20 (CEO + 7 master, worker folders collapsed as `+N 窗口`), 隐藏 worker 11/20; hide moved a row to the tray, per-row 恢复 and 恢复全部 both restored it, tray disappeared at zero hidden. Settings renders no drawer filter and no manual master/subagent/hidden-name fields. Live tmux session `workspace-1` renders in the terminal surface.
 - Update check: selecting `使用 Relay 公网` and checking reports current 3231 / latest 3231 without error. The persisted `server-connected` manifest on this device still points at `100.86.84.63` (MacBook Air), whose daemon does not serve `/updates/latest.json` and returns HTTP 404; the client shows the failure explicitly and keeps the previous latest version. The no-route fallback in `resolveRouteAwareManifestUrl` prefers the first Tailscale candidate, which can be a different machine than `defaultServerId`; not changed in this pass, recorded as an open question for the update owner.
 - Evidence: `android/evidence/2026-10-28-l5-3231` (screenshots, logcat slice). Delivery: branch `release/1028-drawer-remote` commit 903a9306, PR #178 into main.
+
+# 2026-10-28 0.1.3.3232 UDP fast path OTA + partial L5
+
+- Build truth: `android/.build-meta.json` 3232, merged as `848a3a56` in PR #179 (`492650a0`). OTA manifest `publishedAt` 2026-10-29T00:41:44.623Z, versionCode 1100032320, sha256 `ccf4f4d15efd06aec83268eda661059257d7b63a442a236a7a907403dcaa4c84`, size 58277963.
+- Channel identity: `127.0.0.1:3333`, `100.66.1.82:3333` and the public Relay updates directory all serve 3232 with the same sha256. The repo `android/update-dist/latest.json` is still 3227 and holds no 323x APK; it is not the live channel, so device OTA reads `~/.zterm/updates/latest.json` on the daemon.
+- Installed state: PLZ110 `100.104.163.65:5555` and `emulator-5554` are on 0.1.3.3232 (versionCode 1100032320); `emulator-5556` remains on 3231 (1100032310).
+- Emulator L5 (partial): three screen-off/on cycles on `emulator-5554` kept pid 18971, left `AndroidConnectionService isForeground=true`, and produced no FATAL/SIGABRT/tombstone line. Evidence: `android/evidence/2026-10-28-l5-3232/emulator-logcat.txt`.
+- Emulator network-cut L5 (partial): on `emulator-5554` with a live `workspace-1` terminal, three airplane-mode enable/disable cycles kept pid 18971 and produced 0 FATAL/SIGABRT/tombstone lines; the session streamed new output after the cuts. Evidence: `android/evidence/2026-10-28-l5-3232/emulator-network-cuts.txt` and `e03-after-cuts.png`.
+- Real-device observation (passive): the 15T was in active user use, so no scripted screen-off run was performed. After another app took the foreground, pid 28051 stayed alive with the connection service foreground, and `/data/tombstones` held no entry newer than 2026-07-30. This does not prove the 3232 lifecycle fix.
+- Remaining gate: a scripted real-device run covering repeated screen-off/background plus LAN, cellular and Tailscale transitions, with no RTC SIGABRT and no healthy-target teardown. 3232 remains `UNVERIFIED` for acceptance until then.
+
+# 2026-10-28 OTA retention, public release, and Astra design cycle
+
+- `prepare-update-bundle.mjs` never pruned old builds, so `~/.zterm/updates` reached 1404 APKs / 26 GiB and `~/.wterm/updates` 1119 APKs / 21 GiB. Both home directories were pruned by hand to the live build plus two prior builds (389 MiB and 518 MiB), and `latest.json` still resolves to 3232 with sha256 `ccf4f4d1…a4c84`. Two stale regenerable build trees under `/Volumes/Intel/playground/zterm` were removed too (15.5 GiB). Total released: about 61.6 GiB.
+- PR #180 added one retention pass per output directory: it keeps the manifest-named APKs, the alias, the previous rollback and the newest three build numbers, and never touches `latest.json`, other files or unparseable names. Test `android/scripts/prepare-update-bundle.test.mjs` 2/2, `verify:local` 6/6, CI all green, merged as `555a11ff`.
+- PR #181 merged the from-zero install guide and release audit as `d1d81102`. Verified independently: GitHub release `v0.1.3.3232` is public with 15 assets; npm `@jsonstudio/zterm-cli@0.1.4` and `@jsonstudio/zterm-daemon@0.1.3` are latest. Three gaps stay UNVERIFIED: a genuine blank machine, a Collab public binary plus blank-machine handshake, and cross-machine Collab<->zterm transport.
+- Astra design cycle: review 1 FAIL (B1-B8). The revision planner closed all eight and validate passed at 20 nodes / 21 edges. Recheck 2 closed six and kept B4 (response arc still produced by the requester) plus new N1 (render stage lacked declared inputs). Revision 3 re-bound the response arc to wire ingress, restored code-order stages, and gave the render stage `arc.committed_sparse_truth` and `arc.visible_range_demand`; validate and inspect exit 0 at 20 nodes / 23 edges / 15 waves. Final focused check of B4 and N1 is the remaining design gate.
+
+# 2026-10-28 connection recovery design accepted and implementation tree opened
+
+- Astra recheck 4 completed with PASS for B4: `client.session_runtime` now owns actual visible-response reception, request dispatch remains `client.buffer_store`, pull settlement remains `client.buffer_store`, and `client.wire_ingress` owns normalization only. Remaining blocking count is 0; the graph is 20 nodes / 23 edges / 15 waves. Evidence: `/Volumes/Intel/playground/zterm/.worker-runs/network-connection-diagnosis-20261028/astra-recheck-4/result.md`.
+- Accepted candidate graph promoted to `android/docs/dagpipe/connection-recovery.graph.json`. `dagpipe graph validate` and `inspect` both exit 0; bindings remain syntactic until project compile/registry gates pass.
+- Sole implementation tree: `/Volumes/Intel/playground/zterm/conn-recovery-1028`, branch `codex/conn-recovery-1028`, base `d1d81102`. The task remains working; Android 3232 real-device L5 and the 10-20 second slow-connect root cause are still `UNVERIFIED`.
+- Phase 0 GCM worker dispatched for target-scoped network-retirement and bounded empty-window repair red tests. Product code remains unchanged until the red tests and timing evidence are reviewed.
