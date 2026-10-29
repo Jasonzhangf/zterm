@@ -64,14 +64,15 @@ return to follow, or send a literal prefix.
 
 ## Requirements And Status
 
-- Node.js 22 or newer.
+- Node.js 22 LTS (`ABI 127`) required for `zterm-daemon` native payloads; Node.js 22 or newer for `@jsonstudio/zterm-cli`.
 - Fixed platform tuples: `darwin-arm64`, `linux-x64`, `win32-x64`.
 - macOS arm64 full user path passed from an isolated npm tarball.
 - npm isolation upgrade passed 8/8.
-- Public npm publication is pending.
+- Public npm publication completed for `@jsonstudio/zterm-cli@0.1.4`, `@jsonstudio/zterm-daemon@0.1.3`, and the 3 platform payloads (`latest` and `next`), plus GitHub Release `v0.1.3.3232`. From-zero installation guide and blank-machine audit matrix: [`../../../docs/install-from-zero.md`](../../../docs/install-from-zero.md).
 - Windows x64 and Linux x64 native payload, installed CLI, and daemon installation
-  gates passed in CI. Windows remote acceptance passed in run 39707241211 with
+  gates passed in CI (including run `40797381369`). Windows remote acceptance passed in run 39707241211 with
   actual RTC relay/relay statistics and the original 2500 ms connection budget.
+- Genuinely blank physical machine / blank OS VM end-to-end installation, `Collab` + `zterm` blank-machine install sequence handshake, cross-machine Collab transport, and blank-machine upgrade/rollback remain explicitly `UNVERIFIED` until a blank machine is provisioned.
 - Independent review findings are closed: pinned socket routing survives catalog
   refresh, and ambiguous same-name sessions omit observations without exact
   provenance. Integration status is tracked in PR #167.

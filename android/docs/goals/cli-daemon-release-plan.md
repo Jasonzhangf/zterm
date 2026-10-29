@@ -1,12 +1,24 @@
 # CLI 与 daemon release 执行计划
 
-流程真源：[标准 release 流程](../decisions/2026-10-24-cli-daemon-release-process.md)。状态：流程已制定；自动化与公开发布待执行。本轮不调用 npm publish 或移动 tag。
+流程真源：[标准 release 流程](../decisions/2026-10-24-cli-daemon-release-process.md)。从零安装与空白机审计真源：[`docs/install-from-zero.md`](../../../docs/install-from-zero.md)。状态：M1–M3 公开 npm 发布与 GitHub Release `v0.1.3.3232` 已完成；真实空白机（物理机/空白 OS VM）端到端验证待空白机资源到位后执行。
 
-## 本轮结果
+## 本轮结果（2026-10-29）
 
-- Mac Studio 和 MacBook Air 已从本轮 tarball 重装 CLI 0.1.4，正式入口均为 `/opt/homebrew/bin/zterm`；版本和 slot 帮助检查通过，共享配置保留。
-- Air 的默认 Node 24 缺少动态库。已有 Node 22.23.4 可用，已通过 Homebrew link 恢复默认入口；RTC native 加载通过。没有服务重启。
-- 公开 npm 查询返回 CLI E404、daemon `latest=0.1.2`。源码候选为 CLI 0.1.4 / daemon 0.1.3；最终版本须在发布前重新检查，不由 E404 推断版本可用。
+- 基于 `origin/main`（`492650a074065b96d234167fa77f8d4bd2637d3f`）及 CI Run `40797381369` 三平台构建产物，`node android/scripts/verify-release-assets.mjs` 19 项校验全部通过（`ok: true`）。
+- 已按顺序发布 5 个公开 npm 包并完成公开 registry 隔离 prefix 安装与 `zterm daemon install --version 0.1.3` 验收，随后提升 `latest` tag：
+  - `@jsonstudio/zterm-daemon-darwin-arm64@0.1.3`（`shasum: c101e50f1c2b78e074e6bf2b413e26626c8cc5bb`，`latest: 0.1.3`，`next: 0.1.3`）
+  - `@jsonstudio/zterm-daemon-linux-x64@0.1.3`（`shasum: edc1b1185b36858e11b5e18220a12243c0f31c29`，`latest: 0.1.3`，`next: 0.1.3`）
+  - `@jsonstudio/zterm-daemon-win32-x64@0.1.3`（`shasum: f9598e400bc1760565be305f7e1587efbc738237`，`latest: 0.1.3`，`next: 0.1.3`）
+  - `@jsonstudio/zterm-daemon@0.1.3`（`shasum: bcad7594e4f18cb17925f74659f93af71c0c3aeb`，`latest: 0.1.3`，`next: 0.1.3`）
+  - `@jsonstudio/zterm-cli@0.1.4`（`shasum: 53ae4615c43e54585eb44f6913d34d314acf4b06`，`latest: 0.1.4`，`next: 0.1.4`）
+- 已发布 GitHub Public Release [`v0.1.3.3232`](https://github.com/Jasonzhangf/zterm/releases/tag/v0.1.3.3232)，包含 `zterm-0.1.3.3232.apk`、回滚包 `zterm-0.1.3.3232.1.apk`、`latest.json`、`zterm-daemon-0.1.3-darwin-arm64.tar.gz`、5 个 npm `.tgz` 及其 `.sha256` 共 15 个可下载资产。
+- 已与 AppSDK master（`Jenny`，`m1793238318673-416`）对齐版本兼容与安装顺序契约（`zterm-daemon` 固定要求 Node.js 22.x LTS `ABI 127`；共享 `TMUX_TMPDIR="$HOME/.tmux/run"`），沉淀于 [`docs/install-from-zero.md`](../../../docs/install-from-zero.md)。
+
+## 仍保持 UNVERIFIED 的真实空白机缺口
+
+- 真实空白机（无预装依赖的物理机或全新 OS VM）从零安装与升级/回滚验收：当前双项目均无可用空白机或空白账号（CI runner、容器及现有开发机不冒充空白机）。
+- `Collab` 公开二进制分发与空白机安装顺序握手：`Collab` 当前仅提供源码安装脚本 `collab/scripts/install-global-collab.sh`，无公开预编译二进制或 npm 包，且在 Windows/WSL 与空白机上的顺序握手未验证。
+- 跨机器 `Collab` 路由与双机联调：`cli-cross-machine-messaging` 仍在推进中，尚未在空白双机环境验证。
 
 ## 里程碑与依赖
 

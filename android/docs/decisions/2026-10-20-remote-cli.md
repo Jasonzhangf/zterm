@@ -10,7 +10,7 @@
 |---|---|
 | 正式入口 | `packages/cli/src/main.ts` 已落地并接通 argv、登录、槽位、终端、升级和 daemon 管理。 |
 | 构建产物 | `packages/cli/dist/main.mjs` 由正式入口构建；本地 tarball 可隔离安装。 |
-| npm 发布 | `@jsonstudio/zterm-cli` 尚未发布到公开 npm；隔离 tarball 不是公开渠道证据。 |
+| npm 发布 | `@jsonstudio/zterm-cli@0.1.4`、`@jsonstudio/zterm-daemon@0.1.3` 及三平台 payload（`0.1.3`）已发布到公开 npm（`latest` 与 `next`）及 GitHub Release `v0.1.3.3232`；真实空白机（物理机/空白 VM）全链路安装、与 Collab 的空白机顺序握手、跨机器 Collab 传输及空白机升级回滚仍保持 `UNVERIFIED`（见 `docs/install-from-zero.md`）。 |
 | 平台验证 | Windows x64、macOS arm64、Linux x64 的构建、安装、升级和适用用户链通过；Windows 外部 RTC 在 CI 39707241211 通过原始 2500ms 期限和实际 relay/relay 断言。此前超时记录保留；一次通过不证明所有网络下的延迟可靠性。 |
 
 ## 1. 范围与命令
