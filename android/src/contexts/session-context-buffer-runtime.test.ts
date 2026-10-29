@@ -348,7 +348,29 @@ describe('session-context-buffer-runtime inactive gating', () => {
       },
       repairDispatchedRevisions: [11],
     });
-    const requestSessionBufferSync = vi.fn(() => true);
+    // Wire the head handler straight into the real request runtime so this case
+    // proves the revision-reset recovery actually reaches the wire, not just that
+    // a callback was invoked.
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const sessionPullStateRef = { current: new Map() };
+    const requestSessionBufferSync = (sid: string, requestOptions?: any) => requestSessionBufferSyncRuntime({
+      sessionId: sid,
+      requestOptions,
+      refs: {
+        stateRef: refs.stateRef,
+        sessionVisibleRangeRef: refs.sessionVisibleRangeRef,
+        sessionHeadStoreRef: refs.sessionHeadStoreRef,
+        sessionPullStateRef,
+        tailRefreshStoreRef: refs.tailRefreshStoreRef,
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
 
     handleBufferHeadRuntime({
       sessionId,
@@ -357,7 +379,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       availableStartIndex: 0,
       availableEndIndex: 1,
       refs,
-      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionTransportSocket: () => ws,
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate: vi.fn(() => false),
       scheduleSessionRenderCommit: vi.fn(),
@@ -371,11 +393,14 @@ describe('session-context-buffer-runtime inactive gating', () => {
       error: null,
       repairDispatchedRevisions: [],
     });
-    expect(requestSessionBufferSync).toHaveBeenCalledTimes(1);
-    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, expect.objectContaining({
-      reason: 'buffer-head-revision-reset',
-      purpose: 'tail-refresh',
-    }));
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const resetRequest = JSON.parse(String(sendSocketPayload.mock.calls[0][2]));
+    expect(resetRequest.type).toBe('buffer-sync-request');
+    expect(resetRequest.payload).toMatchObject({
+      knownRevision: 12,
+      targetHeadRevision: 11,
+    });
+    expect(resetRequest.payload.requestEndIndex).toBeGreaterThan(resetRequest.payload.requestStartIndex);
 
     refs.bufferFrameAssemblyRef.current.set(sessionId, {
       pending: null,
@@ -396,7 +421,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       availableStartIndex: 0,
       availableEndIndex: 1,
       refs,
-      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionTransportSocket: () => ws,
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate: vi.fn(() => false),
       scheduleSessionRenderCommit: vi.fn(),
@@ -411,6 +436,82 @@ describe('session-context-buffer-runtime inactive gating', () => {
       },
       repairDispatchedRevisions: [11],
     });
+  });
+
+  it('dispatches a real recovery wire request after a daemon revision reset keeps the stale local window', () => {
+    const sessionId = 'session-revision-reset-wire';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: Array.from({ length: 120 }, (_, index) => `row-${index}`),
+      startIndex: 0,
+      endIndex: 120,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 120,
+      cols: 80,
+      rows: 24,
+      revision: 12,
+      cacheLines: 1000,
+    });
+    // Review-1 counterexample: local buffer revision 12 over [0,120), renderer
+    // demand [96,120), and the restarted daemon reports a lower head revision 1
+    // over [0,120) with changed body. The whole visible window already lies inside
+    // the retained local range, so a numeric `head <= local` suppression would eat
+    // the recovery request and the renderer would keep showing stale rows.
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      visibleRangeEntries: [[sessionId, { startIndex: 96, endIndex: 120, viewportRows: 24 }]],
+    });
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const requestSessionBufferSync = (sid: string, requestOptions?: any) => requestSessionBufferSyncRuntime({
+      sessionId: sid,
+      requestOptions,
+      refs: {
+        stateRef: refs.stateRef,
+        sessionVisibleRangeRef: refs.sessionVisibleRangeRef,
+        sessionHeadStoreRef: refs.sessionHeadStoreRef,
+        sessionPullStateRef: { current: new Map() },
+        tailRefreshStoreRef: refs.tailRefreshStoreRef,
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 1,
+      latestEndIndex: 120,
+      availableStartIndex: 0,
+      availableEndIndex: 120,
+      refs,
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const message = JSON.parse(String(sendSocketPayload.mock.calls[0][2]));
+    expect(message.type).toBe('buffer-sync-request');
+    expect(message.payload).toMatchObject({
+      knownRevision: 12,
+      localStartIndex: 0,
+      localEndIndex: 120,
+      targetHeadRevision: 1,
+    });
+    // A real authoritative recovery window must reach the wire; suppression by the
+    // retained stale local range is exactly the regression under test.
+    expect(message.payload.requestEndIndex).toBeGreaterThan(message.payload.requestStartIndex);
+    expect(message.payload.requestStartIndex).toBeGreaterThanOrEqual(96);
+    expect(message.payload.requestEndIndex).toBeLessThanOrEqual(120);
   });
 
   it('does not apply sparse buffer-sync after a revision gap and requests an authoritative tail window', () => {
@@ -4627,6 +4728,11 @@ describe('session-context-buffer-runtime inactive gating', () => {
         requestOptions: {
           reason: 'test-requested-at',
           purpose: 'tail-refresh',
+          // Accepted connection-recovery semantics: an unknown daemon head must not
+          // imply an unbounded [0,0) body window. The caller is explicit about the
+          // visible range it wants to (re)pull, so the planner honors the override
+          // instead of falling back to head-derived bounds.
+          requestWindowOverride: { requestStartIndex: 0, requestEndIndex: 1 },
         },
         refs: {
           stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
@@ -4651,6 +4757,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
         type: 'buffer-sync-request',
         payload: expect.objectContaining({
           requestedAt: 4444,
+          requestStartIndex: 0,
+          requestEndIndex: 1,
         }),
       });
       expect(tailRefreshStoreRef.current.readSyncRequest(sessionId, 'tail-refresh')).toMatchObject({
@@ -5195,7 +5303,12 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
-  it('reissues a visible-window tail refresh when daemon head revision advanced beyond the in-flight pull target', () => {
+  // A stale (expired) in-flight pull cannot settle a request by range coverage alone.
+  // Here the daemon head moved past the pull target (6) and the local base (5) to 7,
+  // so the retained local rows and the expired pull both belong to an older revision
+  // epoch. Coverage of [96,120) does not prove the current head body was received or
+  // has no gap, so the runtime must reissue the visible-window tail refresh.
+  it('reissues a visible-window tail refresh when the expired in-flight pull targets an older head than the local base', () => {
     const sessionId = 'session-1';
     const session = {
       ...makeSession(sessionId),
@@ -5264,6 +5377,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         localEndIndex: 120,
         requestStartIndex: 96,
         requestEndIndex: 120,
+        targetHeadRevision: 7,
       }),
     });
   });
@@ -5327,15 +5441,33 @@ describe('session-context-buffer-runtime inactive gating', () => {
     vi.useFakeTimers();
     try {
       const sessionId = 'session-1';
-      const session = makeSession(sessionId);
+      // A genuinely dispatchable demand is needed to exercise the debounce guard:
+      // the daemon head is known and its visible window extends beyond the local
+      // buffer, so the covering/skip path does not eat the first request.
+      const session: TestSession = {
+        ...makeSession(sessionId),
+        daemonHeadRevision: 2,
+        daemonHeadEndIndex: 24,
+        buffer: createSessionBufferState({
+          lines: ['alpha'],
+          startIndex: 0,
+          endIndex: 1,
+          bufferHeadStartIndex: 0,
+          bufferTailEndIndex: 1,
+          cols: 80,
+          rows: 24,
+          revision: 1,
+          cacheLines: 1000,
+        }),
+      };
       const ws = { readyState: WebSocket.OPEN } as any;
       const sendSocketPayload = vi.fn();
       const refs = {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionVisibleRangeRef: {
-          current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
+          current: new Map([[sessionId, { startIndex: 0, endIndex: 24, viewportRows: 24 }]]),
         },
-        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, { revision: 2, latestEndIndex: 24, seenAt: 1 }]]),
         sessionPullStateRef: { current: new Map() },
         tailRefreshStoreRef: makeTailRefreshStoreRef(),
       };
@@ -6257,5 +6389,196 @@ describe('P5 post-apply catchup trimming', () => {
       sessionId,
       expect.objectContaining({ reason: 'buffer-sync-catchup', purpose: 'tail-refresh' }),
     );
+  });
+});
+
+describe('connection recovery visible-window planning (plan_and_dispatch_visible_window)', () => {
+  const COMMITTED_START_INDEX = 1165;
+  const COMMITTED_END_INDEX = 2165;
+  const COMMITTED_REVISION = 14;
+  const VISIBLE_WINDOW_ROWS = 24;
+  const COMMITTED_VISIBLE_WINDOW = {
+    startIndex: COMMITTED_END_INDEX - VISIBLE_WINDOW_ROWS,
+    endIndex: COMMITTED_END_INDEX,
+    viewportRows: VISIBLE_WINDOW_ROWS,
+  };
+
+  function makeRecoveredCommittedSession(sessionId: string): TestSession {
+    return {
+      ...makeSession(sessionId),
+      buffer: createSessionBufferState({
+        lines: Array.from(
+          { length: COMMITTED_END_INDEX - COMMITTED_START_INDEX },
+          (_, index) => `row-${COMMITTED_START_INDEX + index}`,
+        ),
+        startIndex: COMMITTED_START_INDEX,
+        endIndex: COMMITTED_END_INDEX,
+        bufferHeadStartIndex: COMMITTED_START_INDEX,
+        bufferTailEndIndex: COMMITTED_END_INDEX,
+        cols: 80,
+        rows: VISIBLE_WINDOW_ROWS,
+        revision: COMMITTED_REVISION,
+        cacheLines: 1000,
+      }),
+      daemonHeadRevision: 0,
+      daemonHeadEndIndex: 0,
+    };
+  }
+
+  function dispatchVisibleWindowRequest(options: {
+    session: TestSession;
+    visibleRange: { startIndex: number; endIndex: number; viewportRows: number };
+    requestOptions: Parameters<typeof requestSessionBufferSyncRuntime>[0]['requestOptions'];
+    liveHeads?: Array<[string, any]>;
+  }) {
+    const sessionId = options.session.id;
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const requested = requestSessionBufferSyncRuntime({
+      sessionId,
+      requestOptions: options.requestOptions,
+      refs: {
+        stateRef: { current: { sessions: [options.session], activeSessionId: sessionId } },
+        sessionVisibleRangeRef: { current: new Map([[sessionId, options.visibleRange]]) },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(options.liveHeads || []),
+        sessionPullStateRef: { current: new Map() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
+      },
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => options.session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
+    const messages = sendSocketPayload.mock.calls.map((call) => JSON.parse(String(call[2])));
+    return {
+      requested,
+      headRequestCount: messages.filter((message) => message?.type === 'buffer-head-request').length,
+      bodySyncWindows: messages
+        .filter((message) => message?.type === 'buffer-sync-request')
+        .map((message) => ({
+          requestStartIndex: message.payload?.requestStartIndex,
+          requestEndIndex: message.payload?.requestEndIndex,
+          knownRevision: message.payload?.knownRevision,
+          localStartIndex: message.payload?.localStartIndex,
+          localEndIndex: message.payload?.localEndIndex,
+          targetHeadRevision: message.payload?.targetHeadRevision,
+        })),
+    };
+  }
+
+  // Failure mode 1: unknown daemon head must not degrade into an empty [0,0) body request
+  // that the daemon answers with an unbounded mirror burst.
+  it('waits for head instead of dispatching an empty body window when committed rows exist and head is unknown', () => {
+    const session = makeRecoveredCommittedSession('session-recovery-unknown-head');
+    const result = dispatchVisibleWindowRequest({
+      session,
+      visibleRange: COMMITTED_VISIBLE_WINDOW,
+      requestOptions: {
+        reason: 'buffer-head-resume-tail',
+        purpose: 'tail-refresh',
+        headOverride: null,
+      },
+      liveHeads: [],
+    });
+
+    expect(result.bodySyncWindows).toEqual([]);
+    expect(result.headRequestCount).toBeLessThanOrEqual(1);
+  });
+
+  // Failure mode 1 (bounded alternative): when the planner does dispatch a body window
+  // without head facts, it must stay inside the known visible demand, never [0,0).
+  it('keeps an unknown-head body window bounded by the visible demand instead of falling back to [0,0)', () => {
+    const session = makeRecoveredCommittedSession('session-recovery-visible-jump');
+    const advancedVisibleRange = {
+      startIndex: COMMITTED_END_INDEX,
+      endIndex: COMMITTED_END_INDEX + VISIBLE_WINDOW_ROWS,
+      viewportRows: VISIBLE_WINDOW_ROWS,
+    };
+    const result = dispatchVisibleWindowRequest({
+      session,
+      visibleRange: advancedVisibleRange,
+      requestOptions: {
+        reason: 'buffer-head-resume-tail',
+        purpose: 'tail-refresh',
+        headOverride: null,
+      },
+      liveHeads: [],
+    });
+
+    // Zero dispatches must fail: the missing visible rows beyond the committed range
+    // have to produce at least one real body window. The empty-set and per-window
+    // checks below are vacuous when nothing was sent, so pin a non-empty dispatch.
+    expect(result.bodySyncWindows.length).toBeGreaterThan(0);
+    const emptyWindows = result.bodySyncWindows.filter(
+      (window) => !(window.requestEndIndex > window.requestStartIndex),
+    );
+    expect(emptyWindows).toEqual([]);
+    for (const window of result.bodySyncWindows) {
+      expect(window.requestStartIndex).toBeGreaterThanOrEqual(advancedVisibleRange.startIndex);
+      expect(window.requestEndIndex).toBeLessThanOrEqual(advancedVisibleRange.endIndex);
+    }
+  });
+
+  // Failure mode 2: rows already committed in the local sparse buffer must not be
+  // requested again while head truth is unchanged.
+  it('does not re-request visible rows already committed in the local sparse buffer', () => {
+    const session = makeRecoveredCommittedSession('session-recovery-covered');
+    const result = dispatchVisibleWindowRequest({
+      session,
+      visibleRange: COMMITTED_VISIBLE_WINDOW,
+      requestOptions: {
+        reason: 'buffer-head-update',
+        purpose: 'tail-refresh',
+        headOverride: {
+          daemonHeadRevision: COMMITTED_REVISION,
+          daemonHeadEndIndex: COMMITTED_END_INDEX,
+        },
+      },
+      liveHeads: [[session.id, {
+        revision: COMMITTED_REVISION,
+        latestEndIndex: COMMITTED_END_INDEX,
+        availableStartIndex: COMMITTED_START_INDEX,
+        availableEndIndex: COMMITTED_END_INDEX,
+        seenAt: 1,
+      }]],
+    });
+
+    expect(result.bodySyncWindows).toEqual([]);
+  });
+
+  // Failure mode 3 (anti-regression counterexample): a bounded planner must still
+  // refresh when the same visible window end carries changed daemon content.
+  it('still refreshes the visible tail when same-end window content changed', () => {
+    const session = makeRecoveredCommittedSession('session-recovery-content-change');
+    const result = dispatchVisibleWindowRequest({
+      session,
+      visibleRange: COMMITTED_VISIBLE_WINDOW,
+      requestOptions: {
+        reason: 'buffer-head-update',
+        purpose: 'tail-refresh',
+        headOverride: {
+          daemonHeadRevision: COMMITTED_REVISION + 1,
+          daemonHeadEndIndex: COMMITTED_END_INDEX,
+        },
+      },
+      liveHeads: [[session.id, {
+        revision: COMMITTED_REVISION + 1,
+        latestEndIndex: COMMITTED_END_INDEX,
+        availableStartIndex: COMMITTED_START_INDEX,
+        availableEndIndex: COMMITTED_END_INDEX,
+        seenAt: 2,
+      }]],
+    });
+
+    expect(result.bodySyncWindows).toEqual([
+      expect.objectContaining({
+        requestStartIndex: COMMITTED_VISIBLE_WINDOW.startIndex,
+        requestEndIndex: COMMITTED_VISIBLE_WINDOW.endIndex,
+        knownRevision: COMMITTED_REVISION,
+        targetHeadRevision: COMMITTED_REVISION + 1,
+      }),
+    ]);
   });
 });

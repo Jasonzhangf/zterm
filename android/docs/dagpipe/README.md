@@ -19,6 +19,12 @@ Graphs:
   device presence -> route resolution -> one daemon-target physical transport
   -> mux negotiation -> per-session channel open/subscribe -> maintain ->
   recovery plan
+- `connection-recovery.graph.json` - one Android recovery event -> stable
+  target reconciliation -> target-scoped network retirement/fencing ->
+  physical/logical recovery -> visible-window request, response, frame assembly,
+  sparse apply and first paint -> optional history -> one recovery result.
+  This is an accepted design candidate; its custom operators are not registered
+  and it is not runtime evidence until the implementation gates pass.
 - `android-buffer-management.graph.json` - per-session head observation ->
   window planning -> range request dispatch -> response ingest -> sparse merge
   -> repair ledger -> render scope publication

@@ -139,14 +139,32 @@ function buildTailRefreshBufferSyncRequestPayload(
     options?.liveHead,
     buffer,
   );
-  const viewportEndIndex = (
-    authoritativeAvailableEndIndex === null
-      ? resolveTailTargetEndIndex(head, visibleRange, buffer)
-      : Math.min(
-          resolveTailTargetEndIndex(head, visibleRange, buffer),
-          authoritativeAvailableEndIndex,
-        )
+  // An unknown daemon head end (0) must not be treated as the target tail. If it
+  // is, viewportEndIndex collapses to 0 and the whole window degenerates to an
+  // unbounded [0,0) body request. When the head end is unknown, fall back to the
+  // visible demand end so the plan stays bounded by what the user can see.
+  const headEndIndex = Math.max(0, Math.floor(head.daemonHeadEndIndex || 0));
+  const liveHeadEndIndex = options?.liveHead
+    ? Math.max(
+        Math.max(0, Math.floor(options.liveHead.availableEndIndex ?? 0)),
+        Math.max(0, Math.floor(options.liveHead.latestEndIndex ?? 0)),
+      )
+    : 0;
+  const visibleFallbackEndIndex = Math.max(
+    0,
+    Math.floor(resolveVisibleRangeEndIndex(head, visibleRange, buffer) || 0),
   );
+  const tailTargetEndIndex = headEndIndex > 0
+    ? headEndIndex
+    : liveHeadEndIndex > 0
+      ? liveHeadEndIndex
+      : visibleFallbackEndIndex;
+  const headEndKnown = headEndIndex > 0 || liveHeadEndIndex > 0;
+  const viewportEndIndex = headEndKnown
+    ? (authoritativeAvailableEndIndex === null
+        ? tailTargetEndIndex
+        : Math.min(tailTargetEndIndex, authoritativeAvailableEndIndex))
+    : tailTargetEndIndex;
   const cacheLines = viewportRows;
   const { availableStartIndex } = resolveHeadAvailableBounds(options?.liveHead, buffer);
   const authoritativeHeadStartIndex = availableStartIndex;

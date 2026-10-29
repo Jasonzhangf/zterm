@@ -877,6 +877,13 @@ public class AndroidConnectionService extends Service {
         volatile long lastActivityAt;
         volatile long lastPingAt;
         volatile long transportNetworkGeneration;
+        /**
+         * Target-scoped network epoch. Only a retirement that affects this target
+         * advances its epoch. Send/retry eligibility compares the transport
+         * generation against this epoch, never against the service-global counter,
+         * so an unrelated target keeps its generation and send eligibility.
+         */
+        volatile long networkEpoch;
         volatile boolean stopped;
         volatile boolean sendRetryPending;
         volatile RouteCandidateDiagnostic committedCandidate;
@@ -958,6 +965,7 @@ public class AndroidConnectionService extends Service {
             }
             generation = nextGeneration;
             transportNetworkGeneration = networkGeneration;
+            networkEpoch = networkGeneration;
             routeDiagnostics = new ArrayList<>();
             committedCandidate = null;
             activeMuxReadyCandidate = null;
@@ -1247,11 +1255,11 @@ public class AndroidConnectionService extends Service {
         private void scheduleCandidateTimeout(RouteCandidate candidate, RouteCandidateDiagnostic diagnostic,
                                              Map<String, Runnable> candidateTimeouts) {
             final String timeoutGeneration = generation;
-            final long timeoutNetworkGeneration = networkGeneration;
+            final long timeoutNetworkEpoch = networkEpoch;
             final RouteCandidateDiagnostic timeoutDiagnostic = diagnostic;
             Runnable timeout = () -> {
                 if (stopped || generation == null || !generation.equals(timeoutGeneration)
-                    || transportNetworkGeneration != timeoutNetworkGeneration
+                    || transportNetworkGeneration != timeoutNetworkEpoch
                     || !isConnectingState()) {
                     return;
                 }
@@ -1290,7 +1298,7 @@ public class AndroidConnectionService extends Service {
                     public void onRtcOpen() {
                         workerHandler.post(() -> {
                             if (stopped || rtcBackend != self() || generation == null
-                                || transportNetworkGeneration != networkGeneration) {
+                                || transportNetworkGeneration != networkEpoch) {
                                 return;
                             }
                             handleRtcOpen(diagnostic, candidate);
@@ -1301,7 +1309,7 @@ public class AndroidConnectionService extends Service {
                     public void onRtcText(String text) {
                         workerHandler.post(() -> {
                             if (stopped || rtcBackend != self() || generation == null
-                                || transportNetworkGeneration != networkGeneration) {
+                                || transportNetworkGeneration != networkEpoch) {
                                 return;
                             }
                             try {
@@ -1316,7 +1324,7 @@ public class AndroidConnectionService extends Service {
                     public void onRtcError(String message) {
                         Runnable handle = () -> {
                             if (stopped || rtcBackend != self() || generation == null
-                                || transportNetworkGeneration != networkGeneration) {
+                                || transportNetworkGeneration != networkEpoch) {
                                 return;
                             }
                             if (committedCandidate == null
@@ -1338,7 +1346,7 @@ public class AndroidConnectionService extends Service {
                     public void onRtcClosed(int code, String reason) {
                         Runnable handle = () -> {
                             if (stopped || rtcBackend != self() || generation == null
-                                || transportNetworkGeneration != networkGeneration) {
+                                || transportNetworkGeneration != networkEpoch) {
                                 return;
                             }
                             if (isAuthRtcClose(code, reason)) {
@@ -1364,7 +1372,7 @@ public class AndroidConnectionService extends Service {
                     public void onRtcSelectedIcePair(String json) {
                         workerHandler.post(() -> {
                             if (stopped || rtcBackend != self() || generation == null
-                                || transportNetworkGeneration != networkGeneration) {
+                                || transportNetworkGeneration != networkEpoch) {
                                 return;
                             }
                             stateMachine.dispatch(AndroidConnectionServiceEvent.transportResolved(
@@ -1383,7 +1391,7 @@ public class AndroidConnectionService extends Service {
                 backend.open();
             } catch (RuntimeException error) {
                 if (stopped || rtcBackend != backend || generation == null
-                    || transportNetworkGeneration != networkGeneration) {
+                    || transportNetworkGeneration != networkEpoch) {
                     return;
                 }
                 candidateFailure("rtc-open-rejected", String.valueOf(error.getMessage()), diagnostic,
@@ -1675,7 +1683,7 @@ public class AndroidConnectionService extends Service {
     @Override
     public void onOpen(WebSocket webSocket, Response response) {
             if (stopped || generation == null
-                || transportNetworkGeneration != networkGeneration) {
+                || transportNetworkGeneration != networkEpoch) {
                 closeQuietly(webSocket);
                 return;
             }
@@ -1690,7 +1698,7 @@ public class AndroidConnectionService extends Service {
         @Override
         public void onMessage(WebSocket webSocket, String text) {
             if (stopped || generation == null
-                || transportNetworkGeneration != networkGeneration) {
+                || transportNetworkGeneration != networkEpoch) {
                 return;
             }
             if (diagnosticForSocket(webSocket) == null) return;
@@ -1704,7 +1712,7 @@ public class AndroidConnectionService extends Service {
         @Override
         public void onMessage(WebSocket webSocket, ByteString bytes) {
             if (stopped || generation == null
-                || transportNetworkGeneration != networkGeneration) {
+                || transportNetworkGeneration != networkEpoch) {
                 return;
             }
             if (diagnosticForSocket(webSocket) == null) return;
@@ -1714,7 +1722,7 @@ public class AndroidConnectionService extends Service {
 
         @Override
         public void onFailure(WebSocket webSocket, Throwable throwable, @Nullable Response response) {
-            if (stopped || generation == null || transportNetworkGeneration != networkGeneration) {
+            if (stopped || generation == null || transportNetworkGeneration != networkEpoch) {
                 return;
             }
             RouteCandidateDiagnostic diagnostic = diagnosticForSocket(webSocket);
@@ -1734,7 +1742,7 @@ public class AndroidConnectionService extends Service {
 
         @Override
         public void onClosed(WebSocket webSocket, int code, String reason) {
-            if (stopped || generation == null || transportNetworkGeneration != networkGeneration) {
+            if (stopped || generation == null || transportNetworkGeneration != networkEpoch) {
                 return;
             }
             RouteCandidateDiagnostic diagnostic = diagnosticForSocket(webSocket);
@@ -2009,7 +2017,7 @@ public class AndroidConnectionService extends Service {
         private void send(JSONObject frame, SendGate gate) {
             WebSocket current = socket;
             AndroidRtcTransportBackend currentRtc = rtcBackend;
-            if (generation == null || transportNetworkGeneration != networkGeneration
+            if (generation == null || transportNetworkGeneration != networkEpoch
                 || (current == null && currentRtc == null)) {
                 return;
             }
@@ -2045,7 +2053,7 @@ public class AndroidConnectionService extends Service {
                 }
             }
             if ((current != null || currentRtc != null) && generation != null
-                && transportNetworkGeneration == networkGeneration
+                && transportNetworkGeneration == networkEpoch
                 && isMuxReady()
                 && (channelId == null
                     || !requireOpenedChannel || isChannelOpened(channelId))) {
@@ -2131,7 +2139,7 @@ public class AndroidConnectionService extends Service {
                 || generation == null
                 || !retryGeneration.equals(generation)
                 || retryNetworkGeneration != transportNetworkGeneration
-                || retryNetworkGeneration != networkGeneration
+                || retryNetworkGeneration != networkEpoch
                 || (gate == SendGate.MUX_READY && !isMuxReady())
                 || (currentLifecycleEpoch != null && requireOpenedChannel
                     && !isChannelOpened(safeRetryChannelId))) {
@@ -2316,7 +2324,7 @@ public class AndroidConnectionService extends Service {
             WebSocket current = socket;
             AndroidRtcTransportBackend currentRtc = rtcBackend;
             if ((current == null && currentRtc == null) || generation == null
-                || transportNetworkGeneration != networkGeneration) {
+                || transportNetworkGeneration != networkEpoch) {
                 return;
             }
             java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(channelId);
@@ -2665,6 +2673,11 @@ public class AndroidConnectionService extends Service {
             if (stopped) {
                 return;
             }
+            // Retirement invalidates this target's transport only. Advancing the
+            // target-scoped epoch fences its stale callbacks/sends without touching
+            // the service-global counter that other targets compare against their own
+            // epoch. A later startAttempt() re-syncs networkEpoch to networkGeneration.
+            networkEpoch += 1L;
             closeCurrent(reason);
             if (generation == null) {
                 startOrContinue();

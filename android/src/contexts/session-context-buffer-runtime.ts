@@ -1221,19 +1221,23 @@ export function requestSessionBufferSyncRuntime(options: {
           daemonHeadRevision: 0,
           daemonHeadEndIndex: 0,
         };
+  const hasPendingConnectOrResumeTailRefresh = (
+    options.refs.tailRefreshStoreRef.current.hasPendingConnectTailRefresh(options.sessionId)
+    || options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId)
+  );
+  const hasPendingInputTailRefresh = options.refs.tailRefreshStoreRef.current.hasPendingInputTailRefresh(options.sessionId);
+  const sameEndRefreshMode: 'auto' | 'visible-window' = (
+    hasPendingConnectOrResumeTailRefresh || hasPendingInputTailRefresh
+      ? 'visible-window'
+      : 'auto'
+  );
   const payload = buildSessionBufferSyncRequestPayload(
     effectiveHead,
     localBuffer,
     visibleRange,
     {
       purpose: options.requestOptions?.purpose,
-      sameEndRefreshMode:
-        options.refs.tailRefreshStoreRef.current.hasPendingConnectTailRefresh(options.sessionId)
-        || options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId)
-          ? 'visible-window'
-          : options.refs.tailRefreshStoreRef.current.hasPendingInputTailRefresh(options.sessionId)
-            ? 'visible-window'
-            : 'auto',
+      sameEndRefreshMode,
       forceSameEndRefresh: false,
       liveHead: options.requestOptions?.liveHead || liveHead || null,
       invalidLocalWindow: Boolean(options.requestOptions?.invalidLocalWindow),
@@ -1244,8 +1248,53 @@ export function requestSessionBufferSyncRuntime(options: {
   const inFlightPull = (options.refs.sessionPullStateRef.current.get(options.sessionId) || null)?.[requestPurpose] || null;
   const cadence = options.resolveTerminalRefreshCadence();
   const debounceThresholdMs = SESSION_SYNC_REQUEST_DEBOUNCE_MS;
+  const payloadRequestStart = Math.max(0, Math.floor(payload.requestStartIndex || 0));
+  const payloadRequestEnd = Math.max(0, Math.floor(payload.requestEndIndex || 0));
+  const payloadLocalStart = Math.max(0, Math.floor(payload.localStartIndex || 0));
+  const payloadLocalEnd = Math.max(0, Math.floor(payload.localEndIndex || 0));
+  const payloadKnownRevision = Math.max(0, Math.floor(payload.knownRevision || 0));
+  const payloadHeadRevision = Math.max(0, Math.floor(effectiveHead.daemonHeadRevision || 0));
+  const payloadWindowEmpty = payloadRequestEnd <= payloadRequestStart;
+  // A revision reset (daemon restart / lower head) is a new epoch boundary. The
+  // retained local rows and any in-flight pull belong to the previous epoch, so
+  // neither can prove the new epoch body is covered. Such requests must reach the
+  // wire; suppress only inside the same revision epoch.
+  const revisionResetRequest = options.requestOptions?.reason === 'buffer-head-revision-reset';
+  // Local rows are authoritative for the planned window only within the same
+  // revision epoch. A plain numeric comparison is not enough: `head < local` means
+  // the daemon restarted, so the local window is stale, not "covered"; and a lower
+  // epoch that coincidentally equals the local revision still cannot be trusted.
+  // Only an equal, non-reset revision proves local coverage. An unknown head (0)
+  // still waits for authoritative head facts instead of pulling a covered window.
+  const headNotAdvancedBeyondLocal = !revisionResetRequest && (
+    payloadHeadRevision === payloadKnownRevision
+    || payloadHeadRevision === 0
+  );
+  const payloadWindowCoveredByLocal = headNotAdvancedBeyondLocal
+    && payloadRequestStart >= payloadLocalStart
+    && payloadRequestEnd <= payloadLocalEnd;
+  // Suppress a redundant tail-refresh body window: an empty window, or a window
+  // whose rows are already committed locally at the same head revision. Coverage is
+  // only trusted within one revision epoch; the endpoint below still drops empty
+  // windows so a genuinely empty plan never reaches the daemon as an unbounded [0,0).
+  // Explicit window/missing-range overrides (frame repair, bootstrap) and forced
+  // visible-window refreshes (connect/resume/input) still dispatch on purpose.
+  const suppressRedundantTailRefresh = requestPurpose === 'tail-refresh'
+    && !explicitWindowOverride
+    && !explicitMissingRangesOverride
+    && !options.requestOptions?.invalidLocalWindow
+    && sameEndRefreshMode === 'auto'
+    && (payloadWindowEmpty || payloadWindowCoveredByLocal);
+  let stalePullRequiresReissue = false;
   if (inFlightPull) {
     const pullAgeMs = Math.max(0, Date.now() - Math.max(0, Math.floor(inFlightPull.startedAt || 0)));
+    const inFlightTargetEndIndex = Math.max(0, Math.floor(inFlightPull.targetEndIndex || 0));
+    // A stale pull that was still fetching rows beyond the current local window
+    // must be reissued. A cleared stale pull cannot settle its request by range
+    // coverage alone: coverage proves "old request covered new request", not that the
+    // current-epoch body was received, has no gap, or reached the requested revision.
+    // So settle only when local truth is provably current at the requested head.
+    const inFlightTargetsRowsBeyondLocal = inFlightTargetEndIndex > payloadLocalEnd;
     if (pullAgeMs >= cadence.pullRequestStaleMs) {
       options.runtimeDebug('session.buffer.pull.stale-expire', {
         sessionId: options.sessionId,
@@ -1257,6 +1306,10 @@ export function requestSessionBufferSyncRuntime(options: {
         stalePull: inFlightPull,
       });
       options.clearSessionPullState(options.sessionId, requestPurpose);
+      stalePullRequiresReissue = inFlightTargetsRowsBeyondLocal || !headNotAdvancedBeyondLocal;
+      if (!stalePullRequiresReissue && doesSessionPullStateCoverRequest(inFlightPull, payload)) {
+        return false;
+      }
     } else {
     const authoritativeHeadKnown = Boolean(
       (options.requestOptions?.liveHead && Number.isFinite(options.requestOptions.liveHead.latestEndIndex))
@@ -1279,7 +1332,7 @@ export function requestSessionBufferSyncRuntime(options: {
     ) {
       return false;
     }
-    if (doesSessionPullStateCoverRequest(inFlightPull, payload)) {
+    if (!revisionResetRequest && doesSessionPullStateCoverRequest(inFlightPull, payload)) {
       return false;
     }
     options.runtimeDebug('session.buffer.pull.superseded', {
@@ -1296,6 +1349,23 @@ export function requestSessionBufferSyncRuntime(options: {
     });
     options.clearSessionPullState(options.sessionId, requestPurpose);
     }
+  }
+  if (suppressRedundantTailRefresh && !stalePullRequiresReissue) {
+    options.runtimeDebug('session.buffer.request.skip-covered-window', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      reason: options.requestOptions?.reason || null,
+      purpose: requestPurpose,
+      requestStartIndex: payloadRequestStart,
+      requestEndIndex: payloadRequestEnd,
+      localStartIndex: payloadLocalStart,
+      localEndIndex: payloadLocalEnd,
+      knownRevision: payloadKnownRevision,
+      targetHeadRevision: payloadHeadRevision,
+      windowEmpty: payloadWindowEmpty,
+      windowCoveredByLocal: payloadWindowCoveredByLocal,
+    });
+    return false;
   }
 
   const now = Date.now();
