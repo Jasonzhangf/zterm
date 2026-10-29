@@ -282,6 +282,18 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     peers.delete(peerId);
   }
 
+  function filterRedundantPublicStunServers(iceServers: RTCIceServer[] | undefined, policy: RTCIceTransportPolicy): RTCIceServer[] {
+    if (!Array.isArray(iceServers) || policy === 'relay') {
+      return iceServers || [];
+    }
+    const isPublicFallbackStun = (server: RTCIceServer) => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+      return urls.every((u) => typeof u === 'string' && /stun\d*\.l\.google\.com|stun\.cloudflare\.com/i.test(u));
+    };
+    const hasCustomStun = iceServers.some((server) => !isPublicFallbackStun(server));
+    return hasCustomStun ? iceServers.filter((server) => !isPublicFallbackStun(server)) : iceServers;
+  }
+
   function initializePeerConnection(peer: PeerState, payload?: Record<string, unknown>) {
     if (peer.peerConnection || peer.ready) {
       peer.transport.close('rtc peer replaced by new init');
@@ -292,7 +304,11 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     peer.ready = false;
     peer.offerAccepted = false;
     peer.pendingIceCandidates = [];
-    const peerConnection = new RTCPeerConnection(config);
+    const peerConnection = new RTCPeerConnection({
+      ...config,
+      iceServers: filterRedundantPublicStunServers(config.iceServers, peer.iceTransportPolicy),
+      iceCandidatePoolSize: 1,
+    });
     peer.peerConnection = peerConnection;
     let connectionTimeout: ReturnType<typeof setTimeout> | undefined;
     let disconnectedTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -449,15 +465,15 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       if (!current()) return;
       await peerConnection.setLocalDescription(answer);
       if (!current()) return;
-      await flushPendingIceCandidates(peer, peerConnection);
-      if (!current()) return;
+      const rawAnswerSdp = peerConnection.localDescription?.sdp || answer.sdp || '';
       const answerSdp = peer.iceTransportPolicy !== 'relay'
-        ? stripDirectAnswerSdp(answer.sdp || '')
-        : answer.sdp;
+        ? stripDirectAnswerSdp(rawAnswerSdp)
+        : rawAnswerSdp;
       peer.emitSignal({
         type: 'rtc-answer',
         payload: { sdp: answerSdp, type: answer.type },
       });
+      await flushPendingIceCandidates(peer, peerConnection);
       return;
     }
 

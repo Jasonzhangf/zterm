@@ -459,4 +459,19 @@ public final class AndroidRtcTransportBackendTest {
         assertFalse(AndroidRtcTransportBackend.isTailscaleIceCandidate("candidate:1 1 udp 2113937151 100.128.0.1 5000 typ host"));
         assertFalse(AndroidRtcTransportBackend.isTailscaleIceCandidate("candidate:1 1 udp 2113937151 2001:db8::1 5000 typ host"));
     }
+
+    @Test
+    public void defaultDirectOpenPublishesImmediatelyWithoutArtificialStabilityWait() {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, listener);
+
+        backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
+
+        assertTrue("default direct open must publish immediately when DataChannel opens",
+            backend.isOpen());
+        assertEquals(Collections.singletonList("open"), listener.events);
+        backend.closeQuietly("test");
+    }
 }

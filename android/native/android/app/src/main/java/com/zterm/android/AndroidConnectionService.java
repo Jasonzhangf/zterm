@@ -146,10 +146,18 @@ public class AndroidConnectionService extends Service {
         registerNetworkCallback();
         ensureNotificationChannel();
         httpClient = new OkHttpClient.Builder()
+            .protocols(java.util.Collections.singletonList(okhttp3.Protocol.HTTP_1_1))
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(0, TimeUnit.MILLISECONDS)
             .pingInterval(0, TimeUnit.MILLISECONDS)
             .build();
+        workerHandler.post(() -> {
+            try {
+                AndroidRtcTransportBackend.getOrCreatePeerConnectionFactory(this);
+            } catch (Throwable ignored) {
+                // Unit test environments without native libjingle ignore prewarm.
+            }
+        });
         clientInstanceId = "android-service-" + UUID.randomUUID();
         publishServiceIdle();
     }
@@ -468,6 +476,9 @@ public class AndroidConnectionService extends Service {
     private void bindTarget(AndroidConnectionServiceTarget target) {
         if (target == null) {
             return;
+        }
+        if (AndroidRtcTransportBackend.canPreinitializeNativeWebRtc(this)) {
+            AndroidRtcTransportBackend.prewarmSignalingOrigin(httpClient, target.signalUrl);
         }
         TargetRuntime existing = targets.get(target.targetKey);
         if (existing != null && existing.target.equals(target)) {
@@ -1471,13 +1482,12 @@ public class AndroidConnectionService extends Service {
                 if (!stunUrl.equals(target.turnUrl)
                     && (stunUrl.startsWith("stun:") || stunUrl.startsWith("stuns:"))) {
                     servers.put(new JSONObject().put("urls", new JSONArray().put(stunUrl)));
+                    return;
                 }
             }
             for (String url : java.util.Arrays.asList(
-                "stun:stun.l.google.com:19302",
-                "stun:stun1.l.google.com:19302",
-                "stun:stun2.l.google.com:19302",
-                "stun:stun.cloudflare.com:3478")) {
+                "stun:stun.cloudflare.com:3478",
+                "stun:stun.l.google.com:19302")) {
                 servers.put(new JSONObject().put("urls", new JSONArray().put(url)));
             }
         }

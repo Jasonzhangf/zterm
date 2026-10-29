@@ -49,7 +49,50 @@ import okio.ByteString;
  */
 public final class AndroidRtcTransportBackend extends WebSocketListener {
     private static final String TAG = "ZTermRtcBackend";
-    static final long RTC_DIRECT_OPEN_STABILITY_MS = 1_000L;
+    static final long RTC_DIRECT_OPEN_STABILITY_MS = 0L;
+    private static final Object FACTORY_LOCK = new Object();
+    private static PeerConnectionFactory sharedPeerConnectionFactory;
+
+    public static void prewarmSignalingOrigin(OkHttpClient httpClient, String signalUrl) {
+        if (httpClient == null || signalUrl == null || signalUrl.trim().isEmpty()) {
+            return;
+        }
+        try {
+            String trimmed = signalUrl.trim();
+            if (!trimmed.regionMatches(true, 0, "wss://", 0, 6)
+                && !trimmed.regionMatches(true, 0, "ws://", 0, 5)) {
+                return;
+            }
+            String httpUrl = trimmed
+                .replaceFirst("(?i)^wss://", "https://")
+                .replaceFirst("(?i)^ws://", "http://")
+                .replaceFirst("/ws/client(\\?.*)?$", "/health");
+            Request req = new Request.Builder().url(httpUrl).head().build();
+            httpClient.newCall(req).enqueue(new okhttp3.Callback() {
+                @Override
+                public void onFailure(okhttp3.Call call, java.io.IOException e) {
+                }
+
+                @Override
+                public void onResponse(okhttp3.Call call, Response response) {
+                    response.close();
+                }
+            });
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    public static PeerConnectionFactory getOrCreatePeerConnectionFactory(Context context) {
+        synchronized (FACTORY_LOCK) {
+            if (sharedPeerConnectionFactory == null) {
+                PeerConnectionFactory.initialize(
+                    PeerConnectionFactory.InitializationOptions.builder(context.getApplicationContext())
+                        .createInitializationOptions());
+                sharedPeerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
+            }
+            return sharedPeerConnectionFactory;
+        }
+    }
     static final long RTC_DISCONNECTED_GRACE_MS = 10_000L;
 
     public interface Listener {
@@ -85,6 +128,12 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
     private ScheduledFuture<?> disconnectedFuture;
     private static final int MAX_PENDING_REMOTE_ICE_CANDIDATES = 64;
     private final List<IceCandidate> pendingRemoteIceCandidates = new ArrayList<>();
+    private final Object signalLock = new Object();
+    private final List<IceCandidate> pendingLocalIceCandidates = new ArrayList<>();
+    private volatile boolean signalSocketOpen;
+    private boolean rtcInitSent;
+    private boolean localOfferReady;
+    private boolean rtcOfferSent;
 
     public AndroidRtcTransportBackend(
         Context context,
@@ -153,6 +202,25 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             listener.onRtcError("rtc signal websocket open rejected: "
                 + (error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage()));
             closeQuietly("rtc signal websocket open rejected");
+            return;
+        }
+        if (canPreinitializeNativeWebRtc(context)) {
+            initializePeerConnection();
+        }
+    }
+
+    static boolean canPreinitializeNativeWebRtc(@Nullable Context context) {
+        if (context == null) {
+            return false;
+        }
+        try {
+            if (context instanceof android.content.ContextWrapper
+                && ((android.content.ContextWrapper) context).getBaseContext() == null) {
+                return false;
+            }
+            return context.getApplicationContext() != null;
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
@@ -202,9 +270,9 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         if (signal != null) {
             signal.close(1000, reason);
         }
-        if (peerConnectionFactory != null) {
-            peerConnectionFactory.dispose();
-            peerConnectionFactory = null;
+        peerConnectionFactory = null;
+        synchronized (signalLock) {
+            pendingLocalIceCandidates.clear();
         }
     }
 
@@ -213,7 +281,11 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         if (disposed || signalSocket != webSocket) {
             return;
         }
-        initializePeerConnection();
+        signalSocketOpen = true;
+        if (peerConnection == null) {
+            initializePeerConnection();
+        }
+        flushPendingOutboundSignals();
     }
 
     @Override
@@ -263,15 +335,17 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         closeQuietly(reason == null ? "rtc signaling websocket closed" : reason);
     }
 
-    private void initializePeerConnection() {
+    private synchronized void initializePeerConnection() {
+        if (disposed || peerConnection != null) {
+            return;
+        }
         try {
-            PeerConnectionFactory.initialize(
-                PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions());
-            peerConnectionFactory = PeerConnectionFactory.builder().createPeerConnectionFactory();
+            peerConnectionFactory = getOrCreatePeerConnectionFactory(context);
 
             PeerConnection.RTCConfiguration configuration =
                 new PeerConnection.RTCConfiguration(parseIceServers());
             configuration.iceTransportsType = resolveIceTransportsType(iceTransportPolicy);
+            configuration.iceCandidatePoolSize = 1;
             peerConnection = peerConnectionFactory.createPeerConnection(configuration, peerObserver);
             if (peerConnection == null) {
                 throw new IllegalStateException("peer connection factory returned null");
@@ -282,18 +356,66 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             dataChannel = peerConnection.createDataChannel("zterm", init);
             dataChannel.registerObserver(dataObserver);
 
-            boolean initSent = sendSignal("rtc-init", payload -> {
-                payload.put("iceServers", iceServers);
-                payload.put("iceTransportPolicy", iceTransportPolicy);
-                return payload;
-            });
-            if (!initSent) {
-                throw new IllegalStateException("rtc signaling websocket closed before init");
-            }
+            flushPendingOutboundSignals();
             peerConnection.createOffer(sdpObserver, new MediaConstraints());
-        } catch (RuntimeException | JSONException error) {
+        } catch (RuntimeException error) {
             listener.onRtcError(error.getMessage() == null ? "rtc init error" : error.getMessage());
             closeQuietly("rtc init error");
+        }
+    }
+
+    private void flushPendingOutboundSignals() {
+        synchronized (signalLock) {
+            if (disposed || !signalSocketOpen || signalSocket == null || peerConnection == null) {
+                return;
+            }
+            try {
+                if (!rtcInitSent) {
+                    boolean initSent = sendSignal("rtc-init", payload -> {
+                        payload.put("iceServers", iceServers);
+                        payload.put("iceTransportPolicy", iceTransportPolicy);
+                        return payload;
+                    });
+                    if (!initSent) {
+                        listener.onRtcError("rtc signaling websocket closed before init");
+                        closeQuietly("rtc signaling websocket closed before init");
+                        return;
+                    }
+                    rtcInitSent = true;
+                }
+                if (localOfferReady && !rtcOfferSent) {
+                    SessionDescription description = peerConnection.getLocalDescription();
+                    if (description != null) {
+                        boolean offerSent = sendSignal("rtc-offer", payload -> {
+                            payload.put("sdp", isRelay()
+                                ? description.description
+                                : stripDirectSdp(description.description));
+                            payload.put("type", description.type.canonicalForm());
+                            return payload;
+                        });
+                        if (!offerSent) {
+                            listener.onRtcError("rtc signaling websocket closed before offer");
+                            closeQuietly("rtc signaling websocket closed before offer");
+                            return;
+                        }
+                        rtcOfferSent = true;
+                    }
+                }
+                if (rtcOfferSent && !pendingLocalIceCandidates.isEmpty()) {
+                    for (IceCandidate iceCandidate : pendingLocalIceCandidates) {
+                        sendSignal("rtc-candidate", payload -> {
+                            payload.put("candidate", iceCandidate.sdp);
+                            payload.put("sdpMid", iceCandidate.sdpMid);
+                            payload.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
+                            return payload;
+                        });
+                    }
+                    pendingLocalIceCandidates.clear();
+                }
+            } catch (JSONException error) {
+                listener.onRtcError("rtc signaling serialization failure: " + error.getMessage());
+                closeQuietly("rtc signaling serialization failure");
+            }
         }
     }
 
@@ -460,21 +582,28 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             if (disposed || peerConnection == null) {
                 return;
             }
-            try {
-                SessionDescription description = peerConnection.getLocalDescription();
-                boolean sent = sendSignal("rtc-offer", payload -> {
-                    payload.put("sdp", isRelay() ? description.description : stripDirectSdp(description.description));
-                    payload.put("type", description.type.canonicalForm());
-                    return payload;
-                });
-                if (!sent) {
-                    listener.onRtcError("rtc signaling websocket closed before offer");
-                    closeQuietly("rtc signaling websocket closed before offer");
+            synchronized (signalLock) {
+                localOfferReady = true;
+                if (!signalSocketOpen && signalSocket != null && context == null) {
+                    try {
+                        SessionDescription description = peerConnection.getLocalDescription();
+                        boolean sent = sendSignal("rtc-offer", payload -> {
+                            payload.put("sdp", isRelay() ? description.description : stripDirectSdp(description.description));
+                            payload.put("type", description.type.canonicalForm());
+                            return payload;
+                        });
+                        if (!sent) {
+                            listener.onRtcError("rtc signaling websocket closed before offer");
+                            closeQuietly("rtc signaling websocket closed before offer");
+                        }
+                    } catch (JSONException error) {
+                        listener.onRtcError("rtc offer serialization failure: " + error.getMessage());
+                        closeQuietly("rtc offer serialization failure");
+                    }
+                    return;
                 }
-            } catch (JSONException error) {
-                listener.onRtcError("rtc offer serialization failure: " + error.getMessage());
-                closeQuietly("rtc offer serialization failure");
             }
+            flushPendingOutboundSignals();
         }
 
         @Override
@@ -529,24 +658,32 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
 
         @Override
         public void onIceCandidate(IceCandidate iceCandidate) {
-            if (disposed || signalSocket == null) {
+            if (disposed) {
                 return;
             }
             if (!isRelay() && !shouldSignalIceCandidate(iceCandidate)) {
                 return;
             }
-            try {
-                boolean sent = sendSignal("rtc-candidate", payload -> {
-                    payload.put("candidate", iceCandidate.sdp);
-                    payload.put("sdpMid", iceCandidate.sdpMid);
-                    payload.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
-                    return payload;
-                });
-                if (!sent) {
-                    Log.w(TAG, "rtc signaling websocket closed before candidate");
+            synchronized (signalLock) {
+                if (!signalSocketOpen || !rtcOfferSent || signalSocket == null) {
+                    if (pendingLocalIceCandidates.size() < MAX_PENDING_REMOTE_ICE_CANDIDATES) {
+                        pendingLocalIceCandidates.add(iceCandidate);
+                    }
+                    return;
                 }
-            } catch (JSONException error) {
-                Log.w(TAG, "failed to serialize ice candidate", error);
+                try {
+                    boolean sent = sendSignal("rtc-candidate", payload -> {
+                        payload.put("candidate", iceCandidate.sdp);
+                        payload.put("sdpMid", iceCandidate.sdpMid);
+                        payload.put("sdpMLineIndex", iceCandidate.sdpMLineIndex);
+                        return payload;
+                    });
+                    if (!sent) {
+                        Log.w(TAG, "rtc signaling websocket closed before candidate");
+                    }
+                } catch (JSONException error) {
+                    Log.w(TAG, "failed to serialize ice candidate", error);
+                }
             }
         }
 
@@ -645,7 +782,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             return;
         }
         if (state == DataChannel.State.OPEN && !openPublished) {
-            if (direct) {
+            if (direct && directOpenStabilityMs > 0L) {
                 scheduleDirectOpenPublish();
             } else {
                 publishOpen();
