@@ -525,4 +525,119 @@ describe('zterm app CLI surface', () => {
       expect(JSON.stringify(prepared.stdout.text())).not.toContain('invalid_state');
     }
   });
+
+  it('exits 3 and keeps the original resultUnknown frame when a stream send-file chunk reports resultUnknown (no follow-up chunk/commit)', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'zterm-cli-chunk-unknown-'));
+    roots.push(home);
+    const filePath = join(home, 'payload.bin');
+    // 48000B = three chunks; a resultUnknown on the first chunk must stop the transfer.
+    await writeFile(filePath, Buffer.alloc(48_000, 7));
+    const prepared = await context({
+      stdin: JSON.stringify({ type: 'send-file', peer: 'device-peer', file: filePath, subject: 'file', messageId: 'chunk-unknown-id' }),
+      request: (frame) => {
+        if (frame.type === 'app-send-file-start') {
+          return {
+            type: 'app-send-result',
+            payload: {
+              requestId: frame.payload.requestId,
+              messageId: frame.payload.messageId,
+              transferId: frame.payload.file.transferId,
+              status: 'receiving',
+              stage: 'prepared',
+              persistedOffset: 0,
+            },
+          };
+        }
+        if (frame.type === 'app-send-file-chunk') {
+          // The remote dropped the connection mid-chunk: the daemon returns the original
+          // app-send-result with status resultUnknown and no persistedOffset
+          // (daemon-app-messaging-runtime.ts:757). This frame must be preserved verbatim.
+          return {
+            type: 'app-send-result',
+            payload: {
+              requestId: frame.payload.requestId,
+              messageId: frame.payload.messageId,
+              transferId: frame.payload.transferId,
+              status: 'resultUnknown',
+              stage: 'result_unknown',
+            },
+          };
+        }
+        return {
+          type: 'app-error',
+          payload: appErrorPayload({ code: 'invalid_state', stage: 'file-commit', message: 'unexpected follow-up request' }),
+        };
+      },
+    });
+    const code = await runAppCommand(['stream', '--json'], prepared.context);
+    expect(code, 'stream send-file chunk resultUnknown must exit 3').toBe(3);
+    const frames = ndjson(prepared.stdout.text());
+    const last = frames.at(-1);
+    // The daemon's original resultUnknown frame survives unchanged (not rewritten to app-error).
+    expect(last, 'stream send-file chunk resultUnknown should end on the original app-send-result').toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'resultUnknown', stage: 'result_unknown' },
+    });
+    expect(last).toMatchObject({ payload: { transferId: 'chunk-unknown-id', messageId: 'chunk-unknown-id' } });
+    // Exactly one chunk was attempted; a resultUnknown chunk must not trigger more chunks or a commit.
+    expect(prepared.frames.filter((frame) => frame.type === 'app-send-file-chunk')).toHaveLength(1);
+    expect(prepared.frames.filter((frame) => frame.type === 'app-send-file-commit')).toHaveLength(0);
+    expect(prepared.frames.filter((frame) => frame.type !== 'app-send-file-start')).toHaveLength(1);
+    // Only the single stdin command was read before resultUnknown forced the stream to stop.
+    expect(prepared.frames.filter((frame) => frame.type === 'app-send-file-start')).toHaveLength(1);
+    expect(JSON.stringify(prepared.stdout.text())).not.toContain('invalid_state');
+  });
+
+  it('exits 3 and keeps the original resultUnknown frame when a one-shot send-file chunk reports resultUnknown', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'zterm-cli-chunk-unknown-oneshot-'));
+    roots.push(home);
+    const filePath = join(home, 'payload.bin');
+    await writeFile(filePath, Buffer.alloc(48_000, 7));
+    const prepared = await context({
+      request: (frame) => {
+        if (frame.type === 'app-send-file-start') {
+          return {
+            type: 'app-send-result',
+            payload: {
+              requestId: frame.payload.requestId,
+              messageId: frame.payload.messageId,
+              transferId: frame.payload.file.transferId,
+              status: 'receiving',
+              stage: 'prepared',
+              persistedOffset: 0,
+            },
+          };
+        }
+        if (frame.type === 'app-send-file-chunk') {
+          return {
+            type: 'app-send-result',
+            payload: {
+              requestId: frame.payload.requestId,
+              messageId: frame.payload.messageId,
+              transferId: frame.payload.transferId,
+              status: 'resultUnknown',
+              stage: 'result_unknown',
+            },
+          };
+        }
+        return {
+          type: 'app-error',
+          payload: appErrorPayload({ code: 'invalid_state', stage: 'file-commit', message: 'unexpected follow-up request' }),
+        };
+      },
+    });
+    const code = await runAppCommand([
+      'send-file', '--peer', 'device-peer', '--message-id', 'chunk-unknown-oneshot-id',
+      '--file', filePath, '--subject', 'file',
+    ], prepared.context);
+    expect(code, 'one-shot send-file chunk resultUnknown must exit 3').toBe(3);
+    const last = ndjson(prepared.stdout.text()).at(-1);
+    expect(last, 'one-shot send-file chunk resultUnknown should emit the original app-send-result').toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'resultUnknown', stage: 'result_unknown', messageId: 'chunk-unknown-oneshot-id', transferId: 'chunk-unknown-oneshot-id' },
+    });
+    expect(prepared.frames.filter((frame) => frame.type === 'app-send-file-chunk')).toHaveLength(1);
+    expect(prepared.frames.filter((frame) => frame.type === 'app-send-file-commit')).toHaveLength(0);
+    expect(JSON.stringify(prepared.stdout.text())).not.toContain('invalid_state');
+  });
 });

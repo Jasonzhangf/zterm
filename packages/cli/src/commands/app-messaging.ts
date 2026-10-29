@@ -355,6 +355,14 @@ async function runFileTransfer(
         },
       });
       if (result.type === 'app-error') return result;
+      // A chunk response can carry the daemon's normal app-send-result with status
+      // resultUnknown when the remote dropped the connection mid-chunk
+      // (daemon-app-messaging-runtime.ts:757). Preserve that frame verbatim so its
+      // original messageId/transferId survive and the caller can exit 3; rewriting it
+      // to a generic app-error would lose the transfer identity and exit semantics.
+      if (result.type === 'app-send-result' && result.payload.status === 'resultUnknown') {
+        return result;
+      }
       if (result.type !== 'app-send-result' || typeof result.payload.persistedOffset !== 'number') {
         return {
           type: 'app-error',
