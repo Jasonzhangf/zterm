@@ -281,41 +281,52 @@ export function createDaemonAppMessagingRuntime(
     return `${linkId}\u0000${transferId}`;
   }
 
-  function assertFileSendBinding(link: AppLink, file: AppSendFileStartPayload['file'], messageId: string, target: AppTarget) {
-    const existing = activeFileSends.get(fileSendKey(link.id, file.transferId));
-    if (!existing) return;
-    if (existing.messageId !== messageId || existing.target.daemonHostId !== target.daemonHostId) {
-      throw new AppProtocolError({
-        code: 'transfer_conflict',
-        message: 'transferId is already bound to another message or target on this connection',
-        stage: 'file-start',
-        messageId,
-        transferId: file.transferId,
-      });
-    }
-  }
-
-  function bindFileSend(
+  /**
+   * Reserves the physical local route before any asynchronous connect or
+   * receive. The reservation is the atomic admission point: a parallel start
+   * with the same linkId + transferId sees an existing binding and fails with
+   * transfer_conflict before forwarding or connecting to a peer. A later
+   * duplicate for the same message/target only refreshes its own binding.
+   */
+  function reserveFileSend(
     link: AppLink,
     file: AppSendFileStartPayload['file'],
     messageId: string,
     target: AppTarget,
-    peer?: PeerLink,
-  ) {
+  ): ActiveFileSend {
     const key = fileSendKey(link.id, file.transferId);
     const current = activeFileSends.get(key);
+    const reserved: ActiveFileSend = { linkId: link.id, transferId: file.transferId, messageId, target };
     if (current) {
-      // A duplicate start for the same connection and transferId only refreshes
-      // the peer binding after assertFileSendBinding accepted it; a conflicting
-      // start has already been rejected.
-      activeFileSends.set(key, { ...current, messageId, target, ...(peer ? { peer } : {}) });
-      return;
+      if (current.messageId !== messageId || current.target.daemonHostId !== target.daemonHostId) {
+        throw new AppProtocolError({
+          code: 'transfer_conflict',
+          message: 'transferId is already bound to another message or target on this connection',
+          stage: 'file-start',
+          messageId,
+          transferId: file.transferId,
+        });
+      }
+      // A duplicate start for the same message/target is idempotent. It owns
+      // its own object so its failure cannot delete the active route, while the
+      // map keeps pointing at the original route.
+      return reserved;
     }
-    activeFileSends.set(key, { linkId: link.id, transferId: file.transferId, messageId, target, ...(peer ? { peer } : {}) });
+    activeFileSends.set(key, reserved);
+    return reserved;
   }
 
-  function clearFileSend(link: AppLink, transferId: string) {
-    activeFileSends.delete(fileSendKey(link.id, transferId));
+  function bindFileSendPeer(active: ActiveFileSend, peer: PeerLink) {
+    active.peer = peer;
+  }
+
+  /**
+   * Removes only the reservation object owned by this operation. A failed or
+   * settled operation must never delete a newer operation that replaced it.
+   */
+  function clearFileSend(link: AppLink, transferId: string, active: ActiveFileSend) {
+    const key = fileSendKey(link.id, transferId);
+    if (activeFileSends.get(key) === active) activeFileSends.delete(key);
   }
 
   function resolveActiveFileSend(link: AppLink, messageId: string, transferId: string, stage: string): ActiveFileSend {
@@ -748,30 +759,30 @@ export function createDaemonAppMessagingRuntime(
       link.send(peerResultFrame(payload.requestId, payload.messageId, 'received', 'received', { transferId: file.transferId }));
       return;
     }
-    // The route is bound per local connection and transferId. The conflict
-    // check runs on the store queue and the following bind is synchronous, so
-    // a later start on the same connection cannot replace or forward against a
-    // live route.
-    await store.runExclusive(async () => {
-      assertFileSendBinding(link, file, payload.messageId, target);
-    });
+    // The route is reserved before any asynchronous connect or receive, so a
+    // parallel start with the same linkId + transferId sees the reservation and
+    // fails with transfer_conflict before forwarding. Only the owning
+    // operation (same linkId + messageId + transferId) may update or clear it.
+    let active: ActiveFileSend | null = null;
     try {
+      // The reservation runs on the store queue so the check-and-publish is
+      // atomic with respect to parallel starts on the same connection.
+      active = await store.runExclusive(async () => {
+        return reserveFileSend(link, file, payload.messageId, target);
+      });
       if (target.daemonHostId === options.daemonHostId) {
         const result = await receiveFileStart(
           { deviceId: options.deviceId, daemonHostId: options.daemonHostId },
           { ...payload, file },
         );
-        if (result.type === 'app-send-result' && result.payload.status === 'receiving') {
-          bindFileSend(link, file, payload.messageId, target);
-        }
         if (result.type !== 'app-send-result' || result.payload.status !== 'receiving') {
-          clearFileSend(link, file.transferId);
+          clearFileSend(link, file.transferId, active);
         }
         link.send(result);
         return;
       }
       const peer = await connectPeer(target);
-      bindFileSend(link, file, payload.messageId, target, peer);
+      bindFileSendPeer(active, peer);
       const response = await peerRequest(peer, {
         type: 'app-send-file-start',
         payload: {
@@ -782,12 +793,12 @@ export function createDaemonAppMessagingRuntime(
         },
       });
       if (response.type === 'app-error') {
-        clearFileSend(link, file.transferId);
+        clearFileSend(link, file.transferId, active);
         await updateOutbox(target.daemonHostId, payload.messageId, 'failed', response.payload.code);
       }
       link.send(response);
     } catch (error) {
-      clearFileSend(link, file.transferId);
+      if (active) clearFileSend(link, file.transferId, active);
       if (error instanceof PeerLinkError) {
         const state = error.afterSend ? 'result_unknown' : 'failed';
         await updateOutbox(target.daemonHostId, payload.messageId, state, error.code);
@@ -839,7 +850,6 @@ export function createDaemonAppMessagingRuntime(
   }
 
   async function forwardFileCommit(link: AppLink, payload: AppSendFileCommitPayload) {
-    const key = fileSendKey(link.id, payload.transferId);
     const active = resolveActiveFileSend(link, payload.messageId, payload.transferId, 'file-commit');
     try {
       if (active.target.daemonHostId === options.daemonHostId) {
@@ -849,7 +859,7 @@ export function createDaemonAppMessagingRuntime(
         );
         if (response.type === 'app-send-result' && (response.payload.status === 'received' || response.payload.status === 'delivered' || response.payload.status === 'consumed')) {
           await updateOutbox(active.target.daemonHostId, payload.messageId, 'received');
-          activeFileSends.delete(key);
+          clearFileSend(link, payload.transferId, active);
         }
         link.send(response);
         return;
@@ -865,7 +875,7 @@ export function createDaemonAppMessagingRuntime(
       }
       if (response.type === 'app-send-result' && (response.payload.status === 'received' || response.payload.status === 'delivered' || response.payload.status === 'consumed')) {
         await updateOutbox(active.target.daemonHostId, payload.messageId, 'received');
-        activeFileSends.delete(key);
+        clearFileSend(link, payload.transferId, active);
       }
       link.send(response);
     } catch (error) {

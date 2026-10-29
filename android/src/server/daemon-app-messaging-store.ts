@@ -378,8 +378,12 @@ export class DaemonAppMessagingStore {
   async computeInboxUsage(excludeStaging?: { senderDaemonHostId: string; transferId: string }) {
     let records = 0;
     let bytes = 0;
-    await this.walkJson(this.recordRoot(), () => {
+    await this.walkJson(this.recordRoot(), (record) => {
       records += 1;
+      const inbox = record as AppInboxRecord;
+      if (inbox.kind === 'message' && typeof inbox.body === 'string') {
+        bytes += Buffer.byteLength(inbox.body, 'utf8');
+      }
     });
     await this.walkFiles(join(this.inboxRoot, 'files'), (_filePath, size) => {
       bytes += size;
@@ -527,7 +531,7 @@ export class DaemonAppMessagingStore {
       const next = join(root, entry.name);
       if (entry.isDirectory()) {
         await this.walkJson(next, visit);
-      } else if (entry.isFile() && entry.name.endsWith('.json')) {
+      } else if (entry.isFile() && (entry.name === 'record.json' || entry.name === 'meta.json')) {
         const value = await readJson<unknown>(next);
         if (value !== null) await visit(value);
       }

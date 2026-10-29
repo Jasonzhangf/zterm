@@ -14,6 +14,8 @@ import type { AppInboxRecord, AppStagingMetadata } from './daemon-app-messaging-
 import { DaemonAppMessagingStore } from './daemon-app-messaging-store';
 import {
   attachPeerTransport,
+  FakeSocket,
+  type Bridge,
   captureLink,
   createBridge,
   peerTarget,
@@ -362,3 +364,419 @@ async function arrangeCommittedTransfer(
   await store.writeStagingMetadata(metadata);
   return finalPath;
 }
+
+describe('daemon /app file route reservation', () => {
+  it('rejects a parallel conflicting start before forwarding and keeps the original target', async () => {
+    const root = await registry.root();
+    const bridgeB = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
+    const bridgeC = await createBridge({ root: join(root, 'c'), deviceId: 'device-c', daemonHostId: 'daemon-c' });
+    const [toB, serverB] = socketPair();
+    attachPeerTransport(bridgeB, serverB);
+    const [toC, serverC] = socketPair();
+    attachPeerTransport(bridgeC, serverC);
+    const cClientFrames: string[] = [];
+    const toCSend = toC.send.bind(toC);
+    toC.send = ((text: string, callback?: (error?: Error) => void) => {
+      cClientFrames.push(text);
+      return toCSend(text, callback);
+    }) as FakeSocket['send'];
+
+    // Hold B's handshake so the first start is still inside connectPeer (past
+    // its route admission, before any bind) when the conflicting second start
+    // runs. Without the held window the first start binds before the second
+    // checks and the race never happens.
+    const serverBSend = serverB.send.bind(serverB);
+    let releaseB = false;
+    let bHandshakeStarted = false;
+    const heldB: { send: (() => void) | null } = { send: null };
+    serverB.send = ((text: string, callback?: (error?: Error) => void) => {
+      if (!releaseB) {
+        bHandshakeStarted = true;
+        heldB.send = () => serverBSend(text, callback);
+        return;
+      }
+      serverBSend(text, callback);
+    }) as FakeSocket['send'];
+
+    const bridgeA = await createBridge({
+      root: join(root, 'a'),
+      deviceId: 'device-a',
+      daemonHostId: 'daemon-a',
+      createWebSocket: (url) => (url.endsWith('daemon-c') ? toC : toB) as unknown as WebSocket,
+    });
+    const local = captureLink('local', 'device-a', 'daemon-a');
+    const messageId = `parallel-${randomUUID()}`;
+    const transferId = messageId;
+    const file = sendFileMetadata(Buffer.alloc(1, 1), transferId, 'one.bin');
+
+    const sendStart = (target: Bridge, requestId: string) => bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-file-start',
+      payload: {
+        requestId,
+        messageId,
+        target: peerTarget(target),
+        subject: 'parallel',
+        file,
+      },
+    });
+
+    // First start to B. It admits the route and then blocks in connectPeer(B)
+    // because B's app-ready is held.
+    const firstRequestId = randomUUID();
+    const first = sendStart(bridgeB, firstRequestId);
+    const deadline = Date.now() + 3_000;
+    while (!bHandshakeStarted && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(bHandshakeStarted).toBe(true);
+
+    // Second start to C on the same physical connection + transferId. It must
+    // be rejected with transfer_conflict before A connects to C or forwards.
+    const secondRequestId = randomUUID();
+    await sendStart(bridgeC, secondRequestId);
+    expect(local.frames.some(
+      (frame) => frame.type === 'app-error'
+        && frame.payload.code === 'transfer_conflict'
+        && frame.payload.transferId === transferId
+        && frame.payload.requestId === secondRequestId,
+    )).toBe(true);
+    // No hello or file-start reached C: the conflict is rejected before the
+    // second route connects or forwards.
+    expect(cClientFrames).toEqual([]);
+
+    // Release B so the first start completes against its reserved target only.
+    releaseB = true;
+    heldB.send?.();
+    await first;
+    expect(await waitForFrames(
+      local.frames,
+      (frame) => frame.type === 'app-send-result' && frame.payload.requestId === firstRequestId && frame.payload.status === 'receiving',
+    )).toMatchObject({ type: 'app-send-result', payload: { status: 'receiving' } });
+
+    // The first route must still point at B. Deliver its full transfer and
+    // verify the file lands on B, never on C.
+    const sendChunk = async (chunkIndex: number, offset: number, data: Buffer) => {
+      local.frames.length = 0;
+      await bridgeA.runtime.handleFrame(local.link, {
+        type: 'app-send-file-chunk',
+        payload: {
+          requestId: randomUUID(),
+          messageId,
+          transferId,
+          offset,
+          chunkIndex,
+          dataBase64: data.toString('base64'),
+        },
+      });
+      return waitForFrames(local.frames, () => true);
+    };
+    const data = Buffer.alloc(1, 1);
+    expect(await sendChunk(0, 0, data)).toMatchObject({ type: 'app-send-result', payload: { persistedOffset: 1 } });
+    const commit = await (async () => {
+      local.frames.length = 0;
+      await bridgeA.runtime.handleFrame(local.link, {
+        type: 'app-send-file-commit',
+        payload: { requestId: randomUUID(), messageId, transferId },
+      });
+      return waitForFrames(local.frames, () => true);
+    })();
+    expect(commit).toMatchObject({ type: 'app-send-result', payload: { status: 'received' } });
+
+    const bPath = join(
+      bridgeB.appRootDir,
+      'app-inbox/files',
+      encodeAppPathSegment('daemon-a'),
+      encodeAppPathSegment(messageId),
+      file.fileName,
+    );
+    const cPath = join(
+      bridgeC.appRootDir,
+      'app-inbox/files',
+      encodeAppPathSegment('daemon-a'),
+      encodeAppPathSegment(messageId),
+      file.fileName,
+    );
+    expect((await readFile(bPath)).equals(data)).toBe(true);
+    await expect(stat(cPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+});
+
+describe('daemon /app inbox capacity counts message bodies (P1-C)', () => {
+  function peerLink() {
+    return captureLink('peer', 'device-a', 'daemon-a');
+  }
+
+  async function nextResult(link: ReturnType<typeof peerLink>, predicate: (frame: AppServerFrame) => boolean) {
+    const frame = await waitForFrames(link.frames, predicate);
+    link.frames.length = 0;
+    return frame;
+  }
+
+  const BODY = (n: number) => 'a'.repeat(n);
+
+  it('blocks the second message when the first message body already fills the limit', async () => {
+    const root = await registry.root();
+    const bridgeB = await createBridge({ root, deviceId: 'device-b', daemonHostId: 'daemon-b', maxInboxBytes: 3000 });
+    const peer = peerLink();
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'm1', subject: 's', body: BODY(2048) },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'm2', subject: 's', body: BODY(2048) },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-error')).toMatchObject({
+      type: 'app-error',
+      payload: { code: 'inbox_full' },
+    });
+  });
+
+  it('blocks a file start whose bytes push the persisted message body over the limit', async () => {
+    const root = await registry.root();
+    const bridgeB = await createBridge({ root, deviceId: 'device-b', daemonHostId: 'daemon-b', maxInboxBytes: 3000 });
+    const peer = peerLink();
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'm1', subject: 's', body: BODY(2048) },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+    // 2048 + 1500 = 3548 > 3000 must block; the small file below must still pass.
+    const tooBig = sendFileMetadata(Buffer.alloc(1500, 1), 't-big', 'big.bin');
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-file-start',
+      payload: { requestId: randomUUID(), messageId: 'f-big', subject: 's', file: tooBig },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-error')).toMatchObject({
+      type: 'app-error',
+      payload: { code: 'inbox_full' },
+    });
+    const rejectedStaging = join(
+      bridgeB.appRootDir,
+      'app-inbox/staging',
+      encodeAppPathSegment('daemon-a'),
+      encodeAppPathSegment('t-big'),
+      'meta.json',
+    );
+    await expect(stat(rejectedStaging)).rejects.toMatchObject({ code: 'ENOENT' });
+    const small = sendFileMetadata(Buffer.alloc(100, 1), 't-small', 'small.bin');
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-file-start',
+      payload: { requestId: randomUUID(), messageId: 'f-small', subject: 's', file: small },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'receiving' },
+    });
+  });
+
+  it('blocks a message when an existing committed file plus the body exceeds the limit', async () => {
+    const root = await registry.root();
+    const bridgeB = await createBridge({ root, deviceId: 'device-b', daemonHostId: 'daemon-b', maxInboxBytes: 3000 });
+    const peer = peerLink();
+    const fileBytes = Buffer.alloc(1500, 2);
+    const file = sendFileMetadata(fileBytes, 't-file', 'committed.bin');
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-file-start',
+      payload: { requestId: randomUUID(), messageId: 'f1', subject: 's', file },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'receiving' },
+    });
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-file-chunk',
+      payload: { requestId: randomUUID(), messageId: 'f1', transferId: 't-file', offset: 0, chunkIndex: 0, dataBase64: fileBytes.toString('base64') },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { persistedOffset: 1500 },
+    });
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-file-commit',
+      payload: { requestId: randomUUID(), messageId: 'f1', transferId: 't-file' },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+    // 1500 (file) + 2048 (message) = 3548 > 3000 must block.
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'm-after', subject: 's', body: BODY(2048) },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-error')).toMatchObject({
+      type: 'app-error',
+      payload: { code: 'inbox_full' },
+    });
+    const committedPath = join(
+      bridgeB.appRootDir,
+      'app-inbox/files',
+      encodeAppPathSegment('daemon-a'),
+      encodeAppPathSegment('f1'),
+      file.fileName,
+    );
+    expect((await stat(committedPath)).size).toBe(fileBytes.length);
+    const verify = new DaemonAppMessagingStore({ appRootDir: bridgeB.appRootDir, maxInboxBytes: 3000 });
+    expect(await verify.readInboxRecord('daemon-a', 'f1')).toMatchObject({
+      kind: 'file',
+      state: 'received',
+    });
+  });
+
+  it('does not double count a same-id message retry against inbox capacity', async () => {
+    const root = await registry.root();
+    const bridgeB = await createBridge({ root, deviceId: 'device-b', daemonHostId: 'daemon-b', maxInboxBytes: 3000 });
+    const peer = peerLink();
+    const body = BODY(2048);
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'retry', subject: 's', body },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+    // Same id with identical content is idempotent, so it cannot free or
+    // re-occupy capacity; a third distinct message still hits the shared limit.
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'retry', subject: 's', body },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'm3', subject: 's', body: BODY(2048) },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-error')).toMatchObject({
+      type: 'app-error',
+      payload: { code: 'inbox_full' },
+    });
+  });
+
+  it('retains committed state after restart and still enforces accumulated bytes', async () => {
+    const root = await registry.root();
+    const appRootDir = join(root, 'app');
+    const seed = new DaemonAppMessagingStore({ appRootDir, maxInboxBytes: 3000 });
+    await seed.initialize();
+    const record: AppInboxRecord = {
+      schemaVersion: 1,
+      senderDeviceId: 'device-a',
+      senderDaemonHostId: 'daemon-a',
+      receiverDeviceId: 'device-b',
+      receiverDaemonHostId: 'daemon-b',
+      messageId: 'committed',
+      kind: 'message',
+      subject: 's',
+      body: BODY(2048),
+      state: 'received',
+      receivedAt: new Date().toISOString(),
+    };
+    await seed.writeInboxRecord(record);
+
+    const bridgeB = await createBridge({ root, deviceId: 'device-b', daemonHostId: 'daemon-b', maxInboxBytes: 3000 });
+    expect(bridgeB.runtime.getInitializationError()).toBeNull();
+    const local = captureLink('local', 'device-b', 'daemon-b');
+    await bridgeB.runtime.subscribeLocal(local.link);
+    const replayed = local.frames.filter((frame) => frame.type === 'app-inbound-message');
+    expect(replayed).toHaveLength(1);
+    expect((replayed[0] as Extract<AppServerFrame, { type: 'app-inbound-message' }>).payload.messageId).toBe('committed');
+
+    // 2048 (existing) + 2048 (new) = 4096 > 3000 must still be blocked.
+    const peer = peerLink();
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'm-new', subject: 's', body: BODY(2048) },
+    });
+    expect(await nextResult(peer, (f) => f.type === 'app-error')).toMatchObject({
+      type: 'app-error',
+      payload: { code: 'inbox_full' },
+    });
+    // The rejected message must not have been persisted.
+    const after = captureLink('local', 'device-b', 'daemon-b');
+    await bridgeB.runtime.subscribeLocal(after.link);
+    expect(after.frames.filter((frame) => frame.type === 'app-inbound-message')).toHaveLength(1);
+    const usage = await new DaemonAppMessagingStore({ appRootDir, maxInboxBytes: 3000 }).computeInboxUsage();
+    expect(usage).toEqual({ records: 1, bytes: BODY(2048).length });
+  });
+});
+
+describe('daemon /app atomic temp isolation on restart (P1-B)', () => {
+  it('stays usable after crashed atomic writes and never publishes the temps', async () => {
+    const root = await registry.root();
+    const appRootDir = join(root, 'app');
+    const seed = new DaemonAppMessagingStore({ appRootDir });
+    await seed.initialize();
+    const record: AppInboxRecord = {
+      schemaVersion: 1,
+      senderDeviceId: 'device-a',
+      senderDaemonHostId: 'daemon-a',
+      receiverDeviceId: 'device-b',
+      receiverDaemonHostId: 'daemon-b',
+      messageId: 'committed',
+      kind: 'message',
+      subject: 's',
+      body: 'committed-body',
+      state: 'received',
+      receivedAt: new Date().toISOString(),
+    };
+    await seed.writeInboxRecord(record);
+
+    // Crashed atomic writes: empty, partial, and complete-but-not-renamed temps.
+    const recordGhostDir = join(seed.inboxRoot, 'records', encodeAppPathSegment('daemon-a'), encodeAppPathSegment('ghost'));
+    await mkdir(recordGhostDir, { recursive: true });
+    await writeFile(join(recordGhostDir, `.tmp-${randomUUID()}.json`), '');
+    await writeFile(join(recordGhostDir, `.tmp-${randomUUID()}.json`), '{"messageId":"partial"');
+    await writeFile(join(recordGhostDir, `.tmp-${randomUUID()}.json`), JSON.stringify({
+      schemaVersion: 1,
+      messageId: 'complete-not-renamed',
+      kind: 'message',
+      body: 'x',
+      state: 'received',
+    }));
+    const stagingGhostDir = join(seed.inboxRoot, 'staging', encodeAppPathSegment('daemon-a'), encodeAppPathSegment('ghostx'));
+    await mkdir(stagingGhostDir, { recursive: true });
+    await writeFile(join(stagingGhostDir, `.tmp-${randomUUID()}.json`), JSON.stringify({
+      schemaVersion: 1,
+      transferId: 'ghostx',
+      messageId: 'ghostx',
+      reservedBytes: 999,
+    }));
+
+    const bridgeB = await createBridge({ root, deviceId: 'device-b', daemonHostId: 'daemon-b' });
+    expect(bridgeB.runtime.getInitializationError()).toBeNull();
+
+    const local = captureLink('local', 'device-b', 'daemon-b');
+    await bridgeB.runtime.subscribeLocal(local.link);
+    const inbound = local.frames.filter((frame) => frame.type === 'app-inbound-message' || frame.type === 'app-inbound-file');
+    expect(inbound).toHaveLength(1);
+    expect((inbound[0] as Extract<AppServerFrame, { type: 'app-inbound-message' }>).payload.messageId).toBe('committed');
+
+    // A fresh admission still works and is not blocked by the ghost temps.
+    const peer = captureLink('peer', 'device-a', 'daemon-a');
+    await bridgeB.runtime.handleFrame(peer.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: 'fresh', subject: 's', body: 'fresh-body' },
+    });
+    expect(await waitForFrames(peer.frames, (f) => f.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+
+    // Capacity/count truth comes only from published records.
+    const verify = new DaemonAppMessagingStore({ appRootDir });
+    const usage = await verify.computeInboxUsage();
+    expect(usage).toEqual({
+      records: 2,
+      bytes: Buffer.byteLength('committed-body', 'utf8') + Buffer.byteLength('fresh-body', 'utf8'),
+    });
+  });
+});

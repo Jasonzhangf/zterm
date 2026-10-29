@@ -240,6 +240,13 @@ never returned as inbound files. A resumed transfer uses the same transfer ID
 and byte offset. Duplicate chunks at the already persisted offset are accepted
 idempotently; conflicting bytes fail.
 
+An interrupted atomic write leaves a `.tmp-<uuid>.json` sibling. Temp files are
+never published: enumeration, recovery, retention, replay, and capacity count
+only the formal `record.json` and `meta.json` files. A corrupt formal file still
+fails loudly instead of being skipped. Durable inbox byte usage counts the
+UTF-8 bytes of persisted message bodies plus landed files and staging
+reservations; a same-id retry does not consume capacity a second time.
+
 The sending daemon binds each outbound file transfer to the local connection
 that started it, and checks the bound `messageId` before forwarding any chunk or
 commit. Two local CLIs may therefore use the same `--message-id` (and so the
