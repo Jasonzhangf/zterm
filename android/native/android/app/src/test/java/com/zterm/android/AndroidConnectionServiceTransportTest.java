@@ -2637,11 +2637,11 @@ public final class AndroidConnectionServiceTransportTest {
 
             int sentBBefore = sentB.size();
             sendTargetMessage(runtimeB, "post-b");
-            sendChannelMessage(runtimeB, "channel-b");
             assertEquals(
                 "healthy target B must keep heartbeat/target send after an unrelated "
                     + "target's network generation change",
                 sentBBefore + 1, sentB.size());
+            sendChannelMessage(runtimeB, "channel-b");
             assertEquals(
                 "healthy target B must keep channel send after an unrelated "
                     + "target's network generation change",
