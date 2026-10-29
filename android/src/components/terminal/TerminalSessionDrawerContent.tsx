@@ -470,19 +470,22 @@ function TerminalSessionDrawerComponent({
   ))?.cwd
     || cwdGroups[0]?.cwd
     || null;
-  // Rows the list actually paints, including explicit unclassified rows that
-  // only-master keeps visible. Role-filtered rows behind "+N 窗口" are not
-  // counted until the user opens them.
-  const displayedSessionCount = useMemo(
-    () => cwdGroups.reduce(
-      (total, folder) => total + folder.items.length + folder.unclassifiedItems.length,
-      0,
-    ),
-    [cwdGroups],
-  );
   const [expandedFolderCwd, setExpandedFolderCwd] = useState<string | null>(activeFolderCwd);
   const [collapsedMasterFolders, setCollapsedMasterFolders] = useState<Set<string>>(() => new Set());
   const [expandedOtherFoldersInMasterMode, setExpandedOtherFoldersInMasterMode] = useState<Set<string>>(() => new Set());
+  // Rows the list actually paints: primary rows plus explicit unclassified
+  // rows. Role-filtered rows count only after the user opens "+N 窗口".
+  const displayedSessionCount = useMemo(
+    () => cwdGroups.reduce((total, folder) => {
+      const showsOthers = activeFilterMode === 'only-master'
+        && expandedOtherFoldersInMasterMode.has(folder.cwd);
+      return total
+        + folder.items.length
+        + folder.unclassifiedItems.length
+        + (showsOthers ? folder.otherItems.length : 0);
+    }, 0),
+    [activeFilterMode, cwdGroups, expandedOtherFoldersInMasterMode],
+  );
 
   useEffect(() => {
     setExpandedFolderCwd((current) => (
