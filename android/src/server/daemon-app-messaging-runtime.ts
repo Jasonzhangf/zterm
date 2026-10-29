@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import WebSocket from 'ws';
 import {
@@ -85,6 +84,14 @@ type PeerLink = {
   ready: boolean;
   closed: boolean;
   pending: Map<string, PendingPeerRequest>;
+};
+
+type ActiveFileSend = {
+  linkId: string;
+  transferId: string;
+  messageId: string;
+  target: AppTarget;
+  peer?: PeerLink;
 };
 
 class PeerLinkError extends Error {
@@ -225,7 +232,13 @@ export function createDaemonAppMessagingRuntime(
   });
   const subscribers = new Map<string, AppLink>();
   const peerLinks = new Map<string, PeerLink>();
-  const activeFileSends = new Map<string, { target: AppTarget; link?: PeerLink; messageId: string }>();
+  /**
+   * Outbound file transfers are bound per local connection and transferId. The
+   * CLI derives transferId from messageId, so two local CLIs may legitimately
+   * use the same transferId for different peers; a transferId-only index would
+   * let the second start steal the first route.
+   */
+  const activeFileSends = new Map<string, ActiveFileSend>();
   let initialized = false;
   let initializationError: Error | null = null;
   let retentionTimer: ReturnType<typeof setInterval> | null = null;
@@ -262,6 +275,69 @@ export function createDaemonAppMessagingRuntime(
         subscriber.close('slow_consumer', 4008);
       }
     }
+  }
+
+  function fileSendKey(linkId: string, transferId: string) {
+    return `${linkId}\u0000${transferId}`;
+  }
+
+  function assertFileSendBinding(link: AppLink, file: AppSendFileStartPayload['file'], messageId: string, target: AppTarget) {
+    const existing = activeFileSends.get(fileSendKey(link.id, file.transferId));
+    if (!existing) return;
+    if (existing.messageId !== messageId || existing.target.daemonHostId !== target.daemonHostId) {
+      throw new AppProtocolError({
+        code: 'transfer_conflict',
+        message: 'transferId is already bound to another message or target on this connection',
+        stage: 'file-start',
+        messageId,
+        transferId: file.transferId,
+      });
+    }
+  }
+
+  function bindFileSend(
+    link: AppLink,
+    file: AppSendFileStartPayload['file'],
+    messageId: string,
+    target: AppTarget,
+    peer?: PeerLink,
+  ) {
+    const key = fileSendKey(link.id, file.transferId);
+    const current = activeFileSends.get(key);
+    if (current) {
+      // A duplicate start for the same connection and transferId only refreshes
+      // the peer binding after assertFileSendBinding accepted it; a conflicting
+      // start has already been rejected.
+      activeFileSends.set(key, { ...current, messageId, target, ...(peer ? { peer } : {}) });
+      return;
+    }
+    activeFileSends.set(key, { linkId: link.id, transferId: file.transferId, messageId, target, ...(peer ? { peer } : {}) });
+  }
+
+  function clearFileSend(link: AppLink, transferId: string) {
+    activeFileSends.delete(fileSendKey(link.id, transferId));
+  }
+
+  function resolveActiveFileSend(link: AppLink, messageId: string, transferId: string, stage: string): ActiveFileSend {
+    const active = activeFileSends.get(fileSendKey(link.id, transferId));
+    if (!active) {
+      throw new AppProtocolError({
+        code: 'invalid_state',
+        message: 'file transfer is not active; restart with file-start',
+        stage,
+        transferId,
+      });
+    }
+    if (active.messageId !== messageId) {
+      throw new AppProtocolError({
+        code: 'transfer_conflict',
+        message: 'transferId is bound to another messageId on this connection',
+        stage,
+        messageId,
+        transferId,
+      });
+    }
+    return active;
   }
 
   function publishRecord(record: AppInboxRecord) {
@@ -672,6 +748,13 @@ export function createDaemonAppMessagingRuntime(
       link.send(peerResultFrame(payload.requestId, payload.messageId, 'received', 'received', { transferId: file.transferId }));
       return;
     }
+    // The route is bound per local connection and transferId. The conflict
+    // check runs on the store queue and the following bind is synchronous, so
+    // a later start on the same connection cannot replace or forward against a
+    // live route.
+    await store.runExclusive(async () => {
+      assertFileSendBinding(link, file, payload.messageId, target);
+    });
     try {
       if (target.daemonHostId === options.daemonHostId) {
         const result = await receiveFileStart(
@@ -679,16 +762,16 @@ export function createDaemonAppMessagingRuntime(
           { ...payload, file },
         );
         if (result.type === 'app-send-result' && result.payload.status === 'receiving') {
-          activeFileSends.set(file.transferId, {
-            target,
-            messageId: payload.messageId,
-          });
+          bindFileSend(link, file, payload.messageId, target);
+        }
+        if (result.type !== 'app-send-result' || result.payload.status !== 'receiving') {
+          clearFileSend(link, file.transferId);
         }
         link.send(result);
         return;
       }
       const peer = await connectPeer(target);
-      activeFileSends.set(file.transferId, { target, link: peer, messageId: payload.messageId });
+      bindFileSend(link, file, payload.messageId, target, peer);
       const response = await peerRequest(peer, {
         type: 'app-send-file-start',
         payload: {
@@ -699,12 +782,12 @@ export function createDaemonAppMessagingRuntime(
         },
       });
       if (response.type === 'app-error') {
-        activeFileSends.delete(file.transferId);
+        clearFileSend(link, file.transferId);
         await updateOutbox(target.daemonHostId, payload.messageId, 'failed', response.payload.code);
       }
       link.send(response);
     } catch (error) {
-      activeFileSends.delete(file.transferId);
+      clearFileSend(link, file.transferId);
       if (error instanceof PeerLinkError) {
         const state = error.afterSend ? 'result_unknown' : 'failed';
         await updateOutbox(target.daemonHostId, payload.messageId, state, error.code);
@@ -721,17 +804,7 @@ export function createDaemonAppMessagingRuntime(
   }
 
   async function forwardFileChunk(link: AppLink, payload: AppSendFileChunkPayload) {
-    const active = activeFileSends.get(payload.transferId);
-    if (!active) {
-      sendError(
-        link,
-        new AppProtocolError({ code: 'invalid_state', message: 'file transfer is not active; restart with file-start', stage: 'file-chunk', transferId: payload.transferId }),
-        payload.requestId,
-        payload.messageId,
-        payload.transferId,
-      );
-      return;
-    }
+    const active = resolveActiveFileSend(link, payload.messageId, payload.transferId, 'file-chunk');
     try {
       if (active.target.daemonHostId === options.daemonHostId) {
         const response = await receiveFileChunk(
@@ -741,10 +814,10 @@ export function createDaemonAppMessagingRuntime(
         link.send(response);
         return;
       }
-      if (!active.link) {
+      if (!active.peer) {
         throw new AppProtocolError({ code: 'invalid_state', message: 'peer transport is not active', stage: 'file-chunk', transferId: payload.transferId });
       }
-      const response = await peerRequest(active.link, { type: 'app-send-file-chunk', payload });
+      const response = await peerRequest(active.peer, { type: 'app-send-file-chunk', payload });
       if (response.type === 'app-error') {
         await updateOutbox(active.target.daemonHostId, payload.messageId, 'failed', response.payload.code);
       }
@@ -766,17 +839,8 @@ export function createDaemonAppMessagingRuntime(
   }
 
   async function forwardFileCommit(link: AppLink, payload: AppSendFileCommitPayload) {
-    const active = activeFileSends.get(payload.transferId);
-    if (!active) {
-      sendError(
-        link,
-        new AppProtocolError({ code: 'invalid_state', message: 'file transfer is not active; restart with file-start', stage: 'file-commit', transferId: payload.transferId }),
-        payload.requestId,
-        payload.messageId,
-        payload.transferId,
-      );
-      return;
-    }
+    const key = fileSendKey(link.id, payload.transferId);
+    const active = resolveActiveFileSend(link, payload.messageId, payload.transferId, 'file-commit');
     try {
       if (active.target.daemonHostId === options.daemonHostId) {
         const response = await receiveFileCommit(
@@ -785,15 +849,15 @@ export function createDaemonAppMessagingRuntime(
         );
         if (response.type === 'app-send-result' && (response.payload.status === 'received' || response.payload.status === 'delivered' || response.payload.status === 'consumed')) {
           await updateOutbox(active.target.daemonHostId, payload.messageId, 'received');
-          activeFileSends.delete(payload.transferId);
+          activeFileSends.delete(key);
         }
         link.send(response);
         return;
       }
-      if (!active.link) {
+      if (!active.peer) {
         throw new AppProtocolError({ code: 'invalid_state', message: 'peer transport is not active', stage: 'file-commit', transferId: payload.transferId });
       }
-      const response = await peerRequest(active.link, { type: 'app-send-file-commit', payload });
+      const response = await peerRequest(active.peer, { type: 'app-send-file-commit', payload });
       if (response.type === 'app-error') {
         await updateOutbox(active.target.daemonHostId, payload.messageId, 'failed', response.payload.code);
         link.send(response);
@@ -801,7 +865,7 @@ export function createDaemonAppMessagingRuntime(
       }
       if (response.type === 'app-send-result' && (response.payload.status === 'received' || response.payload.status === 'delivered' || response.payload.status === 'consumed')) {
         await updateOutbox(active.target.daemonHostId, payload.messageId, 'received');
-        activeFileSends.delete(payload.transferId);
+        activeFileSends.delete(key);
       }
       link.send(response);
     } catch (error) {
@@ -1042,7 +1106,7 @@ export function createDaemonAppMessagingRuntime(
       if (partSize !== metadata.totalBytes || metadata.persistedOffset !== metadata.totalBytes) {
         throw new AppProtocolError({
           code: 'transfer_incomplete',
-          message: `transfer has ${partSize}/${metadata.totalBytes} persisted bytes`,
+          message: `transfer has ${partSize ?? 0}/${metadata.totalBytes} persisted bytes`,
           stage: 'file-commit',
           transferId: payload.transferId,
         });
@@ -1083,7 +1147,7 @@ export function createDaemonAppMessagingRuntime(
       await store.admitInboxRecord(record, 0, {
         staging: { senderDaemonHostId: sender.daemonHostId, transferId: payload.transferId },
       });
-      await rm(store.stagingMetaPath(sender.daemonHostId, payload.transferId), { force: true });
+      await store.removeStagingEntry(sender.daemonHostId, payload.transferId);
       publishRecord(record);
       return peerResultFrame(payload.requestId, payload.messageId, 'received', 'received', {
         transferId: payload.transferId,
@@ -1264,6 +1328,9 @@ export function createDaemonAppMessagingRuntime(
 
     revokeLink(linkId) {
       subscribers.delete(linkId);
+      for (const [key, active] of [...activeFileSends]) {
+        if (active.linkId === linkId) activeFileSends.delete(key);
+      }
     },
 
     async handleFrame(link, frame): Promise<{ settled: boolean; messageId?: string; senderDaemonHostId?: string }> {

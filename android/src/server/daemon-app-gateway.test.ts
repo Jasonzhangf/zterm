@@ -526,7 +526,8 @@ describe('daemon app application-level slow consumer', () => {
           root,
           'app/app-inbox/records',
           encodeAppPathSegment('daemon-a'),
-          `${encodeAppPathSegment(messageId)}.json`,
+          encodeAppPathSegment(messageId),
+          'record.json',
         );
         const record = JSON.parse(await readFile(recordPath, 'utf8')) as { messageId: string; state: string };
         expect(record).toMatchObject({ messageId, state: 'received' });

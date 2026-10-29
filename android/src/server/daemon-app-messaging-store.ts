@@ -95,6 +95,19 @@ function assertSegment(value: string): string {
   return value;
 }
 
+/**
+ * A verified staging entry must be released even when its inbox record already
+ * exists, but only when the record describes the same file.
+ */
+function sameStagedFile(record: AppInboxRecord, meta: AppStagingMetadata): boolean {
+  return record.kind === 'file'
+    && record.file?.transferId === meta.transferId
+    && record.file.fileName === meta.fileName
+    && record.file.totalBytes === meta.totalBytes
+    && record.file.chunkCount === meta.chunkCount
+    && record.file.sha256 === meta.sha256;
+}
+
 async function fsyncDirectory(directory: string) {
   try {
     const handle = await open(directory, 'r');
@@ -177,20 +190,32 @@ export class DaemonAppMessagingStore {
     return join(this.outboxRoot, 'records', encodeAppPathSegment(assertSegment(partition)));
   }
 
+  // An encoded identity is the longest path component (at most 255 ASCII bytes
+  // for the 191-byte protocol limit), so every durable file name is a fixed
+  // short name inside a directory owned by that identity. Appending `.json` or
+  // `.part` to the encoded identity would exceed the 255-byte NAME_MAX.
   inboxRecordPath(senderDaemonHostId: string, messageId: string) {
-    return join(this.recordDir(senderDaemonHostId), `${encodeAppPathSegment(assertSegment(messageId))}.json`);
+    return join(this.recordDir(senderDaemonHostId), encodeAppPathSegment(assertSegment(messageId)), 'record.json');
   }
 
   outboxRecordPath(targetDaemonHostId: string, messageId: string) {
-    return join(this.outboxDir(targetDaemonHostId), `${encodeAppPathSegment(assertSegment(messageId))}.json`);
+    return join(this.outboxDir(targetDaemonHostId), encodeAppPathSegment(assertSegment(messageId)), 'record.json');
   }
 
   stagingPartPath(senderDaemonHostId: string, transferId: string) {
-    return join(this.stagingDir(senderDaemonHostId), `${encodeAppPathSegment(assertSegment(transferId))}.part`);
+    return join(this.stagingDir(senderDaemonHostId), encodeAppPathSegment(assertSegment(transferId)), 'data.part');
   }
 
   stagingMetaPath(senderDaemonHostId: string, transferId: string) {
-    return join(this.stagingDir(senderDaemonHostId), `${encodeAppPathSegment(assertSegment(transferId))}.json`);
+    return join(this.stagingDir(senderDaemonHostId), encodeAppPathSegment(assertSegment(transferId)), 'meta.json');
+  }
+
+  private stagingEntryDir(senderDaemonHostId: string, transferId: string) {
+    return join(this.stagingDir(senderDaemonHostId), encodeAppPathSegment(assertSegment(transferId)));
+  }
+
+  async removeStagingEntry(senderDaemonHostId: string, transferId: string) {
+    await rm(this.stagingEntryDir(senderDaemonHostId, transferId), { recursive: true, force: true });
   }
 
   finalFilePath(senderDaemonHostId: string, messageId: string, safeFileName: string) {
@@ -288,12 +313,12 @@ export class DaemonAppMessagingStore {
     }
   }
 
-  async statPart(senderDaemonHostId: string, transferId: string): Promise<number> {
+  async statPart(senderDaemonHostId: string, transferId: string): Promise<number | null> {
     try {
       return (await stat(this.stagingPartPath(senderDaemonHostId, transferId))).size;
     } catch (error) {
       if (error && typeof error === 'object' && (error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return 0;
+        return null;
       }
       throw error;
     }
@@ -418,10 +443,10 @@ export class DaemonAppMessagingStore {
       const partSize = await this.statPart(meta.senderDaemonHostId, meta.transferId);
       if (meta.phase === 'verified') {
         const absolutePath = meta.absolutePath ?? this.finalFilePath(meta.senderDaemonHostId, meta.messageId, meta.fileName);
-        if (partSize === 0) {
+        if (partSize === null) {
           const finalSize = await stat(absolutePath).then((s) => s.size).catch(() => -1);
           if (finalSize !== meta.totalBytes) {
-            throw new AppStoreError('storage_inconsistent', `verified transfer ${meta.transferId} has no final file and no part`);
+            throw new AppStoreError('storage_inconsistent', `verified transfer ${meta.transferId} has neither a complete part nor a final file`);
           }
         } else if (partSize !== meta.totalBytes) {
           throw new AppStoreError('storage_inconsistent', `verified transfer ${meta.transferId} part size ${partSize} != ${meta.totalBytes}`);
@@ -433,10 +458,13 @@ export class DaemonAppMessagingStore {
         continue;
       }
 
-      if (partSize < meta.persistedOffset) {
-        throw new AppStoreError('storage_inconsistent', `open transfer ${meta.transferId} part ${partSize} < persisted offset ${meta.persistedOffset}`);
+      // An open transfer without a part is still resumable from offset 0, which
+      // is the state left by a crash inside openStagingPart.
+      const openPartSize = partSize ?? 0;
+      if (openPartSize < meta.persistedOffset) {
+        throw new AppStoreError('storage_inconsistent', `open transfer ${meta.transferId} part ${openPartSize} < persisted offset ${meta.persistedOffset}`);
       }
-      if (partSize > meta.persistedOffset) {
+      if (openPartSize > meta.persistedOffset) {
         await this.truncatePart(meta.senderDaemonHostId, meta.transferId, meta.persistedOffset);
       }
     }
@@ -445,7 +473,16 @@ export class DaemonAppMessagingStore {
 
   private async finishRecoveredFile(meta: AppStagingMetadata, absolutePath: string): Promise<AppInboxRecord | null> {
     const existing = await this.readInboxRecord(meta.senderDaemonHostId, meta.messageId);
-    if (existing) return null;
+    if (existing) {
+      if (!sameStagedFile(existing, meta)) {
+        throw new AppStoreError(
+          'storage_inconsistent',
+          `inbox record ${meta.messageId} does not match verified transfer ${meta.transferId}`,
+        );
+      }
+      await this.removeStagingEntry(meta.senderDaemonHostId, meta.transferId);
+      return null;
+    }
     const receivedAt = new Date().toISOString();
     const record: AppInboxRecord = {
       schemaVersion: 1,
@@ -468,7 +505,7 @@ export class DaemonAppMessagingStore {
       receivedAt,
     };
     await this.writeInboxRecord(record);
-    await rm(this.stagingMetaPath(meta.senderDaemonHostId, meta.transferId), { force: true });
+    await this.removeStagingEntry(meta.senderDaemonHostId, meta.transferId);
     return record;
   }
 

@@ -165,21 +165,25 @@ Daemon root:
 
 ```text
 ~/.zterm/app-inbox/
-  records/<encoded-sender-daemon-host-id>/<encoded-message-id>.json
+  records/<encoded-sender-daemon-host-id>/<encoded-message-id>/record.json
   files/<encoded-sender-daemon-host-id>/<encoded-message-id>/<safe-file-name>
-  staging/<encoded-sender-daemon-host-id>/<encoded-transfer-id>.part
-  staging/<encoded-sender-daemon-host-id>/<encoded-transfer-id>.json
+  staging/<encoded-sender-daemon-host-id>/<encoded-transfer-id>/meta.json
+  staging/<encoded-sender-daemon-host-id>/<encoded-transfer-id>/data.part
 ~/.zterm/app-outbox/
-  records/<encoded-target-daemon-host-id>/<encoded-message-id>.json
+  records/<encoded-target-daemon-host-id>/<encoded-message-id>/record.json
 ```
 
 The public `messageId` and `transferId` do not change. A path segment uses
 base64url without padding over the UTF-8 identity bytes. Empty identities and
 identities longer than 191 UTF-8 bytes are rejected, so each encoded segment is
-at most 255 ASCII bytes. Raw network identity values are never concatenated
-into a path. Inbox and file assets are partitioned by sending daemon; Outbox
-records are partitioned by target daemon. The safe file name remains a validated
-single basename and cannot escape its message directory.
+at most 255 ASCII bytes, which is exactly the file-system `NAME_MAX` for one
+path component. An identity therefore owns a directory and every durable file
+name below it is a fixed short name (`record.json`, `meta.json`, `data.part`);
+no `.json` or `.part` suffix is appended to an encoded identity. Raw network
+identity values are never concatenated into a path. Inbox and file assets are
+partitioned by sending daemon; Outbox records are partitioned by target daemon.
+The safe file name remains a validated single basename and cannot escape its
+message directory.
 
 Inbox record states:
 
@@ -235,6 +239,21 @@ published until chunk count, total bytes, and SHA-256 match. `.part` files are
 never returned as inbound files. A resumed transfer uses the same transfer ID
 and byte offset. Duplicate chunks at the already persisted offset are accepted
 idempotently; conflicting bytes fail.
+
+The sending daemon binds each outbound file transfer to the local connection
+that started it, and checks the bound `messageId` before forwarding any chunk or
+commit. Two local CLIs may therefore use the same `--message-id` (and so the
+same derived `transferId`) for different peers. One connection cannot rebind a
+live `transferId` to another message or target; that request fails with
+`transfer_conflict` instead of replacing the route. The outbox keeps its
+per-target partition, and the CLI stays free of routing state.
+
+Commit recovery distinguishes "part missing" from "part length 0". A verified
+entry with a complete part is renamed and published again after a restart. A
+verified entry whose inbox record already exists is released only when the
+record describes the same file; a mismatch is reported as `storage_inconsistent`
+and never overwrites the record. Retention therefore never leaves an orphaned
+staging reservation that would block later `/app` admission.
 
 ## Delivery lifecycle
 

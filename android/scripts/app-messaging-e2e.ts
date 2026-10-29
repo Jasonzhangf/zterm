@@ -603,7 +603,8 @@ async function readInboxRecord(home: string, senderDaemonHostId: string, message
     home,
     '.zterm/app-inbox/records',
     encodeAppPathSegment(senderDaemonHostId),
-    `${encodeAppPathSegment(messageId)}.json`,
+    encodeAppPathSegment(messageId),
+    'record.json',
   );
   return JSON.parse(await readFile(path, 'utf8')) as {
     messageId: string;
