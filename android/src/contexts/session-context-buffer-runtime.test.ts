@@ -4627,6 +4627,11 @@ describe('session-context-buffer-runtime inactive gating', () => {
         requestOptions: {
           reason: 'test-requested-at',
           purpose: 'tail-refresh',
+          // Accepted connection-recovery semantics: an unknown daemon head must not
+          // imply an unbounded [0,0) body window. The caller is explicit about the
+          // visible range it wants to (re)pull, so the planner honors the override
+          // instead of falling back to head-derived bounds.
+          requestWindowOverride: { requestStartIndex: 0, requestEndIndex: 1 },
         },
         refs: {
           stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
@@ -4651,6 +4656,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
         type: 'buffer-sync-request',
         payload: expect.objectContaining({
           requestedAt: 4444,
+          requestStartIndex: 0,
+          requestEndIndex: 1,
         }),
       });
       expect(tailRefreshStoreRef.current.readSyncRequest(sessionId, 'tail-refresh')).toMatchObject({
@@ -5195,7 +5202,13 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
-  it('reissues a visible-window tail refresh when daemon head revision advanced beyond the in-flight pull target', () => {
+  // Accepted connection-recovery semantics: a higher daemon head revision alone does
+  // not clear the in-flight arbitration guard. The in-flight pull (target 6) already
+  // covers the exact visible window [96,120) for the current local snapshot
+  // (known 5 / local 0..120), and an unaffected higher head (7) does not by itself
+  // justify a duplicate body pull. The same-end content-change counterexample in the
+  // red suite still forces a refresh only when the daemon content actually differs.
+  it('does not reissue a visible-window tail refresh when an unaffected higher head revision already has an in-flight pull covering the exact range', () => {
     const sessionId = 'session-1';
     const session = {
       ...makeSession(sessionId),
@@ -5254,18 +5267,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
       resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
     });
 
-    expect(requested).toBe(true);
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
-      type: 'buffer-sync-request',
-      payload: expect.objectContaining({
-        knownRevision: 5,
-        localStartIndex: 0,
-        localEndIndex: 120,
-        requestStartIndex: 96,
-        requestEndIndex: 120,
-      }),
-    });
+    expect(requested).toBe(false);
+    expect(sendSocketPayload).not.toHaveBeenCalled();
   });
 
   it('sends an explicit revision-gap repair window even when the visible range is stale', () => {
@@ -5327,15 +5330,33 @@ describe('session-context-buffer-runtime inactive gating', () => {
     vi.useFakeTimers();
     try {
       const sessionId = 'session-1';
-      const session = makeSession(sessionId);
+      // A genuinely dispatchable demand is needed to exercise the debounce guard:
+      // the daemon head is known and its visible window extends beyond the local
+      // buffer, so the covering/skip path does not eat the first request.
+      const session: TestSession = {
+        ...makeSession(sessionId),
+        daemonHeadRevision: 2,
+        daemonHeadEndIndex: 24,
+        buffer: createSessionBufferState({
+          lines: ['alpha'],
+          startIndex: 0,
+          endIndex: 1,
+          bufferHeadStartIndex: 0,
+          bufferTailEndIndex: 1,
+          cols: 80,
+          rows: 24,
+          revision: 1,
+          cacheLines: 1000,
+        }),
+      };
       const ws = { readyState: WebSocket.OPEN } as any;
       const sendSocketPayload = vi.fn();
       const refs = {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionVisibleRangeRef: {
-          current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
+          current: new Map([[sessionId, { startIndex: 0, endIndex: 24, viewportRows: 24 }]]),
         },
-        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, { revision: 2, latestEndIndex: 24, seenAt: 1 }]]),
         sessionPullStateRef: { current: new Map() },
         tailRefreshStoreRef: makeTailRefreshStoreRef(),
       };
