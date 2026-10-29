@@ -3,6 +3,11 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalSessionDrawer } from './TerminalSessionDrawer';
+import { TerminalSessionDrawerSlotMenu } from './TerminalSessionDrawerSlotMenu';
+import {
+  computeSlotMenuPosition,
+  estimateSlotMenuHeight,
+} from './terminal-session-drawer-slot-menu-position';
 import {
   TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX,
   TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX,
@@ -2118,5 +2123,88 @@ describe('TerminalSessionDrawer catalog availability', () => {
     expect(folders[0]?.getAttribute('data-testid')).toBe(
       'terminal-session-drawer-folder-button-/Users/fanzhang/.collab/workspace',
     );
+  });
+});
+
+describe('TerminalSessionDrawerSlotMenu viewport clamp', () => {
+  const originalWidth = window.innerWidth;
+  const originalHeight = window.innerHeight;
+
+  function setViewport(width: number, height: number) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+  }
+
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight });
+  });
+
+  function renderMenu(params: { y: number; anchorTop?: number; x?: number }) {
+    return render(
+      <TerminalSessionDrawerSlotMenu
+        sessionId="s1"
+        title="demo"
+        x={params.x ?? 12}
+        y={params.y}
+        anchorTop={params.anchorTop}
+        axis="vertical"
+        onAssign={vi.fn()}
+        onHide={vi.fn()}
+        onCloseSession={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+  }
+
+  it('keeps the lower-row Hide and Close actions inside a short landscape viewport', () => {
+    setViewport(640, 360);
+    renderMenu({ y: 340, anchorTop: 296 });
+
+    const menu = screen.getByTestId('terminal-session-drawer-slot-menu');
+    const budget = estimateSlotMenuHeight(6);
+    const expected = computeSlotMenuPosition({
+      anchorTop: 296,
+      anchorBottom: 340,
+      anchorLeft: 12,
+      viewportWidth: 640,
+      viewportHeight: 360,
+      menuHeight: budget,
+    });
+
+    expect(expected.placement).toBe('clamped');
+    expect(menu.style.top).toBe(`${expected.top}px`);
+    expect(menu.style.maxHeight).toBe(`${expected.maxHeight}px`);
+
+    const top = Number.parseFloat(menu.style.top);
+    const maxHeight = Number.parseFloat(menu.style.maxHeight);
+    expect(top + maxHeight).toBeLessThanOrEqual(360);
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-hide')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-close')).toBeTruthy();
+  });
+
+  it('opens upward and keeps the lower-row menu inside a tall viewport', () => {
+    setViewport(400, 900);
+    renderMenu({ y: 800, anchorTop: 756 });
+
+    const menu = screen.getByTestId('terminal-session-drawer-slot-menu');
+    const budget = estimateSlotMenuHeight(6);
+    const expected = computeSlotMenuPosition({
+      anchorTop: 756,
+      anchorBottom: 800,
+      anchorLeft: 12,
+      viewportWidth: 400,
+      viewportHeight: 900,
+      menuHeight: budget,
+    });
+
+    expect(expected.placement).toBe('above');
+    expect(menu.style.top).toBe(`${expected.top}px`);
+    expect(menu.style.maxHeight).toBe(`${expected.maxHeight}px`);
+
+    const top = Number.parseFloat(menu.style.top);
+    expect(top + budget).toBeLessThanOrEqual(800);
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-hide')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-close')).toBeTruthy();
   });
 });

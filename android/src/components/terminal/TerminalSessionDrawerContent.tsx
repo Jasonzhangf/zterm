@@ -128,6 +128,7 @@ function TerminalSessionDrawerComponent({
     title: string;
     x: number;
     y: number;
+    anchorTop?: number;
   } | null>(null);
   const [newSessionDraft, setNewSessionDraft] = useState<{
     hostKey?: string;
@@ -194,7 +195,7 @@ function TerminalSessionDrawerComponent({
     restoreFocusOutsideDrawer();
     onCloseSession(sessionId);
   };
-  const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number) => {
+  const openSlotMenu = (session: TerminalSessionDrawerItem, x: number, y: number, anchorTop?: number) => {
     if (!onAssignSessionGroupSlot && !onHideSession && !onCloseSession) {
       return;
     }
@@ -203,6 +204,7 @@ function TerminalSessionDrawerComponent({
       title: session.title,
       x,
       y,
+      anchorTop,
     });
   };
   const describeEventTarget = (target: EventTarget | null) => {
@@ -826,7 +828,7 @@ function TerminalSessionDrawerComponent({
             event.preventDefault();
             event.stopPropagation();
             const rect = event.currentTarget.getBoundingClientRect();
-            openSlotMenu(session, rect.left, rect.bottom);
+            openSlotMenu(session, rect.left, rect.bottom, rect.top);
           }}
           style={{
             alignSelf: 'center',
@@ -1691,6 +1693,7 @@ function TerminalSessionDrawerComponent({
             title={slotMenu.title}
             x={slotMenu.x}
             y={slotMenu.y}
+            anchorTop={slotMenu.anchorTop}
             axis={sessionGroupLayoutAxis}
             onAssign={(sessionId, slot) => {
               onAssignSessionGroupSlot?.(sessionId, slot);
