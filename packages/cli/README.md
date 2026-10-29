@@ -28,9 +28,16 @@ identity, logout, and cleanup. The npm isolation upgrade suite passed 8/8.
 The CLI test suite also covers stale session identity and request-driven initial
 mirror delivery.
 
-`@jsonstudio/zterm-cli` is not published to the public npm registry. Windows
-x64, Linux x64 and macOS arm64 have passed native builds, installed CLI checks,
-isolated npm upgrade checks and the native daemon installation matrix.
+`@jsonstudio/zterm-cli@0.1.4` and `@jsonstudio/zterm-daemon@0.1.3` (together with
+`@jsonstudio/zterm-daemon-darwin-arm64@0.1.3`,
+`@jsonstudio/zterm-daemon-linux-x64@0.1.3`, and
+`@jsonstudio/zterm-daemon-win32-x64@0.1.3`) are published to the public npm
+registry (`latest` and `next`) and attached to GitHub Release `v0.1.3.3232`.
+See [`../../docs/install-from-zero.md`](../../docs/install-from-zero.md) for the
+from-zero installation guide, `AppSDK`/`Collab` install order, and the verified
+vs. unverified blank-machine audit matrix. Windows x64, Linux x64 and macOS
+arm64 have passed native builds, installed CLI checks, isolated npm upgrade
+checks and the native daemon installation matrix in CI run `40797381369`.
 The installed Windows remote user path has also passed login reuse, exact slot
 selection and snapshot, initial mirror, remote input, resize, local exit with
 terminal restoration, and logout. The separate public RTC API consumer checks
@@ -61,14 +68,15 @@ and the exact server and session identity saved in the slot.
 
 ## Install
 
-The release target is a global npm installation:
+Global npm installation (`@jsonstudio/zterm-cli@0.1.4` and `@jsonstudio/zterm-daemon@0.1.3`):
 
 ```sh
 npm install --global @jsonstudio/zterm-cli
 zterm --version
+zterm daemon install --version 0.1.3
 ```
 
-This public command is unavailable until the package publish is complete.
+See [`../../docs/install-from-zero.md`](../../docs/install-from-zero.md) for OS-specific dependency setup (including Node.js 22 LTS `ABI 127` for `zterm-daemon` and `TMUX_TMPDIR="$HOME/.tmux/run"`).
 
 For local package development, build and install the actual CLI tarball into
 an isolated prefix:
@@ -528,8 +536,7 @@ create a second installation lock, or promise an automatic rollback. A failed
 or cancelled npm operation is reported as `unverified`; it does not claim that
 the previous entry is still healthy.
 
-The public CLI package has not yet been published by this task. The adapter
-exists, but public upgrade delivery remains unverified.
+`@jsonstudio/zterm-cli@0.1.4` is published to the public npm registry (`latest` and `next`), and isolated public registry installation + upgrade suites passed 8/8. End-to-end upgrade/rollback on a genuinely blank physical machine or blank OS VM remains unverified until a blank-machine target is provisioned.
 
 ## Daemon management
 
@@ -655,7 +662,4 @@ as a private workspace runtime dependency.
 | macOS | `darwin-arm64`, Node 22 | Full user path passed from an isolated npm tarball, including login, slot, snapshot, mirror, input, resize, `Ctrl+] q`, stale identity, logout, and cleanup. |
 | Linux | `linux-x64`, Node 22 | Real native staging, installed CLI, PTY, remote connection, and lifecycle evidence are pending platform CI or a Linux target host. |
 
-The npm isolation upgrade suite passed 8/8. Public npm publication and download
-remain pending, so `npm install --global @jsonstudio/zterm-cli` is not yet a
-working public installation instruction. The three operating systems are not
-all accepted until the Windows and Linux real gates pass.
+The npm isolation upgrade suite passed 8/8, and `@jsonstudio/zterm-cli@0.1.4` plus `@jsonstudio/zterm-daemon@0.1.3` (with all three platform payloads) are published to the public npm registry and GitHub Release `v0.1.3.3232`. Note that CI runner, container, and existing-host verification do not substitute for a genuinely blank physical machine or blank OS VM; see [`../../docs/install-from-zero.md`](../../docs/install-from-zero.md) for the explicit blank-machine audit matrix.

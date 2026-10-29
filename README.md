@@ -62,20 +62,31 @@ Mac and Windows desktop work starts in `mac/` and `win/` respectively. Shared ap
 
 Do not copy runtime source into this repository. If runtime behavior needs to change, update the runtime repository, publish the package, then consume the new package version here.
 
-## macOS Daemon
+## Public CLI & Daemon Installation
 
-Install from release artifact:
+For a complete from-zero clean-machine installation guide across `darwin-arm64`, `linux-x64`, `win32-x64`, Android APK, and `AppSDK` / `DAGPipe` / `Collab` interoperability, see [`docs/install-from-zero.md`](docs/install-from-zero.md).
+
+Requires Node.js 22.x LTS (`ABI 127`) when running `zterm-daemon`.
+
+Install from the public npm registry:
 
 ```bash
-curl -fsSL https://github.com/Jasonzhangf/zterm/releases/latest/download/zterm-daemon-<version>-darwin-arm64.tar.gz | tar xz
-cd zterm-daemon-<version>-darwin-arm64
+npm install -g @jsonstudio/zterm-cli@0.1.4
+zterm daemon install --version 0.1.3
+```
+
+Or install the macOS daemon directly from the GitHub Release (`v0.1.3.3232`):
+
+```bash
+curl -fsSL https://github.com/Jasonzhangf/zterm/releases/download/v0.1.3.3232/zterm-daemon-0.1.3-darwin-arm64.tar.gz | tar xz
+cd zterm-daemon-0.1.3-darwin-arm64
 ./bin/install-global.sh
 ```
 
-Or install from npm:
+Or install the daemon launcher directly from npm:
 
 ```bash
-npm install -g @jsonstudio/zterm-daemon
+npm install -g @jsonstudio/zterm-daemon@0.1.3
 ```
 
 Common daemon commands:
