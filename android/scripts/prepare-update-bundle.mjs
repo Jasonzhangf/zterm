@@ -1,4 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, rmSync } from 'fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
 import { createHash } from 'crypto';
 import { basename, dirname, resolve } from 'path';
 import { homedir } from 'os';
@@ -21,7 +31,6 @@ function exec(command, options = {}) {
   }
   return result.stdout;
 }
-
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDir, '..');
 const packageJson = JSON.parse(readFileSync(resolve(projectRoot, 'package.json'), 'utf-8'));
@@ -43,6 +52,81 @@ const daemonUpdatesDir = explicitDaemonUpdatesDir
   ? explicitDaemonUpdatesDir
   : resolve(homedir(), '.zterm/updates');
 const latestAliasName = 'zterm-latest-debug.apk';
+const updateApkNamePattern = /^zterm-(.+)\.apk$/u;
+const updateApkBuildPattern = /^zterm-(.+?)\.(\d+)(?:\.1)?\.apk$/u;
+const retentionBuildsEnvName = 'ZTERM_UPDATE_RETENTION_BUILDS';
+const defaultRetentionBuilds = 3;
+
+function parseBuildNumber(apkName) {
+  const match = updateApkBuildPattern.exec(apkName);
+  if (!match) return null;
+  const buildNumber = Number.parseInt(match[2], 10);
+  return Number.isSafeInteger(buildNumber) ? buildNumber : null;
+}
+
+function resolveRetentionBuildLimit() {
+  const raw = process.env[retentionBuildsEnvName];
+  if (raw === undefined || raw === '') return defaultRetentionBuilds;
+  const normalized = raw.trim();
+  const parsed = Number.parseInt(normalized, 10);
+  if (!/^\d+$/u.test(normalized)) {
+    throw new Error(`${retentionBuildsEnvName} must be a positive integer, received: ${raw}`);
+  }
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new Error(`${retentionBuildsEnvName} must be a positive integer, received: ${raw}`);
+  }
+  return parsed;
+}
+
+function manifestApkNames(manifest) {
+  return [
+    manifest.apkUrl,
+    manifest.preparedRollback?.apkUrl,
+    manifest.rollbackToPrevious?.apkUrl,
+    manifest.sourceApk,
+  ].filter((name) => typeof name === 'string' && name.length > 0);
+}
+
+function retainUpdateArtifacts(directory, manifest, {
+  aliases = [latestAliasName],
+  buildLimit = resolveRetentionBuildLimit(),
+  log = console.log,
+} = {}) {
+  const protectedNames = new Set([
+    ...manifestApkNames(manifest).map((name) => basename(name)),
+    ...aliases.map((name) => basename(name)),
+  ]);
+  const apkFiles = readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && updateApkNamePattern.test(entry.name))
+    .map((entry) => ({ name: entry.name, buildNumber: parseBuildNumber(entry.name) }));
+  const newestBuildNumbers = new Set(
+    [...new Set(
+      apkFiles
+        .map((entry) => entry.buildNumber)
+        .filter((buildNumber) => buildNumber !== null),
+    )]
+      .sort((left, right) => right - left)
+      .slice(0, buildLimit),
+  );
+  const deleted = [];
+  let kept = 0;
+
+  for (const entry of apkFiles) {
+    const filePath = resolve(directory, entry.name);
+    const shouldKeep = protectedNames.has(entry.name)
+      || entry.buildNumber === null
+      || newestBuildNumbers.has(entry.buildNumber);
+    if (shouldKeep) {
+      kept += 1;
+      continue;
+    }
+    unlinkSync(filePath);
+    deleted.push(filePath);
+    log(`[prepare-update-bundle] retention delete ${filePath}`);
+  }
+  log(`[prepare-update-bundle] retention ${directory}: kept ${kept}`);
+  return { deleted, kept };
+}
 
 function hashFile(filePath) {
   const hash = createHash('sha256');
@@ -171,6 +255,7 @@ writeFileSync(resolve(daemonUpdatesDir, 'latest.json'), `${JSON.stringify(manife
 // 兼容旧 launchd（.wterm wrapper 运行 npm 包 daemon，其 updates 目录是 ~/.wterm/updates）：
 // 双写一份，避免升级检查 404
 const legacyDaemonUpdatesDir = resolve(homedir(), '.wterm/updates');
+const retentionDirectories = [outputDir, releaseDistDir, daemonUpdatesDir];
 if (!explicitDaemonUpdatesDir
   && (existsSync(resolve(homedir(), '.wterm')) || existsSync(resolve(homedir(), '.wterm/bin/zterm-daemon-launchd-run')))) {
   mkdirSync(legacyDaemonUpdatesDir, { recursive: true });
@@ -182,6 +267,21 @@ if (!explicitDaemonUpdatesDir
   }
   writeFileSync(resolve(legacyDaemonUpdatesDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   console.log(`- legacy daemon updates dir (mirrored): ${legacyDaemonUpdatesDir}`);
+  retentionDirectories.push(legacyDaemonUpdatesDir);
+}
+
+const retentionErrors = [];
+for (const directory of retentionDirectories) {
+  try {
+    retainUpdateArtifacts(directory, manifest);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    retentionErrors.push(`${directory}: ${message}`);
+    console.error(`[prepare-update-bundle] retention failed ${directory}: ${message}`);
+  }
+}
+if (retentionErrors.length > 0) {
+  throw new Error(`update retention failed:\n${retentionErrors.join('\n')}`);
 }
 
 console.log('[prepare-update-bundle] ready');

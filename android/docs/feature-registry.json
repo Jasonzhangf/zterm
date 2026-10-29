@@ -1505,6 +1505,7 @@
         "scripts/setup-android-java.sh",
         "scripts/ensure-pnpm-install.sh",
         "scripts/prepare-update-bundle.mjs",
+        "scripts/prepare-update-bundle.test.mjs",
         "scripts/tools/patch-apk-version.py",
         "scripts/verify-update-bundle.mjs",
         "scripts/verify-release-assets.mjs",
@@ -1519,6 +1520,7 @@
         "scripts/bump-build-version.test.mjs",
         "scripts/verify-update-manifest-version.test.mjs",
         "scripts/verify-web-assets-version.test.mjs",
+        "scripts/prepare-update-bundle.test.mjs",
         "scripts/verify-update-bundle.mjs",
         "src/lib/function-wiki-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts"
