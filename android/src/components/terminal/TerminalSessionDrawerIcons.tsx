@@ -32,13 +32,37 @@ export function DrawerCloseIcon({ size }: DrawerIconProps) {
   );
 }
 
-export function DrawerHideIcon({ size }: DrawerIconProps) {
+export function DrawerChevronIcon({ size }: DrawerIconProps) {
   return (
     <DrawerIconFrame size={size}>
-      <path d="m3 3 18 18" />
-      <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8" />
-      <path d="M9.9 5.2A9.7 9.7 0 0 1 12 5c2.7 0 7.2 3.1 9 7a14 14 0 0 1-2.2 3.5" />
-      <path d="M6.7 6.7C5 7.9 3.7 9.5 3 12c1.8 3.9 6.3 7 9 7 1.4 0 3-.6 4.4-1.5" />
+      <path d="m9 6 6 6-6 6" />
+    </DrawerIconFrame>
+  );
+}
+
+export function DrawerFolderIcon({ size }: DrawerIconProps) {
+  return (
+    <DrawerIconFrame size={size}>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h6a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+    </DrawerIconFrame>
+  );
+}
+
+export function DrawerMoreIcon({ size }: DrawerIconProps) {
+  return (
+    <DrawerIconFrame size={size}>
+      <circle cx="5" cy="12" r="1.4" />
+      <circle cx="12" cy="12" r="1.4" />
+      <circle cx="19" cy="12" r="1.4" />
+    </DrawerIconFrame>
+  );
+}
+
+export function DrawerRestoreIcon({ size }: DrawerIconProps) {
+  return (
+    <DrawerIconFrame size={size}>
+      <path d="M4 9a8 8 0 1 1 2 8" />
+      <path d="M4 4v5h5" />
     </DrawerIconFrame>
   );
 }

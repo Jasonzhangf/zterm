@@ -47,7 +47,6 @@ import type { BridgeSettingsWriteResult } from '@zterm/shared';
 import type { AppUpdatePreferencesWriteResult } from '../lib/app-update-runtime';
 import {
   normalizeSessionDrawerFilterConfig,
-  type SessionDrawerFilterConfig,
 } from '../lib/plugin-session-drawer/session-drawer-visibility';
 
 interface SettingsPageProps {
@@ -157,9 +156,6 @@ export function SettingsPage({
   onBack,
 }: SettingsPageProps) {
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
-  const [sessionDrawerFilterDraft, setSessionDrawerFilterDraft] = useState<SessionDrawerFilterConfig>(() =>
-    normalizeSessionDrawerFilterConfig(settings.sessionDrawerFilter),
-  );
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
   const [runtimeDebugEnabled, setRuntimeDebugEnabledState] = useState(() => isRuntimeDebugEnabled());
   const [remoteWindowVideoPreference, setRemoteWindowVideoPreference] = useState<RemoteWindowVideoPreference>(() => (
@@ -229,7 +225,6 @@ export function SettingsPage({
       return;
     }
     setDraft({ ...settings, servers: sortBridgeServers(settings.servers) });
-    setSessionDrawerFilterDraft(normalizeSessionDrawerFilterConfig(settings.sessionDrawerFilter));
   }, [settings]);
 
   const handleRelaySettingsChange = useCallback((nextRelay: BridgeSettings['traversalRelay']) => {
@@ -244,7 +239,7 @@ export function SettingsPage({
     setSaveState('saving');
     const bridgeResult = onSave({
       ...draft,
-      sessionDrawerFilter: normalizeSessionDrawerFilterConfig(sessionDrawerFilterDraft),
+      sessionDrawerFilter: normalizeSessionDrawerFilterConfig(draft.sessionDrawerFilter),
     });
     if (!bridgeResult.ok) {
       setSaveState('error');

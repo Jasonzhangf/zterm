@@ -3,6 +3,11 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TerminalSessionDrawer } from './TerminalSessionDrawer';
+import { TerminalSessionDrawerSlotMenu } from './TerminalSessionDrawerSlotMenu';
+import {
+  computeSlotMenuPosition,
+  estimateSlotMenuHeight,
+} from './terminal-session-drawer-slot-menu-position';
 import {
   TERMINAL_SESSION_DRAWER_ROW_MIN_HEIGHT_PX,
   TERMINAL_SESSION_DRAWER_ROW_SUBTITLE_FONT_SIZE_PX,
@@ -135,9 +140,9 @@ describe('TerminalSessionDrawer', () => {
 
     const header = screen.getByTestId('terminal-session-drawer-header');
     expect(header.style.paddingTop).toBe('28px');
-    expect(header.style.paddingBottom).toBe('6px');
-    expect(screen.getByTestId('terminal-session-drawer-close').style.width).toBe('40px');
-    expect(screen.getByTestId('terminal-session-drawer-close').style.height).toBe('40px');
+    expect(header.style.paddingBottom).toBe('8px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.width).toBe('44px');
+    expect(screen.getByTestId('terminal-session-drawer-close').style.height).toBe('44px');
     expect(screen.getByTestId('terminal-session-drawer-close').style.borderStyle).toBe('none');
     expect(screen.getByTestId('terminal-session-drawer-close').querySelector('svg')).toBeTruthy();
 
@@ -157,8 +162,10 @@ describe('TerminalSessionDrawer', () => {
     expect(subtitle.style.whiteSpace).toBe('nowrap');
     expect(subtitle.style.overflow).toBe('hidden');
     expect(subtitle.style.textOverflow).toBe('ellipsis');
-    expect(screen.getByTestId('terminal-session-drawer-close-s1').style.borderStyle).toBe('none');
-    expect(screen.getByTestId('terminal-session-drawer-close-s1').querySelector('svg')).toBeTruthy();
+    const moreButton = screen.getByTestId('terminal-session-drawer-more-s1');
+    expect(moreButton.style.borderStyle).toBe('none');
+    expect(moreButton.style.width).toBe('44px');
+    expect(moreButton.querySelector('svg')).toBeTruthy();
   });
 
   it('renders a single-column session list and routes select/plus actions', () => {
@@ -405,7 +412,7 @@ describe('TerminalSessionDrawer', () => {
   });
 
 
-  it('routes row close button to close only without selecting the session', () => {
+  it('routes the row more menu close action without selecting the session', () => {
     const onSelectSession = vi.fn();
     const onCloseSession = vi.fn();
 
@@ -420,16 +427,19 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-s1'));
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
     expect(onCloseSession).toHaveBeenCalledWith('s1');
     expect(onSelectSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('terminal-session-drawer-slot-menu')).toBeNull();
 
     fireEvent.click(screen.getByTestId('terminal-session-drawer-select-s2'));
     expect(onSelectSession).toHaveBeenCalledWith('s2');
     expect(onCloseSession).toHaveBeenCalledTimes(1);
   });
 
-  it('routes row close button through touch activation without selecting the session', () => {
+  it('opens the row action menu once and closes the session without selecting it', () => {
     const onSelectSession = vi.fn();
     const onCloseSession = vi.fn();
 
@@ -444,19 +454,19 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    const closeButton = screen.getByTestId('terminal-session-drawer-close-s1');
-    fireEvent.touchStart(closeButton, {
+    const moreButton = screen.getByTestId('terminal-session-drawer-more-s1');
+    fireEvent.touchStart(moreButton, {
       touches: [{ clientX: 240, clientY: 120 }],
     });
-    fireEvent.touchEnd(closeButton, {
-      changedTouches: [{ clientX: 240, clientY: 120 }],
-    });
+    fireEvent.click(moreButton);
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-close')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
 
     expect(onCloseSession).toHaveBeenCalledWith('s1');
     expect(onCloseSession).toHaveBeenCalledTimes(1);
     expect(onSelectSession).not.toHaveBeenCalled();
 
-    fireEvent.click(closeButton);
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-s1'));
     expect(onCloseSession).toHaveBeenCalledTimes(1);
   });
 
@@ -1138,7 +1148,7 @@ describe('TerminalSessionDrawer', () => {
     expect(openStyle.boxShadow ?? '').toBe('none');
   });
 
-  it('draws the active row with an accent edge and keeps close/badges in row flow', () => {
+  it('draws the active row with an accent edge and keeps the row action in flow', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1155,16 +1165,14 @@ describe('TerminalSessionDrawer', () => {
     expect(activeRow.style.border).toBe('1px solid transparent');
     expect(activeRow.style.boxShadow).toContain('inset 3px 0 0');
 
-    const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
-    expect(closeTarget.style.position).not.toBe('absolute');
-    expect(closeTarget.style.borderStyle).toBe('none');
-    const chip = closeTarget.parentElement as HTMLElement | null;
-    expect(chip).not.toBeNull();
-    expect(chip?.style.borderRadius).toBe('0px');
-    expect(chip?.style.background).toBe('transparent');
+    const actionTarget = screen.getByTestId(`terminal-session-drawer-more-${sessions[0]!.id}`) as HTMLElement;
+    expect(actionTarget.style.position).not.toBe('absolute');
+    expect(actionTarget.style.borderStyle).toBe('none');
+    expect(activeRow.contains(actionTarget)).toBe(true);
+    expect(activeRow.style.borderRadius).toBe('10px');
   });
 
-  it('keeps pane, slot, and close controls in row flow so grouped rows are not clipped', () => {
+  it('keeps pane, slot, and action controls in row flow so grouped rows are not clipped', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1193,10 +1201,10 @@ describe('TerminalSessionDrawer', () => {
     expect(chip.style.flexWrap).toBe('wrap');
     expect(screen.getByText('P1')).toBeTruthy();
     expect(screen.getByTestId(`terminal-session-drawer-slot-${sessions[0]!.id}`).textContent).toContain('上方');
-    expect(screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`)).toBeTruthy();
+    expect(screen.getByTestId(`terminal-session-drawer-more-${sessions[0]!.id}`)).toBeTruthy();
   });
 
-  it('shows Collab role badges with exact MASTER/WORKER labels', () => {
+  it('shows readable Collab role badges and agent state text', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1212,10 +1220,12 @@ describe('TerminalSessionDrawer', () => {
     );
 
     const masterBadge = screen.getByTestId('terminal-session-drawer-collab-s1');
-    expect(masterBadge.textContent).toBe('MASTER');
+    expect(masterBadge.textContent).toBe('Master');
     expect(masterBadge.style.color).toBe('var(--zterm-settings-success)');
     const workerBadge = screen.getByTestId('terminal-session-drawer-collab-s2');
-    expect(workerBadge.textContent).toBe('WORKER');
+    expect(workerBadge.textContent).toBe('Worker');
+    expect(workerBadge.style.color).toBe('var(--zterm-settings-warning)');
+    expect(screen.getByTestId('terminal-session-drawer-agent-s2').textContent).toContain('空闲');
     expect(screen.queryByTestId('terminal-session-drawer-collab-s3')).toBeNull();
   });
 
@@ -1422,7 +1432,7 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.queryByTestId('terminal-session-drawer-empty-host')).toBeNull();
   });
 
-  it('uses at least 40px filter segments at 11px label', () => {
+  it('uses at least 44px filter segments at 12px labels', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1437,12 +1447,12 @@ describe('TerminalSessionDrawer', () => {
 
     for (const mode of ['all', 'only-master', 'hide-worker'] as const) {
       const segment = screen.getByTestId(`terminal-session-drawer-filter-${mode}`);
-      expect(Number(segment.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(40);
-      expect(Number(segment.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
+      expect(Number(segment.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(44);
+      expect(Number(segment.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(12);
     }
   });
 
-  it('uses at least 40px row hide and close hit areas', () => {
+  it('uses one 44px primary row action and keeps close/hide behind the menu', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1456,16 +1466,15 @@ describe('TerminalSessionDrawer', () => {
     );
 
     for (const id of ['s1', 's2']) {
-      const hide = screen.getByTestId(`terminal-session-drawer-hide-${id}`);
-      const close = screen.getByTestId(`terminal-session-drawer-close-${id}`);
-      for (const control of [hide, close]) {
-        expect(Number(control.style.minWidth.replace('px', ''))).toBeGreaterThanOrEqual(40);
-        expect(Number(control.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(40);
-      }
+        const more = screen.getByTestId(`terminal-session-drawer-more-${id}`);
+        expect(Number(more.style.minWidth.replace('px', ''))).toBeGreaterThanOrEqual(44);
+        expect(Number(more.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(44);
+        expect(screen.queryByTestId(`terminal-session-drawer-hide-${id}`)).toBeNull();
+        expect(screen.queryByTestId(`terminal-session-drawer-close-${id}`)).toBeNull();
     }
   });
 
-  it('uses at least 40px hidden tray restore controls at 11px label', () => {
+  it('uses at least 44px hidden tray restore controls at 12px labels', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1482,14 +1491,18 @@ describe('TerminalSessionDrawer', () => {
     );
 
     const bulk = screen.getByTestId('terminal-session-drawer-restore-hidden');
-    expect(Number(bulk.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(40);
-    expect(Number(bulk.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
+    expect(Number(bulk.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(44);
+    expect(Number(bulk.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(12);
+    // The tray lives outside the scrolling tree so New Session cannot cover it.
+    const tree = screen.getByTestId('terminal-session-drawer-tree');
+    expect(tree.contains(screen.getByTestId('terminal-session-drawer-hidden-tray'))).toBe(false);
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-hidden-tray-toggle'));
     const single = screen.getByTestId(terminalSessionDrawerHiddenRestoreTestId('tmux-master'));
-    expect(Number(single.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(40);
-    expect(Number(single.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(11);
+    expect(Number(single.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(44);
+    expect(Number(single.style.fontSize.replace('px', ''))).toBeGreaterThanOrEqual(12);
   });
 
-  it('renders legible 11px theme-adaptive Collab chips', () => {
+  it('renders legible 12px theme-adaptive Collab chips', () => {
     render(
       <TerminalSessionDrawer
         open
@@ -1505,17 +1518,17 @@ describe('TerminalSessionDrawer', () => {
     );
 
     const masterBadge = screen.getByTestId('terminal-session-drawer-collab-s1');
-    expect(masterBadge.style.fontSize).toBe('11px');
+    expect(masterBadge.style.fontSize).toBe('12px');
     expect(masterBadge.style.background).toBe('var(--zterm-settings-success-soft)');
     expect(masterBadge.style.color).toBe('var(--zterm-settings-success)');
     expect(masterBadge.style.border).toContain('var(--zterm-settings-success)');
     const workerBadge = screen.getByTestId('terminal-session-drawer-collab-s2');
-    expect(workerBadge.style.fontSize).toBe('11px');
+    expect(workerBadge.style.fontSize).toBe('12px');
     expect(workerBadge.style.background).toBe('var(--zterm-settings-warning-soft)');
     expect(workerBadge.style.color).toBe('var(--zterm-settings-warning)');
   });
 
-  it('hides a row from the row chip action and keeps long titles truncating', () => {
+  it('hides a row from the more menu and keeps long titles truncating', () => {
     const onHideSession = vi.fn();
     render(
       <TerminalSessionDrawer
@@ -1531,10 +1544,12 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-hide-s1'));
+    const moreButton = screen.getByTestId('terminal-session-drawer-more-s1');
+    expect(moreButton.getAttribute('aria-label'))
+      .toBe('更多操作 a-very-long-session-title-that-must-never-reach-the-badge');
+    fireEvent.click(moreButton);
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-hide'));
     expect(onHideSession).toHaveBeenCalledWith('s1');
-    expect(screen.getByTestId('terminal-session-drawer-hide-s1').getAttribute('aria-label'))
-      .toBe('隐藏 a-very-long-session-title-that-must-never-reach-the-badge');
     const row = screen.getByTestId('terminal-session-drawer-row-s1');
     expect((row.firstElementChild as HTMLElement).style.minWidth).toBe('0px');
   });
@@ -1559,6 +1574,7 @@ describe('TerminalSessionDrawer', () => {
 
     expect(screen.getByTestId('terminal-session-drawer-hidden-tray')).toBeTruthy();
     expect(screen.getByText('已隐藏 2')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-hidden-tray-toggle'));
     fireEvent.click(screen.getByTestId('terminal-session-drawer-restore-hidden-tmux-master'));
     expect(onRestoreHiddenSession).toHaveBeenCalledWith('tmux-master');
     fireEvent.click(screen.getByTestId(terminalSessionDrawerHiddenRestoreTestId('OneStop/1')));
@@ -1585,7 +1601,9 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-filter-all').getAttribute('aria-pressed')).toBe('true');
     fireEvent.click(screen.getByTestId('terminal-session-drawer-filter-only-master'));
     expect(onFilterModeChange).toHaveBeenCalledWith('only-master');
-    expect(screen.getByTestId('terminal-session-drawer-filter-only-master').textContent).toBe('仅 master');
+    expect(screen.getByTestId('terminal-session-drawer-filter-only-master').textContent).toContain('仅 master');
+    expect(screen.getByTestId('terminal-session-drawer-filter-only-master').getAttribute('aria-label'))
+      .toContain('仅 master');
   });
 
   it('moves focus outside before a session close can hide the drawer', () => {
@@ -1615,20 +1633,15 @@ describe('TerminalSessionDrawer', () => {
     rerender(renderDrawer(true));
     expect(document.activeElement).toBe(screen.getByTestId('terminal-session-drawer-close'));
 
-    const sessionClose = screen.getByTestId('terminal-session-drawer-close-s1');
-    fireEvent.touchStart(sessionClose, {
-      touches: [{ clientX: 240, clientY: 120 }],
-    });
-    fireEvent.touchEnd(sessionClose, {
-      changedTouches: [{ clientX: 240, clientY: 120 }],
-    });
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-more-s1'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-close'));
 
     expect(onCloseSession).toHaveBeenCalledTimes(1);
     expect(activeElementAtClose).toBe(returnTarget);
-    expect(activeElementAtClose).not.toBe(sessionClose);
+    expect(activeElementAtClose).not.toBe(screen.getByTestId('terminal-session-drawer-more-s1'));
   });
 
-  it('keeps the scrim mounted for exit fading and uses 44px session close targets', () => {
+  it('keeps the scrim mounted for exit fading and uses 44px session action targets', () => {
     const { rerender } = render(
       <TerminalSessionDrawer
         open={false}
@@ -1668,11 +1681,11 @@ describe('TerminalSessionDrawer', () => {
     expect(overlay.style.pointerEvents).toBe('auto');
     expect(overlay.style.transition).toContain('opacity 150ms ease');
 
-    const closeTarget = screen.getByTestId(`terminal-session-drawer-close-${sessions[0]!.id}`) as HTMLElement;
-    expect(Number(closeTarget.style.minWidth.replace('px', ''))).toBeGreaterThanOrEqual(36);
-    expect(Number(closeTarget.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(36);
-    expect(closeTarget.style.position).toBe('');
-    expect(closeTarget.style.color).toBe('var(--zterm-panel-danger)');
+    const actionTarget = screen.getByTestId(`terminal-session-drawer-more-${sessions[0]!.id}`) as HTMLElement;
+    expect(Number(actionTarget.style.minWidth.replace('px', ''))).toBeGreaterThanOrEqual(44);
+    expect(Number(actionTarget.style.minHeight.replace('px', ''))).toBeGreaterThanOrEqual(44);
+    expect(actionTarget.style.position).toBe('');
+    expect(actionTarget.style.color).toBe('var(--zterm-panel-muted)');
   });
 
   it('defaults new session backend to the current host terminal backend (herdr)', () => {
@@ -1893,6 +1906,116 @@ describe('TerminalSessionDrawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-row-zterm-w1')).toBeTruthy();
     expect(expandOthersButton.textContent).toContain('收起 (1)');
   });
+
+  it('keeps unclassified real sessions visible in only-master mode with an explicit marker', () => {
+    const master = {
+      id: 'mix-master',
+      stableKey: 'stable-mix-master',
+      title: 'mix-master',
+      subtitle: 'Mac Studio · mix-master',
+      cwd: '/Users/jason/code/mix',
+      hostKey: 'mac-studio',
+      hostLabel: 'Mac Studio',
+      collab: { role: 'master' as const, displayName: 'Jenny' },
+    };
+    const worker = {
+      id: 'mix-worker',
+      stableKey: 'stable-mix-worker',
+      title: 'mix-worker',
+      subtitle: 'Mac Studio · mix-worker',
+      cwd: '/Users/jason/code/mix',
+      hostKey: 'mac-studio',
+      hostLabel: 'Mac Studio',
+      collab: { role: 'worker' as const, displayName: 'Alice' },
+    };
+    const unclassified = {
+      id: 'mix-unknown',
+      stableKey: 'stable-mix-unknown',
+      title: 'mix-unknown',
+      subtitle: 'Mac Studio · mix-unknown',
+      cwd: '/Users/jason/code/mix',
+      hostKey: 'mac-studio',
+      hostLabel: 'Mac Studio',
+    };
+
+    render(
+      <TerminalSessionDrawer
+        open
+        filterMode="only-master"
+        sessions={[master]}
+        unfilteredSessions={[master, worker, unclassified]}
+        unfilteredSessionCount={3}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-row-mix-master')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-session-drawer-row-mix-worker')).toBeNull();
+    expect(screen.getByTestId('terminal-session-drawer-folder-unclassified-/Users/jason/code/mix')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-row-mix-unknown')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-collab-mix-unknown').textContent).toBe('未识别');
+  });
+
+  it('states a project has no master instead of leaving the folder blank', () => {
+    const workerOnly = {
+      id: 'worker-only-1',
+      stableKey: 'stable-worker-only-1',
+      title: 'worker-only-1',
+      subtitle: 'Mac Studio · worker-only-1',
+      cwd: '/Users/jason/code/worker-only',
+      hostKey: 'mac-studio',
+      hostLabel: 'Mac Studio',
+      collab: { role: 'worker' as const, displayName: 'Alice' },
+    };
+
+    render(
+      <TerminalSessionDrawer
+        open
+        filterMode="only-master"
+        sessions={[]}
+        unfilteredSessions={[workerOnly]}
+        unfilteredSessionCount={1}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-folder-no-master-/Users/jason/code/worker-only').textContent)
+      .toContain('该项目无 master');
+    expect(screen.queryByTestId('terminal-session-drawer-row-worker-only-1')).toBeNull();
+  });
+
+  it('toggles the hidden tray list while keeping the tray outside the scroll tree', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        hiddenSessionNames={['tmux-master']}
+        hiddenSessionCount={1}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onRestoreHiddenSession={vi.fn()}
+        onRestoreAllHiddenSessions={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const tray = screen.getByTestId('terminal-session-drawer-hidden-tray');
+    const tree = screen.getByTestId('terminal-session-drawer-tree');
+    expect(tree.contains(tray)).toBe(false);
+    const toggle = screen.getByTestId('terminal-session-drawer-hidden-tray-toggle');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByTestId(terminalSessionDrawerHiddenRestoreTestId('tmux-master'))).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId(terminalSessionDrawerHiddenRestoreTestId('tmux-master'))).toBeTruthy();
+  });
 });
 
 describe('TerminalSessionDrawer catalog availability', () => {
@@ -2000,5 +2123,88 @@ describe('TerminalSessionDrawer catalog availability', () => {
     expect(folders[0]?.getAttribute('data-testid')).toBe(
       'terminal-session-drawer-folder-button-/Users/fanzhang/.collab/workspace',
     );
+  });
+});
+
+describe('TerminalSessionDrawerSlotMenu viewport clamp', () => {
+  const originalWidth = window.innerWidth;
+  const originalHeight = window.innerHeight;
+
+  function setViewport(width: number, height: number) {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: height });
+  }
+
+  afterEach(() => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalHeight });
+  });
+
+  function renderMenu(params: { y: number; anchorTop?: number; x?: number }) {
+    return render(
+      <TerminalSessionDrawerSlotMenu
+        sessionId="s1"
+        title="demo"
+        x={params.x ?? 12}
+        y={params.y}
+        anchorTop={params.anchorTop}
+        axis="vertical"
+        onAssign={vi.fn()}
+        onHide={vi.fn()}
+        onCloseSession={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+  }
+
+  it('keeps the lower-row Hide and Close actions inside a short landscape viewport', () => {
+    setViewport(640, 360);
+    renderMenu({ y: 340, anchorTop: 296 });
+
+    const menu = screen.getByTestId('terminal-session-drawer-slot-menu');
+    const budget = estimateSlotMenuHeight(6);
+    const expected = computeSlotMenuPosition({
+      anchorTop: 296,
+      anchorBottom: 340,
+      anchorLeft: 12,
+      viewportWidth: 640,
+      viewportHeight: 360,
+      menuHeight: budget,
+    });
+
+    expect(expected.placement).toBe('clamped');
+    expect(menu.style.top).toBe(`${expected.top}px`);
+    expect(menu.style.maxHeight).toBe(`${expected.maxHeight}px`);
+
+    const top = Number.parseFloat(menu.style.top);
+    const maxHeight = Number.parseFloat(menu.style.maxHeight);
+    expect(top + maxHeight).toBeLessThanOrEqual(360);
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-hide')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-close')).toBeTruthy();
+  });
+
+  it('opens upward and keeps the lower-row menu inside a tall viewport', () => {
+    setViewport(400, 900);
+    renderMenu({ y: 800, anchorTop: 756 });
+
+    const menu = screen.getByTestId('terminal-session-drawer-slot-menu');
+    const budget = estimateSlotMenuHeight(6);
+    const expected = computeSlotMenuPosition({
+      anchorTop: 756,
+      anchorBottom: 800,
+      anchorLeft: 12,
+      viewportWidth: 400,
+      viewportHeight: 900,
+      menuHeight: budget,
+    });
+
+    expect(expected.placement).toBe('above');
+    expect(menu.style.top).toBe(`${expected.top}px`);
+    expect(menu.style.maxHeight).toBe(`${expected.maxHeight}px`);
+
+    const top = Number.parseFloat(menu.style.top);
+    expect(top + budget).toBeLessThanOrEqual(800);
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-hide')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-slot-menu-close')).toBeTruthy();
   });
 });
