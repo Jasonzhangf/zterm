@@ -584,6 +584,119 @@ describe('daemon /app file route peer reconnect retry (review-8)', () => {
     );
     expect((await readFile(bPath)).equals(data)).toBe(true);
   });
+
+  it('does not let a stale start clear a re-registered route whose generation restarted at 1', async () => {
+    const root = await registry.root();
+    const bridgeB = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
+
+    // Handshake order for the three starts is controlled per call:
+    // #0 stays in flight, #1 fails during handshake, #2 reaches daemon-b.
+    const sockets: FakeSocket[] = [];
+    let heldSocket: FakeSocket | null = null;
+    const bridgeA = await createBridge({
+      root: join(root, 'a'),
+      deviceId: 'device-a',
+      daemonHostId: 'daemon-a',
+      createWebSocket: () => {
+        const call = sockets.length;
+        if (call === 0) {
+          const [client] = socketPair();
+          heldSocket = client;
+          sockets.push(client);
+          return client as unknown as WebSocket;
+        }
+        if (call === 1) {
+          const [client] = socketPair();
+          sockets.push(client);
+          setTimeout(() => client.emit('error', new Error('handshake refused')), 0);
+          return client as unknown as WebSocket;
+        }
+        const [client, server] = socketPair();
+        attachPeerTransport(bridgeB, server);
+        sockets.push(client);
+        return client as unknown as WebSocket;
+      },
+    });
+    const local = captureLink('local', 'device-a', 'daemon-a');
+    const messageId = `stale-clear-${randomUUID()}`;
+    const transferId = messageId;
+    const data = Buffer.alloc(4, 3);
+    const file = sendFileMetadata(data, transferId, 'stale-clear.bin');
+    const startFrame = (requestId: string): AppClientFrame => ({
+      type: 'app-send-file-start',
+      payload: { requestId, messageId, target: peerTarget(bridgeB), subject: 'stale-clear', file },
+    });
+    const requestIdOf = (frame: AppServerFrame) => (frame.payload as { requestId?: string }).requestId;
+
+    const waitForCondition = async (predicate: () => boolean, timeoutMs = 3_000) => {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        if (predicate()) return;
+        await new Promise((done) => setTimeout(done, 5));
+      }
+      throw new Error('condition not observed');
+    };
+
+    // Start A reserves the route at revision 1 and blocks in the peer handshake.
+    const reqA = `reqA-${randomUUID()}`;
+    const startA = bridgeA.runtime.handleFrame(local.link, startFrame(reqA));
+    await waitForCondition(() => sockets.length === 1);
+
+    // Start B is a same-id duplicate: it bumps the route in place and its handshake
+    // fails, so B's cleanup deletes the route object X at revision 2.
+    const reqB = `reqB-${randomUUID()}`;
+    const startB = bridgeA.runtime.handleFrame(local.link, startFrame(reqB));
+    await waitForFrames(local.frames, (frame) => frame.type === 'app-error' && requestIdOf(frame) === reqB);
+    await startB;
+
+    // Start C re-registers the same id from an empty map, so the new object Y
+    // starts at revision 1 and reaches daemon-b.
+    const reqC = `reqC-${randomUUID()}`;
+    const startC = bridgeA.runtime.handleFrame(local.link, startFrame(reqC));
+    expect(await waitForFrames(local.frames, (frame) => requestIdOf(frame) === reqC)).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'receiving' },
+    });
+    await startC;
+    expect(sockets).toHaveLength(3);
+
+    // The stale start A now fails carrying token 1 from object X. It must not
+    // clear object Y only because Y's generation also restarted at 1.
+    expect(heldSocket).not.toBeNull();
+    (heldSocket as FakeSocket | null)?.emit('error', new Error('old handshake failed'));
+    await waitForFrames(local.frames, (frame) => frame.type === 'app-error' && requestIdOf(frame) === reqA);
+    await startA;
+
+    // The re-registered route must still be able to finish.
+    local.frames.length = 0;
+    await bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-file-chunk',
+      payload: { requestId: randomUUID(), messageId, transferId, offset: 0, chunkIndex: 0, dataBase64: data.toString('base64') },
+    });
+    expect(await waitForFrames(local.frames, (frame) => frame.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { persistedOffset: data.length },
+    });
+
+    local.frames.length = 0;
+    await bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-file-commit',
+      payload: { requestId: randomUUID(), messageId, transferId },
+    });
+    expect(await waitForFrames(local.frames, (frame) => frame.type === 'app-send-result')).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+
+    const bPath = join(
+      bridgeB.appRootDir,
+      'app-inbox/files',
+      encodeAppPathSegment('daemon-a'),
+      encodeAppPathSegment(messageId),
+      file.fileName,
+    );
+    expect((await readFile(bPath)).equals(data)).toBe(true);
+  });
 });
 
 describe('daemon /app inbox capacity counts message bodies (P1-C)', () => {

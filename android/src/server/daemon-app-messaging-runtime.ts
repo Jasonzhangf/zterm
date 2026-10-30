@@ -341,12 +341,15 @@ export function createDaemonAppMessagingRuntime(
   /**
    * Removes the registered route only when this operation still owns it. A
    * failed or settled start must never delete a route that a newer same-id
-   * start (e.g. a peer reconnect retry) has already re-registered.
+   * start (e.g. a peer reconnect retry) has already re-registered. Ownership is
+   * object identity plus generation: a route that was deleted and registered
+   * again for the same id is a new object whose revision restarts at 1, so a
+   * stale operation carrying the old revision must not clear it.
    */
-  function clearFileSend(link: AppLink, transferId: string, token: number) {
+  function clearFileSend(link: AppLink, transferId: string, active: ActiveFileSend, token: number) {
     const key = fileSendKey(link.id, transferId);
     const current = activeFileSends.get(key);
-    if (current && current.revision === token) activeFileSends.delete(key);
+    if (current === active && current.revision === token) activeFileSends.delete(key);
   }
 
   function resolveActiveFileSend(link: AppLink, messageId: string, transferId: string, stage: string): ActiveFileSend {
@@ -796,7 +799,7 @@ export function createDaemonAppMessagingRuntime(
           { ...payload, file },
         );
         if (result.type !== 'app-send-result' || result.payload.status !== 'receiving') {
-          clearFileSend(link, file.transferId, reservation.token);
+          clearFileSend(link, file.transferId, reservation.active, reservation.token);
         }
         link.send(result);
         return;
@@ -813,12 +816,12 @@ export function createDaemonAppMessagingRuntime(
         },
       });
       if (response.type === 'app-error') {
-        clearFileSend(link, file.transferId, reservation.token);
+        clearFileSend(link, file.transferId, reservation.active, reservation.token);
         await updateOutbox(target.daemonHostId, payload.messageId, 'failed', response.payload.code);
       }
       link.send(response);
     } catch (error) {
-      if (reservation) clearFileSend(link, file.transferId, reservation.token);
+      if (reservation) clearFileSend(link, file.transferId, reservation.active, reservation.token);
       if (error instanceof PeerLinkError) {
         const state = error.afterSend ? 'result_unknown' : 'failed';
         await updateOutbox(target.daemonHostId, payload.messageId, state, error.code);
@@ -880,7 +883,7 @@ export function createDaemonAppMessagingRuntime(
         );
         if (response.type === 'app-send-result' && (response.payload.status === 'received' || response.payload.status === 'delivered' || response.payload.status === 'consumed')) {
           await updateOutbox(active.target.daemonHostId, payload.messageId, 'received');
-          clearFileSend(link, payload.transferId, commitToken);
+          clearFileSend(link, payload.transferId, active, commitToken);
         }
         link.send(response);
         return;
@@ -896,7 +899,7 @@ export function createDaemonAppMessagingRuntime(
       }
       if (response.type === 'app-send-result' && (response.payload.status === 'received' || response.payload.status === 'delivered' || response.payload.status === 'consumed')) {
         await updateOutbox(active.target.daemonHostId, payload.messageId, 'received');
-        clearFileSend(link, payload.transferId, commitToken);
+        clearFileSend(link, payload.transferId, active, commitToken);
       }
       link.send(response);
     } catch (error) {

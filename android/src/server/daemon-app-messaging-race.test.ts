@@ -287,3 +287,115 @@ describe('daemon /app real WebSocket file-start conflict race', () => {
     expect(recorder.connections).toBe(0);
   });
 });
+
+/**
+ * TCP pass-through in front of a peer daemon that can sever the current
+ * connection on demand. Later connections pass through normally, so a
+ * reconnect can succeed after one transport drops.
+ */
+function startDisconnectOnceProxy(targetPort: number) {
+  const connections: Array<{ client: Socket; upstream: Socket }> = [];
+  const sockets = new Set<Socket>();
+  let live = 0;
+  const server: NetServer = createNetServer((client) => {
+    const upstream = netConnect(targetPort, '127.0.0.1');
+    sockets.add(client);
+    sockets.add(upstream);
+    connections.push({ client, upstream });
+    live += 1;
+    client.on('data', (data) => { if (!upstream.destroyed) upstream.write(data); });
+    upstream.on('data', (data) => { if (!client.destroyed) client.write(data); });
+    client.on('close', () => { live -= 1; upstream.destroy(); sockets.delete(client); sockets.delete(upstream); });
+    upstream.on('close', () => { client.destroy(); sockets.delete(client); sockets.delete(upstream); });
+    client.on('error', () => undefined);
+    upstream.on('error', () => undefined);
+  });
+  cleanups.push(async () => {
+    for (const socket of sockets) socket.destroy();
+    await new Promise<void>((done) => server.close(() => done()));
+  });
+  return {
+    async listen() {
+      await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
+      return (server.address() as { port: number }).port;
+    },
+    get liveConnections() { return live; },
+    get connectionCount() { return connections.length; },
+    /** Sever the current transport without touching the peer daemon itself. */
+    dropCurrent() {
+      const current = connections[connections.length - 1];
+      if (!current) throw new Error('no proxied connection to drop');
+      current.upstream.destroy();
+      current.client.destroy();
+    },
+  };
+}
+
+describe('daemon /app real WebSocket file-start retry after peer transport drop', () => {
+  it('rebinds the route on a same-id retry over one real /app connection and finishes the transfer', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'zterm-app-retry-'));
+    cleanups.push(async () => { await rm(root, { recursive: true, force: true }); });
+
+    const tokenA = 'retry-token-a';
+    const tokenB = 'retry-token-b';
+    const daemonA = await startRealDaemon({ root: join(root, 'a'), deviceId: 'device-a', daemonHostId: 'daemon-a', token: tokenA });
+    const daemonB = await startRealDaemon({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b', token: tokenB });
+    const proxy = startDisconnectOnceProxy(daemonB.port);
+    const proxyPort = await proxy.listen();
+    const local = await connectLocal(daemonA.port, tokenA);
+
+    const messageId = `retry-${randomUUID()}`;
+    const transferId = messageId;
+    const data = Buffer.alloc(8, 4);
+    const file = { transferId, fileName: 'retry.bin', totalBytes: data.length, chunkCount: 1, sha256: sha256(data) };
+    const targetB = { deviceId: 'device-b', daemonHostId: 'daemon-b', wsUrl: `ws://127.0.0.1:${proxyPort}/app`, authToken: tokenB };
+    const requestIdOf = (frame: AppServerFrame) => (frame.payload as { requestId?: string }).requestId;
+
+    // First start establishes a real peer transport through the proxy.
+    const req1 = `start1-${randomUUID()}`;
+    local.send({ type: 'app-send-file-start', payload: { requestId: req1, messageId, target: targetB, subject: 'retry', file } } as AppClientFrame);
+    expect(await local.waitFor((frame) => requestIdOf(frame) === req1)).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'receiving', persistedOffset: 0 },
+    });
+    expect(proxy.connectionCount).toBe(1);
+
+    // Drop only the daemon-to-daemon transport; the local /app connection stays
+    // open, exactly like a client that retries on the same connection.
+    proxy.dropCurrent();
+    await local.waitFor((frame) => frame.type === 'app-connection-state'
+      && frame.payload.state === 'peer-disconnected');
+
+    // Same messageId/transferId retry must reconnect and rebind the route.
+    const req2 = `start2-${randomUUID()}`;
+    local.send({ type: 'app-send-file-start', payload: { requestId: req2, messageId, target: targetB, subject: 'retry', file } } as AppClientFrame);
+    expect(await local.waitFor((frame) => requestIdOf(frame) === req2)).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'receiving', persistedOffset: 0 },
+    });
+    expect(proxy.connectionCount).toBe(2);
+
+    const reqChunk = `chunk-${randomUUID()}`;
+    local.send({ type: 'app-send-file-chunk', payload: { requestId: reqChunk, messageId, transferId, offset: 0, chunkIndex: 0, dataBase64: data.toString('base64') } } as AppClientFrame);
+    expect(await local.waitFor((frame) => requestIdOf(frame) === reqChunk)).toMatchObject({
+      type: 'app-send-result',
+      payload: { persistedOffset: data.length },
+    });
+
+    const reqCommit = `commit-${randomUUID()}`;
+    local.send({ type: 'app-send-file-commit', payload: { requestId: reqCommit, messageId, transferId } } as AppClientFrame);
+    expect(await local.waitFor((frame) => requestIdOf(frame) === reqCommit)).toMatchObject({
+      type: 'app-send-result',
+      payload: { status: 'received' },
+    });
+
+    const bPath = join(
+      daemonB.appRootDir,
+      'app-inbox/files',
+      encodeAppPathSegment('daemon-a'),
+      encodeAppPathSegment(messageId),
+      file.fileName,
+    );
+    expect((await readFile(bPath)).equals(data)).toBe(true);
+  });
+});
