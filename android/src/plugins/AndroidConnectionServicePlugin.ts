@@ -100,6 +100,7 @@ const AndroidConnectionService = registerPlugin<AndroidConnectionServiceNativePl
         nextRetryAt: null,
         error: null,
         muxReadyPayload: null,
+        transportFlow: null,
       }),
       addListener: async () => ({ remove: async () => undefined }),
     }),

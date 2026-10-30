@@ -495,6 +495,59 @@ describe('daemon buffer publisher runtime', () => {
     expect(sent[1]).toBe(1);
     expect(new Set(sent).size).toBe(sent.length);
   });
+
+  it('re-checks physical backpressure before every chunk and resumes the same frame identity', () => {
+    const session = makeSession('s1');
+    session.bodySubscribed = false;
+    const sent: number[] = [];
+    const largeLines = Array.from({ length: 20_000 }, (_, index) => ({ i: index }));
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      sendText: (_transport, text) => {
+        sent.push(JSON.parse(text).payload.frameChunkIndex);
+        // A queue rise after the first chunk must pause the same authoritative
+        // frame instead of sending a half-applied different revision.
+        session.transport!.bufferedAmount = 200_000;
+      },
+      buildRequestedRangeBufferPayload: (mirror, request) => ({
+        revision: mirror.revision,
+        startIndex: 0,
+        endIndex: 20_000,
+        availableStartIndex: mirror.bufferStartIndex,
+        availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+        cols: mirror.cols,
+        rows: mirror.rows,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor,
+        requestSentAt: request.requestedAt,
+        lines: largeLines,
+      }) as never,
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 12);
+
+    expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, {
+      knownRevision: 11,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 0,
+      requestEndIndex: 20_000,
+      requestedAt: 201,
+      targetHeadRevision: 12,
+    })).toBe('queued');
+    expect(sent).toEqual([0]);
+
+    // Still OPEN and the frame is not complete: next flush must wait at the
+    // same chunk boundary and must not emit a new frame revision.
+    expect(publisher.flushPendingSubscriberBufferSync(mirror, session.id)).toBe('backpressured');
+    expect(sent).toEqual([0]);
+    expect(session.bufferSyncState?.pendingRangeResponses?.[0]?.nextChunkIndex).toBe(1);
+    expect(session.bufferSyncState?.pendingRangeResponses?.[0]?.payload.revision).toBe(12);
+
+    session.transport!.bufferedAmount = 0;
+    expect(publisher.flushPendingSubscriberBufferSync(mirror, session.id)).toBe('sent');
+    expect(sent).toEqual([0, 1]);
+  });
 });
 
 describe('daemon buffer publisher ownership gates', () => {

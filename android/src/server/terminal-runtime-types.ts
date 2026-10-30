@@ -29,6 +29,15 @@ export interface TerminalSessionTransport {
   connectedSent?: boolean;
 }
 
+/**
+ * Physical transport send-flow watermarks (bytes). One owner: `daemon.runtime`
+ * (this shared base module). Both `daemon.file_transfer` and
+ * `daemon.transport_subscriber` read these so pacing admission never requires
+ * the cyclic `file_transfer -> transport_subscriber` import edge.
+ */
+export const TRANSPORT_BACKPRESSURE_BUFFERED_BYTES = 128_000;
+export const TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES = 64_000;
+
 export interface TerminalTransportConnection {
   transportId: string;
   transport: TerminalSessionTransport;

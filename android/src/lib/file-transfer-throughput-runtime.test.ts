@@ -203,4 +203,56 @@ describe('file-transfer-throughput-runtime', () => {
     );
     expect(FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS).toBe(8);
   });
+
+  it('awaits each async chunk dispatch before sending the next chunk', async () => {
+    const sentIndexes: number[] = [];
+    let releaseFirst: () => void = () => undefined;
+    const firstDispatch = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let settled = false;
+
+    const run = sendBoundedFileUploadChunks({
+      totalChunks: 3,
+      readChunk: async (chunkIndex) => `chunk-${chunkIndex}`,
+      sendChunk: (chunkIndex) => {
+        sentIndexes.push(chunkIndex);
+        if (chunkIndex === 0) {
+          return firstDispatch;
+        }
+        return undefined;
+      },
+      waitForProgress: () => Promise.resolve(),
+    });
+    void run.then(() => {
+      settled = true;
+    });
+
+    await Promise.resolve();
+    expect(sentIndexes).toEqual([0]);
+    expect(settled).toBe(false);
+
+    releaseFirst();
+    await expect(run).resolves.toBeUndefined();
+    expect(sentIndexes).toEqual([0, 1, 2]);
+  });
+
+  it('propagates an async chunk dispatch failure into the upload error path', async () => {
+    const sentIndexes: number[] = [];
+
+    await expect(sendBoundedFileUploadChunks({
+      totalChunks: 3,
+      readChunk: async (chunkIndex) => `chunk-${chunkIndex}`,
+      sendChunk: (chunkIndex) => {
+        sentIndexes.push(chunkIndex);
+        if (chunkIndex === 1) {
+          return Promise.reject(new Error('transport send rejected'));
+        }
+        return undefined;
+      },
+      waitForProgress: () => Promise.resolve(),
+    })).rejects.toThrow('transport send rejected');
+
+    expect(sentIndexes).toEqual([0, 1]);
+  });
 });

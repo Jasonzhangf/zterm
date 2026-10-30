@@ -9,6 +9,7 @@ import {
   watch,
 } from 'fs';
 import { join, resolve } from 'path';
+import { WebSocket } from 'ws';
 import type {
   FileCreateDirectoryRequestPayload,
   FileDownloadRequestPayload,
@@ -19,6 +20,10 @@ import type {
 import { resolveFileTransferListPath } from './file-transfer-path';
 import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
 import { runPhase3FileBrowse, runPhase3Download } from './dagpipe-bridge';
+import {
+  TRANSPORT_BACKPRESSURE_BUFFERED_BYTES,
+  TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES,
+} from './terminal-runtime-types';
 import type { TerminalSession } from './terminal-runtime-types';
 import {
   FILE_CHUNK_SIZE,
@@ -58,6 +63,7 @@ export function createTerminalFileTransferListRuntime(
   deps: TerminalFileTransferRuntimeDeps,
 ): TerminalFileTransferListRuntime {
   const directoryCache = new Map<string, RemoteDirectoryCacheEntry>();
+  const cancelActiveDownloads = new Set<() => void>();
 
   function readDirectorySnapshot(resolvedPath: string) {
     const entries = readdirSync(resolvedPath, { withFileTypes: true });
@@ -224,6 +230,10 @@ export function createTerminalFileTransferListRuntime(
   }
 
   function dispose() {
+    for (const cancel of cancelActiveDownloads) {
+      cancel();
+    }
+    cancelActiveDownloads.clear();
     for (const entry of directoryCache.values()) {
       closeDirectoryCacheEntry(entry);
     }
@@ -238,34 +248,106 @@ export function createTerminalFileTransferListRuntime(
 
   function sendFileDownloadBuffer(session: TerminalSession, requestId: string, fileName: string, fileBuffer: Buffer) {
     const totalChunks = Math.ceil(fileBuffer.length / FILE_CHUNK_SIZE);
+    // The transport identity captured at dispatch time is the request's
+    // physical destination. A retired/rotated transport must not receive a
+    // late chunk from this request.
+    const requestTransportId = session.transportId;
     let index = 0;
+    let cancelled = false;
+    let waitTimer: ReturnType<typeof setTimeout> | null = null;
+    // Hysteresis: once the high watermark is crossed, hold until the physical
+    // queue drains to the low watermark, then resume from the same index.
+    let draining = false;
 
-    function sendNextChunk() {
+    function stop() {
+      cancelled = true;
+      if (waitTimer) {
+        clearTimeout(waitTimer);
+        waitTimer = null;
+      }
+      cancelActiveDownloads.delete(stop);
+    }
+
+    function fail(error: unknown) {
+      stop();
+      deps.sendMessage(session, {
+        type: 'file-download-error',
+        payload: {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+
+    function pump() {
+      if (cancelled) {
+        return;
+      }
+      if (session.transportId !== requestTransportId) {
+        // Transport retired mid-download; drop this request rather than
+        // forwarding its remaining bytes onto the replacement transport.
+        stop();
+        return;
+      }
+      const transport = session.transport;
+      if (transport) {
+        if (transport.readyState !== WebSocket.OPEN) {
+          stop();
+          return;
+        }
+        const bufferedBytes = Math.max(0, Math.floor(transport.bufferedAmount || 0));
+        const holding = draining
+          ? bufferedBytes > TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES
+          : bufferedBytes >= TRANSPORT_BACKPRESSURE_BUFFERED_BYTES;
+        if (holding) {
+          draining = true;
+          // Single cancellable wait; no busy setImmediate polling under pressure.
+          waitTimer = setTimeout(() => {
+            waitTimer = null;
+            pump();
+          }, 20);
+          return;
+        }
+        draining = false;
+      }
       if (index >= totalChunks) {
-        deps.sendMessage(session, {
-          type: 'file-download-complete',
-          payload: { requestId, fileName, totalBytes: fileBuffer.length },
-        });
+        try {
+          deps.sendMessage(session, {
+            type: 'file-download-complete',
+            payload: { requestId, fileName, totalBytes: fileBuffer.length },
+          });
+        } catch (error) {
+          fail(error);
+          return;
+        }
+        stop();
         return;
       }
       const start = index * FILE_CHUNK_SIZE;
       const end = Math.min(start + FILE_CHUNK_SIZE, fileBuffer.length);
       const chunk = fileBuffer.subarray(start, end);
-      deps.sendMessage(session, {
-        type: 'file-download-chunk',
-        payload: {
-          requestId,
-          chunkIndex: index,
-          totalChunks,
-          fileName,
-          dataBase64: chunk.toString('base64'),
-        },
-      });
+      try {
+        deps.sendMessage(session, {
+          type: 'file-download-chunk',
+          payload: {
+            requestId,
+            chunkIndex: index,
+            totalChunks,
+            fileName,
+            dataBase64: chunk.toString('base64'),
+          },
+        });
+      } catch (error) {
+        // A send throw must not advance the chunk index nor emit complete.
+        fail(error);
+        return;
+      }
       index += 1;
-      setImmediate(sendNextChunk);
+      setImmediate(pump);
     }
 
-    sendNextChunk();
+    cancelActiveDownloads.add(stop);
+    pump();
   }
 
   function buildRemoteScreenshotFileName(prefix = 'remote-screenshot') {

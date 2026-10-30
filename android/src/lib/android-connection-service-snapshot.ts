@@ -35,6 +35,14 @@ export interface AndroidConnectionServiceError {
   message: string;
 }
 
+export interface AndroidConnectionServiceTransportFlow {
+  nativeBufferedBytes: number;
+  serviceQueuedBytes: number;
+  serviceQueuedFrames: number;
+  backpressured: boolean;
+  sampledAt: number;
+}
+
 export interface AndroidConnectionServiceSnapshot {
   state: AndroidConnectionServiceState;
   generation: string | null;
@@ -50,6 +58,7 @@ export interface AndroidConnectionServiceSnapshot {
   resolvedRelayTransport?: TraversalResolvedRelayTransport | null;
   resolvedEndpoint?: string | null;
   selectedIcePair?: TraversalSelectedIcePairDiagnostic | null;
+  transportFlow?: AndroidConnectionServiceTransportFlow | null;
 }
 
 export type AndroidConnectionServiceEvent =
@@ -98,6 +107,7 @@ function readonlySnapshot(snapshot: AndroidConnectionServiceSnapshot): AndroidCo
     resolvedRelayTransport: snapshot.resolvedRelayTransport ?? null,
     resolvedEndpoint: snapshot.resolvedEndpoint ?? null,
     selectedIcePair: snapshot.selectedIcePair ? { ...snapshot.selectedIcePair } : null,
+    transportFlow: snapshot.transportFlow ? { ...snapshot.transportFlow } : null,
   };
 }
 
@@ -137,6 +147,7 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
   resolvedRelayTransport: null,
   resolvedEndpoint: null,
   selectedIcePair: null,
+  transportFlow: null,
 };
       retiredGenerations = new Set();
       consecutiveHeartbeatMisses = 0;
@@ -162,6 +173,7 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
           lastActivityAt: null,
           nextRetryAt: null,
           error: null,
+          transportFlow: null,
         };
         consecutiveHeartbeatMisses = 0;
       }
@@ -205,6 +217,7 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
           generation: event.generation,
           error: null,
           nextRetryAt: null,
+          transportFlow: null,
         };
         consecutiveHeartbeatMisses = 0;
         return true;

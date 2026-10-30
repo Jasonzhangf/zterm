@@ -79,6 +79,37 @@ public final class AndroidConnectionServiceSnapshot {
         }
     }
 
+    public static final class FlowObservation {
+        public final long nativeBufferedBytes;
+        public final long serviceQueuedBytes;
+        public final long serviceQueuedFrames;
+        public final boolean backpressured;
+        public final long sampledAt;
+
+        public FlowObservation(
+            long nativeBufferedBytes,
+            long serviceQueuedBytes,
+            long serviceQueuedFrames,
+            boolean backpressured,
+            long sampledAt) {
+            this.nativeBufferedBytes = Math.max(0L, nativeBufferedBytes);
+            this.serviceQueuedBytes = Math.max(0L, serviceQueuedBytes);
+            this.serviceQueuedFrames = Math.max(0L, serviceQueuedFrames);
+            this.backpressured = backpressured;
+            this.sampledAt = sampledAt;
+        }
+
+        public JSONObject toJson() throws JSONException {
+            JSONObject json = new JSONObject();
+            json.put("nativeBufferedBytes", nativeBufferedBytes);
+            json.put("serviceQueuedBytes", serviceQueuedBytes);
+            json.put("serviceQueuedFrames", serviceQueuedFrames);
+            json.put("backpressured", backpressured);
+            json.put("sampledAt", sampledAt);
+            return json;
+        }
+    }
+
     public static final class RouteDiagnostic {
         public final String candidateId;
         public final String path;
@@ -136,6 +167,7 @@ public final class AndroidConnectionServiceSnapshot {
     public final String resolvedEndpoint;
     public final String selectedIcePairJson;
     public final List<RouteDiagnostic> routeDiagnostics;
+    public final FlowObservation transportFlow;
 
     private AndroidConnectionServiceSnapshot(Builder b) {
         this.state = b.state;
@@ -153,6 +185,7 @@ public final class AndroidConnectionServiceSnapshot {
         this.resolvedEndpoint = b.resolvedEndpoint;
         this.selectedIcePairJson = b.selectedIcePairJson;
         this.routeDiagnostics = Collections.unmodifiableList(new ArrayList<>(b.routeDiagnostics));
+        this.transportFlow = b.transportFlow;
     }
 
     public static AndroidConnectionServiceSnapshot empty() {
@@ -178,7 +211,8 @@ public final class AndroidConnectionServiceSnapshot {
             .resolvedRelayTransport(resolvedRelayTransport)
             .resolvedEndpoint(resolvedEndpoint)
             .selectedIcePairJson(selectedIcePairJson)
-            .routeDiagnostics(routeDiagnostics);
+            .routeDiagnostics(routeDiagnostics)
+            .transportFlow(transportFlow);
     }
 
     public JSONObject toJson() throws JSONException {
@@ -205,6 +239,7 @@ public final class AndroidConnectionServiceSnapshot {
         JSONArray routeDiagnosticArray = new JSONArray();
         for (RouteDiagnostic diagnostic : routeDiagnostics) routeDiagnosticArray.put(diagnostic.toJson());
         json.put("routeDiagnostics", routeDiagnosticArray);
+        json.put("transportFlow", transportFlow == null ? JSONObject.NULL : transportFlow.toJson());
         return json;
     }
 
@@ -228,7 +263,13 @@ public final class AndroidConnectionServiceSnapshot {
             && Objects.equals(resolvedRelayTransport, that.resolvedRelayTransport)
             && Objects.equals(resolvedEndpoint, that.resolvedEndpoint)
             && Objects.equals(selectedIcePairJson, that.selectedIcePairJson)
-            && Objects.equals(routeDiagnostics.size(), that.routeDiagnostics.size());
+            && Objects.equals(routeDiagnostics.size(), that.routeDiagnostics.size())
+            && Objects.equals(transportFlow == null ? null : transportFlow.nativeBufferedBytes,
+                that.transportFlow == null ? null : that.transportFlow.nativeBufferedBytes)
+            && Objects.equals(transportFlow == null ? null : transportFlow.serviceQueuedBytes,
+                that.transportFlow == null ? null : that.transportFlow.serviceQueuedBytes)
+            && Objects.equals(transportFlow == null ? null : transportFlow.backpressured,
+                that.transportFlow == null ? null : that.transportFlow.backpressured);
     }
 
     private static boolean channelsEqual(List<Channel> a, List<Channel> b) {
@@ -254,7 +295,11 @@ public final class AndroidConnectionServiceSnapshot {
             lastActivityAt, nextRetryAt, error == null ? null : error.code,
             error == null ? null : error.message, muxReadyPayloadJson, channelHash,
             resolvedPath, resolvedRelayTransport, resolvedEndpoint, selectedIcePairJson,
-            routeDiagnosticHash, routeDiagnostics.size());
+            routeDiagnosticHash, routeDiagnostics.size(),
+            transportFlow == null ? 0 : Objects.hash(
+                transportFlow.nativeBufferedBytes,
+                transportFlow.serviceQueuedBytes,
+                transportFlow.backpressured));
     }
 
     public static final class Builder {
@@ -273,6 +318,7 @@ public final class AndroidConnectionServiceSnapshot {
         private String resolvedEndpoint;
         private String selectedIcePairJson;
         private List<RouteDiagnostic> routeDiagnostics = new ArrayList<>();
+        private FlowObservation transportFlow;
 
         public Builder(State state) { this.state = state; }
         public Builder generation(String v) { this.generation = v; return this; }
@@ -292,6 +338,7 @@ public final class AndroidConnectionServiceSnapshot {
             this.routeDiagnostics = v == null ? new ArrayList<>() : new ArrayList<>(v);
             return this;
         }
+        public Builder transportFlow(FlowObservation v) { this.transportFlow = v; return this; }
         public AndroidConnectionServiceSnapshot build() { return new AndroidConnectionServiceSnapshot(this); }
     }
 }

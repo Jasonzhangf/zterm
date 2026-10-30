@@ -300,6 +300,8 @@ impl Operator for EstablishPhysicalTransport {
 
 struct MaintainHeartbeat;
 
+struct ObserveTransportFlow;
+
 impl Operator for MaintainHeartbeat {
     fn name(&self) -> &'static str {
         "client.android_connection_service.maintain_heartbeat"
@@ -335,6 +337,62 @@ impl Operator for MaintainHeartbeat {
             "state": "healthy",
             "misses": 0,
             "target": get_str(&transport, "targetKey"),
+        }))
+    }
+}
+
+impl Operator for ObserveTransportFlow {
+    fn name(&self) -> &'static str {
+        "client.android_connection_service.observe_transport_flow"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let values = inputs(input);
+        let transport = obj(values.first().cloned().unwrap_or_default());
+        // A transport that is not connected has no live flow observation.
+        // null is the correct projection: callers must not interpret a missing
+        // observation as "native buffered zero".
+        if get_str(&transport, "state") != "connected" {
+            return Ok(json!({
+                "nativeBufferedBytes": 0,
+                "serviceQueuedBytes": 0,
+                "serviceQueuedFrames": 0,
+                "backpressured": false,
+                "transportFlow": Value::Null,
+            }));
+        }
+        let flow = transport.get("flow").cloned().unwrap_or(Value::Null);
+        let native = flow
+            .get("nativeBufferedBytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let queued_bytes = flow
+            .get("serviceQueuedBytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let queued_frames = flow
+            .get("serviceQueuedFrames")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        Ok(json!({
+            "nativeBufferedBytes": native,
+            "serviceQueuedBytes": queued_bytes,
+            "serviceQueuedFrames": queued_frames,
+            "backpressured": native >= 131_072,
+            "transportFlow": {
+                "nativeBufferedBytes": native,
+                "serviceQueuedBytes": queued_bytes,
+                "serviceQueuedFrames": queued_frames,
+                "backpressured": native >= 131_072,
+            },
         }))
     }
 }
@@ -403,6 +461,7 @@ impl Operator for ProjectServiceSnapshot {
         let transport = obj(values.get(2).cloned().unwrap_or_default());
         let health = obj(values.get(3).cloned().unwrap_or_default());
         let backoff = obj(values.get(4).cloned().unwrap_or_default());
+        let flow = obj(values.get(5).cloned().unwrap_or_default());
         if get_str(&desired, "state") == "no-bind"
             || get_str(&release, "state") == "release-planned"
         {
@@ -426,6 +485,7 @@ impl Operator for ProjectServiceSnapshot {
             "target": get_str(&desired, "targetKey"),
             "generation": get_str(&transport, "generation"),
             "channels": get_array(&transport, "channels"),
+            "transportFlow": flow.get("transportFlow").cloned().unwrap_or(Value::Null),
         }))
     }
 }
@@ -609,6 +669,7 @@ fn make_registry() -> Registry {
     register!(ReplayDesiredChannels);
     register!(EstablishPhysicalTransport);
     register!(MaintainHeartbeat);
+    register!(ObserveTransportFlow);
     register!(ScheduleBackoffReconnect);
     register!(ProjectServiceSnapshot);
     register!(ProjectNotificationActions);

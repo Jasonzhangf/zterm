@@ -11,6 +11,10 @@ import type {
   TerminalSessionTransport,
   TerminalTransportConnection,
 } from './terminal-runtime-types';
+import {
+  TRANSPORT_BACKPRESSURE_BUFFERED_BYTES,
+  TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES,
+} from './terminal-runtime-types';
 import type { RtcServerTransport } from './rtc-bridge';
 
 export interface DaemonTransportConnection extends TerminalTransportConnection {
@@ -54,8 +58,6 @@ export interface TerminalTransportRuntime {
   ) => DaemonTransportConnection;
 }
 
-const TRANSPORT_BACKPRESSURE_BUFFERED_BYTES = 128_000;
-const TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES = 64_000;
 // Android sends the physical target heartbeat every 30s and declares failure
 // after 3 misses; the daemon must not detach the subscriber before that client
 // heartbeat contract can run.

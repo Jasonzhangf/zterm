@@ -6,7 +6,7 @@ import { createTerminalFileTransferListRuntime } from './terminal-file-transfer-
 import { createTerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
 import type { ServerMessage } from '../lib/types';
 import type { TerminalSession } from './terminal-runtime-types';
-import type { RemoteScreenshotCaptureOptions } from './terminal-file-transfer-types';
+import { FILE_CHUNK_SIZE, type RemoteScreenshotCaptureOptions } from './terminal-file-transfer-types';
 
 const { browseGateMock, downloadGateMock, uploadGateMock } = vi.hoisted(() => ({
   browseGateMock: vi.fn(() => ({ ok: true, outputs: {} })),
@@ -24,7 +24,14 @@ function makeSession(overrides?: Partial<Pick<TerminalSession, 'backend'>>): Ter
   return {
     id: 'session-1',
     transportId: 'transport-1',
-    transport: null,
+    transport: {
+      kind: 'ws',
+      readyState: 1,
+      bufferedAmount: 0,
+      backpressureCount: 0,
+      sendText: () => undefined,
+      close: () => undefined,
+    },
     sessionName: 'client-session-name',
     mirrorKey: 'mirror-1',
     pendingPasteImage: null,
@@ -80,17 +87,21 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
     }
   });
 
-  function createRuntime(sentMessages: ServerMessage[], captureRemoteScreenshot = vi.fn(async ({ outputPath }: RemoteScreenshotCaptureOptions) => {
-    writeFileSync(outputPath, Buffer.from('png'));
-    return { outputPath };
-  })) {
+  function createRuntime(
+    sentMessages: ServerMessage[],
+    captureRemoteScreenshot = vi.fn(async ({ outputPath }: RemoteScreenshotCaptureOptions) => {
+      writeFileSync(outputPath, Buffer.from('png'));
+      return { outputPath };
+    }),
+    sendMessageOverride?: (session: TerminalSession, message: ServerMessage) => void,
+  ) {
     tempDir = mkdtempSync(join(tmpdir(), 'zterm-shot-'));
     const runtime = createTerminalFileTransferListRuntime({
         uploadDir: tempDir,
         downloadsDir: tempDir,
         wtermHomeDir: tempDir,
         platform: 'darwin',
-        sendMessage: (_session, message) => sentMessages.push(message),
+        sendMessage: sendMessageOverride ?? ((_session, message) => sentMessages.push(message)),
         getSessionMirror: vi.fn(() => null),
         scheduleMirrorLiveSync: vi.fn(),
         enqueueBackendInput: vi.fn(async () => false),
@@ -136,7 +147,11 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
       (sentMessages[sentMessages.length - 1] as any).payload.entries.map((entry: { name: string }) => entry.name),
     ).toEqual(['old.txt']);
 
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Drive the refresh explicitly: the runtime refreshes the cache either via
+    // the filesystem watcher or this exposed callback. The test must not depend
+    // on watcher timing inside jsdom, so call the same refresh the watcher
+    // would trigger and then assert list-3 sees the new directory state.
+    runtime.refreshDirectoryCache(tempDir!);
     runtime.handleFileListRequest(makeSession(), {
       requestId: 'list-3',
       path: tempDir!,
@@ -412,5 +427,92 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
       message.type === 'error'
       && message.payload.code === 'herdr_file_transfer_unsupported'
     ))).toBe(true);
+  });
+
+  it('paces file download chunks on physical transport backpressure', async () => {
+    const sentMessages: ServerMessage[] = [];
+    const transport = {
+      kind: 'ws' as const,
+      readyState: 1,
+      bufferedAmount: 0,
+      backpressureCount: 0,
+      sendText: () => undefined,
+      close: () => undefined,
+    };
+    const session = makeSession();
+    session.transport = transport;
+    let chunkCount = 0;
+    const { runtime } = createRuntime(sentMessages, undefined, (_session, message) => {
+      sentMessages.push(message);
+      if (message.type === 'file-download-chunk') {
+        chunkCount += 1;
+        if (chunkCount === 2) {
+          transport.bufferedAmount = 200_000;
+        }
+      }
+    });
+    writeFileSync(join(tempDir!, 'paced.bin'), Buffer.alloc(FILE_CHUNK_SIZE * 2 + 1, 0x41));
+
+    runtime.handleFileDownloadRequest(session, {
+      requestId: 'download-paced',
+      remotePath: join(tempDir!, 'paced.bin'),
+      fileName: 'paced.bin',
+      totalBytes: FILE_CHUNK_SIZE * 2 + 1,
+    });
+    await flushFileTransferMessages();
+
+    expect(chunkCount).toBe(2);
+
+    transport.bufferedAmount = 200_000;
+    await flushFileTransferMessages();
+    expect(chunkCount).toBe(2);
+    expect(sentMessages.some((message) => message.type === 'file-download-complete')).toBe(false);
+
+    transport.bufferedAmount = 0;
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await flushFileTransferMessages();
+    expect(chunkCount).toBe(3);
+    expect(sentMessages.some((message) => message.type === 'file-download-complete')).toBe(true);
+  });
+
+  it('stops a file download and does not send complete when transport retires mid-flight', async () => {
+    const sentMessages: ServerMessage[] = [];
+    const transport = {
+      kind: 'ws' as const,
+      readyState: 1,
+      bufferedAmount: 0,
+      backpressureCount: 0,
+      sendText: () => undefined,
+      close: () => undefined,
+    };
+    const session = makeSession();
+    session.transport = transport;
+    let chunkCount = 0;
+    const { runtime } = createRuntime(sentMessages, undefined, (_session, message) => {
+      sentMessages.push(message);
+      if (message.type === 'file-download-chunk') {
+        chunkCount += 1;
+        if (chunkCount === 1) {
+          session.transportId = 'transport-2';
+        }
+      }
+    });
+    writeFileSync(join(tempDir!, 'retired.bin'), Buffer.alloc(FILE_CHUNK_SIZE * 3, 0x42));
+
+    runtime.handleFileDownloadRequest(session, {
+      requestId: 'download-retired',
+      remotePath: join(tempDir!, 'retired.bin'),
+      fileName: 'retired.bin',
+      totalBytes: FILE_CHUNK_SIZE * 3,
+    });
+    await flushFileTransferMessages();
+
+    session.transportId = 'transport-2';
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await flushFileTransferMessages();
+
+    expect(chunkCount).toBe(1);
+    expect(sentMessages.some((message) => message.type === 'file-download-complete')).toBe(false);
+    expect(sentMessages.some((message) => message.type === 'file-download-error')).toBe(false);
   });
 });

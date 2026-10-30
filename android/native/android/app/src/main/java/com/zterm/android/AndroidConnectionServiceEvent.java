@@ -21,6 +21,7 @@ public final class AndroidConnectionServiceEvent {
         SERVER_ACTIVITY,
         HEARTBEAT_MISSED,
         TRANSPORT_RESOLVED,
+        TRANSPORT_FLOW_CHANGED,
         TRANSPORT_FAILURE,
         AUTHENTICATION_FAILURE,
         TERMINAL_FAILURE,
@@ -43,6 +44,7 @@ public final class AndroidConnectionServiceEvent {
     public final String resolvedEndpoint;
     public final String selectedIcePairJson;
     public final List<AndroidConnectionServiceSnapshot.RouteDiagnostic> routeDiagnostics;
+    public final AndroidConnectionServiceSnapshot.FlowObservation flowObservation;
 
     private AndroidConnectionServiceEvent(Builder b) {
         this.type = b.type;
@@ -60,6 +62,7 @@ public final class AndroidConnectionServiceEvent {
         this.resolvedEndpoint = b.resolvedEndpoint;
         this.selectedIcePairJson = b.selectedIcePairJson;
         this.routeDiagnostics = b.routeDiagnostics;
+        this.flowObservation = b.flowObservation;
     }
 
     public static AndroidConnectionServiceEvent bindTarget(AndroidConnectionServiceTarget target) {
@@ -90,6 +93,17 @@ public final class AndroidConnectionServiceEvent {
             .resolvedRelayTransport(resolvedRelayTransport)
             .resolvedEndpoint(resolvedEndpoint)
             .selectedIcePairJson(selectedIcePairJson)
+            .build();
+    }
+
+    public static AndroidConnectionServiceEvent transportFlowChanged(
+        String generation, long nativeBufferedBytes, long serviceQueuedBytes,
+        long serviceQueuedFrames, boolean backpressured, long sampledAt) {
+        return new Builder(Type.TRANSPORT_FLOW_CHANGED)
+            .generation(generation)
+            .flowObservation(new AndroidConnectionServiceSnapshot.FlowObservation(
+                nativeBufferedBytes, serviceQueuedBytes, serviceQueuedFrames,
+                backpressured, sampledAt))
             .build();
     }
 
@@ -162,6 +176,7 @@ public final class AndroidConnectionServiceEvent {
         private String resolvedEndpoint;
         private String selectedIcePairJson;
         private List<AndroidConnectionServiceSnapshot.RouteDiagnostic> routeDiagnostics;
+        private AndroidConnectionServiceSnapshot.FlowObservation flowObservation;
 
         public Builder(Type type) { this.type = type; }
 
@@ -179,6 +194,7 @@ public final class AndroidConnectionServiceEvent {
         public Builder resolvedEndpoint(String v) { this.resolvedEndpoint = v; return this; }
         public Builder selectedIcePairJson(String v) { this.selectedIcePairJson = v; return this; }
         public Builder routeDiagnostics(List<AndroidConnectionServiceSnapshot.RouteDiagnostic> v) { this.routeDiagnostics = v; return this; }
+        public Builder flowObservation(AndroidConnectionServiceSnapshot.FlowObservation v) { this.flowObservation = v; return this; }
 
         public AndroidConnectionServiceEvent build() {
             if (generation == null && (type == Type.TRANSPORT_OPENING
@@ -192,6 +208,7 @@ public final class AndroidConnectionServiceEvent {
                 || type == Type.TRANSPORT_FAILURE
                 || type == Type.AUTHENTICATION_FAILURE
                 || type == Type.TERMINAL_FAILURE
+                || type == Type.TRANSPORT_FLOW_CHANGED
                 || type == Type.RECONNECT_ATTEMPT)) {
                 throw new IllegalArgumentException("event " + type + " requires generation");
             }

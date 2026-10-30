@@ -290,7 +290,33 @@
         "exclude": [],
         "predicate": null
       },
-      "iterator": "Whole"
+      "iterator": "Whole",
+      "notes": "Heartbeat refresh only target transport liveness. Transport flow observations and watermarks never update heartbeat health."
+    },
+    {
+      "id": "observe_transport_flow",
+      "operator": "client.android_connection_service.observe_transport_flow",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.target_transport",
+        "arc.service_policy"
+      ],
+      "output": {
+        "id": "arc.transport_flow",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "notes": "Projects native DataChannel buffered bytes and service-owned queued bytes. High-water (128 KiB) sets backpressured; low-water (64 KiB) clears it. An OPEN congested transport keeps its pending frame and does not escalate to reconnect."
     },
     {
       "id": "schedule_backoff_reconnect",
@@ -326,7 +352,8 @@
         "arc.release_plan",
         "arc.target_transport",
         "arc.connection_health",
-        "arc.backoff_plan"
+        "arc.backoff_plan",
+        "arc.transport_flow"
       ],
       "output": {
         "id": "arc.service_snapshot",
@@ -482,6 +509,11 @@
       "arc_id": "arc.target_transport"
     },
     {
+      "from": "establish_physical_transport",
+      "to": "observe_transport_flow",
+      "arc_id": "arc.target_transport"
+    },
+    {
       "from": "maintain_heartbeat",
       "to": "schedule_backoff_reconnect",
       "arc_id": "arc.connection_health"
@@ -505,6 +537,11 @@
       "from": "establish_physical_transport",
       "to": "project_service_snapshot",
       "arc_id": "arc.target_transport"
+    },
+    {
+      "from": "observe_transport_flow",
+      "to": "project_service_snapshot",
+      "arc_id": "arc.transport_flow"
     },
     {
       "from": "maintain_heartbeat",
@@ -574,6 +611,11 @@
     {
       "from": "dagpipe.extract.arc.service_policy",
       "to": "maintain_heartbeat",
+      "arc_id": "arc.service_policy"
+    },
+    {
+      "from": "dagpipe.extract.arc.service_policy",
+      "to": "observe_transport_flow",
       "arc_id": "arc.service_policy"
     },
     {

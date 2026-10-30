@@ -13,5 +13,6 @@ source "${ANDROID_ROOT}/scripts/setup-android-java.sh"
 ./gradlew app:testDebugUnitTest \
   --tests com.zterm.android.AndroidConnectionServiceTransportTest \
   --tests com.zterm.android.AndroidRtcTransportBackendTest \
+  --tests com.zterm.android.AndroidConnectionStateMachineFlowTest \
   assembleDebug \
   --no-daemon

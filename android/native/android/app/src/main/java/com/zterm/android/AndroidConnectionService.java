@@ -130,6 +130,11 @@ public class AndroidConnectionService extends Service {
 
     /** Maximum per-channel pending frame window for transient transport outages. */
     static final int TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL = 256;
+    /** Send flow-control watermarks (bytes). One owner: AndroidConnectionService. */
+    static final long SEND_FLOW_HIGH_WATER_BYTES = 128 * 1024L;
+    static final long SEND_FLOW_LOW_WATER_BYTES = 64 * 1024L;
+    /** Wait wake-up for an OPEN connection that refuses a send. */
+    static final long SEND_CONGESTION_WAKEUP_MS = 200L;
 
     @Override
     public void onCreate() {
@@ -1306,6 +1311,17 @@ public class AndroidConnectionService extends Service {
                     }
 
                     @Override
+                    public void onRtcFlowChanged(long bufferedBytes) {
+                        workerHandler.post(() -> {
+                            if (stopped || rtcBackend != self() || generation == null
+                                || transportNetworkGeneration != networkEpoch) {
+                                return;
+                            }
+                            publishTransportFlow(bufferedBytes, System.currentTimeMillis());
+                        });
+                    }
+
+                    @Override
                     public void onRtcText(String text) {
                         workerHandler.post(() -> {
                             if (stopped || rtcBackend != self() || generation == null
@@ -2158,6 +2174,19 @@ public class AndroidConnectionService extends Service {
                     retryLifecycleEpoch, gate));
                 return;
             }
+            // Congestion admission. For an OPEN RTC channel, a rising buffered
+            // amount is not a physical disconnect: keep the same frame at the
+            // head, park it, and let the drain callback / wake-up resume it.
+            if (retryRtcBackend != null && retryRtcBackend.isOpen()
+                && isSendCongested(retryRtcBackend.bufferedAmount())) {
+                sendRetryPending = true;
+                scheduleSendRetry(() -> attemptSendWithRetry(
+                    frame, channelId, source, requireOpenedChannel, gate,
+                    retrySocket, retryRtcBackend, retryGeneration,
+                    retryNetworkGeneration, currentLifecycleEpoch,
+                    Math.min(attempt + 1, SEND_RETRY_MAX)));
+                return;
+            }
             try {
                 boolean sent = retryRtcBackend != null
                     ? retryRtcBackend.sendText(frame.toString())
@@ -2211,6 +2240,17 @@ public class AndroidConnectionService extends Service {
                     return;
                 }
             }
+            // OPEN but send() returned false, or a retry was attempted, is a
+            // congestion wait for RTC. It must not escalate to reconnect.
+            if (retryRtcBackend != null && retryRtcBackend.isOpen()) {
+                sendRetryPending = true;
+                scheduleSendRetry(() -> attemptSendWithRetry(
+                    frame, channelId, source, requireOpenedChannel, gate,
+                    retrySocket, retryRtcBackend, retryGeneration,
+                    retryNetworkGeneration, channelLifecycleEpoch(channelId),
+                    Math.min(attempt + 1, SEND_RETRY_MAX)));
+                return;
+            }
             if (attempt >= SEND_RETRY_MAX) {
                 sendRetryPending = false;
                 parkCurrentAndDeferredForReconnect(new DeferredSend(
@@ -2236,6 +2276,10 @@ public class AndroidConnectionService extends Service {
                 scheduledLifecycleEpoch,
                 attempt + 1
             ));
+        }
+
+        private boolean isSendCongested(long bufferedBytes) {
+            return bufferedBytes >= SEND_FLOW_HIGH_WATER_BYTES;
         }
 
         private void parkCurrentAndDeferredForReconnect(DeferredSend current) {
@@ -2632,6 +2676,33 @@ public class AndroidConnectionService extends Service {
 
         private void transportFailure(String code, String message) {
             transportFailure(code, message, null);
+        }
+
+        private void publishTransportFlow(long nativeBufferedBytes, long sampledAt) {
+            if (stateMachine == null) {
+                return;
+            }
+            long serviceQueuedBytes = 0L;
+            long serviceQueuedFrames = 0L;
+            for (java.util.ArrayDeque<JSONObject> queue : pendingFrames.values()) {
+                serviceQueuedFrames += queue.size();
+                for (JSONObject queued : queue) {
+                    serviceQueuedBytes += queued == null ? 0L
+                        : queued.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+                }
+            }
+            for (DeferredSend deferred : retryDeferredFrames) {
+                if (deferred == null || deferred.frame == null) {
+                    continue;
+                }
+                serviceQueuedFrames += 1L;
+                serviceQueuedBytes += deferred.frame.toString()
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            }
+            boolean backpressured = nativeBufferedBytes >= SEND_FLOW_HIGH_WATER_BYTES;
+            stateMachine.dispatch(AndroidConnectionServiceEvent.transportFlowChanged(
+                generation, nativeBufferedBytes, serviceQueuedBytes, serviceQueuedFrames,
+                backpressured, sampledAt), sampledAt);
         }
 
         private void transportFailure(String code, String message, RouteCandidateDiagnostic failed) {

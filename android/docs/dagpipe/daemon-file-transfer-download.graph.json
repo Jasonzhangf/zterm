@@ -55,6 +55,29 @@
       "iterator": "Whole"
     },
     {
+      "id": "dagpipe.extract.arc.transport_flow",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.transport_flow",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
       "id": "validate_download",
       "operator": "daemon.file_transfer.validate_download",
       "operator_version": "0.1",
@@ -102,11 +125,36 @@
       "iterator": "Whole"
     },
     {
+      "id": "admit_download_send",
+      "operator": "daemon.file_transfer.download_send_admission",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.download_chunk",
+        "arc.transport_flow"
+      ],
+      "output": {
+        "id": "arc.download_sent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole",
+      "notes": "Reads the physical transport backpressure snapshot before each chunk. High-water pauses and waits 20 ms (single cancellable timer); low-water resumes from the same chunk index. Transport retire/cancel stops the request and never emits complete."
+    },
+    {
       "id": "ack_download_chunk",
       "operator": "daemon.file_transfer.download_ack",
       "operator_version": "0.1",
       "inputs": [
-        "arc.download_chunk"
+        "arc.download_sent"
       ],
       "output": {
         "id": "arc.download_complete",
@@ -133,13 +181,23 @@
     },
     {
       "from": "download_segment",
-      "to": "ack_download_chunk",
+      "to": "admit_download_send",
       "arc_id": "arc.download_chunk"
+    },
+    {
+      "from": "admit_download_send",
+      "to": "ack_download_chunk",
+      "arc_id": "arc.download_sent"
     },
     {
       "from": "dagpipe.extract.arc.download_intent",
       "to": "validate_download",
       "arc_id": "arc.download_intent"
+    },
+    {
+      "from": "dagpipe.extract.arc.transport_flow",
+      "to": "admit_download_send",
+      "arc_id": "arc.transport_flow"
     },
     {
       "from": "dagpipe.extract.arc.transfer_policy",

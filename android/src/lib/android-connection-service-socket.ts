@@ -22,7 +22,20 @@ import type { AndroidConnectionServiceTarget } from './android-connection-servic
  * heartbeat, or probes/reconnects on its own.
  */
 export class AndroidConnectionServiceTransportSocket implements BridgeTransportSocket {
-  readonly bufferedAmount = 0;
+  /**
+   * Current sender-owned buffered bytes projected from the native transport
+   * flow snapshot. This is the sum of native DataChannel buffered bytes and
+   * service-owned queued frames. Returns 0 only when no flow observation has
+   * been received yet (e.g. before mux-ready); callers must not treat 0 as a
+   * proof of "native has drained".
+   */
+  get bufferedAmount(): number {
+    const flow = this.readySnapshot?.transportFlow;
+    if (!flow) {
+      return 0;
+    }
+    return Math.max(0, Math.floor(flow.nativeBufferedBytes + flow.serviceQueuedBytes));
+  }
   readonly transportOwnership = 'service' as const;
   readyState: number = WebSocket.CONNECTING;
   private openHandler: ((event?: Event) => void) | null = null;
@@ -157,6 +170,20 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       }),
     ]);
     this.removeListeners.push(...handles.map((handle) => () => handle.remove()));
+  }
+
+  getTransportFlowDiagnostics() {
+    const flow = this.readySnapshot?.transportFlow;
+    if (!flow) {
+      return null;
+    }
+    return {
+      nativeBufferedBytes: Math.max(0, Math.floor(flow.nativeBufferedBytes)),
+      serviceQueuedBytes: Math.max(0, Math.floor(flow.serviceQueuedBytes)),
+      serviceQueuedFrames: Math.max(0, Math.floor(flow.serviceQueuedFrames)),
+      backpressured: Boolean(flow.backpressured),
+      sampledAt: Math.max(0, Math.floor(flow.sampledAt)),
+    };
   }
 
   private clearProjectedChannels(reason: string, code: string) {
