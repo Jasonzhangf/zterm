@@ -33,11 +33,12 @@ Remaining gates (external resources, not code):
 - A genuinely blank supported OS machine/VM from which to run
   `docs/install-from-zero.md` end-to-end, including upgrade/rollback and the
   Collab blank-machine install-order handshake.
-- Physical 15T network-transition L5: the 15T (`100.104.163.65:5555`, PLZ110,
-  Android 16) still runs build 3232 and was observed in active camera use
-  (`com.zcam.app`). It needs a coordinated window to install build 3236 and run
-  the sleep/background/LAN/cellular/Tailscale transitions without disturbing
-  the user.
+- Physical 15T network-transition L5: build 3236 is now installed on the 15T
+  (`100.104.163.65:5555`, PLZ110, Android 16; versionName 0.1.3.3236,
+  versionCode 1100032360). The device was asleep with `com.zcam.app` foreground.
+  The sleep/background/LAN/cellular/Tailscale transition L5 still needs a
+  coordinated window, because toggling network drops adb-over-Tailscale and may
+  disturb active use.
 
 ## Required Operating Rules
 
