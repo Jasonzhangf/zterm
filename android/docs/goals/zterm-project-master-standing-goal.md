@@ -28,9 +28,16 @@ All project board tasks are closed and merged to `main`:
   the cycle's technical rulings; VERDICT PASS.
 - `public-release-blank-machine-audit-20261029` (P1): audit deliverable accepted.
 
-Remaining gate (external resource, not code): a genuinely blank supported OS
-machine/VM from which to run `docs/install-from-zero.md` end-to-end, including
-upgrade/rollback and the Collab blank-machine install-order handshake.
+Remaining gates (external resources, not code):
+
+- A genuinely blank supported OS machine/VM from which to run
+  `docs/install-from-zero.md` end-to-end, including upgrade/rollback and the
+  Collab blank-machine install-order handshake.
+- Physical 15T network-transition L5: the 15T (`100.104.163.65:5555`, PLZ110,
+  Android 16) still runs build 3232 and was observed in active camera use
+  (`com.zcam.app`). It needs a coordinated window to install build 3236 and run
+  the sleep/background/LAN/cellular/Tailscale transitions without disturbing
+  the user.
 
 ## Required Operating Rules
 
@@ -57,7 +64,12 @@ upgrade/rollback and the Collab blank-machine install-order handshake.
   daemon revision reset recovery merged in PR #183/#184; L5 evidence
   `android/evidence/2026-10-29-conn-recovery-l5-3236`.
 - Cross-machine messaging: PR #185 merged `d570e0c7`; review-10 PASS; daemon 50,
-  CLI 297/1 skip, feature-registry 106, shared app-protocol 7 tests green.
+  CLI 297/1 skip, feature-registry 106, shared app-protocol 7 tests green. Real
+  two-host acceptance passed on `Macstudio-2.local` (100.66.1.82) and
+  `Jennys-MacBook-Air.local` (100.93.143.20): bidirectional message and file
+  with byte/SHA-256 match, and daemon-restart file resume from a persisted
+  offset. Evidence:
+  `/Volumes/Intel/playground/zterm/.worker-runs/cli-cross-machine-messaging/two-machine-1/run.md`.
 - Public release `v0.1.3.3232`: non-draft GitHub Release with 15 verified
   assets, `verify-release-assets.mjs` 19/19; npm published and isolated-prefix
   verified for `@jsonstudio/zterm-cli@0.1.4`, `@jsonstudio/zterm-daemon@0.1.3`,
