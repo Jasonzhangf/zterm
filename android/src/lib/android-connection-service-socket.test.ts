@@ -53,6 +53,14 @@ const target = {
   authToken: 'token',
 };
 
+// The factory derives its target key via buildTransportTargetKey (daemon id),
+// which differs from the direct-socket fixture above. Reattach-mode decisions
+// compare the snapshot target to the factory-built key.
+const factoryTarget = {
+  ...target,
+  targetKey: 'daemon=mac-studio',
+};
+
 const muxReadyPayload = buildTerminalMuxReady({ daemonHostId: 'daemon-host' }).payload;
 
 describe('AndroidConnectionServiceTransportSocket', () => {
@@ -1057,6 +1065,218 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     }));
     // A second reattach is a no-op while the projection is attached.
     expect(await socket.reattach()).toBe(false);
+  });
+
+  it('does not bind when an already-bound OPEN target is resumed in reattach mode', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'mux-ready',
+      generation: 'g-live',
+      target: factoryTarget,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'open', sessionName: 'shell' }],
+      lastHeartbeatAt: 1,
+      lastActivityAt: 1,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    plugin.sendCommand.mockResolvedValue({ ok: true, outputs: {} });
+    const socket = openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    }, undefined, { mode: 'reattach' });
+    const opened = vi.fn();
+    const messages: string[] = [];
+    socket.onopen = opened;
+    socket.onmessage = (event) => messages.push(String(event.data));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+    }));
+    expect(opened).toHaveBeenCalled();
+    expect(messages.map((message) => JSON.parse(message).type)).toEqual(['mux-ready', 'mux-channel-opened']);
+  });
+
+  it('binds when the native service has no target for the resumed key', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'idle',
+      generation: null,
+      target: null,
+      route: null,
+      channels: [],
+      lastHeartbeatAt: null,
+      lastActivityAt: null,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload: null,
+    });
+    plugin.sendCommand.mockResolvedValue({ ok: true, outputs: {} });
+    void openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    }, undefined, { mode: 'reattach' });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(plugin.sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+      target: expect.objectContaining({ targetKey: 'daemon=mac-studio' }),
+    }));
+  });
+
+  it('does not bind when the resumed snapshot read fails', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockRejectedValue(new Error('snapshot read unavailable'));
+    plugin.sendCommand.mockResolvedValue({ ok: true, outputs: {} });
+    void openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    }, undefined, { mode: 'reattach' });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+    }));
+  });
+
+  it('keeps native backoff and does not bind when a resumed target is in backoff-reconnect', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'backoff-reconnect',
+      generation: null,
+      target: factoryTarget,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: null,
+      lastActivityAt: 1,
+      nextRetryAt: 2,
+      error: { code: 'transport', message: 'recovering' },
+      muxReadyPayload: null,
+    });
+    plugin.sendCommand.mockResolvedValue({ ok: true, outputs: {} });
+    const socket = openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    }, undefined, { mode: 'reattach' });
+    const opened = vi.fn();
+    socket.onopen = opened;
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    expect(plugin.sendCommand).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+    }));
+    expect(socket.readyState).toBe(WebSocket.CLOSED);
+
+    // Native recovers on its own; the reattached projection restores exactly once.
+    listeners.get('androidConnectionServerFrame')?.({
+      targetKey: factoryTarget.targetKey,
+      type: 'mux-ready',
+      generation: 'g-recovered',
+      receivedAt: 3,
+      payload: muxReadyPayload,
+    });
+    await Promise.resolve();
+    listeners.get('androidConnectionServerFrame')?.({
+      targetKey: factoryTarget.targetKey,
+      type: 'mux-ready',
+      generation: 'g-recovered',
+      receivedAt: 4,
+      payload: muxReadyPayload,
+    });
+    await Promise.resolve();
+
+    expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it('still reaches the native owner for an explicit config change even when a target is bound', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'mux-ready',
+      generation: 'g-live',
+      target: factoryTarget,
+      route: { mode: 'auto' },
+      channels: [{ channelId: 'channel-1', state: 'open', sessionName: 'shell' }],
+      lastHeartbeatAt: 1,
+      lastActivityAt: 1,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+    });
+    plugin.sendCommand.mockResolvedValue({ ok: true, outputs: {} });
+    void openAndroidConnectionServiceTransportSocket({
+      id: 'host-1',
+      createdAt: 1,
+      name: 'mac-studio',
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      authToken: target.authToken,
+      daemonHostId: 'mac-studio',
+      sessionName: 'shell',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await Promise.resolve();
+
+    // Default opens are typed connect/config path; the native owner still
+    // receives the bind so it can apply its own equality/replacement policy.
+    expect(plugin.sendCommand).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'bind-target',
+      target: expect.objectContaining({ targetKey: 'daemon=mac-studio' }),
+    }));
   });
 
   it('maps channel frames to typed service commands without owning transport', () => {

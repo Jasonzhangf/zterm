@@ -55,6 +55,52 @@
       "iterator": "Whole"
     },
     {
+      "id": "dagpipe.extract.arc.lifecycle_demand",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.lifecycle_demand",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "dagpipe.extract.arc.native_transport_projection",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.native_transport_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
       "id": "open_tab",
       "operator": "client.app_shell.open_tab",
       "operator_version": "0.1",
@@ -105,10 +151,35 @@
       "operator": "client.session_runtime.subscribe",
       "operator_version": "0.1",
       "inputs": [
-        "arc.active_session"
+        "arc.retained_session_projection"
       ],
       "output": {
         "id": "arc.body_subscription",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "reattach_session_projection",
+      "operator": "client.session_runtime.reattach_projection",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.active_session",
+        "arc.lifecycle_demand",
+        "arc.native_transport_projection"
+      ],
+      "output": {
+        "id": "arc.retained_session_projection",
         "schema": "Object"
       },
       "input_selector": {
@@ -252,8 +323,23 @@
     },
     {
       "from": "activate_session",
-      "to": "subscribe_body",
+      "to": "reattach_session_projection",
       "arc_id": "arc.active_session"
+    },
+    {
+      "from": "dagpipe.extract.arc.lifecycle_demand",
+      "to": "reattach_session_projection",
+      "arc_id": "arc.lifecycle_demand"
+    },
+    {
+      "from": "dagpipe.extract.arc.native_transport_projection",
+      "to": "reattach_session_projection",
+      "arc_id": "arc.native_transport_projection"
+    },
+    {
+      "from": "reattach_session_projection",
+      "to": "subscribe_body",
+      "arc_id": "arc.retained_session_projection"
     },
     {
       "from": "subscribe_body",

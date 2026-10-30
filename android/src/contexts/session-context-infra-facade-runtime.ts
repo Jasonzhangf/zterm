@@ -524,7 +524,10 @@ export function createSessionInfraFacadeRuntime(options: {
     });
   };
 
-  const openDaemonTargetTransportSocket = (host: Host) => {
+  const openDaemonTargetTransportSocket = (
+    host: Host,
+    openOptions?: { mode?: 'bind' | 'reattach' },
+  ) => {
     if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
       return openAndroidConnectionServiceTransportSocket(host, {
         signalUrl: options.bridgeSettings.signalUrl,
@@ -532,7 +535,7 @@ export function createSessionInfraFacadeRuntime(options: {
         turnUsername: options.bridgeSettings.turnUsername,
         turnCredential: options.bridgeSettings.turnCredential,
         traversalRelay: options.bridgeSettings.traversalRelay,
-      });
+      }, { mode: openOptions?.mode });
     }
     return buildTraversalSocketForHostRuntime({
       host,
