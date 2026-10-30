@@ -15,11 +15,13 @@ import type {
 function makeTransport(options: {
   readyState?: number;
   bufferedAmount?: number;
+  flowUnknown?: boolean;
 } = {}) {
   return {
     kind: 'ws' as const,
     readyState: options.readyState ?? 1,
     bufferedAmount: options.bufferedAmount ?? 0,
+    flowUnknown: options.flowUnknown,
     backpressureCount: 0,
     sendText: () => undefined,
     close: () => undefined,
@@ -171,6 +173,39 @@ describe('daemon buffer publisher runtime', () => {
     transport.bufferedAmount = 0;
     transport.backpressureCount = 0;
     expect(publisher.flushPendingSubscriberBufferSync(mirror, 's1')).toBe('sent');
+    expect(session.bufferSyncState?.pendingLatestRevision).toBeNull();
+  });
+
+  it('holds pending frames while the transport flow observation is unknown', () => {
+    const transport = makeTransport({ bufferedAmount: 0, flowUnknown: true });
+    const session = makeSession('s1', transport);
+    const sent: string[] = [];
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      sendText: (_transport, text) => {
+        sent.push(text);
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1']);
+
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 2, endIndex: 3 }],
+    );
+
+    // An unknown flow observation is not proof of an empty queue: hold the
+    // frame and send nothing until a real bufferedAmount value is projected.
+    expect(sent).toHaveLength(0);
+    expect(session.bufferSyncState?.pendingLatestRevision).toBe(1);
+    expect(publisher.flushPendingSubscriberBufferSync(mirror, 's1')).toBe('backpressured');
+
+    // Once the client reports a real flow value, the held frame flushes at the
+    // same revision identity with no chunk loss.
+    transport.flowUnknown = false;
+    expect(publisher.flushPendingSubscriberBufferSync(mirror, 's1')).toBe('sent');
+    expect(sent).toHaveLength(1);
+    expect(session.bufferSyncState?.lastSentRevision).toBe(1);
     expect(session.bufferSyncState?.pendingLatestRevision).toBeNull();
   });
 

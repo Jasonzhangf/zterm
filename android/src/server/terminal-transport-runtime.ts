@@ -30,6 +30,7 @@ export interface TerminalTransportBackpressureSnapshot {
   bufferedBytes: number;
   backpressure: boolean;
   lowWaterDrained: boolean;
+  flowUnknown: boolean;
   backpressureCount: number;
   lastSendBytes: number;
   totalSendBytes: number;
@@ -74,6 +75,7 @@ export function readTerminalTransportBackpressureSnapshot(
     return null;
   }
   const bufferedBytes = Math.max(0, Math.floor(transport.bufferedAmount || 0));
+  const flowUnknown = !!transport.flowUnknown;
   const backpressure = bufferedBytes >= TRANSPORT_BACKPRESSURE_BUFFERED_BYTES;
   if (backpressure) {
     transport.backpressureCount = Math.max(0, Math.floor(transport.backpressureCount || 0)) + 1;
@@ -86,6 +88,7 @@ export function readTerminalTransportBackpressureSnapshot(
     bufferedBytes,
     backpressure,
     lowWaterDrained: bufferedBytes <= TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES,
+    flowUnknown,
     backpressureCount: Math.max(0, Math.floor(transport.backpressureCount || 0)),
     lastSendBytes: Math.max(0, Math.floor(transport.lastSendBytes || 0)),
     totalSendBytes: Math.max(0, Math.floor(transport.totalSendBytes || 0)),

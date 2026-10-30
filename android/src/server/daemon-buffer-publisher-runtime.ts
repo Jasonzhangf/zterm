@@ -249,6 +249,13 @@ export function createDaemonBufferPublisherRuntime(
     if (!snapshot?.ready) {
       return true;
     }
+    if (snapshot.flowUnknown) {
+      // No valid flow observation yet (Android service has not projected the
+      // first native bufferedAmount snapshot). A missing observation is not
+      // proof of an empty queue, so hold the same frame until a real flow
+      // value arrives; never treat unknown as drained.
+      return true;
+    }
     if (snapshot.backpressure) {
       state.highWaterActive = true;
       if (!state.highWaterEnteredAt) {

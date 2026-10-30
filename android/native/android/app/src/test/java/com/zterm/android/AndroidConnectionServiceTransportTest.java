@@ -2651,6 +2651,37 @@ public final class AndroidConnectionServiceTransportTest {
         }
     }
 
+    @Test
+    public void generationRetirementClearsScopedCongestionDraining() throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            Object runtime = newRuntime(service);
+            setField(runtime, "stateMachine", readyStateMachine());
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "congestionDraining", true);
+
+            // The congestion-drain gate is generation-scoped. A reset or close
+            // that retires the physical generation must clear it so a
+            // replacement generation cannot inherit a stale drain flag.
+            Method resetAttempt = runtime.getClass().getDeclaredMethod("resetAttemptState");
+            resetAttempt.setAccessible(true);
+            resetAttempt.invoke(runtime);
+            assertEquals("reset attempt must clear generation congestion state",
+                Boolean.FALSE, field(runtime, "congestionDraining"));
+
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "congestionDraining", true);
+            Method close = runtime.getClass().getDeclaredMethod("close", String.class);
+            close.setAccessible(true);
+            close.invoke(runtime, "service-close");
+            assertEquals("service close must clear generation congestion state",
+                Boolean.FALSE, field(runtime, "congestionDraining"));
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
     private static void registerRuntime(
         AndroidConnectionService service, String targetKey, Object runtime
     ) throws Exception {

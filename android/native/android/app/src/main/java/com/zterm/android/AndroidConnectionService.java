@@ -2735,6 +2735,7 @@ public class AndroidConnectionService extends Service {
                 committedCandidate == null ? null : committedCandidate.candidateId);
             String failedGeneration = generation;
             generation = null;
+            congestionDraining = false;
             AndroidConnectionServiceSnapshot snapshot = stateMachine == null
                 ? AndroidConnectionServiceSnapshot.empty() : stateMachine.readSnapshot();
             List<AndroidConnectionServiceSnapshot.RouteDiagnostic> diagnostics =
@@ -2771,6 +2772,7 @@ public class AndroidConnectionService extends Service {
             }
             String failedGeneration = generation;
             generation = null;
+            congestionDraining = false;
             AndroidConnectionServiceSnapshot currentSnapshot = stateMachine == null
                 ? AndroidConnectionServiceSnapshot.empty() : stateMachine.readSnapshot();
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportFailure(
@@ -2801,6 +2803,7 @@ public class AndroidConnectionService extends Service {
             closeRtcQuietly();
             String failedGeneration = generation;
             generation = null;
+            congestionDraining = false;
             stateMachine.dispatch(AndroidConnectionServiceEvent.terminalFailure(
                 failedGeneration, message), System.currentTimeMillis());
             publishPhysicalError(code, message);
@@ -2816,6 +2819,7 @@ public class AndroidConnectionService extends Service {
             closeRtcQuietly();
             String failedGeneration = generation;
             generation = null;
+            congestionDraining = false;
             stateMachine.dispatch(AndroidConnectionServiceEvent.authenticationFailure(
                 failedGeneration, message), System.currentTimeMillis());
             publishPhysicalError(code, message);
@@ -2838,6 +2842,7 @@ public class AndroidConnectionService extends Service {
             generation = null;
             socket = null;
             rtcBackend = null;
+            congestionDraining = false;
             activeRtcCandidate = null;
             backoffIndex = 0;
             heartbeatMisses = 0;
@@ -2860,6 +2865,7 @@ public class AndroidConnectionService extends Service {
             socket = null;
             closeRtcQuietly();
             generation = null;
+            congestionDraining = false;
         }
 
         synchronized void setTestRouteDiagnostics(List<RouteCandidateDiagnostic> diagnostics) {
