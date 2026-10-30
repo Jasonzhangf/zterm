@@ -39,6 +39,7 @@ import {
 import { createNodePrompts, type PromptPort } from './prompts.js';
 import { createRendererWindow } from './renderer-window.js';
 import { upgradeCli } from './release.js';
+import { APP_HELP, runAppCommand } from './commands/app-messaging.js';
 import type {
   CliSlotBinding,
   SlotListEntry,
@@ -74,6 +75,7 @@ const HELP = `用法：
   zterm daemon install [--version <version>] [--registry <url>]
   zterm daemon status
   zterm daemon config
+  zterm app stream|send|send-file|status|ack|consume
   zterm --help
   zterm --version
 `;
@@ -154,6 +156,7 @@ interface MainContext {
   store: SharedConfigStore;
   accountClient: MainAccountClient;
   prompts: PromptPort;
+  stdin: Readable;
   stdout: Writable;
   stderr: Writable;
   signal: AbortSignal;
@@ -938,6 +941,8 @@ async function dispatch(argv: string[], context: MainContext): Promise<number> {
       return runUpgrade(args, context);
     case 'daemon':
       return runDaemon(args, context);
+    case 'app':
+      return runAppCommand(args, context);
     default:
       return usage(context.stderr, `未知命令：${command}`);
   }
@@ -958,6 +963,7 @@ export async function runMain(
       output: stdout,
       signal,
     }),
+    stdin: options.stdin ?? process.stdin,
     stdout,
     stderr,
     signal,

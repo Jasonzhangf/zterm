@@ -83,6 +83,8 @@ import {
 } from './terminal-daemon-runtime';
 import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
 import { createTerminalAttachTokenRuntime } from './terminal-attach-token-runtime';
+import { createDaemonAppMessagingRuntime } from './daemon-app-messaging-runtime';
+import { createDaemonAppGateway } from './daemon-app-websocket-runtime';
 import { captureRemoteScreenshotWithDaemon } from './remote-screenshot-daemon';
 import {
   buildRemoteWindowImagePasteInputPayloads,
@@ -797,6 +799,51 @@ relayHostClient = createTraversalRelayHostClient({
   }),
   listTerminalSessionCatalog,
 });
+
+async function startAppMessagingGateway() {
+  const appMessagingRuntime = createDaemonAppMessagingRuntime({
+    appRootDir: WTERM_HOME_DIR,
+    deviceId: DAEMON_CONFIG.deviceId,
+    daemonHostId: DAEMON_CONFIG.daemonHostId,
+  });
+  await appMessagingRuntime.initialize().catch((error: unknown) => {
+    console.error(
+      `[${logTimePrefix()}] app messaging initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+  let appGateway: ReturnType<typeof createDaemonAppGateway> | null = null;
+  try {
+    appGateway = createDaemonAppGateway({
+      requiredAuthToken: REQUIRED_AUTH_TOKEN,
+      daemonHostId: DAEMON_CONFIG.daemonHostId,
+      deviceId: DAEMON_CONFIG.deviceId,
+      messaging: appMessagingRuntime,
+      log: (message) => console.warn(`[${logTimePrefix()}] ${message}`),
+    });
+  } catch (error: unknown) {
+    console.error(
+      `[${logTimePrefix()}] app messaging gateway unavailable: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  server.on('upgrade', (request, socket, head) => {
+    if (appGateway?.handleServerUpgrade(request, socket, head)) return;
+    handleServerUpgrade(request, socket, head);
+  });
+  server.on('close', () => {
+    appGateway?.dispose();
+    appMessagingRuntime.dispose();
+  });
+  server.listen(PORT, HOST, () => {
+    handleDaemonServerListening();
+  });
+}
+void startAppMessagingGateway().catch((error: unknown) => {
+  console.error(
+    `[${logTimePrefix()}] app messaging gateway startup failed: ${error instanceof Error ? error.message : String(error)}`,
+  );
+});
+
 wss.on('connection', handleWebSocketConnection);
 startHeartbeatLoop();
 startMemoryGuardLoop();
@@ -816,12 +863,6 @@ wss.on('close', () => {
 
 server.on('error', (error) => {
   handleDaemonServerError(error);
-});
-
-server.on('upgrade', handleServerUpgrade);
-
-server.listen(PORT, HOST, () => {
-  handleDaemonServerListening();
 });
 
 process.on('SIGINT', () => shutdownDaemon('SIGINT', 0));

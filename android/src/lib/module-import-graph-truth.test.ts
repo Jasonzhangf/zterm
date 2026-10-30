@@ -49,7 +49,12 @@ const SHARED_V2_SOURCE_FILES = [
   'packages/shared/src/terminal/plugin-capability-registry.ts',
   'packages/shared/src/terminal/plugin-ui-slot.ts',
   'packages/shared/src/terminal/plugin-ui-slot-registry.ts',
+  'packages/shared/src/connection/app-protocol.ts',
 ] as const;
+
+const SHARED_PACKAGE_EXPORT_ALIASES = new Map([
+  ['@zterm/shared/app-protocol', 'packages/shared/src/connection/app-protocol.ts'],
+]);
 
 function listSourceFiles(): string[] {
   const result: string[] = [];
@@ -111,7 +116,10 @@ const IMPORT_PATTERN =
 
 function resolveImport(fromFile: string, spec: string, owned: Set<string>): string | null {
   let target: string;
-  if (spec.startsWith('.')) {
+  const packageAlias = SHARED_PACKAGE_EXPORT_ALIASES.get(spec);
+  if (packageAlias) {
+    target = packageAlias;
+  } else if (spec.startsWith('.')) {
     target = normalize(join(dirname(fromFile), spec)).replace(/\\/g, '/');
   } else if (spec.startsWith('@/')) {
     target = `src/${spec.slice(2)}`;

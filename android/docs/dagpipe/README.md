@@ -363,3 +363,19 @@ client wrapper entries are N/A on the client side by ownership:
 - `daemon-connection-channel-catalog` 与客户端连接图不合并，owner 边界不同。
 - file-transfer / attachment / screenshot / remote-window 不是死图，当前作为
   admission gate 保留，等 parity 后再消融对应 TS 重复 owner。
+
+## Phase 11 static app-messaging design graph (2026-10-28)
+
+- `daemon-app-messaging.graph.json` - one `/app` request or recovery
+  transaction: extract -> v1 validation -> route resolution -> authenticated
+  admission -> durable operation preparation -> operation execution ->
+  observation publication -> terminal settlement.
+
+The graph keeps one external input and one external output. It covers local
+stream/replay, status/ack/consume, message send, file start/chunk/commit/resume,
+pre-send Outbox persistence, `resultUnknown`, cancellation, and subscriber/peer
+release through typed outcomes, not graph back edges. Its operators are
+declarative owner mappings for `shared.app_protocol`, `cli.app_messaging`,
+`daemon.app_gateway`, and `daemon.app_messaging`; static phase0 validation does
+not register a native executor. Contract:
+`../decisions/2026-10-28-cli-cross-machine-messaging.md`.

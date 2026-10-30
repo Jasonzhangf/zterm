@@ -1,5 +1,5 @@
 import type { IncomingMessage } from 'http';
-import type { Socket } from 'net';
+import type { Duplex } from 'stream';
 import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { createRtcBridgeServer, type RtcServerTransport, type SignalMessage } from './rtc-bridge';
 import type { TerminalTransportSubscriber } from './terminal-runtime';
@@ -35,7 +35,7 @@ export interface TerminalBridgeRuntimeDeps {
 export interface TerminalBridgeRuntime {
   rtcBridgeServer: ReturnType<typeof createRtcBridgeServer>;
   handleWebSocketConnection: (ws: WebSocket, request: IncomingMessage) => void;
-  handleServerUpgrade: (request: IncomingMessage, socket: Socket, head: Buffer) => void;
+  handleServerUpgrade: (request: IncomingMessage, socket: Duplex, head: Buffer) => void;
   handleRelaySignal: (
     peerId: string,
     message: SignalMessage,
@@ -297,7 +297,7 @@ export function createTerminalBridgeRuntime(
     });
   }
 
-  function handleServerUpgrade(request: IncomingMessage, socket: Socket, head: Buffer) {
+  function handleServerUpgrade(request: IncomingMessage, socket: Duplex, head: Buffer) {
     const origin = deps.resolveRequestOrigin(request);
     const pathname = new URL(request.url || '/', origin).pathname;
 

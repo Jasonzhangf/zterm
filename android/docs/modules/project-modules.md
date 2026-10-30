@@ -84,6 +84,8 @@ The v2 client DAG baseline physically separates composition from transport primi
 | `daemon.schedule_runtime` | `resource.schedule_job` | backend session | UI/renderer timers |
 | `daemon.file_transfer` | `resource.file_transfer`, `resource.remote_screenshot` | backend session, transport subscriber | UI guesses, client window state |
 | `daemon.remote_window_stream` | `resource.remote_window_stream`, `resource.remote_window_canvas_layout`, `resource.remote_window_focus_stream`, `resource.remote_window_overview_stream`; pending resources (design): `resource.remote_window_canvas_raw`, `resource.remote_window_canvas_encode`, `resource.remote_window_capture_backpressure`, `resource.remote_window_input_delivery_daemon` | daemon process, transport target, tmux reverse lookup | terminal mirror/buffer/render/UI truth |
+| `daemon.app_messaging` | `resource.daemon_app_messaging` | app protocol contract | terminal mux, tmux, mirror, renderer, UI, client session state |
+| `daemon.app_gateway` | `resource.daemon_app_gateway` | app messaging owner, app protocol contract | terminal mux, tmux, mirror, renderer, UI, second Inbox/Outbox |
 
 Daemon hard boundary:
 
@@ -97,6 +99,7 @@ Daemon hard boundary:
 - Daemon attachment delivery owns durable outbox files, per-device receipts, HTTP enqueue/read, and transport-message pending/history/asset/receipt projection. `terminal-message-runtime.ts` routes the four attachment message types only; it must not reimplement query/read/receipt logic.
 - Daemon file transfer transport-message projection belongs to `daemon.file_transfer`; `terminal-message-runtime.ts` routes paste/attach/list/download/screenshot/upload messages and raw binary chunks only to `src/server/terminal-file-transfer-message-runtime.ts`, which owns paste/attach pending start projection and delegates exact file/screenshot handling to the file transfer facade.
 - Daemon terminal source adapter contract ownership belongs to `daemon.source_adapter`; tmux/Herdr/WezTerm backend and mirror-capture readback consumers import the shared adapter contract from `src/server/terminal-source-adapter.ts` without re-owning kind normalization, source session shape, or readback snapshot shape.
+- Daemon app messaging has one durable business owner (`daemon.app_messaging`) and one authenticated physical ingress owner (`daemon.app_gateway`). Inbox and Outbox, dedupe, delivery state, replay, file staging/resume, integrity, and completed-file publication never move into the gateway, terminal mux, mirror store, or client. Peer connections are delivery-only and cannot enumerate, subscribe, ack, or consume.
 
 ## Client Modules
 
@@ -150,6 +153,7 @@ Client connection boundary:
 | `shared.control_contract` | Branded control command, result, correlation, deadline, idempotency, and audit contracts. |
 | `shared.node_contract` | Runtime node identity, lifecycle, disposal, subscription, and typed adjacent node contracts. |
 | `shared.debug_contract` | Versioned debug snapshots, debug events, filters, sensitivity classes, bounded stores, and expiring debug permission contracts. |
+| `shared.app_protocol` | App messaging protocol v1 frames, limits, stable identifiers, results, and typed errors. |
 | `shared.test_contracts` | Static gates for module, edge, resource, function, and mainline maps. |
 | `shared.test_environment` | Deterministic Vitest/jsdom browser Storage and environment bootstrap. |
 
