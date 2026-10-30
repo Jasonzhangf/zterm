@@ -1942,6 +1942,13 @@ public class AndroidConnectionService extends Service {
             stateMachine.dispatch(AndroidConnectionServiceEvent.muxReady(
                 generation, payload.toString()),
                 System.currentTimeMillis());
+            if (webSocket != null) {
+                // OKHttp WebSocket has no native bufferedAmount producer. Publish a
+                // valid service-owned flow observation at mux-ready so downstream
+                // buffer-sync and file-download admission leave the unknown-flow hold.
+                // A missing observation would otherwise be treated as unknown, not empty.
+                publishTransportFlow(0L, System.currentTimeMillis());
+            }
             publishServerFrame(AndroidConnectionServiceServerFrameEvent.Kind.MUX_READY, payload);
             replayDesiredChannels();
             refreshNotification();

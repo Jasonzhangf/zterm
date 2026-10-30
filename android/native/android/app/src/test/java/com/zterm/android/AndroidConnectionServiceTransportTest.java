@@ -2682,6 +2682,54 @@ public final class AndroidConnectionServiceTransportTest {
         }
     }
 
+    @Test
+    public void webSocketMuxReadyPublishesTransportFlowObservation() throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-ws-flow")
+                .bridgeHost("127.0.0.1")
+                .bridgePort(3333)
+                .build();
+            Object runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine", connectingStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+
+            List<String> sent = new ArrayList<>();
+            WebSocket socket = fakeSocket(sent, true);
+            java.util.Map<String, WebSocket> candidateSockets =
+                (java.util.Map<String, WebSocket>) field(runtime, "candidateSockets");
+            java.util.Map<String, Object> candidateDiagnostics =
+                (java.util.Map<String, Object>) field(runtime, "candidateDiagnostics");
+            Object diagnostic = candidateDiagnostic(runtime, "lan");
+            String candidateId = (String) candidateField(diagnostic, "candidateId");
+            candidateSockets.put(candidateId, socket);
+            candidateDiagnostics.put(candidateId, diagnostic);
+
+            Method handleMuxReady = runtime.getClass().getDeclaredMethod(
+                "handleMuxReady", JSONObject.class, WebSocket.class);
+            handleMuxReady.setAccessible(true);
+            handleMuxReady.invoke(runtime, muxReadyPayload(), socket);
+
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) field(runtime, "stateMachine");
+            AndroidConnectionServiceSnapshot snapshot = stateMachine.readSnapshot();
+            assertEquals(AndroidConnectionServiceSnapshot.State.MUX_READY, snapshot.state);
+            assertNotNull(
+                "direct WebSocket mux-ready must publish a valid flow observation",
+                snapshot.transportFlow);
+            assertEquals(
+                "OKHttp WebSocket has no native bufferedAmount producer",
+                0L, snapshot.transportFlow.nativeBufferedBytes);
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
     private static void registerRuntime(
         AndroidConnectionService service, String targetKey, Object runtime
     ) throws Exception {
