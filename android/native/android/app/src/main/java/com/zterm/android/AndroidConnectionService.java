@@ -910,6 +910,7 @@ public class AndroidConnectionService extends Service {
             new java.util.LinkedHashMap<>();
         private final java.util.Set<String> drainingPendingFrames =
             new java.util.HashSet<>();
+        private volatile boolean congestionDraining;
         private final java.util.ArrayDeque<DeferredSend> retryDeferredFrames =
             new java.util.ArrayDeque<>();
         private final java.util.Map<String, Long> channelLifecycleEpochs =
@@ -2177,8 +2178,9 @@ public class AndroidConnectionService extends Service {
             // Congestion admission. For an OPEN RTC channel, a rising buffered
             // amount is not a physical disconnect: keep the same frame at the
             // head, park it, and let the drain callback / wake-up resume it.
-            if (retryRtcBackend != null && retryRtcBackend.isOpen()
-                && isSendCongested(retryRtcBackend.bufferedAmount())) {
+           if (retryRtcBackend != null && retryRtcBackend.isOpen()
+               && isSendCongested(retryRtcBackend.bufferedAmount())) {
+               congestionDraining = true;
                 sendRetryPending = true;
                 scheduleSendRetry(() -> attemptSendWithRetry(
                     frame, channelId, source, requireOpenedChannel, gate,
@@ -2187,11 +2189,24 @@ public class AndroidConnectionService extends Service {
                     Math.min(attempt + 1, SEND_RETRY_MAX)));
                 return;
             }
+           if (congestionDraining && retryRtcBackend != null && retryRtcBackend.isOpen()) {
+               if (retryRtcBackend.bufferedAmount() > SEND_FLOW_LOW_WATER_BYTES) {
+                   sendRetryPending = true;
+                   scheduleSendRetry(() -> attemptSendWithRetry(
+                       frame, channelId, source, requireOpenedChannel, gate,
+                       retrySocket, retryRtcBackend, retryGeneration,
+                       retryNetworkGeneration, currentLifecycleEpoch,
+                       Math.min(attempt + 1, SEND_RETRY_MAX)));
+                   return;
+               }
+               congestionDraining = false;
+           }
             try {
                 boolean sent = retryRtcBackend != null
                     ? retryRtcBackend.sendText(frame.toString())
                     : retrySocket != null && retrySocket.send(frame.toString());
                 if (sent) {
+                    congestionDraining = false;
                     sendRetryPending = false;
                     consumeSuccessfulRetryFrame(frame, safeRetryChannelId);
                     java.util.ArrayDeque<JSONObject> sameChannelQueue =

@@ -515,4 +515,44 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
     expect(sentMessages.some((message) => message.type === 'file-download-complete')).toBe(false);
     expect(sentMessages.some((message) => message.type === 'file-download-error')).toBe(false);
   });
+
+  it('holds the first chunk while the transport flow observation is unknown', async () => {
+    const sentMessages: ServerMessage[] = [];
+    const transport = {
+      kind: 'ws' as const,
+      readyState: 1,
+      bufferedAmount: 0,
+      flowUnknown: true,
+      sendText: () => undefined,
+      close: () => undefined,
+    };
+    const session = makeSession();
+    session.transport = transport;
+    let chunkCount = 0;
+    const { runtime } = createRuntime(sentMessages, undefined, (_session, message) => {
+      sentMessages.push(message);
+      if (message.type === 'file-download-chunk') {
+        chunkCount += 1;
+      }
+    });
+    writeFileSync(join(tempDir!, 'unknown-flow.bin'), Buffer.alloc(FILE_CHUNK_SIZE * 2, 0x43));
+
+    runtime.handleFileDownloadRequest(session, {
+      requestId: 'download-unknown-flow',
+      remotePath: join(tempDir!, 'unknown-flow.bin'),
+      fileName: 'unknown-flow.bin',
+      totalBytes: FILE_CHUNK_SIZE * 2,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    await flushFileTransferMessages();
+
+    expect(chunkCount).toBe(0);
+    expect(sentMessages.some((message) => message.type === 'file-download-complete')).toBe(false);
+
+    transport.flowUnknown = false;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    await flushFileTransferMessages();
+    expect(chunkCount).toBe(2);
+    expect(sentMessages.some((message) => message.type === 'file-download-complete')).toBe(true);
+  });
 });

@@ -36,6 +36,9 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     }
     return Math.max(0, Math.floor(flow.nativeBufferedBytes + flow.serviceQueuedBytes));
   }
+  get flowUnknown(): boolean {
+    return !this.readySnapshot?.transportFlow;
+  }
   readonly transportOwnership = 'service' as const;
   readyState: number = WebSocket.CONNECTING;
   private openHandler: ((event?: Event) => void) | null = null;

@@ -1814,4 +1814,28 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     expect(socket.bufferedAmount).toBe(1_000);
     expect(socket.getTransportFlowDiagnostics()?.nativeBufferedBytes).toBe(1_000);
   });
+
+  it('reports flowUnknown true when no transport flow observation exists', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-no-flow',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 30,
+      lastActivityAt: 30,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      transportFlow: null,
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    socket.onopen = vi.fn();
+    await socket.start();
+
+    expect(socket.bufferedAmount).toBe(0);
+    expect(socket.flowUnknown).toBe(true);
+  });
 });

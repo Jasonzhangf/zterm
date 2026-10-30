@@ -17,6 +17,7 @@ export interface TerminalSessionTransport {
   kind: 'ws' | 'rtc';
   readyState: number;
   bufferedAmount?: number;
+  flowUnknown?: boolean;
   lastSendAt?: number;
   lastSendBytes?: number;
   totalSendBytes?: number;

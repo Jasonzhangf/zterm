@@ -295,6 +295,18 @@ export function createTerminalFileTransferListRuntime(
           stop();
           return;
         }
+        if (transport.flowUnknown) {
+          // No valid flow observation yet (Android service projection has not
+          // received the first native bufferedAmount snapshot). A missing
+          // observation is not proof of an empty queue, so hold the same chunk
+          // until a real flow value arrives.
+          draining = true;
+          waitTimer = setTimeout(() => {
+            waitTimer = null;
+            pump();
+          }, 20);
+          return;
+        }
         const bufferedBytes = Math.max(0, Math.floor(transport.bufferedAmount || 0));
         const holding = draining
           ? bufferedBytes > TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES
