@@ -18,7 +18,7 @@
 
 - 真实空白机（无预装依赖的物理机或全新 OS VM）从零安装与升级/回滚验收：当前双项目均无可用空白机或空白账号（CI runner、容器及现有开发机不冒充空白机）。
 - `Collab` 公开二进制分发与空白机安装顺序握手：`Collab` 当前仅提供源码安装脚本 `collab/scripts/install-global-collab.sh`，无公开预编译二进制或 npm 包，且在 Windows/WSL 与空白机上的顺序握手未验证。
-- 跨机器 `Collab` 路由与双机联调：`cli-cross-machine-messaging` 仍在推进中，尚未在空白双机环境验证。
+- 跨机器 CLI 消息/文件投递（`cli-cross-machine-messaging`）：PR #185 已合并 main。`daemon.app_messaging` 已具备原子路由预留、同 id 重试在断线 peer 上重绑、按 reservation 身份加代际守卫的清理，以及真实 `/app` WebSocket 并发冲突与断线重试验收；独立 review 通过。空白双机环境端到端验证仍未执行，该缺口保持 UNVERIFIED。
 
 ## 里程碑与依赖
 
