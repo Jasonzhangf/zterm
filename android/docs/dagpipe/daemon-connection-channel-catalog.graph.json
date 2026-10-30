@@ -240,12 +240,84 @@
       "iterator": "Whole"
     },
     {
+      "id": "dagpipe.extract.arc.body_subscription_update",
+      "operator": "dagpipe.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.request"
+      ],
+      "output": {
+        "id": "arc.body_subscription_update",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "reconcile_body_subscription",
+      "operator": "daemon.transport_subscriber.reconcile_body_subscription",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.body_subscription",
+        "arc.body_subscription_update"
+      ],
+      "output": {
+        "id": "arc.reconciled_body_subscription",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "settle_physical_subscriber",
+      "operator": "daemon.transport_subscriber.settle_physical_subscriber",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.accepted_transport",
+        "arc.reconciled_body_subscription",
+        "arc.subscriber_released"
+      ],
+      "output": {
+        "id": "arc.physical_subscriber_settlement",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
       "id": "build_session_catalog",
       "operator": "daemon.session_catalog.build",
       "operator_version": "0.1",
       "inputs": [
         "arc.channel_registry",
-        "arc.body_subscription",
+        "arc.reconciled_body_subscription",
         "arc.session_catalog_request",
         "arc.tmux_socket_routes"
       ],
@@ -337,13 +409,14 @@
       "iterator": "Whole"
     },
     {
-      "id": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
+      "id": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released,arc.physical_subscriber_settlement",
       "operator": "dagpipe.result.collect",
       "operator_version": "0.1",
       "inputs": [
         "arc.session_catalog",
         "arc.idle_facts",
-        "arc.subscriber_released"
+        "arc.subscriber_released",
+        "arc.physical_subscriber_settlement"
       ],
       "output": {
         "id": "arc.result",
@@ -379,14 +452,44 @@
       "arc_id": "arc.channel_registry"
     },
     {
+      "from": "dagpipe.extract.arc.body_subscription_update",
+      "to": "reconcile_body_subscription",
+      "arc_id": "arc.body_subscription_update"
+    },
+    {
+      "from": "bind_body_subscription",
+      "to": "reconcile_body_subscription",
+      "arc_id": "arc.body_subscription"
+    },
+    {
+      "from": "reconcile_body_subscription",
+      "to": "build_session_catalog",
+      "arc_id": "arc.reconciled_body_subscription"
+    },
+    {
       "from": "register_session_channel",
       "to": "build_session_catalog",
       "arc_id": "arc.channel_registry"
     },
     {
-      "from": "bind_body_subscription",
-      "to": "build_session_catalog",
-      "arc_id": "arc.body_subscription"
+      "from": "accept_physical_connection",
+      "to": "settle_physical_subscriber",
+      "arc_id": "arc.accepted_transport"
+    },
+    {
+      "from": "reconcile_body_subscription",
+      "to": "settle_physical_subscriber",
+      "arc_id": "arc.reconciled_body_subscription"
+    },
+    {
+      "from": "release_body_subscription",
+      "to": "settle_physical_subscriber",
+      "arc_id": "arc.subscriber_released"
+    },
+    {
+      "from": "settle_physical_subscriber",
+      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released,arc.physical_subscriber_settlement",
+      "arc_id": "arc.physical_subscriber_settlement"
     },
     {
       "from": "build_session_catalog",
@@ -435,17 +538,17 @@
     },
     {
       "from": "build_session_catalog",
-      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
+      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released,arc.physical_subscriber_settlement",
       "arc_id": "arc.session_catalog"
     },
     {
       "from": "publish_idle_facts",
-      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
+      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released,arc.physical_subscriber_settlement",
       "arc_id": "arc.idle_facts"
     },
     {
       "from": "release_body_subscription",
-      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released",
+      "to": "dagpipe.collect.arc.session_catalog,arc.idle_facts,arc.subscriber_released,arc.physical_subscriber_settlement",
       "arc_id": "arc.subscriber_released"
     }
   ],

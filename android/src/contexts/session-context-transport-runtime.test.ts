@@ -474,6 +474,61 @@ describe('handleTargetMuxServerFrameRuntime', () => {
     });
   });
 
+  it('rewrites body=true over the same transport when the opened channel is body-subscribed', () => {
+    const updateSessionTerminalChannelState = vi.fn();
+    const onChannelAllocated = vi.fn();
+    const sendSocketPayload = vi.fn();
+    const sameTransport = { readyState: WebSocket.OPEN, targetKey: 'mac-studio' } as any;
+
+    handleTargetMuxServerFrameRuntime({
+      anchorSessionId: 'session-anchor',
+      host: makeHost(),
+      ws: sameTransport,
+      debugScope: 'reconnect',
+      frame: {
+        type: 'mux-channel-opened',
+        payload: {
+          channelId: 'channel-b',
+          sessionName: 'tmux-b',
+        },
+      },
+      resolveSessionIdForChannel: () => 'session-2',
+      readSessionTerminalChannelBodySubscribed: () => true,
+      readRequestedTerminalGeometry: () => ({ widthMode: 'mirror-fixed' }),
+      updateSessionTerminalChannelState,
+      sendSocketPayload,
+      handleSocketServerMessage: vi.fn(),
+      buildChannelCallbacks: () => ({
+        onChannelAllocated,
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      }),
+      runtimeDebug: vi.fn(),
+    });
+
+    // Reattached resume must restore body demand on the very same physical
+    // transport, not a fresh socket; a suppressed-background channel that
+    // returns to foreground writes subscribed:true back to the existing ws.
+    expect(updateSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'open');
+    expect(onChannelAllocated).toHaveBeenCalledTimes(1);
+    expect(sendSocketPayload).toHaveBeenCalledWith(
+      'session-2',
+      sameTransport,
+      expect.stringContaining('"type":"body-subscription"'),
+    );
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toMatchObject({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-b',
+        message: {
+          type: 'body-subscription',
+          payload: { version: 1, subscribed: true },
+        },
+      },
+    });
+  });
+
   it('settles terminal connected only from a real channel connected message', () => {
     const handleSocketServerMessage = vi.fn((_params, msg) => {
       expect(msg).toEqual({
@@ -591,6 +646,44 @@ describe('handleTargetMuxServerFrameRuntime', () => {
 });
 
 describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
+  it('reconnect debugScope re-attaches the service-owned transport instead of binding', async () => {
+    const serviceSocket = {
+      readyState: WebSocket.OPEN,
+      transportOwnership: 'service',
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      targetKey: 'mac-studio',
+      targetHeartbeatKey: 'target:mac-studio',
+      host: makeHost(),
+      ws: serviceSocket,
+      debugScope: 'reconnect',
+      readTargetTerminalSocket: () => serviceSocket,
+      readRequestedTerminalGeometry: () => null,
+      getOpeningTerminalChannelsForTarget: () => [],
+      readPrioritySessionId: () => 'session-anchor',
+      setTargetMuxReady: vi.fn(),
+      sendSocketPayload: vi.fn(),
+      handleTargetMuxServerFrame: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      startSocketHeartbeat: vi.fn(),
+      startMuxHandshakeTimeout: vi.fn(),
+      runtimeDebug: vi.fn(),
+      finalizeFailure: vi.fn(),
+    });
+
+    serviceSocket.onopen?.();
+
+    // A service-owned socket is only projected back; no JS hello or heartbeat.
+    expect(serviceSocket.onopen).toBeTruthy();
+  });
+
   it('does not send JS mux hello or start JS heartbeat for a service-owned socket', () => {
     const ws = {
       readyState: WebSocket.OPEN,

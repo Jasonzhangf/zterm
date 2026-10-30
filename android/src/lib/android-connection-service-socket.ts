@@ -62,7 +62,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     this.readyState = WebSocket.CONNECTING;
   }
 
-  async start(): Promise<void> {
+  async start(): Promise<AndroidConnectionServiceSnapshot | null> {
     if (this.disposed) {
       throw new Error('AndroidConnectionServiceTransportSocket is disposed');
     }
@@ -70,6 +70,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     await this.attachNativeListeners();
     const snapshot = await readAndroidConnectionServiceSnapshot(this.targetKey);
     this.applySnapshot(snapshot);
+    return snapshot;
   }
 
   /**

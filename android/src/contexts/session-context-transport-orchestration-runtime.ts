@@ -615,7 +615,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
   clearTailRefreshRuntime: (sessionId: string) => void;
   clearSessionPullState: (sessionId: string) => void;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  openDaemonTargetTransportSocket: (host: Host) => BridgeTransportSocket;
+  openDaemonTargetTransportSocket: (
+    host: Host,
+    openOptions?: { mode?: 'bind' | 'reattach' },
+  ) => BridgeTransportSocket;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
   recordControlTransportRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
   recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
@@ -959,7 +962,13 @@ export function createSessionTransportOrchestrationRuntime(options: {
       });
     },
     openSessionTargetTransport: ({ sessionId, host, debugScope, finalizeFailure }) => {
-      const ws = options.openDaemonTargetTransportSocket(host);
+      // `connect` is the explicit first/config connection: it binds. Every
+      // `reconnect`/open-intent path is a resume over an already-owned native
+      // target, so it opens in reattach mode and never sends a fresh bind that
+      // would create a new native generation.
+      const ws = options.openDaemonTargetTransportSocket(host, {
+        mode: debugScope === 'connect' ? 'bind' : 'reattach',
+      });
       options.applyTransportDiagnostics(sessionId, ws);
       primeTargetTerminalTransportSocket(sessionId, ws);
       bindTargetMuxTransportSocketLifecycle({

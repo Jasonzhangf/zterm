@@ -5,6 +5,7 @@ import type { Host } from './types';
 import { buildTransportTargetKey } from './session-transport-runtime';
 import { AndroidConnectionServiceTransportSocket } from './android-connection-service-socket';
 import type { AndroidConnectionServiceTarget } from './android-connection-service-commands';
+import type { AndroidConnectionServiceSnapshot } from './android-connection-service-snapshot';
 import type { BridgeSettings } from './bridge-settings';
 import {
   defaultClientControlDirectoryRuntime,
@@ -94,16 +95,30 @@ export function buildAndroidConnectionServiceTarget(
   };
 }
 
+export type AndroidConnectionServiceSocketOpenMode = 'bind' | 'reattach';
+
 export function openAndroidConnectionServiceTransportSocket(
   host: Host,
   settings?: AndroidConnectionServiceTraversalSettings,
+  openOptions?: { mode?: AndroidConnectionServiceSocketOpenMode },
 ): BridgeTransportSocket {
   const target = buildAndroidConnectionServiceTarget(host, settings);
   const socket = new AndroidConnectionServiceTransportSocket(target);
+  const mode: AndroidConnectionServiceSocketOpenMode = openOptions?.mode === 'reattach'
+    ? 'reattach'
+    : 'bind';
   const startup = socket.start();
   startup.then(
-    async () => {
+    async (snapshot) => {
       try {
+        // Reattach-only opens re-project an already-bound native target. The
+        // native service remains the transport owner, so resume must not send a
+        // fresh `bind-target` that would create a new generation. Only bind when
+        // the native service explicitly reports no live target for this key; a
+        // snapshot read failure is never treated as "no target".
+        if (mode === 'reattach' && !shouldBindAfterReattach(snapshot, target.targetKey)) {
+          return;
+        }
         // Connection-service startup-only admission gates. They are not owner
         // wiring for client.buffer_store / client.renderer_window /
         // client.input_runtime; those graphs keep their owning runtime entries.
@@ -251,4 +266,30 @@ export function resolveRoutePlanPath(host: Host): 'LAN' | 'Tailscale' | 'IPv6' |
     return 'IPv6';
   }
   return 'IPv4';
+}
+
+/**
+ * Decide whether a reattach-only open must still send `bind-target`. A resume
+ * that finds the native target still present (OPEN / connecting / backoff /
+ * any state with a target) must reuse the existing native generation and must
+ * NOT issue a fresh bind that would create a new one. The native owner owns
+ * binding and reconnection, so JS never binds on resume.
+ *
+ * Only a snapshot whose target no longer matches this key (the native service
+ * explicitly holds no such target) proceeds with bind. A null/unknown snapshot
+ * never does, so a read failure is never treated as "no target".
+ */
+function shouldBindAfterReattach(
+  snapshot: AndroidConnectionServiceSnapshot | null,
+  targetKey: string,
+): boolean {
+  if (!snapshot) {
+    // Unknown: a snapshot read failure is not evidence that the target is
+    // gone. Never fall back to a fresh bind from an unknown state.
+    return false;
+  }
+  if (snapshot.target?.targetKey !== targetKey) {
+    return true;
+  }
+  return false;
 }

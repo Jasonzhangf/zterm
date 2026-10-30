@@ -29,14 +29,15 @@ describe('server bridge runtime truth gates', () => {
     expect(source).toContain('closeRelayPeer,');
     expect(source).toContain('} = terminalBridgeRuntime;');
     expect(source).toContain("wss.on('connection', handleWebSocketConnection)");
-    expect(source).toContain("server.on('upgrade', handleServerUpgrade)");
+    expect(source).toContain("server.on('upgrade', (request, socket, head) => {");
+    expect(source).toContain('handleServerUpgrade(request, socket, head);');
   });
 
   it('does not keep ws/rtc/upgrade bridge implementations in server.ts', () => {
     const source = readServerSource();
 
-    expect(source).not.toContain("wss.on('connection', (ws: WebSocket, request) =>");
-    expect(source).not.toContain("server.on('upgrade', (request, socket, head) =>");
+    expect(source).not.toContain('function handleWebSocketConnection(');
+    expect(source).not.toContain('function handleServerUpgrade(');
     expect(source).not.toContain('const rtcBridgeServer = createRtcBridgeServer({');
   });
 
