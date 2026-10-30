@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Jenny, zterm project master
-Updated: 2026-10-29
+Updated: 2026-10-30
 
 ## Objective
 
@@ -12,12 +12,25 @@ publish only authorized artifacts, and close owned resources.
 
 ## Active Board Tasks
 
-- `network-connection-diagnosis-20261028`: diagnose and fix Android connection
-  reconnect, cache/repair, foreground recovery, and background-keepalive defects.
-- `cli-cross-machine-messaging`: deliver durable, push-based cross-machine zterm
-  message and file transfer over the existing daemon connection.
-- `public-release-blank-machine-audit-20261029`: audit and publish a real
-  clean-machine installation path, including Collab/AppSDK dependencies.
+All project board tasks are closed and merged to `main`:
+
+- `session-drawer-collab-roles-1028` (P0): merged `d0b0bf1e` (PR #178).
+- `session-drawer-ux-1028` (P1): master filter delegates to the Collab
+  projection, only real tmux sessions are listed, hide/restore is in-list (no
+  Settings textarea), and the visual hierarchy was reworked. Merged `e156ca7a`
+  (PR #182); L5 evidence `android/evidence/2026-10-29-drawer-ux-l5-3234`.
+- `network-connection-diagnosis-20261028` (P1): merged `0a20d4d5`, `053578e4`
+  (PR #183/#184); OTA `0.1.3.3236` published.
+- `cli-cross-machine-messaging` (P1): durable, push-based cross-machine message
+  and file transfer over the existing daemon connection. Merged `d570e0c7`
+  (PR #185); review-10 PASS.
+- `android-expert-review-1029` (P1): independent Android-expert plan + review of
+  the cycle's technical rulings; VERDICT PASS.
+- `public-release-blank-machine-audit-20261029` (P1): audit deliverable accepted.
+
+Remaining gate (external resource, not code): a genuinely blank supported OS
+machine/VM from which to run `docs/install-from-zero.md` end-to-end, including
+upgrade/rollback and the Collab blank-machine install-order handshake.
 
 ## Required Operating Rules
 
@@ -33,34 +46,30 @@ publish only authorized artifacts, and close owned resources.
 
 ## Current Verified Facts
 
-- OTA build 3232 is published on the public Relay and installed on 15T and
-  emulator-5554. Build 3231 is installed on emulator-5556.
-- Channel identity agrees for 3232: local daemon `127.0.0.1:3333`, Tailscale
-  `100.66.1.82:3333` and the public Relay directory all serve versionCode
-  1100032320 with sha256 `ccf4f4d1…a4c84`; 15T lastUpdateTime 2026-10-29
-  08:42:31 and emulator-5554 lastUpdateTime 2026-10-28 17:42:14.
-- Emulator-5554 on 3232 survived three screen-off/on cycles with an unchanged
-  app pid and a live `AndroidConnectionService` foreground record; the captured
-  logcat slice holds no FATAL/SIGABRT/tombstone line. This is emulator evidence
-  only.
-- Emulator-5554 on 3232 also survived three airplane-mode enable/disable cycles
-  with a live terminal session: pid unchanged, no FATAL/SIGABRT/tombstone, and
-  the session resumed streaming new output after each cut.
-- 15T on 3232 kept pid 28051 and `AndroidConnectionService isForeground=true`
-  after being pushed to background by another app; `/data/tombstones` holds no
-  entry newer than 2026-07-30, so 3231's RTC SIGABRT did not recur in this
-  window.
-- Build 3231 produced repeatable native RTC SIGABRT tombstones: a destroyed
-  peer-connection mutex was touched from the signaling thread.
-- Build 3232 moves to a process-shared PeerConnectionFactory and appears to
-  target the same lifecycle defect. Real-device sleep/background proof is still
-  missing: the 15T was in active user use, so no scripted screen-off/LAN/cellular
-  transition run was performed. 3232 is not yet accepted as the completed
-  Android fix.
-- Repair/retry behavior can emit empty-window buffer requests in bursts.
-  Global network generation fencing can retire healthy targets.
-- GitHub currently exposes old Android releases; a current public install path
-  has not yet been proven from a genuinely blank supported machine.
+- `main` == `origin/main` at `8b2a93f2`; OTA `0.1.3.3236` is `stable` in
+  `~/.zterm/updates/latest.json` (versionCode 1100032360, rollback 3236.1).
+- Only `main` worktree remains; `/Volumes/Intel/playground/zterm` holds no
+  orphan worktree (only `.worker-runs` and `.DS_Store`).
+- Session drawer: master filter uses the Collab projection (no user-entered
+  master), only real tmux sessions render, and hide/restore happens in-list.
+  Merged `e156ca7a` (PR #182); `android-expert-review-1029` VERDICT PASS.
+- Android connection recovery: target-scoped network generation retirement and
+  daemon revision reset recovery merged in PR #183/#184; L5 evidence
+  `android/evidence/2026-10-29-conn-recovery-l5-3236`.
+- Cross-machine messaging: PR #185 merged `d570e0c7`; review-10 PASS; daemon 50,
+  CLI 297/1 skip, feature-registry 106, shared app-protocol 7 tests green.
+- Public release `v0.1.3.3232`: non-draft GitHub Release with 15 verified
+  assets, `verify-release-assets.mjs` 19/19; npm published and isolated-prefix
+  verified for `@jsonstudio/zterm-cli@0.1.4`, `@jsonstudio/zterm-daemon@0.1.3`,
+  and the darwin-arm64/linux-x64/win32-x64 payloads.
+- `docs/install-from-zero.md` exists on `main` and defines the Node 22 ABI 127,
+  `TMUX_TMPDIR=~/.tmux/run`, and zterm + Collab install-order contract.
+- No local VM tool exists on the dev Mac (checked multipass, lima, colima, orb,
+  tart, qemu, prl, virsh, UTM). Containers, CI runners, and this configured dev
+  Mac are explicitly excluded as blank-machine proof.
+- Therefore, genuine blank-machine install/upgrade/rollback and the Collab
+  blank-machine install-order handshake remain UNVERIFIED pending an external
+  blank supported OS machine/VM.
 
 ## Acceptance
 
