@@ -127,6 +127,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
     private volatile boolean disposed;
     private volatile boolean openPublished;
     private volatile long bufferedBytes;
+    private volatile java.util.function.Predicate<String> sendTextOverrideForTests;
     private ScheduledFuture<?> stabilityFuture;
     private ScheduledFuture<?> disconnectedFuture;
     private static final int MAX_PENDING_REMOTE_ICE_CANDIDATES = 64;
@@ -235,6 +236,10 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         if (!isOpen()) {
             return false;
         }
+        java.util.function.Predicate<String> override = sendTextOverrideForTests;
+        if (override != null) {
+            return override.test(text);
+        }
         if (dataChannel == null) {
             return false;
         }
@@ -256,6 +261,11 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             return Math.max(0L, bufferedBytes);
         }
         return Math.max(0L, channel.bufferedAmount());
+    }
+
+    /** Test seam: deterministically control sendText() without native libjingle. */
+    void setSendTextOverrideForTests(java.util.function.Predicate<String> override) {
+        this.sendTextOverrideForTests = override;
     }
 
     public void closeQuietly(String reason) {

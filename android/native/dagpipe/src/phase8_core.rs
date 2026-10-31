@@ -366,6 +366,7 @@ impl Operator for ObserveTransportFlow {
                 "serviceQueuedBytes": 0,
                 "serviceQueuedFrames": 0,
                 "backpressured": false,
+                "sendStalled": false,
                 "transportFlow": Value::Null,
             }));
         }
@@ -382,16 +383,22 @@ impl Operator for ObserveTransportFlow {
             .get("serviceQueuedFrames")
             .and_then(Value::as_u64)
             .unwrap_or(0);
+        let send_stalled = flow
+            .get("sendStalled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         Ok(json!({
             "nativeBufferedBytes": native,
             "serviceQueuedBytes": queued_bytes,
             "serviceQueuedFrames": queued_frames,
             "backpressured": native >= 131_072,
+            "sendStalled": send_stalled,
             "transportFlow": {
                 "nativeBufferedBytes": native,
                 "serviceQueuedBytes": queued_bytes,
                 "serviceQueuedFrames": queued_frames,
                 "backpressured": native >= 131_072,
+                "sendStalled": send_stalled,
             },
         }))
     }

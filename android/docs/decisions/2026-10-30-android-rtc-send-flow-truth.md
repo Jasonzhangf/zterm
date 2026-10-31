@@ -38,6 +38,7 @@ nativeBufferedBytes: number
 serviceQueuedBytes: number
 serviceQueuedFrames: number
 backpressured: boolean
+sendStalled: boolean
 sampledAt: number
 ```
 
@@ -59,6 +60,11 @@ sampledAt: number
 6. WebSocket 路径不得用 RTC 数值或旧 generation 代替自身队列事实。
 7. JS snapshot 是异步投影；原生 admission 才是硬流控，JS getter 只做提前退让与
    观测，禁止 JS 虚构“原生已排空”。
+8. `sendStalled` 表示当前 OPEN 且低于 high 水位（`< SEND_FLOW_HIGH_WATER_BYTES`，
+   128,000）时，同一 head frame 连续 `SEND_RETRY_MAX`（3）次 `sendText()` 返回
+   `false`，`attemptSendWithRetry` 停止 200 ms retry timer 循环（
+   `sendRetryPending = false`），保留该帧在 FIFO 队首，发布 `transportFlow` 并等待
+   既有监督器判断；它只描述显式发送拒绝 stall，不等于物理失败。
 
 高低水位是发送流控契约，写在唯一 owner `AndroidConnectionService.java`：
 high 128,000，low 64,000。控制帧也不得绕过所有队列顺序持续积压；保留既有握手
@@ -70,6 +76,15 @@ OPEN 拥塞：当前 backend 仍 OPEN，generation / network generation / channe
 有效，高水位阻止发送或 `sendText()` 返回 false 但未收到物理终止事实时，保留同一
 待发帧，不消费、不推进成功计数、不触发 `transportFailure`、不递归新建多个 retry
 timer；优先由 drain callback 续发，保留一个 200 ms 等待唤醒。
+
+OPEN 低水位持续拒绝：当前 backend 仍 OPEN 且 `bufferedAmount() <
+SEND_FLOW_HIGH_WATER_BYTES`，同一 head frame 连续 `SEND_RETRY_MAX`（3）次
+`sendText()` 返回 `false` 时，`attemptSendWithRetry` 停止 retry timer 循环
+（`sendRetryPending = false`）、置 `sendStalled = true`、把 head frame 保留在 FIFO
+队首并发布 `transportFlow`；不直接触发 `transportFailure`，等既有监督器
+（heartbeat 超时或物理 error/close）裁决。`sendStalled` 在后续成功发送、
+RTC drain（`onRtcFlowChanged` 低于 high 水位）、generation 变更或 target teardown
+时清除为 `false`。
 
 真正断连：DataChannel CLOSED、ICE FAILED、既有 disconnected grace 到期、真实
 transport close/error、既有 heartbeat 失败合同成立、network generation 变更依法

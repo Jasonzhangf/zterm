@@ -1733,8 +1733,70 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       serviceQueuedBytes: 8_000,
       serviceQueuedFrames: 3,
       backpressured: false,
+      sendStalled: false,
       sampledAt: 20,
     });
+  });
+
+  it('projects sendStalled and clears it on snapshot update', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-stalled',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 30,
+      lastActivityAt: 30,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      transportFlow: {
+        nativeBufferedBytes: 0,
+        serviceQueuedBytes: 120,
+        serviceQueuedFrames: 2,
+        backpressured: false,
+        sendStalled: true,
+        sampledAt: 30,
+      },
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    socket.onopen = vi.fn();
+    await socket.start();
+
+    expect(socket.getTransportFlowDiagnostics()).toEqual({
+      nativeBufferedBytes: 0,
+      serviceQueuedBytes: 120,
+      serviceQueuedFrames: 2,
+      backpressured: false,
+      sendStalled: true,
+      sampledAt: 30,
+    });
+
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-stalled',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 31,
+      lastActivityAt: 31,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      transportFlow: {
+        nativeBufferedBytes: 0,
+        serviceQueuedBytes: 0,
+        serviceQueuedFrames: 0,
+        backpressured: false,
+        sendStalled: false,
+        sampledAt: 31,
+      },
+    });
+    await Promise.resolve();
+
+    expect(socket.getTransportFlowDiagnostics()?.sendStalled).toBe(false);
   });
 
   it('does not leak an old-generation transport flow into the current generation', async () => {

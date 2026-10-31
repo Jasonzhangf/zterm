@@ -316,7 +316,7 @@
         "predicate": null
       },
       "iterator": "Whole",
-      "notes": "Projects native DataChannel buffered bytes and service-owned queued bytes. High-water (128 KiB) sets backpressured; low-water (64 KiB) clears it. An OPEN congested transport keeps its pending frame and does not escalate to reconnect."
+      "notes": "Projects native DataChannel buffered bytes, service-owned queued bytes/frames, backpressured, and sendStalled. High-water (128 KiB) sets backpressured; low-water (64 KiB) clears it. An OPEN congested transport keeps its pending frame and does not escalate to reconnect. An OPEN transport below the high watermark that fails sendText() across SEND_RETRY_MAX attempts stops its retry timer and publishes sendStalled=true without tearing down the connection."
     },
     {
       "id": "schedule_backoff_reconnect",

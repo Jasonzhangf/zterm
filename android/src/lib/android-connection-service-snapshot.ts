@@ -40,6 +40,7 @@ export interface AndroidConnectionServiceTransportFlow {
   serviceQueuedBytes: number;
   serviceQueuedFrames: number;
   backpressured: boolean;
+  sendStalled?: boolean;
   sampledAt: number;
 }
 

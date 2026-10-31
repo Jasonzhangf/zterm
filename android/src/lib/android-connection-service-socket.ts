@@ -185,6 +185,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       serviceQueuedBytes: Math.max(0, Math.floor(flow.serviceQueuedBytes)),
       serviceQueuedFrames: Math.max(0, Math.floor(flow.serviceQueuedFrames)),
       backpressured: Boolean(flow.backpressured),
+      sendStalled: Boolean(flow.sendStalled),
       sampledAt: Math.max(0, Math.floor(flow.sampledAt)),
     };
   }
