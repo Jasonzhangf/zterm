@@ -44,9 +44,13 @@ sampledAt: number
 规则：
 
 1. `nativeBufferedBytes` 只来自当前 native transport，读取前/成功后/回调、
-   open/close 边界更新；关闭后不再访问已 dispose 的 DataChannel。
-2. `serviceQueuedBytes` 只统计 service 拥有、尚未被 native 接受的帧；成功交给
-   native 后必须从 service 队列移除，避免重复计数。
+   RTC open、`mux-ready`（WebSocket 与 RTC 均适用）、close 边界更新；0 字节
+   RTC open 也必须立即发布有效 `transportFlow` 观测，不等待后续
+   `onBufferedAmountChange` 回调；关闭后不再访问已 dispose 的 DataChannel。
+2. `serviceQueuedBytes` 与 `serviceQueuedFrames` 只统计 service 拥有、尚未被
+   native 接受的帧（`pendingFrames` 与 `retryDeferredFrames`）；所有队列入队、
+   出队、成功消费、channel 关闭清理、旧 channel 迁移和重连驻留都必须经过唯一队列
+   mutation owner 并立即重发当前 `transportFlow`，避免重复计数或读数陈旧。
 3. `null` 表示当前没有有效 flow observation，不得宣称为零。
 4. flow observation 不更新 `lastActivityAt`、不清 heartbeat misses、不把连接改为
    healthy。

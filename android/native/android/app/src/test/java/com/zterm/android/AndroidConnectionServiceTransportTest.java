@@ -2730,6 +2730,179 @@ public final class AndroidConnectionServiceTransportTest {
         }
     }
 
+    @Test
+    public void rtcOpenAndMuxReadyPublishZeroByteTransportFlowWithoutBufferedAmountCallback()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            AndroidConnectionServiceTarget target = new AndroidConnectionServiceTarget.Builder()
+                .targetKey("target-rtc-flow")
+                .bridgeHost("relay.example")
+                .bridgePort(3333)
+                .relayHostId("relay-1")
+                .signalUrl("wss://relay.example/client")
+                .relayDeviceId("android-1")
+                .signalToken("relay-token")
+                .turnUrl("turn:relay.example:3478?transport=udp")
+                .turnUsername("ztermturn")
+                .turnCredential("turn-pass")
+                .build();
+            Object runtime = newRuntime(service, target,
+                AndroidConnectionServiceRoutePolicy.manual(
+                    AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT));
+            AndroidConnectionStateMachine stateMachine = connectingStateMachine(target);
+            setField(runtime, "stateMachine", stateMachine);
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+
+            AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+                null, null, "wss://relay.example/client", new JSONArray(), "all",
+                true, new AndroidRtcTransportBackend.Listener() {
+                    @Override public void onRtcOpen() { }
+                    @Override public void onRtcText(String text) { }
+                    @Override public void onRtcError(String message) { }
+                    @Override public void onRtcClosed(int code, String reason) { }
+                });
+            setField(runtime, "rtcBackend", backend);
+
+            Object diagnostic = candidateDiagnostic(runtime, "rtc-direct");
+            Object candidate = candidateByPath(buildCandidates(runtime), "rtc-direct");
+            Class<?> diagnosticClass = nestedRuntimeClass(runtime, "RouteCandidateDiagnostic");
+            Class<?> candidateClass = nestedRuntimeClass(runtime, "RouteCandidate");
+            Method handleRtcOpen = runtime.getClass().getDeclaredMethod(
+                "handleRtcOpen", diagnosticClass, candidateClass);
+            handleRtcOpen.setAccessible(true);
+            handleRtcOpen.invoke(runtime, diagnostic, candidate);
+
+            AndroidConnectionServiceSnapshot afterOpen = stateMachine.readSnapshot();
+            assertNotNull(
+                "RTC open must publish an initial flow observation even with 0 buffered bytes",
+                afterOpen.transportFlow);
+            assertEquals(0L, afterOpen.transportFlow.nativeBufferedBytes);
+            assertEquals(0L, afterOpen.transportFlow.serviceQueuedBytes);
+            assertEquals(0L, afterOpen.transportFlow.serviceQueuedFrames);
+            assertFalse(afterOpen.transportFlow.backpressured);
+
+            // Simulate a connecting state where flow was not yet observed prior to mux-ready,
+            // and verify RTC mux-ready also publishes a valid 0-byte flow observation.
+            AndroidConnectionStateMachine freshMachine = connectingStateMachine(target);
+            setField(runtime, "stateMachine", freshMachine);
+            setField(runtime, "activeRtcCandidate", diagnostic);
+
+            Method handleMuxReady = runtime.getClass().getDeclaredMethod(
+                "handleMuxReady", JSONObject.class, WebSocket.class);
+            handleMuxReady.setAccessible(true);
+            handleMuxReady.invoke(runtime, muxReadyPayload(), null);
+
+            AndroidConnectionServiceSnapshot afterMuxReady = freshMachine.readSnapshot();
+            assertEquals(AndroidConnectionServiceSnapshot.State.MUX_READY, afterMuxReady.state);
+            assertNotNull(
+                "RTC mux-ready must publish a valid flow observation without waiting for bufferedAmount callbacks",
+                afterMuxReady.transportFlow);
+            assertEquals(0L, afterMuxReady.transportFlow.nativeBufferedBytes);
+            assertEquals(0L, afterMuxReady.transportFlow.serviceQueuedBytes);
+            assertEquals(0L, afterMuxReady.transportFlow.serviceQueuedFrames);
+            assertFalse(afterMuxReady.transportFlow.backpressured);
+            backend.closeQuietly("test");
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    @Test
+    public void queueMutationsUnderOpenCongestionPublishUpdatedServiceQueuedBytesAndFrames()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        AtomicReference<Runnable> scheduledRetry = new AtomicReference<>();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            setField(service, "sendRetryScheduler",
+                (java.util.function.BiConsumer<Runnable, Long>) (runnable, delayMillis) ->
+                    scheduledRetry.set(runnable));
+            AndroidConnectionServiceTarget target = target("target-congested-queue");
+            Object runtime = newRuntime(service, target);
+            AndroidConnectionStateMachine stateMachine = readyStateMachine(target);
+            setField(runtime, "stateMachine", stateMachine);
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+
+            AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+                null, null, "wss://relay.example/client", new JSONArray(), "all",
+                true, new AndroidRtcTransportBackend.Listener() {
+                    @Override public void onRtcOpen() { }
+                    @Override public void onRtcText(String text) { }
+                    @Override public void onRtcError(String message) { }
+                    @Override public void onRtcClosed(int code, String reason) { }
+                });
+            backend.simulateDataChannelStateForTests(org.webrtc.DataChannel.State.OPEN);
+            Field bufferedBytesField = AndroidRtcTransportBackend.class
+                .getDeclaredField("bufferedBytes");
+            bufferedBytesField.setAccessible(true);
+            bufferedBytesField.setLong(backend, AndroidConnectionService.SEND_FLOW_HIGH_WATER_BYTES);
+            setField(runtime, "rtcBackend", backend);
+
+            setDesiredChannel(runtime, "channel-a", "shell-a");
+            setDesiredChannelOpened(runtime, "channel-a", true);
+            setDesiredChannel(runtime, "channel-b", "shell-b");
+            setDesiredChannelOpened(runtime, "channel-b", false);
+
+            // First send on OPEN congested RTC parks the head frame and sets sendRetryPending=true.
+            sendChannelMessage(runtime, "channel-a");
+            assertNotNull("congested head frame must schedule wakeup retry", scheduledRetry.get());
+
+            // Second send on channel-a while sendRetryPending=true enqueues into retryDeferredFrames.
+            sendChannelMessage(runtime, "channel-a");
+            AndroidConnectionServiceSnapshot.FlowObservation afterDeferredEnqueue =
+                stateMachine.readSnapshot().transportFlow;
+            assertNotNull(
+                "enqueueing into retryDeferredFrames must publish updated transportFlow",
+                afterDeferredEnqueue);
+            assertEquals(
+                AndroidConnectionService.SEND_FLOW_HIGH_WATER_BYTES,
+                afterDeferredEnqueue.nativeBufferedBytes);
+            assertTrue(afterDeferredEnqueue.backpressured);
+            assertEquals(1L, afterDeferredEnqueue.serviceQueuedFrames);
+            assertTrue(afterDeferredEnqueue.serviceQueuedBytes > 0L);
+            long singleFrameBytes = afterDeferredEnqueue.serviceQueuedBytes;
+
+            // Enqueueing onto unopened channel-b adds to pendingFrames and must immediately update flow.
+            sendChannelMessage(runtime, "channel-b");
+            AndroidConnectionServiceSnapshot.FlowObservation afterPendingEnqueue =
+                stateMachine.readSnapshot().transportFlow;
+            assertNotNull(afterPendingEnqueue);
+            assertEquals(2L, afterPendingEnqueue.serviceQueuedFrames);
+            assertTrue(afterPendingEnqueue.serviceQueuedBytes > singleFrameBytes);
+
+            // Closing channel-a removes its retryDeferredFrames entry and must immediately update flow.
+            Method sendCloseChannel = runtime.getClass().getDeclaredMethod(
+                "sendCloseChannel", AndroidConnectionCommand.class);
+            sendCloseChannel.setAccessible(true);
+            sendCloseChannel.invoke(runtime, AndroidConnectionCommand.closeChannel(
+                target.targetKey, "channel-a", "close-a"));
+            AndroidConnectionServiceSnapshot.FlowObservation afterCloseA =
+                stateMachine.readSnapshot().transportFlow;
+            assertNotNull(afterCloseA);
+            assertEquals(1L, afterCloseA.serviceQueuedFrames);
+
+            // Closing channel-b removes its pendingFrames queue and drops queued counts to zero.
+            sendCloseChannel.invoke(runtime, AndroidConnectionCommand.closeChannel(
+                target.targetKey, "channel-b", "close-b"));
+            AndroidConnectionServiceSnapshot.FlowObservation afterCloseB =
+                stateMachine.readSnapshot().transportFlow;
+            assertNotNull(afterCloseB);
+            assertEquals(0L, afterCloseB.serviceQueuedFrames);
+            assertEquals(0L, afterCloseB.serviceQueuedBytes);
+            backend.closeQuietly("test");
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
     private static void registerRuntime(
         AndroidConnectionService service, String targetKey, Object runtime
     ) throws Exception {

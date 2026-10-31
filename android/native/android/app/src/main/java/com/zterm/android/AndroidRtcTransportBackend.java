@@ -248,10 +248,12 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
 
     /** Current sender-owned buffered bytes on the live DataChannel, or 0 when closed. */
     public long bufferedAmount() {
-        DataChannel channel = dataChannel;
-        if (disposed || channel == null
-            || dataChannelState != DataChannel.State.OPEN) {
+        if (disposed || dataChannelState != DataChannel.State.OPEN) {
             return 0L;
+        }
+        DataChannel channel = dataChannel;
+        if (channel == null) {
+            return Math.max(0L, bufferedBytes);
         }
         return Math.max(0L, channel.bufferedAmount());
     }
@@ -844,6 +846,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         openPublished = true;
         maybePublishSelectedIcePair();
         listener.onRtcOpen();
+        publishBufferedAmount();
     }
 
     private void maybePublishSelectedIcePair() {
