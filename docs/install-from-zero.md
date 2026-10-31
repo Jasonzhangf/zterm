@@ -20,6 +20,14 @@ This document provides the complete from-zero installation steps for a blank sup
 | `@jsonstudio/zterm-daemon-linux-x64` | `0.1.3` | `0.1.3` / `0.1.3` | `edc1b1185b36858e11b5e18220a12243c0f31c29` | Linux glibc x86_64 (`linux-x64`) native payload |
 | `@jsonstudio/zterm-daemon-win32-x64` | `0.1.3` | `0.1.3` / `0.1.3` | `f9598e400bc1760565be305f7e1587efbc738237` | Windows x64 MSVC (`win32-x64`) native payload |
 
+> **npm-only update (2026-10-31):** `@jsonstudio/zterm-cli@0.1.5` and
+> `@jsonstudio/zterm-daemon@0.1.4` (with the matching `0.1.4` platform payloads)
+> are published to the public npm registry at `latest`. CLI `0.1.5` adds the
+> `zterm app` cross-machine message and file commands; daemon `0.1.4` adds the
+> `/app` WebSocket gateway. Install with `npm install -g @jsonstudio/zterm-cli@0.1.5`
+> then `zterm daemon install --version 0.1.4`. The GitHub Release assets below
+> remain the `v0.1.3.3232` snapshot, which pins daemon `0.1.3`.
+
 ### 1.2 GitHub Release `v0.1.3.3232` Assets
 
 | Asset | Size (Bytes) | SHA-256 | Purpose |

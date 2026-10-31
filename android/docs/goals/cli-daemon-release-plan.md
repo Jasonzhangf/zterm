@@ -14,17 +14,25 @@
 - 已发布 GitHub Public Release [`v0.1.3.3232`](https://github.com/Jasonzhangf/zterm/releases/tag/v0.1.3.3232)，包含 `zterm-0.1.3.3232.apk`、回滚包 `zterm-0.1.3.3232.1.apk`、`latest.json`、`zterm-daemon-0.1.3-darwin-arm64.tar.gz`、5 个 npm `.tgz` 及其 `.sha256` 共 15 个可下载资产。
 - 已与 AppSDK master（`Jenny`，`m1793238318673-416`）对齐版本兼容与安装顺序契约（`zterm-daemon` 固定要求 Node.js 22.x LTS `ABI 127`；共享 `TMUX_TMPDIR="$HOME/.tmux/run"`），沉淀于 [`docs/install-from-zero.md`](../../../docs/install-from-zero.md)。
 
+## 本轮结果（2026-10-31）
+
+- 基于 `origin/main`（`a554f87eae4d6869f03c9b4f2f13134676e72faa`）及 CLI Platform 三平台 CI（run `41188327672`，主 CI `41188327683` 全绿）构建：
+  - `@jsonstudio/zterm-cli@0.1.5`：新增 `zterm app` 跨机器消息/文件命令，已发布公开 npm `latest`，隔离 registry 安装 `zterm app --help` 通过。
+  - `@jsonstudio/zterm-daemon@0.1.4`（launcher）+ `darwin-arm64` / `linux-x64` / `win32-x64` 三个 `0.1.4` payload：新增 `/app` WebSocket 网关，已发布公开 npm `latest`，公开 registry 安装 `zterm daemon install --version 0.1.4` 通过。
+- 公开安装 CLI 的完整 `app-messaging-e2e` 通过（`e2e.pass`）：双向消息、双向文件字节一致、接收端 daemon 重启续传、dedupe、slow-consumer、inbox 上限、权限拒绝。
+- 因此 `cli-cross-machine-messaging` 的“公开安装 CLI 入口用于验收”缺口已补齐；真实空白机端到端升级/回滚仍按上节保持 UNVERIFIED。
+
 ## 仍保持 UNVERIFIED 的真实空白机缺口
 
 - 真实空白机（无预装依赖的物理机或全新 OS VM）从零安装与升级/回滚验收：当前双项目均无可用空白机或空白账号（CI runner、容器及现有开发机不冒充空白机）。
 - `Collab` 公开二进制分发与空白机安装顺序握手：`Collab` 当前仅提供源码安装脚本 `collab/scripts/install-global-collab.sh`，无公开预编译二进制或 npm 包，且在 Windows/WSL 与空白机上的顺序握手未验证。
-- 跨机器 CLI 消息/文件投递（`cli-cross-machine-messaging`）：PR #185 已合并 main。`daemon.app_messaging` 已具备原子路由预留、同 id 重试在断线 peer 上重绑、按 reservation 身份加代际守卫的清理，以及真实 `/app` WebSocket 并发冲突与断线重试验收；独立 review 通过。空白双机环境端到端验证仍未执行，该缺口保持 UNVERIFIED。
+- 跨机器 CLI 消息/文件投递（`cli-cross-machine-messaging`）：PR #185 已合并 main；公开 CLI `0.1.5` + daemon `0.1.4` 已发布，公开安装 CLI 的 e2e 通过。真实空白双机环境端到端验证仍未执行，该缺口保持 UNVERIFIED。
 
 ## 里程碑与依赖
 
 | 工作项 | owner | 依赖 | 验收与停止条件 |
 | --- | --- | --- | --- |
-| M1：双机重装与流程设计 | 当前编排者；独立 Planner 提供方案 | 已合并 CLI 0.1.4 | 重装、入口、配置保留通过；流程、计划和历史入口对齐。只修改文档，不执行公开发布。 |
+| M1：双机重装与流程设计 | 当前编排者；独立 Planner 提供方案 | 已合并 CLI 0.1.5 | 重装、入口、配置保留通过；流程、计划和历史入口对齐。只修改文档，不执行公开发布。 |
 | M2：独立发布验证与 registry smoke | 后续执行 worker；编排者验收 | M1 | 按单元验证：CLI 一个 tarball，daemon 四个 tarball；联合发布可验证全部五包，无 Android APK 前置。registry 安装证明 home/prefix 隔离及三平台布局，错误不能投影成成功。 |
 | M3：发布执行与渠道提升 | 获授权 release operator | M2，或完成等价的人工隔离验收；发布权限与兼容矩阵明确 | daemon payload→launcher；CLI 独立；next 验收后提升公开入口 latest。部分成功按单元记录，失败恢复实际 tag。 |
 
