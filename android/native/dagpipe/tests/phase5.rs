@@ -91,3 +91,29 @@ fn preview_lattice_selects_or_pans_without_joining_mutually_exclusive_paths() {
     );
     assert_eq!(pan_only["outputs"]["arc.focus_panned"]["state"], "applied");
 }
+
+#[test]
+fn shell_lifecycle_reattaches_existing_generation_without_fresh_bind() {
+    let result = run_shell_lifecycle(json!({
+        "execution_id": "phase5-reattach",
+        "attempt_id": "1",
+        "inputs": {
+            "arc.open_tab_intent": { "sessionId": "s1" },
+            "arc.shell_state": { "visible": true },
+            "arc.lifecycle_demand": { "mode": "reattach" },
+            "arc.native_transport_projection": {
+                "generation": "gen-live",
+                "targetMatch": true,
+            },
+        },
+    }));
+    assert_eq!(result["ok"], true, "phase5 reattach failed: {result}");
+    assert_eq!(
+        result["outputs"]["arc.body_subscription"]["sessionId"],
+        "s1"
+    );
+    assert_eq!(
+        result["outputs"]["arc.body_subscription"]["state"],
+        "subscribed"
+    );
+}

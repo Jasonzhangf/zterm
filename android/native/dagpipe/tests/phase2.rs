@@ -39,6 +39,16 @@ fn daemon_request(channel_removal: serde_json::Value) -> serde_json::Value {
     )
 }
 
+fn daemon_request_with_subscription_update(
+    channels: serde_json::Value,
+    channel_removal: serde_json::Value,
+    body_subscription_update: serde_json::Value,
+) -> serde_json::Value {
+    let mut request = daemon_request_with_channels(channels, channel_removal);
+    request["inputs"]["arc.body_subscription_update"] = body_subscription_update;
+    request
+}
+
 #[test]
 fn compiles_phase2_graphs() {
     let graphs = zterm_dagpipe::phase2_core::compile_phase2_graphs().unwrap();
@@ -211,4 +221,43 @@ fn daemon_connection_release_keeps_sibling_channel_subscribed() {
         result["outputs"]["arc.subscriber_released"]["channels"],
         json!([{ "channelId": "s2", "sessionName": "s2" }])
     );
+}
+
+#[test]
+fn daemon_connection_reconciles_body_subscription_without_dropping_physical_subscriber() {
+    let result = run_daemon_connection(daemon_request_with_subscription_update(
+        json!([{ "channelId": "s1", "sessionName": "s1" }]),
+        json!({}),
+        json!({ "channelId": "s1", "subscribed": false }),
+    ));
+    assert_eq!(result["ok"], true, "phase2 reconcile failed: {result}");
+
+    // The reconciled subscription feeds session_catalog.bodySubscribed.
+    assert_eq!(
+        result["outputs"]["arc.session_catalog"]["bodySubscribed"],
+        false
+    );
+    assert_eq!(result["outputs"]["arc.session_catalog"]["state"], "ready");
+
+    let settlement = &result["outputs"]["arc.physical_subscriber_settlement"];
+    assert_eq!(settlement["state"], "settled");
+    assert_eq!(settlement["bodySubscribed"], false);
+    assert_eq!(settlement["bodySubscribedByChannel"]["s1"], false);
+    // A physical subscriber with bodySubscribed=false is still a live connection.
+    assert_eq!(settlement["physicalSubscriberRetained"], true);
+    assert_eq!(settlement["zeroSubscriberRelease"], false);
+}
+
+#[test]
+fn daemon_connection_reconcile_rejects_unregistered_channel() {
+    let result = run_daemon_connection(daemon_request_with_subscription_update(
+        json!([{ "channelId": "s1", "sessionName": "s1" }]),
+        json!({}),
+        json!({ "channelId": "unknown", "subscribed": false }),
+    ));
+    assert_eq!(result["ok"], false);
+    assert!(result["error"]
+        .as_str()
+        .unwrap_or("")
+        .contains("not registered"));
 }
