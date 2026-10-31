@@ -71,9 +71,12 @@ Requires Node.js 22.x LTS (`ABI 127`) when running `zterm-daemon`.
 Install from the public npm registry:
 
 ```bash
-npm install -g @jsonstudio/zterm-cli@0.1.4
-zterm daemon install --version 0.1.3
+npm install -g @jsonstudio/zterm-cli@0.1.5
+zterm daemon install --version 0.1.4
 ```
+
+CLI `0.1.5` adds `zterm app` cross-machine message and file delivery; daemon
+`0.1.4` adds the `/app` WebSocket gateway.
 
 Or install the macOS daemon directly from the GitHub Release (`v0.1.3.3232`):
 
@@ -86,7 +89,7 @@ cd zterm-daemon-0.1.3-darwin-arm64
 Or install the daemon launcher directly from npm:
 
 ```bash
-npm install -g @jsonstudio/zterm-daemon@0.1.3
+npm install -g @jsonstudio/zterm-daemon@0.1.4
 ```
 
 Common daemon commands:

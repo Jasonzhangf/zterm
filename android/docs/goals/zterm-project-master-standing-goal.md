@@ -54,8 +54,9 @@ Remaining gates (external resources, not code):
 
 ## Current Verified Facts
 
-- `main` == `origin/main` at `8b2a93f2`; OTA `0.1.3.3236` is `stable` in
-  `~/.zterm/updates/latest.json` (versionCode 1100032360, rollback 3236.1).
+- `main` base `a554f87e`; release PR #194 bumps CLI to `0.1.5` and daemon to
+  `0.1.4`. OTA `0.1.3.3236` is `stable` in `~/.zterm/updates/latest.json`
+  (versionCode 1100032360, rollback 3236.1).
 - Only `main` worktree remains; `/Volumes/Intel/playground/zterm` holds no
   orphan worktree (only `.worker-runs` and `.DS_Store`).
 - Session drawer: master filter uses the Collab projection (no user-entered
@@ -75,6 +76,15 @@ Remaining gates (external resources, not code):
   assets, `verify-release-assets.mjs` 19/19; npm published and isolated-prefix
   verified for `@jsonstudio/zterm-cli@0.1.4`, `@jsonstudio/zterm-daemon@0.1.3`,
   and the darwin-arm64/linux-x64/win32-x64 payloads.
+- Public npm `latest` now carries `@jsonstudio/zterm-cli@0.1.5` and
+  `@jsonstudio/zterm-daemon@0.1.4` (plus `0.1.4` darwin-arm64/linux-x64/
+  win32-x64 payloads). CLI `0.1.5` exposes `zterm app` (stream/send/send-file/
+  status/ack/consume); daemon `0.1.4` serves the `/app` WebSocket gateway.
+  Verified by isolated public-registry install (`zterm app --help`,
+  `zterm daemon install --version 0.1.4`) and the full `app-messaging-e2e`
+  against the public installed CLI (`e2e.pass`: bidirectional message, file
+  byte match, restart resume, dedupe, slow-consumer, inbox cap, auth reject).
+  Source CI: CLI Platform `41188327672` and main `41188327683` both green.
 - `docs/install-from-zero.md` exists on `main` and defines the Node 22 ABI 127,
   `TMUX_TMPDIR=~/.tmux/run`, and zterm + Collab install-order contract.
 - No local VM tool exists on the dev Mac (checked multipass, lima, colima, orb,
