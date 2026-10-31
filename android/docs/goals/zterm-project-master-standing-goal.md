@@ -54,11 +54,19 @@ Remaining gates (external resources, not code):
 
 ## Current Verified Facts
 
-- `main` base `a554f87e`; release PR #194 bumps CLI to `0.1.5` and daemon to
-  `0.1.4`. OTA `0.1.3.3236` is `stable` in `~/.zterm/updates/latest.json`
-  (versionCode 1100032360, rollback 3236.1).
-- Only `main` worktree remains; `/Volumes/Intel/playground/zterm` holds no
-  orphan worktree (only `.worker-runs` and `.DS_Store`).
+- `main` base `6c46195e`; release PR #194 bumps CLI to `0.1.5` and daemon to
+  `0.1.4`. Local OTA `~/.zterm/updates/latest.json` now points at
+  `0.1.4.3239` (versionCode 1100032390) after the cold-start DAGpipe fix
+  build; Relay publish stayed off.
+- Worktrees: `main` plus the unmerged diagnostic branch
+  `android-error-boundary-diag-20261030` (`fix/android-error-boundary-diag`,
+  `a6ff0213`). No other orphan worktree.
+- Cold-start DAGpipe fix: installed 3238 failed `compileAllDagpipePhases`
+  with missing `reconcile_body_subscription`; 3239 from `main` (PR #192,
+  `4d248997`) compiles all 25 graphs `ok:true`. Verified on emulator-5558
+  with cold start, HOME/resume, and zero render errors. Evidence
+  `android/evidence/2026-10-31-coldstart-dagpipe-3239/`. 15T install and
+  network-transition L5 still pending.
 - Session drawer: master filter uses the Collab projection (no user-entered
   master), only real tmux sessions render, and hide/restore happens in-list.
   Merged `e156ca7a` (PR #182); `android-expert-review-1029` VERDICT PASS.
