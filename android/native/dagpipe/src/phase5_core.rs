@@ -44,6 +44,7 @@ fn make_registry() -> Registry {
     register!(ShellOpenTab);
     register!(SessionActivate);
     register!(SessionSubscribe);
+    register!(SessionReattachProjection);
     register!(ShellProject);
     register!(ShellProjectQuickbar);
     register!(ShellProjectCopy);
@@ -226,8 +227,67 @@ impl Operator for SessionSubscribe {
         let session = obj(inputs(input).first().cloned().unwrap_or_default());
         Ok(json!({
             "sessionId": get_str(&session, "sessionId"),
-            "bodySubscribed": true,
+            "bodySubscribed": session
+                .get("bodySubscribed")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
             "state": "subscribed",
+        }))
+    }
+}
+
+struct SessionReattachProjection;
+
+impl Operator for SessionReattachProjection {
+    fn name(&self) -> &'static str {
+        "client.session_runtime.reattach_projection"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let values = inputs(input);
+        let active_session = obj(values.first().cloned().unwrap_or_default());
+        let lifecycle_demand = obj(values.get(1).cloned().unwrap_or_default());
+        let native_transport_projection = obj(values.get(2).cloned().unwrap_or_default());
+        let session_id = get_str(&active_session, "sessionId").to_string();
+        if session_id.is_empty() {
+            return Err("reattach projection requires sessionId".into());
+        }
+        let mode = match get_str(&lifecycle_demand, "mode") {
+            "reattach" => "reattach",
+            _ => "bind",
+        };
+        let generation = native_transport_projection
+            .get("generation")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let target_match = native_transport_projection
+            .get("targetMatch")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let action = if mode == "reattach" && target_match {
+            "reattach"
+        } else {
+            "bind"
+        };
+        let body_subscribed = lifecycle_demand
+            .get("bodySubscribed")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        Ok(json!({
+            "sessionId": session_id,
+            "mode": mode,
+            "action": action,
+            "generation": generation,
+            "bodySubscribed": body_subscribed,
+            "state": "retained",
         }))
     }
 }
@@ -280,6 +340,78 @@ impl Operator for ShellProjectQuickbar {
             "sessionId": get_str(&shell_projection, "sessionId"),
             "state": "projected",
         }))
+    }
+}
+
+#[cfg(test)]
+mod operator_tests {
+    use super::*;
+
+    fn context() -> OperatorContext {
+        OperatorContext {
+            identity: Identity {
+                project_id: "zterm".into(),
+                graph_id: "test".into(),
+                graph_version: "0.1".into(),
+                execution_id: "execution".into(),
+                attempt_id: "attempt".into(),
+            },
+            node_id: "node".into(),
+        }
+    }
+
+    #[test]
+    fn reattach_with_matching_target_reuses_generation() {
+        let result = SessionReattachProjection
+            .execute(
+                json!([
+                    { "sessionId": "s1", "state": "active" },
+                    { "mode": "reattach" },
+                    { "generation": "gen-live", "targetMatch": true },
+                ]),
+                &context(),
+            )
+            .unwrap();
+        assert_eq!(result["state"], "retained");
+        assert_eq!(result["mode"], "reattach");
+        assert_eq!(result["action"], "reattach");
+        assert_eq!(result["generation"], "gen-live");
+        assert_eq!(result["bodySubscribed"], true);
+    }
+
+    #[test]
+    fn reattach_falls_back_to_bind_on_target_mismatch() {
+        let result = SessionReattachProjection
+            .execute(
+                json!([
+                    { "sessionId": "s1" },
+                    { "mode": "reattach" },
+                    { "generation": "gen-live", "targetMatch": false },
+                ]),
+                &context(),
+            )
+            .unwrap();
+        assert_eq!(result["mode"], "reattach");
+        assert_eq!(result["action"], "bind");
+    }
+
+    #[test]
+    fn reattach_defaults_to_bind_mode() {
+        let result = SessionReattachProjection
+            .execute(json!([{ "sessionId": "s1" }, {}, {}]), &context())
+            .unwrap();
+        assert_eq!(result["mode"], "bind");
+        assert_eq!(result["action"], "bind");
+        assert_eq!(result["generation"], Value::Null);
+        assert_eq!(result["bodySubscribed"], true);
+    }
+
+    #[test]
+    fn reattach_requires_session_id() {
+        let error = SessionReattachProjection
+            .execute(json!([{}, {}, {}]), &context())
+            .unwrap_err();
+        assert!(error.contains("sessionId"));
     }
 }
 

@@ -249,6 +249,13 @@ export function createDaemonBufferPublisherRuntime(
     if (!snapshot?.ready) {
       return true;
     }
+    if (snapshot.flowUnknown) {
+      // No valid flow observation yet (Android service has not projected the
+      // first native bufferedAmount snapshot). A missing observation is not
+      // proof of an empty queue, so hold the same frame until a real flow
+      // value arrives; never treat unknown as drained.
+      return true;
+    }
     if (snapshot.backpressure) {
       state.highWaterActive = true;
       if (!state.highWaterEnteredAt) {
@@ -330,6 +337,14 @@ export function createDaemonBufferPublisherRuntime(
       const start = Math.max(0, item.nextChunkIndex || 0);
       const end = Math.min(messages.length, start + Math.max(1, Math.floor(maxChunks)));
       for (let index = start; index < end; index += 1) {
+        // Re-check admission before every chunk: a mid-frame queue rise must
+        // pause this response and resume from the same nextChunkIndex so the
+        // subscriber never sees a half-applied different revision.
+        if (shouldHoldPendingForBackpressure(state, session)) {
+          return sentChunks > 0
+            ? { status: 'sent', sentChunks }
+            : { status: 'backpressured', sentChunks: 0 };
+        }
         deps.sendText(session.transport, messages[index]!.text);
         item.nextChunkIndex = index + 1;
         sentChunks += 1;
@@ -433,6 +448,14 @@ export function createDaemonBufferPublisherRuntime(
     try {
       deps.ensureSessionReady(session, mirror);
       for (let index = start; index < end; index += 1) {
+        // Per-chunk admission: pause and keep the same frame identity when the
+        // shared physical transport is at the high-water mark. Resuming from
+        // pendingLiveChunkIndex preserves the single authoritative frame.
+        if (shouldHoldPendingForBackpressure(state, session)) {
+          return sentChunks > 0
+            ? { status: 'sent', sentChunks }
+            : { status: 'backpressured', sentChunks: 0 };
+        }
         const message = messages[index]!;
         deps.recordPerformanceTrace?.({
           ...traceBase,

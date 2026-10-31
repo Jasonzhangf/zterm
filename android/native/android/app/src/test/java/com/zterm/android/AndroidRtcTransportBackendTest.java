@@ -75,10 +75,16 @@ public final class AndroidRtcTransportBackendTest {
         implements AndroidRtcTransportBackend.Listener {
         final List<String> events = Collections.synchronizedList(new ArrayList<>());
         final List<Integer> closedCodes = Collections.synchronizedList(new ArrayList<>());
+        final List<Long> flowReadings = Collections.synchronizedList(new ArrayList<>());
 
         @Override
         public void onRtcOpen() {
             events.add("open");
+        }
+
+        @Override
+        public void onRtcFlowChanged(long bufferedBytes) {
+            flowReadings.add(bufferedBytes);
         }
 
         @Override
@@ -472,6 +478,20 @@ public final class AndroidRtcTransportBackendTest {
         assertTrue("default direct open must publish immediately when DataChannel opens",
             backend.isOpen());
         assertEquals(Collections.singletonList("open"), listener.events);
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void openPublishesInitialZeroByteFlowObservationWithoutBufferedAmountCallback() {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, listener);
+
+        backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
+
+        assertTrue("RTC open must immediately publish a 0-byte flow observation",
+            listener.flowReadings.contains(0L));
         backend.closeQuietly("test");
     }
 }

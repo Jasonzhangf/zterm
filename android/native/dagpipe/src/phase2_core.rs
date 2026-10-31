@@ -82,6 +82,8 @@ fn make_registry() -> Registry {
     register!(DaemonPublishIdleFacts);
     register!(DaemonUnregisterChannel);
     register!(DaemonReleaseBodySubscription);
+    register!(DaemonReconcileBodySubscription);
+    register!(DaemonSettlePhysicalSubscriber);
     crate::sese_core::register_sese_operators(&mut registry);
     registry
 }
@@ -633,6 +635,138 @@ impl Operator for DaemonReleaseBodySubscription {
     }
 }
 
+struct DaemonReconcileBodySubscription;
+
+impl Operator for DaemonReconcileBodySubscription {
+    fn name(&self) -> &'static str {
+        "daemon.transport_subscriber.reconcile_body_subscription"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let values = inputs(input);
+        let subscription = obj(values.first().cloned().unwrap_or_default());
+        let update = obj(values.get(1).cloned().unwrap_or_default());
+        let mut by_channel = match subscription.get("bodySubscribedByChannel") {
+            Some(Value::Object(map)) => map.clone(),
+            _ => Map::new(),
+        };
+        let mut reconciled = false;
+        if let Some(Value::Object(updates)) = update.get("bodySubscribedByChannel") {
+            for (channel_id, value) in updates {
+                if !by_channel.contains_key(channel_id) {
+                    return Err(format!(
+                        "channel {channel_id} is not registered on mux session"
+                    ));
+                }
+                by_channel.insert(
+                    channel_id.clone(),
+                    Value::Bool(value.as_bool().unwrap_or(false)),
+                );
+            }
+            reconciled = true;
+        }
+        let channel_id = get_str(&update, "channelId").to_string();
+        if !channel_id.is_empty() {
+            if !by_channel.contains_key(&channel_id) {
+                return Err(format!(
+                    "channel {channel_id} is not registered on mux session"
+                ));
+            }
+            let subscribed = update
+                .get("subscribed")
+                .or_else(|| update.get("bodySubscribed"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            by_channel.insert(channel_id, Value::Bool(subscribed));
+            reconciled = true;
+        }
+        let body_subscribed = by_channel
+            .values()
+            .any(|value| value.as_bool() == Some(true));
+        Ok(json!({
+            "muxSessionId": get_str(&subscription, "muxSessionId"),
+            "bodySubscribed": body_subscribed,
+            "bodySubscribedByChannel": Value::Object(by_channel),
+            "state": if reconciled { "reconciled" } else { "bound" },
+        }))
+    }
+}
+
+struct DaemonSettlePhysicalSubscriber;
+
+impl Operator for DaemonSettlePhysicalSubscriber {
+    fn name(&self) -> &'static str {
+        "daemon.transport_subscriber.settle_physical_subscriber"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let values = inputs(input);
+        let accepted = obj(values.first().cloned().unwrap_or_default());
+        let reconciled = obj(values.get(1).cloned().unwrap_or_default());
+        let released = obj(values.get(2).cloned().unwrap_or_default());
+        let connection_id = get_str(&accepted, "connectionId").to_string();
+        if connection_id.is_empty() {
+            return Err("physical subscriber settlement requires connectionId".into());
+        }
+        let channels = released
+            .get("channels")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new()));
+        let active_ids = channels
+            .as_array()
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|channel| channel.get("channelId").and_then(Value::as_str))
+                    .map(|channel_id| channel_id.to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let reconciled_by_channel = reconciled
+            .get("bodySubscribedByChannel")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let mut effective_by_channel = Map::new();
+        for channel_id in active_ids {
+            let value = reconciled_by_channel
+                .get(&channel_id)
+                .cloned()
+                .unwrap_or(Value::Bool(true));
+            effective_by_channel.insert(channel_id, value);
+        }
+        let body_subscribed = effective_by_channel
+            .values()
+            .any(|value| value.as_bool() == Some(true));
+        Ok(json!({
+            "connectionId": connection_id,
+            "muxSessionId": get_str(&reconciled, "muxSessionId"),
+            "channels": channels,
+            "bodySubscribed": body_subscribed,
+            "bodySubscribedByChannel": Value::Object(effective_by_channel),
+            "physicalSubscriberRetained": true,
+            "zeroSubscriberRelease": false,
+            "state": "settled",
+        }))
+    }
+}
+
 struct DaemonBuildSessionCatalog;
 
 impl Operator for DaemonBuildSessionCatalog {
@@ -696,5 +830,123 @@ impl Operator for DaemonPublishIdleFacts {
                 .collect::<Vec<_>>(),
             "state": "published",
         }))
+    }
+}
+
+#[cfg(test)]
+mod operator_tests {
+    use super::*;
+
+    fn context() -> OperatorContext {
+        OperatorContext {
+            identity: Identity {
+                project_id: "zterm".into(),
+                graph_id: "test".into(),
+                graph_version: "0.1".into(),
+                execution_id: "execution".into(),
+                attempt_id: "attempt".into(),
+            },
+            node_id: "node".into(),
+        }
+    }
+
+    fn run(operator: &dyn Operator, values: Value) -> Result<Value, String> {
+        operator.execute(values, &context())
+    }
+
+    fn subscription() -> Value {
+        json!({
+            "muxSessionId": "mux-conn-1",
+            "bodySubscribed": true,
+            "bodySubscribedByChannel": { "s1": true, "s2": true },
+            "state": "bound",
+        })
+    }
+
+    #[test]
+    fn reconcile_without_update_passes_through_binding() {
+        let result = run(
+            &DaemonReconcileBodySubscription,
+            json!([subscription(), {}]),
+        )
+        .unwrap();
+        assert_eq!(result["state"], "bound");
+        assert_eq!(result["bodySubscribed"], true);
+        assert_eq!(result["bodySubscribedByChannel"]["s1"], true);
+    }
+
+    #[test]
+    fn reconcile_channel_update_marks_state_and_recomputes_aggregate() {
+        let result = run(
+            &DaemonReconcileBodySubscription,
+            json!([subscription(), { "channelId": "s1", "subscribed": false }]),
+        )
+        .unwrap();
+        assert_eq!(result["state"], "reconciled");
+        assert_eq!(result["bodySubscribedByChannel"]["s1"], false);
+        // s2 still subscribed so the aggregate stays true.
+        assert_eq!(result["bodySubscribed"], true);
+    }
+
+    #[test]
+    fn reconcile_rejects_unregistered_channel() {
+        let error = run(
+            &DaemonReconcileBodySubscription,
+            json!([subscription(), { "channelId": "unknown", "subscribed": false }]),
+        )
+        .unwrap_err();
+        assert!(error.contains("not registered"));
+    }
+
+    #[test]
+    fn settle_requires_connection_id() {
+        let error = run(
+            &DaemonSettlePhysicalSubscriber,
+            json!([{}, subscription(), { "channels": [] }]),
+        )
+        .unwrap_err();
+        assert!(error.contains("connectionId"));
+    }
+
+    #[test]
+    fn settle_filters_released_channels_and_retains_physical_subscriber() {
+        let result = run(
+            &DaemonSettlePhysicalSubscriber,
+            json!([
+                { "connectionId": "conn-1", "channels": [], "state": "accepted" },
+                {
+                    "muxSessionId": "mux-conn-1",
+                    "bodySubscribed": true,
+                    "bodySubscribedByChannel": { "s1": false, "s2": true },
+                    "state": "reconciled",
+                },
+                { "channels": [{ "channelId": "s2", "sessionName": "s2" }] },
+            ]),
+        )
+        .unwrap();
+        assert_eq!(result["state"], "settled");
+        assert_eq!(result["connectionId"], "conn-1");
+        assert_eq!(result["bodySubscribedByChannel"]["s2"], true);
+        assert!(result["bodySubscribedByChannel"].get("s1").is_none());
+        assert_eq!(result["bodySubscribed"], true);
+        assert_eq!(result["physicalSubscriberRetained"], true);
+        assert_eq!(result["zeroSubscriberRelease"], false);
+    }
+
+    #[test]
+    fn settle_defaults_surviving_channel_absent_from_reconciled_to_subscribed() {
+        let result = run(
+            &DaemonSettlePhysicalSubscriber,
+            json!([
+                { "connectionId": "conn-1" },
+                { "muxSessionId": "mux-conn-1", "bodySubscribedByChannel": {} },
+                { "channels": [{ "channelId": "s9" }] },
+            ]),
+        )
+        .unwrap();
+        assert_eq!(result["bodySubscribedByChannel"]["s9"], true);
+        assert_eq!(result["bodySubscribed"], true);
+        assert_eq!(result["physicalSubscriberRetained"], true);
+        assert_eq!(result["zeroSubscriberRelease"], false);
     }
 }

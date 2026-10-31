@@ -111,6 +111,7 @@ public final class AndroidConnectionStateMachine {
                     .muxReadyPayloadJson(null)
                     .nextRetryAt(null)
                     .error(null)
+                    .transportFlow(null)
                     .resolvedPath(null)
                     .resolvedRelayTransport(null)
                     .resolvedEndpoint(null)
@@ -209,6 +210,13 @@ public final class AndroidConnectionStateMachine {
                 publish();
                 return true;
 
+            case TRANSPORT_FLOW_CHANGED:
+                snapshot = snapshot.toBuilder()
+                    .transportFlow(event.flowObservation)
+                    .build();
+                publish();
+                return true;
+
             case HEARTBEAT_MISSED:
                 if (!isConnectedState(snapshot.state)) return false;
                 consecutiveHeartbeatMisses += 1;
@@ -294,6 +302,7 @@ public final class AndroidConnectionStateMachine {
             case SERVER_ACTIVITY:
             case HEARTBEAT_MISSED:
             case TRANSPORT_RESOLVED:
+            case TRANSPORT_FLOW_CHANGED:
             case TRANSPORT_FAILURE:
             case AUTHENTICATION_FAILURE:
             case TERMINAL_FAILURE:
@@ -327,6 +336,7 @@ public final class AndroidConnectionStateMachine {
             .resolvedRelayTransport(source.resolvedRelayTransport)
             .resolvedEndpoint(source.resolvedEndpoint)
             .selectedIcePairJson(source.selectedIcePairJson)
+            .transportFlow(source.transportFlow)
             .build();
     }
 

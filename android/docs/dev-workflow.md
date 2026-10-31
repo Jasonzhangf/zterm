@@ -92,6 +92,19 @@ Android build/test 会解析 `@zterm/shared` 的部分出口到 `packages/shared
 - 任何“只为性能”做的改动，不允许通过裁剪既有 payload 语义达成
 - 客户端巨型文件拆分只能做 ownership 下沉，不得借拆分之机修改 wire 行为
 
+## Android 发送流控门禁
+
+- Android rtc-direct 本端发送流控真源：
+  `docs/decisions/2026-10-30-android-rtc-send-flow-truth.md`。涉及
+  `transportFlow` 投影、发送 admission、拥塞分类、文件下载 pacing 或 publisher
+  逐块 admission 的改动，必须先更新该决策并跑：
+  `test:android-connection-service`、`test:file-transfer:throughput`、
+  `test:transport-network-lifecycle`、`test:feature-registry`、`type-check`。
+- OPEN 拥塞不得升级为物理重连；真正断连（CLOSED/ICE FAILED/grace 到期/heartbeat
+  合同成立）才允许交 recovery owner。旧的 generation callback 不得更新新连接。
+- `sendChunk` 必须 await 本次 dispatch；下载每次 dispatch 前检查原 transport
+  identity 与 OPEN 状态；buffer-sync 每块发送前重查背压并保留 `nextChunkIndex`。
+
 ## Terminal buffer 重构门禁
 
 - 任何 terminal buffer / scroll / cursor 改动，先更新：

@@ -17,7 +17,7 @@ interface SendBoundedFileUploadChunksOptions<TChunk> {
   totalChunks: number;
   startChunkIndex?: number;
   readChunk: (chunkIndex: number) => Promise<TChunk>;
-  sendChunk: (chunkIndex: number, chunk: TChunk) => void;
+  sendChunk: (chunkIndex: number, chunk: TChunk) => void | Promise<void>;
   waitForProgress: (minimumAcknowledgedChunks: number) => Promise<void>;
   resume?: UploadResumePolicy;
 }
@@ -48,7 +48,7 @@ export async function sendBoundedFileUploadChunks<TChunk>(
           );
         }
         const chunk = await options.readChunk(chunkIndex);
-        options.sendChunk(chunkIndex, chunk);
+        await options.sendChunk(chunkIndex, chunk);
       }
 
       await options.waitForProgress(options.totalChunks);

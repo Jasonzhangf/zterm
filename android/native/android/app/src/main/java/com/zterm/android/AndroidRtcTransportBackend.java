@@ -102,6 +102,8 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         void onRtcClosed(int code, String reason);
         default void onRtcSelectedIcePair(String json) {
         }
+        default void onRtcFlowChanged(long bufferedBytes) {
+        }
     }
 
     private final Context context;
@@ -124,6 +126,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         PeerConnection.IceConnectionState.NEW;
     private volatile boolean disposed;
     private volatile boolean openPublished;
+    private volatile long bufferedBytes;
     private ScheduledFuture<?> stabilityFuture;
     private ScheduledFuture<?> disconnectedFuture;
     private static final int MAX_PENDING_REMOTE_ICE_CANDIDATES = 64;
@@ -235,8 +238,24 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         if (dataChannel == null) {
             return false;
         }
-        return dataChannel.send(new DataChannel.Buffer(
+        boolean sent = dataChannel.send(new DataChannel.Buffer(
             ByteBuffer.wrap(text.getBytes(StandardCharsets.UTF_8)), false));
+        if (sent) {
+            publishBufferedAmount();
+        }
+        return sent;
+    }
+
+    /** Current sender-owned buffered bytes on the live DataChannel, or 0 when closed. */
+    public long bufferedAmount() {
+        if (disposed || dataChannelState != DataChannel.State.OPEN) {
+            return 0L;
+        }
+        DataChannel channel = dataChannel;
+        if (channel == null) {
+            return Math.max(0L, bufferedBytes);
+        }
+        return Math.max(0L, channel.bufferedAmount());
     }
 
     public void closeQuietly(String reason) {
@@ -263,6 +282,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             }
             channel.dispose();
         }
+        bufferedBytes = 0L;
         if (peer != null) {
             peer.close();
             peer.dispose();
@@ -711,6 +731,9 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
     private final DataChannel.Observer dataObserver = new DataChannel.Observer() {
         @Override
         public void onBufferedAmountChange(long l) {
+            // The delta parameter can arrive while the channel is draining or
+            // receiving. Re-read current state; never trust the previous value.
+            publishBufferedAmount();
         }
 
         @Override
@@ -790,10 +813,19 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             return;
         }
         if (state == DataChannel.State.CLOSED) {
+            bufferedBytes = 0L;
             cancelStabilityFuture();
             cancelDisconnectedFuture();
             listener.onRtcClosed(1000, "rtc data channel closed");
             closeQuietly("rtc data channel closed");
+        }
+    }
+
+    private void publishBufferedAmount() {
+        long current = bufferedAmount();
+        bufferedBytes = current;
+        if (!disposed && dataChannelState == DataChannel.State.OPEN) {
+            listener.onRtcFlowChanged(current);
         }
     }
 
@@ -814,6 +846,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         openPublished = true;
         maybePublishSelectedIcePair();
         listener.onRtcOpen();
+        publishBufferedAmount();
     }
 
     private void maybePublishSelectedIcePair() {

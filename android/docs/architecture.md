@@ -17,6 +17,7 @@
 9. `docs/decisions/2026-07-19-remote-window-stream-truth.md`：remote window stream / iTerm2 pane coordinate / input return 真源
 10. `docs/decisions/2026-08-07-opencode-transcript-mirror-truth.md`：opencode transcript 数据导出 / daemon 只读服务 / client 历史投影真源（独立于 mirror store）
 11. `dev-workflow.md`：执行门禁
+11. `docs/decisions/2026-10-30-android-rtc-send-flow-truth.md`：Android rtc-direct 本端发送队列投影、拥塞分类与文件下载 pacing 真源
 12. `task.md`：当前任务
 13. `CACHE.md`：短期上下文
 14. `MEMORY.md`：长期经验
@@ -544,7 +545,7 @@ daemon server
 - 当前 client sparse buffer 默认/最大仍是 1000 行；目标默认 3000 行且可配置，最大值尚未由设计确定
 - 当前 daemon 对完整 mirror window 计算 diff，初始 `forceRevision` 可发布完整窗口；目标 ordinary live diff 只比较最后一屏，首连 head/tail 后最多 catch 三屏
 - 当前生产编排是 `ClientCompositionRoot + PluginHost`；Cordis 固定 service/node 仍是目标迁移
-- 当前 Android Service 只拥有 WebSocket/mux 物理生命周期，UDP/WebRTC 仍在 TypeScript；目标由 Service 持有全部物理连接逻辑和状态
+- 当前 Android Service 只拥有 WebSocket/mux 物理生命周期，UDP/WebRTC 仍在 TypeScript；目标由 Service 持有全部物理连接逻辑和状态。本端发送队列投影（`transportFlow`）、拥塞与真正断连分类、文件下载 pacing 与 publisher 逐块 admission 的真源见 `docs/decisions/2026-10-30-android-rtc-send-flow-truth.md`
 - 当前仍读取 JSON 配置并存在固定 Relay 默认地址；目标是迁移到 `~/.zterm/config.toml` 后删除硬编码和 JSON runtime fallback
 - 当前是“主机列表页 + 顶部按钮”，目标是“Connections 连接中心”
 - 当前缺少独立的 Connection Properties 结构页

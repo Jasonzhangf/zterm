@@ -1700,4 +1700,142 @@ describe('AndroidConnectionServiceTransportSocket', () => {
       }),
     }));
   });
+
+  it('projects non-zero native and service buffered bytes into bufferedAmount', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-flow-nonzero',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 20,
+      lastActivityAt: 20,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      transportFlow: {
+        nativeBufferedBytes: 100_000,
+        serviceQueuedBytes: 8_000,
+        serviceQueuedFrames: 3,
+        backpressured: false,
+        sampledAt: 20,
+      },
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    socket.onopen = vi.fn();
+    await socket.start();
+
+    expect(socket.bufferedAmount).toBe(108_000);
+    expect(socket.getTransportFlowDiagnostics()).toEqual({
+      nativeBufferedBytes: 100_000,
+      serviceQueuedBytes: 8_000,
+      serviceQueuedFrames: 3,
+      backpressured: false,
+      sampledAt: 20,
+    });
+  });
+
+  it('does not leak an old-generation transport flow into the current generation', async () => {
+    const { listeners, add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-old',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 21,
+      lastActivityAt: 21,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      transportFlow: {
+        nativeBufferedBytes: 200_000,
+        serviceQueuedBytes: 16_000,
+        serviceQueuedFrames: 4,
+        backpressured: true,
+        sampledAt: 21,
+      },
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    socket.onopen = vi.fn();
+    await socket.start();
+    expect(socket.bufferedAmount).toBe(216_000);
+
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'backoff-reconnect',
+      generation: null,
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: null,
+      lastActivityAt: null,
+      nextRetryAt: 30_000,
+      error: { code: 'transport', message: 'physical loss' },
+      muxReadyPayload: null,
+      transportFlow: null,
+    });
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'connecting',
+      generation: 'g-new',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: null,
+      lastActivityAt: null,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload: null,
+      transportFlow: null,
+    });
+    listeners.get('androidConnectionSnapshot')?.({
+      state: 'healthy',
+      generation: 'g-new',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 22,
+      lastActivityAt: 22,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      transportFlow: {
+        nativeBufferedBytes: 1_000,
+        serviceQueuedBytes: 0,
+        serviceQueuedFrames: 0,
+        backpressured: false,
+        sampledAt: 22,
+      },
+    });
+    await Promise.resolve();
+
+    expect(socket.bufferedAmount).toBe(1_000);
+    expect(socket.getTransportFlowDiagnostics()?.nativeBufferedBytes).toBe(1_000);
+  });
+
+  it('reports flowUnknown true when no transport flow observation exists', async () => {
+    const { add } = listenerMock();
+    plugin.addListener.mockImplementation(add);
+    plugin.readSnapshot.mockResolvedValue({
+      state: 'healthy',
+      generation: 'g-no-flow',
+      target,
+      route: { mode: 'auto' },
+      channels: [],
+      lastHeartbeatAt: 30,
+      lastActivityAt: 30,
+      nextRetryAt: null,
+      error: null,
+      muxReadyPayload,
+      transportFlow: null,
+    });
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    socket.onopen = vi.fn();
+    await socket.start();
+
+    expect(socket.bufferedAmount).toBe(0);
+    expect(socket.flowUnknown).toBe(true);
+  });
 });

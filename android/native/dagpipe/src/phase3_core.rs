@@ -188,6 +188,7 @@ fn make_registry() -> Registry {
     register!(FileTransferUploadAck);
     register!(FileTransferValidateDownload);
     register!(FileTransferDownloadSegment);
+    register!(FileTransferDownloadSendAdmission);
     register!(FileTransferDownloadAck);
     register!(AttachmentValidate);
     register!(AttachmentEnqueue);
@@ -732,6 +733,8 @@ impl Operator for FileTransferValidateDownload {
 
 struct FileTransferDownloadSegment;
 
+struct FileTransferDownloadSendAdmission;
+
 impl Operator for FileTransferDownloadSegment {
     fn name(&self) -> &'static str {
         "daemon.file_transfer.download_segment"
@@ -754,6 +757,40 @@ impl Operator for FileTransferDownloadSegment {
             "segmentIndex": validation.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
             "totalChunks": validation.get("totalChunks").cloned().unwrap_or_else(|| json!(1)),
             "state": "chunked",
+        }))
+    }
+}
+
+impl Operator for FileTransferDownloadSendAdmission {
+    fn name(&self) -> &'static str {
+        "daemon.file_transfer.download_send_admission"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let values = inputs(input);
+        let chunk = obj(values.first().cloned().unwrap_or_default());
+        let flow = obj(values.get(1).cloned().unwrap_or_default());
+        let native = flow
+            .get("nativeBufferedBytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let backpressured = native >= 131_072;
+        Ok(json!({
+            "downloadId": get_str(&chunk, "downloadId"),
+            "path": get_str(&chunk, "path"),
+            "chunk": chunk.get("chunk").cloned().unwrap_or_else(|| json!("")),
+            "segmentIndex": chunk.get("segmentIndex").cloned().unwrap_or_else(|| json!(0)),
+            "totalChunks": chunk.get("totalChunks").cloned().unwrap_or_else(|| json!(1)),
+            "state": if backpressured { "waiting" } else { "sent" },
+            "backpressured": backpressured,
         }))
     }
 }
