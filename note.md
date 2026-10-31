@@ -766,3 +766,23 @@ bottom lines 不刷新可能有两种根因：1.bufferTailEndIndex 不更新导�
 - 阶段计划：Phase 0 governance → Phase 1 shared contracts → Phase 2 Cordis Playground → Phase 3 hosts → Phase 4 parity kernel → Phase 5 data plane → Phase 6 UI plugins → Phase 7 platform parity → Phase 8 closeout。
 - 并发协议：阶段 owner claim 通过后，按 manifest 发放互不重叠的 semantic claims；worker 必须在 clean worktree 交 evidence/handoff，主 tree 合并后重新验证。
 - 设计文档：`docs/design/2026-08-26-zterm-cordis-v2-cross-platform.md`；执行计划：`docs/goals/zterm-cordis-v2-rebuild-plan.md`；机器 manifest：`docs/architecture/zterm-cordis-v2-phase-manifest.json`。
+
+## 2026-10-29 空间清理（按用户纠正：直接释放，不再归档备份）
+
+用户纠正：清理以实际释放空间为目标，不为清理而归档、备份或移入废纸篓。已核对无未交付内容后直接删除。本轮实测释放约 16.2 GiB：
+
+- `android/update-dist` 与 `android/release-dist`：按 `prepare-update-bundle.mjs` 保留策略（manifest 引用 + alias + 最新 3 个 build number）清理 1289 个陈旧 versioned APK，`update-dist` 8.2G→469M，`release-dist` 8.2G→591M，释放约 15.7 GiB。两目录均 git-ignored，无 tracked 文件。
+- 删除 `.worktree-archive`（上一轮 worktree 收口的 patch/tgz 备份，40M）；分支仍保留，代码可经 `git branch` 恢复。
+- `~/.zterm/updates`：删除旧 3230/3231 normal+rollback APK（约 224M），保留 3232 / 3232.1 / latest-debug。
+- `~/.zterm/probe-3209`（92M）、`~/.zterm/wrtc-release-input-3209`（20M）、`android/evidence/zterm-0.1.3.3227*.apk`（112M，未跟踪）删除。
+
+repo `/Volumes/extension/code/zterm` 21G→5.6G。`/Volumes/Intel/playground/zterm` 维持 3.1G（3 个活动树）。worktree 数维持 4（main + 3 活动任务）。
+
+## 2026-10-31 冷启动 DAGpipe 编译失败与 3239 修复验证
+
+- 现象：安装态 `0.1.3.3238` 冷启动/后台切页会失败或退回首页。
+- 原始证据：emulator-5558 冷启动 logcat `compileAllDagpipePhases result={"error":"node reconcile_body_subscription references missing operator daemon.transport_subscriber.reconcile_body_subscription@0.1","ok":false}`；证据目录 `android/evidence/2026-10-31-coldstart-dagpipe-3238/`。
+- 根因：3238 由 `fix/android-lan-udp-transport` HEAD `697b002f` 构建，早于 `c4e3ff3b`；main 的 PR #192（`4d248997`）才注册 `reconcile_body_subscription`、`settle_physical_subscriber`、`reattach_projection`。
+- 修复构建：`build:android --resume-build 3239`，产物 `0.1.4.3239` / versionCode 1100032390；daemon release 需要 `ZTERM_DAEMON_WRTC_INPUT_MANIFEST`，本地用 `prepare-daemon-ci-wrtc-input.mjs` 生成。
+- 复验：emulator-5558 装 3239 后 25 张图 `ok:true`，冷启动与 HOME/resume 均无 `zterm:react-error`、无 `页面加载失败`、无 missing operator，terminal `workspace-1` 后台恢复保留 scrollback。证据 `android/evidence/2026-10-31-coldstart-dagpipe-3239/`。
+- 剩余：15T（100.104.163.65）安装 3239 并做网络切换 L5；`android-error-boundary-diag-20261030` 分支仍未合入，仅用于错误详情展示。
