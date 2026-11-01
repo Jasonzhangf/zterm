@@ -4836,6 +4836,72 @@ describe('session-context-buffer-runtime inactive gating', () => {
   });
 
 
+  it('does not dispatch buffer sync or head requests while the session mux channel is closed', () => {
+    const sessionId = 'session-channel-closed';
+    const session = makeSession(sessionId);
+    // The local sparse buffer stops at 48 while the renderer asks for [96,120).
+    // That missing range is exactly the page-switch demand that used to reach
+    // sendSocketPayload and throw TerminalMuxChannelNotOpenError.
+    session.buffer = createSessionBufferState({
+      lines: Array.from({ length: 48 }, (_, index) => `row-${index}`),
+      startIndex: 0,
+      endIndex: 48,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 48,
+      cols: 80,
+      rows: 24,
+      revision: 5,
+      cacheLines: 1000,
+    });
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const closedChannelResource = {
+      socket: targetSocket,
+      channel: { state: 'closed' },
+    };
+    const sendSocketPayload = vi.fn();
+    const refs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      visibleRangeEntries: [[sessionId, { startIndex: 96, endIndex: 120, viewportRows: 24 }]],
+    });
+
+    const syncRequested = requestSessionBufferSyncRuntime({
+      sessionId,
+      requestOptions: { reason: 'page-switch', purpose: 'tail-refresh' },
+      refs: {
+        stateRef: refs.stateRef,
+        sessionVisibleRangeRef: refs.sessionVisibleRangeRef,
+        sessionHeadStoreRef: refs.sessionHeadStoreRef,
+        sessionPullStateRef: { current: new Map() },
+        tailRefreshStoreRef: refs.tailRefreshStoreRef,
+      },
+      readSessionTransportSocket: () => targetSocket,
+      readSessionTransportResource: () => closedChannelResource as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
+    expect(syncRequested).toBe(false);
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+
+    const headRequested = requestSessionBufferHeadRuntime({
+      sessionId,
+      refs: {
+        stateRef: refs.stateRef,
+        lastHeadRequestAtRef: { current: new Map() },
+        sessionDebugMetricsStoreRef: { current: { recordRefreshRequest: vi.fn() } },
+      },
+      readSessionTransportSocket: () => targetSocket,
+      readSessionTransportResource: () => closedChannelResource as any,
+      sendSocketPayload,
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 0 }),
+    });
+    expect(headRequested).toBe(false);
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+  });
+
   it('does not reissue a body refresh without renderer visible range for non-head call sites', () => {
     const sessionId = 'session-1';
     const session = {
