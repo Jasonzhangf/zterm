@@ -84,32 +84,42 @@ export function resolveLocalAppDaemonConfig(options?: {
   const zterm = object(config.zterm);
   const android = object(zterm.android);
   const mobile = object(config.mobile);
-  const daemon = Object.keys(object(android.daemon)).length > 0
-    ? object(android.daemon)
-    : object(mobile.daemon);
-  const relay = Object.keys(object(android.relay)).length > 0
-    ? object(android.relay)
-    : object(mobile.relay);
-  const host = text(env.ZTERM_HOST) || text(env.HOST) || text(daemon.host) || '0.0.0.0';
+  const androidDaemon = object(android.daemon);
+  const mobileDaemon = object(mobile.daemon);
+  const androidRelay = object(android.relay);
+  const mobileRelay = object(mobile.relay);
+  const host = text(env.ZTERM_HOST)
+    || text(env.HOST)
+    || text(androidDaemon.host)
+    || text(mobileDaemon.host)
+    || '0.0.0.0';
   const port = positiveInteger(env.ZTERM_PORT)
     ?? positiveInteger(env.PORT)
-    ?? positiveInteger(daemon.port)
+    ?? positiveInteger(androidDaemon.port)
+    ?? positiveInteger(mobileDaemon.port)
     ?? DEFAULT_BRIDGE_PORT;
-  const authToken = text(env.ZTERM_AUTH_TOKEN) || text(daemon.authToken);
+  const authToken = text(env.ZTERM_AUTH_TOKEN)
+    || text(androidDaemon.authToken)
+    || text(mobileDaemon.authToken);
   if (!authToken) {
     throw new AppCliError(
       'missing_auth_token',
       '/app requires a configured daemon token; set zterm.android.daemon.authToken',
     );
   }
-  const deviceId = text(env.ZTERM_TRAVERSAL_DEVICE_ID) || text(relay.deviceId);
+  const deviceId = text(env.ZTERM_TRAVERSAL_DEVICE_ID)
+    || text(androidRelay.deviceId)
+    || text(mobileRelay.deviceId);
   if (!deviceId) {
     throw new AppCliError(
       'missing_identity',
       'local deviceId is missing; configure zterm.android.relay.deviceId',
     );
   }
-  const daemonHostId = text(env.ZTERM_TRAVERSAL_HOST_ID) || text(relay.hostId) || readDaemonId(home);
+  const daemonHostId = text(env.ZTERM_TRAVERSAL_HOST_ID)
+    || text(androidRelay.hostId)
+    || text(mobileRelay.hostId)
+    || readDaemonId(home);
   if (!daemonHostId) {
     throw new AppCliError(
       'missing_identity',
