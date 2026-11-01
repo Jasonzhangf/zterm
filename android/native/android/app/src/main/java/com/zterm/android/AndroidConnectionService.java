@@ -912,6 +912,7 @@ public class AndroidConnectionService extends Service {
             new java.util.HashSet<>();
         private volatile boolean congestionDraining;
         private volatile boolean sendStalled;
+        private volatile long sendStalledBufferedBytes = -1L;
         private final java.util.ArrayDeque<DeferredSend> retryDeferredFrames =
             new java.util.ArrayDeque<>();
         private final java.util.Map<String, Long> channelLifecycleEpochs =
@@ -981,6 +982,7 @@ public class AndroidConnectionService extends Service {
             relayStartedThisAttempt = false;
             sendRetryPending = false;
             sendStalled = false;
+            sendStalledBufferedBytes = -1L;
             congestionDraining = false;
             heartbeatMisses = 0;
             lastActivityAt = System.currentTimeMillis();
@@ -2295,6 +2297,7 @@ public class AndroidConnectionService extends Service {
                     boolean wasStalled = sendStalled;
                     congestionDraining = false;
                     sendStalled = false;
+                    sendStalledBufferedBytes = -1L;
                     sendRetryPending = false;
                     consumeSuccessfulRetryFrame(frame, safeRetryChannelId);
                     if (wasStalled) {
@@ -2364,6 +2367,7 @@ public class AndroidConnectionService extends Service {
                 if (attempt >= SEND_RETRY_MAX) {
                     sendRetryPending = false;
                     sendStalled = true;
+                    sendStalledBufferedBytes = currentBuffered;
                     parkStalledFrameAtHead(new DeferredSend(
                         frame, channelId, source, requireOpenedChannel,
                         channelLifecycleEpoch(channelId), gate));
@@ -2873,8 +2877,11 @@ public class AndroidConnectionService extends Service {
 
         void handleRtcFlowChanged(long bufferedBytes, long sampledAt) {
             boolean wasStalled = false;
-            if (sendStalled && !isSendCongested(bufferedBytes)) {
+            if (sendStalled && !isSendCongested(bufferedBytes)
+                && sendStalledBufferedBytes >= 0L
+                && bufferedBytes < sendStalledBufferedBytes) {
                 sendStalled = false;
+                sendStalledBufferedBytes = -1L;
                 wasStalled = true;
             }
             if (congestionDraining && bufferedBytes <= SEND_FLOW_LOW_WATER_BYTES) {
@@ -2933,6 +2940,7 @@ public class AndroidConnectionService extends Service {
             generation = null;
             congestionDraining = false;
             sendStalled = false;
+            sendStalledBufferedBytes = -1L;
             AndroidConnectionServiceSnapshot snapshot = stateMachine == null
                 ? AndroidConnectionServiceSnapshot.empty() : stateMachine.readSnapshot();
             List<AndroidConnectionServiceSnapshot.RouteDiagnostic> diagnostics =
@@ -2974,6 +2982,7 @@ public class AndroidConnectionService extends Service {
             generation = null;
             congestionDraining = false;
             sendStalled = false;
+            sendStalledBufferedBytes = -1L;
             AndroidConnectionServiceSnapshot currentSnapshot = stateMachine == null
                 ? AndroidConnectionServiceSnapshot.empty() : stateMachine.readSnapshot();
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportFailure(
@@ -3006,6 +3015,7 @@ public class AndroidConnectionService extends Service {
             generation = null;
             congestionDraining = false;
             sendStalled = false;
+            sendStalledBufferedBytes = -1L;
             stateMachine.dispatch(AndroidConnectionServiceEvent.terminalFailure(
                 failedGeneration, message), System.currentTimeMillis());
             publishPhysicalError(code, message);
@@ -3023,6 +3033,7 @@ public class AndroidConnectionService extends Service {
             generation = null;
             congestionDraining = false;
             sendStalled = false;
+            sendStalledBufferedBytes = -1L;
             stateMachine.dispatch(AndroidConnectionServiceEvent.authenticationFailure(
                 failedGeneration, message), System.currentTimeMillis());
             publishPhysicalError(code, message);
@@ -3047,6 +3058,7 @@ public class AndroidConnectionService extends Service {
             rtcBackend = null;
             congestionDraining = false;
             sendStalled = false;
+            sendStalledBufferedBytes = -1L;
             activeRtcCandidate = null;
             backoffIndex = 0;
             heartbeatMisses = 0;
@@ -3071,6 +3083,7 @@ public class AndroidConnectionService extends Service {
             generation = null;
             congestionDraining = false;
             sendStalled = false;
+            sendStalledBufferedBytes = -1L;
         }
 
         synchronized void setTestRouteDiagnostics(List<RouteCandidateDiagnostic> diagnostics) {

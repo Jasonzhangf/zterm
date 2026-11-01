@@ -2937,7 +2937,7 @@ public final class AndroidConnectionServiceTransportTest {
             Field bufferedBytesField = AndroidRtcTransportBackend.class
                 .getDeclaredField("bufferedBytes");
             bufferedBytesField.setAccessible(true);
-            bufferedBytesField.setLong(backend, 0L);
+            bufferedBytesField.setLong(backend, 4096L);
 
             java.util.concurrent.atomic.AtomicBoolean allowSend =
                 new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -2985,19 +2985,50 @@ public final class AndroidConnectionServiceTransportTest {
             assertNotNull("low-queue stall must publish a typed flow observation", stalledFlow);
             assertFalse("low-queue stall is not high-water backpressure", stalledFlow.backpressured);
             assertTrue("low-queue stall must raise sendStalled", stalledFlow.sendStalled);
+            assertEquals("stall must record the native buffered bytes at entry",
+                4096L, stalledFlow.nativeBufferedBytes);
             assertEquals("head frame plus queued second frame both stay queued",
                 2L, stalledFlow.serviceQueuedFrames);
 
-            // Recovery via RTC drain (below high watermark) with sendText() succeeding again.
+            // Equal or higher buffered callbacks below the high watermark are not
+            // evidence of drain. They must keep the parked head and queue intact.
             allowSend.set(true);
             Method handleRtcFlowChanged = runtime.getClass().getDeclaredMethod(
                 "handleRtcFlowChanged", long.class, long.class);
             handleRtcFlowChanged.setAccessible(true);
-            handleRtcFlowChanged.invoke(runtime, 0L, System.currentTimeMillis());
+            handleRtcFlowChanged.invoke(runtime, 4096L, System.currentTimeMillis());
+
+            AndroidConnectionServiceSnapshot equalFlowSnapshot = stateMachine.readSnapshot();
+            assertTrue("equal buffered observation must keep sendStalled",
+                equalFlowSnapshot.transportFlow.sendStalled);
+            assertEquals("equal buffered observation must keep both frames queued",
+                2L, equalFlowSnapshot.transportFlow.serviceQueuedFrames);
+            assertEquals("equal buffered observation must not send the parked head",
+                0, sentTexts.size());
+            assertEquals("equal buffered observation must keep the stall baseline",
+                4096L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+
+            handleRtcFlowChanged.invoke(runtime, 8192L, System.currentTimeMillis());
+
+            AndroidConnectionServiceSnapshot higherFlowSnapshot = stateMachine.readSnapshot();
+            assertTrue("higher but below-high-water buffered observation must keep sendStalled",
+                higherFlowSnapshot.transportFlow.sendStalled);
+            assertEquals("higher buffered observation must keep both frames queued",
+                2L, higherFlowSnapshot.transportFlow.serviceQueuedFrames);
+            assertEquals("higher buffered observation must not send the parked head",
+                0, sentTexts.size());
+            assertEquals("higher buffered observation must keep the stall baseline",
+                4096L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+
+            // A strict decrease proves drain and resumes the parked FIFO.
+            bufferedBytesField.setLong(backend, 2048L);
+            handleRtcFlowChanged.invoke(runtime, 2048L, System.currentTimeMillis());
 
             AndroidConnectionServiceSnapshot recoveredSnapshot = stateMachine.readSnapshot();
-            assertFalse("drain below high watermark must clear sendStalled",
+            assertFalse("strict buffered decrease must clear sendStalled",
                 recoveredSnapshot.transportFlow.sendStalled);
+            assertEquals("strict buffered decrease must reset the stall baseline",
+                -1L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
             assertEquals("all parked frames must drain after recovery",
                 0L, recoveredSnapshot.transportFlow.serviceQueuedFrames);
             assertEquals("both frames must be sent in FIFO order", 2, sentTexts.size());
@@ -3007,6 +3038,7 @@ public final class AndroidConnectionServiceTransportTest {
 
             // Re-establish a stall so the teardown/generation resets can be asserted.
             allowSend.set(false);
+            bufferedBytesField.setLong(backend, 4096L);
             int retryCursor = scheduledRetries.size();
             sendChannelMessage(runtime, "channel-a", new JSONObject().put("seq", 3));
             while (retryCursor < scheduledRetries.size() && retryCursor < 20) {
@@ -3015,6 +3047,8 @@ public final class AndroidConnectionServiceTransportTest {
             }
             assertTrue("re-stall must be active before reset checks",
                 Boolean.TRUE.equals(field(runtime, "sendStalled")));
+            assertEquals("re-stall must record its own buffered baseline",
+                4096L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
 
             Method transportFailure = runtime.getClass().getDeclaredMethod(
                 "transportFailure", String.class, String.class);
@@ -3022,19 +3056,27 @@ public final class AndroidConnectionServiceTransportTest {
             transportFailure.invoke(runtime, "test-stall", "forced transport failure");
             assertFalse("transportFailure must clear sendStalled",
                 Boolean.TRUE.equals(field(runtime, "sendStalled")));
+            assertEquals("transportFailure must clear the stall baseline",
+                -1L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
 
             setField(runtime, "sendStalled", true);
+            setField(runtime, "sendStalledBufferedBytes", 4096L);
             Method resetAttemptState = runtime.getClass().getDeclaredMethod("resetAttemptState");
             resetAttemptState.setAccessible(true);
             resetAttemptState.invoke(runtime);
             assertFalse("resetAttemptState must clear sendStalled",
                 Boolean.TRUE.equals(field(runtime, "sendStalled")));
+            assertEquals("resetAttemptState must clear the stall baseline",
+                -1L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
 
             setField(runtime, "sendStalled", true);
+            setField(runtime, "sendStalledBufferedBytes", 4096L);
             runtime.getClass().getDeclaredMethod("close", String.class)
                 .invoke(runtime, "service-close");
             assertFalse("close must clear sendStalled",
                 Boolean.TRUE.equals(field(runtime, "sendStalled")));
+            assertEquals("close must clear the stall baseline",
+                -1L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
 
             backend.closeQuietly("test");
         } finally {
