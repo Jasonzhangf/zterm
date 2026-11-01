@@ -339,8 +339,11 @@ export function getSessionTransportResource(
   const channel = runtime ? getSessionTerminalChannel(store.terminalChannels, sessionId) : null;
   const terminalSocket = targetRuntime?.terminalTransport || null;
   const hasMuxChannel = Boolean(runtime?.channelId || channel);
+  const isMuxChannelUsable = Boolean(
+    channel && (channel.state === 'open' || channel.state === 'opening'),
+  );
   const socket = hasMuxChannel
-    ? (channel && targetRuntime?.terminalMuxReady ? terminalSocket : null)
+    ? (isMuxChannelUsable && targetRuntime?.terminalMuxReady ? terminalSocket : null)
     : runtime?.activeSocket || null;
   return {
     sessionId,

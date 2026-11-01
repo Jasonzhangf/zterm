@@ -68,8 +68,13 @@ interface SessionDebugMetricsRecorder {
 interface BufferRuntimeTransportAccessors {
   daemonConnection?: ClientDaemonConnection;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  readSessionTransportResource?: (sessionId: string) => BufferSessionTransportResource | null;
 }
+
+type BufferSessionTransportResource = {
+  socket?: BridgeTransportSocket | null;
+  channel?: { state?: string } | null;
+};
 
 function readBufferRuntimeSocket(
   options: BufferRuntimeTransportAccessors,
@@ -78,8 +83,12 @@ function readBufferRuntimeSocket(
   if (options.daemonConnection) {
     return options.daemonConnection.readSessionSocket(sessionId);
   }
-  return options.readSessionTransportResource?.(sessionId)?.socket
-    || options.readSessionTransportSocket(sessionId);
+  const resource = options.readSessionTransportResource?.(sessionId);
+  const channelState = resource?.channel?.state;
+  if (channelState && channelState !== 'open' && channelState !== 'opening') {
+    return null;
+  }
+  return resource?.socket || options.readSessionTransportSocket(sessionId);
 }
 
 function readStrictBufferInteger(value: unknown) {
@@ -826,7 +835,7 @@ export function handleBufferHeadRuntime(options: {
     }>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  readSessionTransportResource?: (sessionId: string) => BufferSessionTransportResource | null;
   daemonConnection?: ClientDaemonConnection;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState, options?: SessionBufferStoreCommitOptions) => boolean;
@@ -1159,7 +1168,7 @@ export function requestSessionBufferSyncRuntime(options: {
     tailRefreshStoreRef: MutableRefObject<SessionTailRefreshStore>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  readSessionTransportResource?: (sessionId: string) => BufferSessionTransportResource | null;
   daemonConnection?: ClientDaemonConnection;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   clearSessionPullState: (sessionId: string, purpose?: SessionPullPurpose) => void;
@@ -1483,7 +1492,7 @@ export function requestSessionBufferHeadRuntime(options: {
     sessionDebugMetricsStoreRef: MutableRefObject<SessionDebugMetricsRecorder>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  readSessionTransportResource?: (sessionId: string) => BufferSessionTransportResource | null;
   daemonConnection?: ClientDaemonConnection;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   resolveTerminalRefreshCadence: () => { headTickMs: number };
