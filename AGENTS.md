@@ -56,6 +56,7 @@
   - 当前缺口是 **补链 / 修图 / 物理移除 / 显式兼容保留** 哪一类
   - 必跑 gate 是什么
 - 未完成上述架构映射前，不得直接改实现代码；禁止靠 grep 命中点直接补 patch。
+- 排障、审计或追踪 TS/JS 调用关系时，从已知函数继续找被调用方优先用全局 `nn-code` skill（`nn-code calls` 一次取 `nodes/edges/unresolvedCallsites`），不默认多轮 rg/sed 逐层展开；再按返回的 `declSpan`/`callsiteSpan` 精读必要源码。优化衡量覆盖整个模型调用过程（组织命令、等待结果、下一轮推理），不只比较命令耗时；`unresolvedCallsites` 不猜成已解析，能力缺口沿该 skill 报告。
 - 客户端目标及迁移状态以 `android/docs/decisions/2026-09-05-runtime-memory-truth.md` 为准；旧架构文档中的 implemented/active 只描述原切片，不证明新目标完成。
 - UI 解耦验收必须追踪 slot 下游实现：页面/视图只投影 snapshot 与发出 typed intent；route、session、文件 I/O、media lifecycle 由对应业务 owner 持有。单纯移除组件 import 或增加 render callback 不算业务解耦。
 - terminal 链路必须先更新 docs / AGENTS / skill，再补测试，再改代码
