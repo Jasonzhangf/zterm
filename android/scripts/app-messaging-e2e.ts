@@ -280,6 +280,7 @@ function directoryDevice(spec: {
   daemonHostId: string;
   port: number;
   token: string;
+  endpoints?: Array<Record<string, unknown>>;
 }): DirectoryDevice {
   const seen = new Date().toISOString();
   return {
@@ -292,7 +293,7 @@ function directoryDevice(spec: {
       hostId: spec.daemonHostId,
       version: 'test',
       presence: { connected: true, lastSeenAt: seen },
-      endpoints: [{
+      endpoints: spec.endpoints ?? [{
         id: `lan-${spec.port}`,
         kind: 'lan',
         authRequired: true,
@@ -641,8 +642,8 @@ async function main() {
   await assertCliEntry();
   await mkdir(ROOT, { recursive: true });
   event('e2e.start', { root: ROOT });
-  const [portA, portB, portC, accountPort, proxyPort] = await Promise.all([
-    freePort(), freePort(), freePort(), freePort(), freePort(),
+  const [portA, portB, portC, accountPort, proxyPort, closedPort] = await Promise.all([
+    freePort(), freePort(), freePort(), freePort(), freePort(), freePort(),
   ]);
   const account = await startAccountStub(accountPort);
   const accountBaseUrl = `http://127.0.0.1:${accountPort}`;
@@ -654,8 +655,47 @@ async function main() {
   const specC = { name: 'C', home: homeC, port: portC, deviceId: DEVICE_C, daemonHostId: HOST_C, token: 'e2e-token-c' };
   await Promise.all([writeHomeConfig(specA, accountBaseUrl), writeHomeConfig(specB, accountBaseUrl), writeHomeConfig(specC, accountBaseUrl)]);
   account.devices.set(DEVICE_A, directoryDevice(specA));
-  account.devices.set(DEVICE_B, directoryDevice(specB));
+  account.devices.set(DEVICE_B, directoryDevice({
+    ...specB,
+    endpoints: [
+      {
+        id: `lan-unreachable-${closedPort}`,
+        kind: 'lan',
+        authRequired: true,
+        lastSeenAt: new Date().toISOString(),
+        host: '127.0.0.1',
+        port: closedPort,
+        authToken: TOKEN_B,
+      },
+      {
+        id: 'rtc-direct-ineligible',
+        kind: 'rtc-direct',
+        authRequired: true,
+        lastSeenAt: new Date().toISOString(),
+        host: '127.0.0.1',
+        port: 9,
+        relayHostId: 'relay-ineligible',
+      },
+      {
+        id: `tailscale-reachable-${portB}`,
+        kind: 'tailscale',
+        authRequired: true,
+        lastSeenAt: new Date().toISOString(),
+        host: '127.0.0.1',
+        port: portB,
+        authToken: TOKEN_B,
+      },
+      {
+        id: 'relay-rtc-ineligible',
+        kind: 'relay-rtc',
+        authRequired: true,
+        lastSeenAt: new Date().toISOString(),
+        relayHostId: 'relay-ineligible',
+      },
+    ],
+  }));
   account.devices.set(DEVICE_C, directoryDevice(specC));
+  event('directory.multi-endpoint', { deviceId: DEVICE_B, closedPort, reachablePort: portB });
 
   let daemonA: Daemon | null = null;
   let daemonB: Daemon | null = null;

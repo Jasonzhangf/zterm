@@ -27,6 +27,7 @@ import {
   type AppServerFrame,
   type AppStatusResultPayload,
   type AppTarget,
+  type AppTargetEndpoint,
 } from '@zterm/shared/app-protocol';
 import {
   DaemonAppMessagingStore,
@@ -53,6 +54,7 @@ export interface DaemonAppMessagingRuntimeOptions {
   now?: () => number;
   maxInboxRecords?: number;
   maxInboxBytes?: number;
+  peerConnectTimeoutMs?: number;
   peerRequestTimeoutMs?: number;
   retentionMs?: number;
   retentionIntervalMs?: number;
@@ -229,6 +231,7 @@ export function createDaemonAppMessagingRuntime(
   const now = options.now ?? (() => Date.now());
   const retentionMs = options.retentionMs ?? APP_ACKED_RETENTION_MS;
   const peerRequestTimeoutMs = options.peerRequestTimeoutMs ?? 15_000;
+  const peerConnectTimeoutMs = options.peerConnectTimeoutMs ?? Math.min(peerRequestTimeoutMs, 3_500);
   const store = new DaemonAppMessagingStore({
     appRootDir: options.appRootDir,
     maxInboxRecords: options.maxInboxRecords ?? APP_MAX_INBOX_RECORDS,
@@ -399,6 +402,13 @@ export function createDaemonAppMessagingRuntime(
       pending.reject(new PeerLinkError(pending.settlement.code, reason, pending.settlement.afterSend));
     }
     peer.pending.clear();
+    if (peer.ws.readyState === WebSocket.CONNECTING) {
+      try {
+        peer.ws.terminate?.();
+      } catch {
+        // The socket may already be gone.
+      }
+    }
     try {
       peer.ws.close(1000, reason);
     } catch {
@@ -407,17 +417,21 @@ export function createDaemonAppMessagingRuntime(
     notifyPeerState('peer-disconnected', peer.target.daemonHostId);
   }
 
-  async function connectPeer(target: AppTarget): Promise<PeerLink> {
-    const key = `${target.daemonHostId}\u0000${target.wsUrl}`;
-    const existing = peerLinks.get(key);
-    if (existing && !existing.closed && existing.ws.readyState === WebSocket.OPEN && existing.ready) {
-      if (await probePeerLink(existing)) {
-        return existing;
-      }
-      await closePeerLink(existing, 'peer liveness probe failed');
-    }
+  function targetCandidateEndpoints(target: AppTarget): AppTargetEndpoint[] {
+    const candidates = target.endpoints?.length
+      ? target.endpoints
+      : [{ wsUrl: target.wsUrl, authToken: target.authToken }];
+    const seen = new Set<string>();
+    return candidates.filter((candidate) => {
+      if (!candidate.wsUrl || seen.has(candidate.wsUrl)) return false;
+      seen.add(candidate.wsUrl);
+      return true;
+    });
+  }
 
-    const ws = createSocket(target.wsUrl, target.authToken);
+  async function connectPeerCandidate(target: AppTarget, candidate: AppTargetEndpoint): Promise<PeerLink> {
+    const key = `${target.daemonHostId}\u0000${candidate.wsUrl}`;
+    const ws = createSocket(candidate.wsUrl, candidate.authToken);
     const peer: PeerLink = {
       key,
       target,
@@ -460,7 +474,7 @@ export function createDaemonAppMessagingRuntime(
       const timer = setTimeout(() => {
         peer.pending.delete(helloRequestId);
         reject(new PeerLinkError('unreachable', 'peer handshake timed out', false));
-      }, peerRequestTimeoutMs);
+      }, peerConnectTimeoutMs);
       peer.pending.set(helloRequestId, {
         resolve,
         reject,
@@ -511,6 +525,50 @@ export function createDaemonAppMessagingRuntime(
     }
     notifyPeerState('peer-connected', target.daemonHostId);
     return peer;
+  }
+
+  function aggregatePeerLinkCode(failures: { error: PeerLinkError }[]): AppErrorCode {
+    if (failures.some(({ error }) => /HTTP 404|different daemon identity/.test(error.message))) {
+      return 'unreachable';
+    }
+    if (failures.some(({ error }) => error.code === 'unauthorized')) {
+      return 'unauthorized';
+    }
+    return 'unreachable';
+  }
+
+  async function connectPeer(target: AppTarget): Promise<PeerLink> {
+    const candidates = targetCandidateEndpoints(target);
+    for (const candidate of candidates) {
+      const key = `${target.daemonHostId}\u0000${candidate.wsUrl}`;
+      const existing = peerLinks.get(key);
+      if (existing && !existing.closed && existing.ws.readyState === WebSocket.OPEN && existing.ready) {
+        if (await probePeerLink(existing)) {
+          return existing;
+        }
+        await closePeerLink(existing, 'peer liveness probe failed');
+      }
+    }
+
+    const failures: { candidate: AppTargetEndpoint; error: PeerLinkError }[] = [];
+    for (const candidate of candidates) {
+      try {
+        return await connectPeerCandidate(target, candidate);
+      } catch (error) {
+        if (!(error instanceof PeerLinkError) || error.afterSend) {
+          throw error;
+        }
+        failures.push({ candidate, error });
+      }
+    }
+
+    if (failures.length === 1) {
+      throw failures[0]!.error;
+    }
+    const message = failures
+      .map(({ candidate, error }) => `[${candidate.kind ?? 'endpoint'}] ${candidate.wsUrl}: ${error.message}`)
+      .join('; ');
+    throw new PeerLinkError(aggregatePeerLinkCode(failures), message, false);
   }
 
   function resolvePeerRequestIdFromRaw(raw: WebSocket.RawData): unknown {
