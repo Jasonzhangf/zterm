@@ -407,7 +407,7 @@ describe('SettingsPage Relay account configuration', () => {
     openConnectionConfig();
     fireEvent.change(screen.getByLabelText('服务器名称'), { target: { value: 'Mac Studio' } });
     fireEvent.change(screen.getByLabelText('服务器地址'), { target: { value: '100.66.1.82' } });
-    fireEvent.change(screen.getByLabelText('服务器认证令牌'), { target: { value: 'wterm-4123456' } });
+    fireEvent.change(screen.getByLabelText('服务器认证令牌'), { target: { value: 'wterm-redacted-test-token' } });
     fireEvent.change(screen.getByLabelText('守护进程 ID（Daemon ID）'), { target: { value: 'mac-studio' } });
     fireEvent.click(screen.getByRole('button', { name: '添加服务器' }));
     fireEvent.click(screen.getByRole('button', { name: '保存' }));
@@ -418,13 +418,13 @@ describe('SettingsPage Relay account configuration', () => {
           name: 'Mac Studio',
           targetHost: '100.66.1.82',
           targetPort: 3333,
-          authToken: 'wterm-4123456',
+          authToken: 'wterm-redacted-test-token',
           relayHostId: 'mac-studio',
         }),
       ],
       targetHost: '100.66.1.82',
       targetPort: 3333,
-      targetAuthToken: 'wterm-4123456',
+      targetAuthToken: 'wterm-redacted-test-token',
     }));
   });
 

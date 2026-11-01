@@ -529,7 +529,7 @@ function parseArgs() {
   const caseArg = args.find((a) => a.startsWith('--case='))?.split('=')[1] || 'all';
   const host = args.find((a) => a.startsWith('--host='))?.split('=')[1] || '127.0.0.1';
   const port = args.find((a) => a.startsWith('--port='))?.split('=')[1] || '3333';
-  const authToken = args.find((a) => a.startsWith('--token='))?.split('=')[1] || 'wterm-4123456';
+  const authToken = args.find((a) => a.startsWith('--token='))?.split('=')[1] || '';
   return { caseArg, host, port, authToken };
 }
 

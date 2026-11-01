@@ -19,7 +19,7 @@ describe('extractApkSmokePrintableAsciiLines', () => {
     ]);
 
     expect(extractApkSmokePrintableAsciiLines(buffer)).toEqual([
-      '{"targetAuthToken":"wterm-4123456","targetHost":"100.66.1.82"}',
+      '{"targetAuthToken":"wterm-redacted-test-token","targetHost":"100.66.1.82"}',
     ]);
   });
 

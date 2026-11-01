@@ -462,7 +462,7 @@
 ## 2026-06-01 Mac render must not resize tmux
 - Mac projection render must not include hidden/1px wterm proxies or call `onResize` from render geometry. Hidden autoResize can shrink tmux cols to 1 and produce vertical text. Follow Android: renderer consumes projection; tmux resize only comes from explicit viewport/width owner paths.
 
-- 2026-06-03: zterm TURN/relay 账号问题不要误判到 sub2api。Claw 上 coturn 真源是共享 TURN 账号 `ztermturn`，应用登录账号在 `zterm-traversal-relay` store：`/var/lib/zterm-traversal-relay/store.json`。本轮重新注册 `2094423@qq.com`，密码 `welcome4zcam#`，公共入口 `https://claw.codewhisper.cc:18443/relay/`，验证 `/api/auth/login`、`/api/auth/me`、`/api/devices` 均成功。
+- 2026-06-03: zterm TURN/relay 账号问题不要误判到 sub2api。Claw 上 coturn 真源是共享 TURN 账号 `ztermturn`，应用登录账号在 `zterm-traversal-relay` store：`/var/lib/zterm-traversal-relay/store.json`。公共入口 `https://claw.codewhisper.cc:18443/relay/`，验证 `/api/auth/login`、`/api/auth/me`、`/api/devices` 均成功（账号与密码已脱敏）。
   Tags: zterm, claw, traversal-relay, turn, account, correction, verification
 
 ## 2026-06-07 Copy mode lifecycle: full-exit on close / reset-on-success
