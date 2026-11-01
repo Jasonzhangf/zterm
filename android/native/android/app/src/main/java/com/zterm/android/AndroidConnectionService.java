@@ -911,6 +911,7 @@ public class AndroidConnectionService extends Service {
         private final java.util.Set<String> drainingPendingFrames =
             new java.util.HashSet<>();
         private volatile boolean congestionDraining;
+        private volatile boolean sendStalled;
         private final java.util.ArrayDeque<DeferredSend> retryDeferredFrames =
             new java.util.ArrayDeque<>();
         private final java.util.Map<String, Long> channelLifecycleEpochs =
@@ -979,6 +980,8 @@ public class AndroidConnectionService extends Service {
             activeDirectTier = -1;
             relayStartedThisAttempt = false;
             sendRetryPending = false;
+            sendStalled = false;
+            congestionDraining = false;
             heartbeatMisses = 0;
             lastActivityAt = System.currentTimeMillis();
             lastPingAt = 0L;
@@ -1320,7 +1323,7 @@ public class AndroidConnectionService extends Service {
                                 || transportNetworkGeneration != networkEpoch) {
                                 return;
                             }
-                            publishTransportFlow(bufferedBytes, System.currentTimeMillis());
+                            handleRtcFlowChanged(bufferedBytes, System.currentTimeMillis());
                         });
                     }
 
@@ -2083,7 +2086,13 @@ public class AndroidConnectionService extends Service {
                     || !requireOpenedChannel || isChannelOpened(channelId))) {
                 boolean isChannelClose = source != null
                     && source.type == AndroidConnectionCommand.Type.CLOSE_CHANNEL;
-                if (!sendRetryPending || isChannelClose) {
+                if (isChannelClose) {
+                    attemptSendWithRetry(frame, channelId, source, requireOpenedChannel, SendGate.MUX_READY,
+                        current, currentRtc, generation, transportNetworkGeneration,
+                        channelLifecycleEpoch(channelId), 1);
+                    return;
+                }
+                if (!sendRetryPending && !sendStalled && retryDeferredFrames.isEmpty()) {
                     attemptSendWithRetry(frame, channelId, source, requireOpenedChannel, SendGate.MUX_READY,
                         current, currentRtc, generation, transportNetworkGeneration,
                         channelLifecycleEpoch(channelId), 1);
@@ -2283,9 +2292,14 @@ public class AndroidConnectionService extends Service {
                     ? retryRtcBackend.sendText(frame.toString())
                     : retrySocket != null && retrySocket.send(frame.toString());
                 if (sent) {
+                    boolean wasStalled = sendStalled;
                     congestionDraining = false;
+                    sendStalled = false;
                     sendRetryPending = false;
                     consumeSuccessfulRetryFrame(frame, safeRetryChannelId);
+                    if (wasStalled) {
+                        publishCurrentTransportFlow(System.currentTimeMillis());
+                    }
                     java.util.ArrayDeque<JSONObject> sameChannelQueue =
                         safeRetryChannelId == null || safeRetryChannelId.isEmpty()
                             ? null : pendingFrames.get(safeRetryChannelId);
@@ -2335,12 +2349,33 @@ public class AndroidConnectionService extends Service {
             // OPEN but send() returned false, or a retry was attempted, is a
             // congestion wait for RTC. It must not escalate to reconnect.
             if (retryRtcBackend != null && retryRtcBackend.isOpen()) {
+                long currentBuffered = retryRtcBackend.bufferedAmount();
+                if (isSendCongested(currentBuffered)) {
+                    congestionDraining = true;
+                    sendRetryPending = true;
+                    publishTransportFlow(currentBuffered, System.currentTimeMillis());
+                    scheduleSendRetry(() -> attemptSendWithRetry(
+                        frame, channelId, source, requireOpenedChannel, gate,
+                        retrySocket, retryRtcBackend, retryGeneration,
+                        retryNetworkGeneration, channelLifecycleEpoch(channelId),
+                        Math.min(attempt + 1, SEND_RETRY_MAX)));
+                    return;
+                }
+                if (attempt >= SEND_RETRY_MAX) {
+                    sendRetryPending = false;
+                    sendStalled = true;
+                    parkStalledFrameAtHead(new DeferredSend(
+                        frame, channelId, source, requireOpenedChannel,
+                        channelLifecycleEpoch(channelId), gate));
+                    publishTransportFlow(currentBuffered, System.currentTimeMillis());
+                    return;
+                }
                 sendRetryPending = true;
                 scheduleSendRetry(() -> attemptSendWithRetry(
                     frame, channelId, source, requireOpenedChannel, gate,
                     retrySocket, retryRtcBackend, retryGeneration,
                     retryNetworkGeneration, channelLifecycleEpoch(channelId),
-                    Math.min(attempt + 1, SEND_RETRY_MAX)));
+                    attempt + 1));
                 return;
             }
             if (attempt >= SEND_RETRY_MAX) {
@@ -2403,6 +2438,57 @@ public class AndroidConnectionService extends Service {
             retryDeferredFrames.clear();
             if (mutated) {
                 publishCurrentTransportFlow(System.currentTimeMillis());
+            }
+        }
+
+        private void parkStalledFrameAtHead(DeferredSend current) {
+            if (current == null || current.frame == null) {
+                return;
+            }
+            String safeChannelId = current.channelId == null ? null : current.channelId.trim();
+            if (safeChannelId != null && !safeChannelId.isEmpty()) {
+                java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(safeChannelId);
+                if (queue != null && queue.peekFirst() == current.frame) {
+                    return;
+                }
+            }
+            DeferredSend head = retryDeferredFrames.peekFirst();
+            if (head != null && head.frame == current.frame) {
+                return;
+            }
+            retryDeferredFrames.addFirst(current);
+        }
+
+        private void resumeStalledSend() {
+            if (sendRetryPending || sendStalled) {
+                return;
+            }
+            WebSocket current = socket;
+            AndroidRtcTransportBackend currentRtc = rtcBackend;
+            if (stopped || generation == null || transportNetworkGeneration != networkEpoch
+                || (current == null && currentRtc == null) || !isMuxReady()) {
+                return;
+            }
+            // Prefer a parked head still sitting at the front of a channel's
+            // pendingFrames queue so it drains ahead of frames deferred into
+            // retryDeferredFrames while stalled.
+            for (String channelId : new java.util.ArrayList<>(pendingFrames.keySet())) {
+                java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(channelId);
+                if (queue != null && !queue.isEmpty() && isChannelOpened(channelId)) {
+                    drainPendingFrames(channelId);
+                    break;
+                }
+            }
+            while (!sendRetryPending && !sendStalled) {
+                DeferredSend deferred = retryDeferredFrames.pollFirst();
+                if (deferred == null) {
+                    return;
+                }
+                publishCurrentTransportFlow(System.currentTimeMillis());
+                attemptSendWithRetry(deferred.frame, deferred.channelId, deferred.source,
+                    deferred.requireOpenedChannel, deferred.gate,
+                    current, currentRtc, generation, transportNetworkGeneration,
+                    deferred.lifecycleEpoch, 1);
             }
         }
 
@@ -2478,11 +2564,15 @@ public class AndroidConnectionService extends Service {
             }
             try {
                 while (!queue.isEmpty()) {
+                    if (sendRetryPending || sendStalled) {
+                        // Retry scheduled or send stalled; keep frame at head of queue.
+                        return;
+                    }
                     JSONObject frame = queue.peekFirst();
                     attemptSendWithRetry(frame, channelId, null, false, SendGate.MUX_READY,
                         current, currentRtc, generation, transportNetworkGeneration,
                         channelLifecycleEpoch(channelId), 1);
-                    if (sendRetryPending) {
+                    if (sendRetryPending || sendStalled) {
                         // Retry scheduled; keep frame at head of queue for next drain.
                         return;
                     }
@@ -2781,6 +2871,21 @@ public class AndroidConnectionService extends Service {
             publishTransportFlow(nativeBufferedBytes, sampledAt);
         }
 
+        void handleRtcFlowChanged(long bufferedBytes, long sampledAt) {
+            boolean wasStalled = false;
+            if (sendStalled && !isSendCongested(bufferedBytes)) {
+                sendStalled = false;
+                wasStalled = true;
+            }
+            if (congestionDraining && bufferedBytes <= SEND_FLOW_LOW_WATER_BYTES) {
+                congestionDraining = false;
+            }
+            publishTransportFlow(bufferedBytes, sampledAt);
+            if (wasStalled && !sendRetryPending) {
+                resumeStalledSend();
+            }
+        }
+
         private void publishTransportFlow(long nativeBufferedBytes, long sampledAt) {
             if (stateMachine == null) {
                 return;
@@ -2805,7 +2910,7 @@ public class AndroidConnectionService extends Service {
             boolean backpressured = nativeBufferedBytes >= SEND_FLOW_HIGH_WATER_BYTES;
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportFlowChanged(
                 generation, nativeBufferedBytes, serviceQueuedBytes, serviceQueuedFrames,
-                backpressured, sampledAt), sampledAt);
+                backpressured, sendStalled, sampledAt), sampledAt);
         }
 
         private void transportFailure(String code, String message, RouteCandidateDiagnostic failed) {
@@ -2821,9 +2926,13 @@ public class AndroidConnectionService extends Service {
             closeRtcQuietly();
             closeUncommittedCandidates("transport-failure",
                 committedCandidate == null ? null : committedCandidate.candidateId);
+            if (!sendRetryPending && !retryDeferredFrames.isEmpty()) {
+                parkCurrentAndDeferredForReconnect(null);
+            }
             String failedGeneration = generation;
             generation = null;
             congestionDraining = false;
+            sendStalled = false;
             AndroidConnectionServiceSnapshot snapshot = stateMachine == null
                 ? AndroidConnectionServiceSnapshot.empty() : stateMachine.readSnapshot();
             List<AndroidConnectionServiceSnapshot.RouteDiagnostic> diagnostics =
@@ -2858,9 +2967,13 @@ public class AndroidConnectionService extends Service {
                 startOrContinue();
                 return;
             }
+            if (!sendRetryPending && !retryDeferredFrames.isEmpty()) {
+                parkCurrentAndDeferredForReconnect(null);
+            }
             String failedGeneration = generation;
             generation = null;
             congestionDraining = false;
+            sendStalled = false;
             AndroidConnectionServiceSnapshot currentSnapshot = stateMachine == null
                 ? AndroidConnectionServiceSnapshot.empty() : stateMachine.readSnapshot();
             stateMachine.dispatch(AndroidConnectionServiceEvent.transportFailure(
@@ -2892,6 +3005,7 @@ public class AndroidConnectionService extends Service {
             String failedGeneration = generation;
             generation = null;
             congestionDraining = false;
+            sendStalled = false;
             stateMachine.dispatch(AndroidConnectionServiceEvent.terminalFailure(
                 failedGeneration, message), System.currentTimeMillis());
             publishPhysicalError(code, message);
@@ -2908,6 +3022,7 @@ public class AndroidConnectionService extends Service {
             String failedGeneration = generation;
             generation = null;
             congestionDraining = false;
+            sendStalled = false;
             stateMachine.dispatch(AndroidConnectionServiceEvent.authenticationFailure(
                 failedGeneration, message), System.currentTimeMillis());
             publishPhysicalError(code, message);
@@ -2931,6 +3046,7 @@ public class AndroidConnectionService extends Service {
             socket = null;
             rtcBackend = null;
             congestionDraining = false;
+            sendStalled = false;
             activeRtcCandidate = null;
             backoffIndex = 0;
             heartbeatMisses = 0;
@@ -2954,6 +3070,7 @@ public class AndroidConnectionService extends Service {
             closeRtcQuietly();
             generation = null;
             congestionDraining = false;
+            sendStalled = false;
         }
 
         synchronized void setTestRouteDiagnostics(List<RouteCandidateDiagnostic> diagnostics) {

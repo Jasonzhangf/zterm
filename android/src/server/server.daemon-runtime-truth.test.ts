@@ -14,9 +14,22 @@ function readPerformanceSchedulerSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-performance-scheduler.ts'), 'utf8');
 }
 
+function readDaemonPackageVersion() {
+  const pkg = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as {
+    version?: string;
+  };
+  return String(pkg.version || '').trim();
+}
+
 function readPreparedDaemonReleaseSource() {
   return readFileSync(
-    join(process.cwd(), 'release-dist', 'zterm-daemon-0.1.3-darwin-arm64', 'runtime', 'server.cjs'),
+    join(
+      process.cwd(),
+      'release-dist',
+      `zterm-daemon-${readDaemonPackageVersion()}-darwin-arm64`,
+      'runtime',
+      'server.cjs',
+    ),
     'utf8',
   );
 }
