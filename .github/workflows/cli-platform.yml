@@ -80,7 +80,7 @@ jobs:
             platform: linux
             arch: x64
           - tuple: darwin-arm64
-            runner: macos-14
+            runner: macos-15
             platform: darwin
             arch: arm64
 
@@ -446,7 +446,7 @@ jobs:
             platform: linux
             arch: x64
           - tuple: darwin-arm64
-            runner: macos-14
+            runner: macos-15
             platform: darwin
             arch: arm64
 
