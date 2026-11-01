@@ -74,7 +74,7 @@ describeRealHerdrLoopback('TmuxSessionPickerSheet installed daemon loopback', ()
         initialTarget={{
           bridgeHost: '127.0.0.1',
           bridgePort: 3333,
-          authToken: 'wterm-4123456',
+          authToken: 'wterm-redacted-test-token',
         }}
         onClose={vi.fn()}
         onOpenTmuxSession={vi.fn()}

@@ -21,7 +21,7 @@ function writeFixtureConfig(overrides: FixtureOverrides): string {
   const mobileDaemon = overrides.mobileDaemon ?? {
     host: '192.168.1.50',
     port: 9911,
-    authToken: 'wterm-4123456',
+    authToken: 'wterm-redacted-test-token',
   };
   const mobileRelay = overrides.mobileRelay ?? { deviceId: 'device-1', hostId: 'host-1' };
   writeFileSync(
@@ -53,7 +53,7 @@ describe('resolveLocalAppDaemonConfig', () => {
   it('resolves the legacy mobile token when the new-style token is an empty string', () => {
     const homeDir = writeFixtureConfig({ androidDaemon: { authToken: '' } });
     const resolved = resolveLocalAppDaemonConfig({ homeDir, env: {} });
-    expect(resolved.authToken).toBe('wterm-4123456');
+    expect(resolved.authToken).toBe('wterm-redacted-test-token');
     expect(resolved.host).toBe('192.168.1.50');
     expect(resolved.port).toBe(9911);
     expect(resolved.deviceId).toBe('device-1');
@@ -63,12 +63,12 @@ describe('resolveLocalAppDaemonConfig', () => {
   it('resolves daemon fields independently, falling back to mobile per field', () => {
     const homeDir = writeFixtureConfig({
       androidDaemon: { host: '127.0.0.2', port: '', authToken: '' },
-      mobileDaemon: { host: '192.168.1.50', port: 9911, authToken: 'wterm-4123456' },
+      mobileDaemon: { host: '192.168.1.50', port: 9911, authToken: 'wterm-redacted-test-token' },
     });
     const resolved = resolveLocalAppDaemonConfig({ homeDir, env: {} });
     expect(resolved.host).toBe('127.0.0.2');
     expect(resolved.port).toBe(9911);
-    expect(resolved.authToken).toBe('wterm-4123456');
+    expect(resolved.authToken).toBe('wterm-redacted-test-token');
   });
 
   it('resolves relay identity fields independently', () => {

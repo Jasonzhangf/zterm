@@ -905,7 +905,7 @@ describe('active truth ownership gates', () => {
       bridgePort: 3333,
       daemonHostId: undefined,
       sessionName: 'rcc',
-      authToken: 'wterm-4123456',
+      authToken: 'wterm-redacted-test-token',
       autoCommand: undefined,
       title: 'rcc',
       ws: null,
@@ -926,7 +926,7 @@ describe('active truth ownership gates', () => {
         daemonHostId: 'mac-studio',
         relayHostId: 'mac-studio',
         sessionName: 'rcc',
-        authToken: 'wterm-4123456',
+        authToken: 'wterm-redacted-test-token',
         transportMode: 'auto',
         relayEndpointCandidates: [{
           id: 'relay-rtc:mac-studio',

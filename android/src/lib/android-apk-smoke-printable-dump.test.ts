@@ -14,12 +14,12 @@ describe('extractApkSmokePrintableAsciiLines', () => {
       0,
       ...Buffer.from('m'),
       0,
-      ...Buffer.from('-4123456","targetHost":"100.66.1.82"}'),
+      ...Buffer.from('-redacted-test-token","targetHost":"100.66.1.82"}'),
       10,
     ]);
 
     expect(extractApkSmokePrintableAsciiLines(buffer)).toEqual([
-      '{"targetAuthToken":"wterm-4123456","targetHost":"100.66.1.82"}',
+      '{"targetAuthToken":"wterm-redacted-test-token","targetHost":"100.66.1.82"}',
     ]);
   });
 
