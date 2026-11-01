@@ -147,6 +147,7 @@ async function createBridge(options: {
   deviceId: string;
   daemonHostId: string;
   maxInboxRecords?: number;
+  peerConnectTimeoutMs?: number;
   peerRequestTimeoutMs?: number;
   createWebSocket?: (url: string, token: string) => WebSocket;
 }) {
@@ -155,6 +156,7 @@ async function createBridge(options: {
     deviceId: options.deviceId,
     daemonHostId: options.daemonHostId,
     ...(options.maxInboxRecords === undefined ? {} : { maxInboxRecords: options.maxInboxRecords }),
+    ...(options.peerConnectTimeoutMs === undefined ? {} : { peerConnectTimeoutMs: options.peerConnectTimeoutMs }),
     peerRequestTimeoutMs: options.peerRequestTimeoutMs ?? 2_000,
     ...(options.createWebSocket ? { createWebSocket: options.createWebSocket } : {}),
   });
@@ -203,7 +205,183 @@ async function tempRoot() {
   return root;
 }
 
+function connectingSocket(): FakeSocket {
+  const socket = new FakeSocket();
+  const peer = new FakeSocket();
+  socket.peer = peer;
+  peer.peer = socket;
+  socket.readyState = 0;
+  peer.readyState = 0;
+  return socket;
+}
+
+function upgradeRejectedSocket(statusCode: number): FakeSocket {
+  const socket = connectingSocket();
+  setTimeout(() => {
+    socket.emit('unexpected-response', {}, { statusCode });
+  }, 0);
+  return socket;
+}
+
+function refusedSocket(): FakeSocket {
+  const socket = connectingSocket();
+  setTimeout(() => {
+    socket.readyState = 3;
+    socket.emit('error', new Error('connect ECONNREFUSED 127.0.0.1:1'));
+  }, 0);
+  return socket;
+}
+
 describe('daemon /app transport', () => {
+  it('falls back from an unreachable LAN endpoint to Tailscale and reuses the healthy link', async () => {
+    const root = await tempRoot();
+    const bridgeB = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
+    const [clientSocket, serverSocket] = socketPair();
+    attachPeerTransport(bridgeB, serverSocket);
+    const createCalls: string[] = [];
+    const bridgeA = await createBridge({
+      root: join(root, 'a'),
+      deviceId: 'device-a',
+      daemonHostId: 'daemon-a',
+      peerConnectTimeoutMs: 100,
+      peerRequestTimeoutMs: 1_000,
+      createWebSocket: (url) => {
+        createCalls.push(url);
+        return (url.includes('100.86.84.63') ? clientSocket : connectingSocket()) as unknown as WebSocket;
+      },
+    });
+    const local = captureLink('local', 'device-a', 'daemon-a');
+    const messageId = `msg-${randomUUID()}`;
+    const multiTarget = {
+      deviceId: 'device-b',
+      daemonHostId: 'daemon-b',
+      wsUrl: 'ws://192.168.99.10:3333/app',
+      authToken: 'test-token',
+      endpoints: [
+        { kind: 'lan' as const, wsUrl: 'ws://192.168.99.10:3333/app', authToken: 'test-token' },
+        { kind: 'tailscale' as const, wsUrl: 'ws://100.86.84.63:3333/app', authToken: 'test-token' },
+      ],
+    };
+
+    await bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId, target: multiTarget, subject: 'fallback', body: 'lan down' },
+    });
+    const receipt = await waitForFrames(local.frames, (frame) => frame.type === 'app-send-result' || frame.type === 'app-error');
+    expect(receipt).toMatchObject({ type: 'app-send-result', payload: { status: 'received' } });
+
+    const recordPath = join(
+      bridgeB.appRootDir,
+      'app-inbox/records',
+      encodeAppPathSegment('daemon-a'),
+      encodeAppPathSegment(messageId),
+      'record.json',
+    );
+    const record = JSON.parse(await readFile(recordPath, 'utf8')) as { messageId: string; body: string };
+    expect(record).toMatchObject({ messageId, body: 'lan down' });
+    expect(createCalls.filter((url) => url.includes('192.168.99.10'))).toHaveLength(1);
+    expect(createCalls.filter((url) => url.includes('100.86.84.63'))).toHaveLength(1);
+
+    const callsBeforeReuse = createCalls.length;
+    await bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-message',
+      payload: { requestId: randomUUID(), messageId: `msg-${randomUUID()}`, target: multiTarget, subject: 'reuse', body: 'reuse tailscale' },
+    });
+    const second = await waitForFrames(
+      local.frames,
+      (frame) => frame.type === 'app-send-result' && frame.payload.messageId !== messageId,
+    );
+    expect(second).toMatchObject({ type: 'app-send-result', payload: { status: 'received' } });
+    expect(createCalls.length).toBe(callsBeforeReuse);
+  });
+
+  it('reports both candidates and preserves the Tailscale HTTP 404 after an earlier LAN timeout', async () => {
+    const root = await tempRoot();
+    const bridgeA = await createBridge({
+      root: join(root, 'a'),
+      deviceId: 'device-a',
+      daemonHostId: 'daemon-a',
+      peerConnectTimeoutMs: 100,
+      peerRequestTimeoutMs: 1_000,
+      createWebSocket: (url) => (
+        url.includes('100.86.84.63') ? upgradeRejectedSocket(404) : connectingSocket()
+      ) as unknown as WebSocket,
+    });
+    const local = captureLink('local', 'device-a', 'daemon-a');
+
+    await bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-message',
+      payload: {
+        requestId: randomUUID(),
+        messageId: `msg-${randomUUID()}`,
+        target: {
+          deviceId: 'device-b',
+          daemonHostId: 'daemon-b',
+          wsUrl: 'ws://192.168.99.10:3333/app',
+          authToken: 'test-token',
+          endpoints: [
+            { kind: 'lan', wsUrl: 'ws://192.168.99.10:3333/app', authToken: 'test-token' },
+            { kind: 'tailscale', wsUrl: 'ws://100.86.84.63:3333/app', authToken: 'test-token' },
+          ],
+        },
+        subject: 'old daemon',
+        body: 'tailscale 404',
+      },
+    });
+
+    const error = await waitForFrames<Extract<AppServerFrame, { type: 'app-error' }>>(
+      local.frames,
+      (frame) => frame.type === 'app-error',
+    );
+    expect(error).toMatchObject({ type: 'app-error', payload: { code: 'unreachable' } });
+    expect(error.payload.message).toContain('ws://192.168.99.10:3333/app');
+    expect(error.payload.message).toContain('ws://100.86.84.63:3333/app');
+    expect(error.payload.message).toContain('HTTP 404');
+  });
+
+  it('aggregates every failed endpoint when no candidate connects', async () => {
+    const root = await tempRoot();
+    const bridgeA = await createBridge({
+      root: join(root, 'a'),
+      deviceId: 'device-a',
+      daemonHostId: 'daemon-a',
+      peerConnectTimeoutMs: 100,
+      peerRequestTimeoutMs: 1_000,
+      createWebSocket: (url) => (
+        url.includes('100.86.84.63') ? refusedSocket() : connectingSocket()
+      ) as unknown as WebSocket,
+    });
+    const local = captureLink('local', 'device-a', 'daemon-a');
+
+    await bridgeA.runtime.handleFrame(local.link, {
+      type: 'app-send-message',
+      payload: {
+        requestId: randomUUID(),
+        messageId: `msg-${randomUUID()}`,
+        target: {
+          deviceId: 'device-b',
+          daemonHostId: 'daemon-b',
+          wsUrl: 'ws://192.168.99.10:3333/app',
+          authToken: 'test-token',
+          endpoints: [
+            { kind: 'lan', wsUrl: 'ws://192.168.99.10:3333/app', authToken: 'test-token' },
+            { kind: 'tailscale', wsUrl: 'ws://100.86.84.63:3333/app', authToken: 'test-token' },
+          ],
+        },
+        subject: 'all down',
+        body: 'both fail',
+      },
+    });
+
+    const error = await waitForFrames<Extract<AppServerFrame, { type: 'app-error' }>>(
+      local.frames,
+      (frame) => frame.type === 'app-error',
+    );
+    expect(error).toMatchObject({ type: 'app-error', payload: { code: 'unreachable' } });
+    expect(error.payload.message).toContain('ws://192.168.99.10:3333/app');
+    expect(error.payload.message).toContain('ws://100.86.84.63:3333/app');
+  });
+
   it('delivers a multiline message, persists it, replays on subscribe, and settles ack/consume', async () => {
     const root = await tempRoot();
     const bridgeB = await createBridge({ root: join(root, 'b'), deviceId: 'device-b', daemonHostId: 'daemon-b' });
