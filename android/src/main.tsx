@@ -2,32 +2,32 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { installInputModalityRuntime } from './components/ambient/input-modality-runtime';
+import { writeTextToClipboard } from './pages/terminal-copy-selection';
 import './index.css';
 
 installInputModalityRuntime();
 
 async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
+    await writeTextToClipboard(text);
+    return true;
   } catch {
     // fall through to the textarea fallback
   }
+  let field: HTMLTextAreaElement | null = null;
   try {
-    const field = document.createElement('textarea');
+    field = document.createElement('textarea');
     field.value = text;
     field.setAttribute('readonly', 'true');
     field.style.position = 'fixed';
     field.style.opacity = '0';
     document.body.appendChild(field);
     field.select();
-    const copied = document.execCommand('copy');
-    document.body.removeChild(field);
-    return copied;
+    return document.execCommand('copy');
   } catch {
     return false;
+  } finally {
+    field?.parentNode?.removeChild(field);
   }
 }
 
