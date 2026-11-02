@@ -26,7 +26,7 @@ public final class AndroidConnectionServiceTransportTest {
     private static final java.util.function.BiConsumer<Runnable, Long> IMMEDIATE_SCHEDULER =
         (runnable, delayMillis) -> runnable.run();
 
-    private static final class FakeDataChannel extends org.webrtc.DataChannel {
+    private static class FakeDataChannel extends org.webrtc.DataChannel {
         private final long bufferedAmount;
 
         FakeDataChannel(long bufferedAmount) {
@@ -3251,26 +3251,58 @@ public final class AndroidConnectionServiceTransportTest {
                     @Override public void onRtcClosed(int code, String reason) { }
                 });
             backend.simulateDataChannelStateForTests(org.webrtc.DataChannel.State.OPEN);
-            setField(backend, "dataChannel", new FakeDataChannel(0L));
-            setField(backend, "bulkDataChannel", new FakeDataChannel(140_000L));
+            List<String> sentLanes = new ArrayList<>();
+            setField(backend, "dataChannel", new FakeDataChannel(0L) {
+                @Override
+                public boolean send(org.webrtc.DataChannel.Buffer buffer) {
+                    sentLanes.add(AndroidRtcTransportBackend.LANE_CONTROL);
+                    return true;
+                }
+            });
+            setField(backend, "bulkDataChannel", new FakeDataChannel(140_000L) {
+                @Override
+                public boolean send(org.webrtc.DataChannel.Buffer buffer) {
+                    sentLanes.add(AndroidRtcTransportBackend.LANE_BULK);
+                    return true;
+                }
+            });
             setField(backend, "bulkDataChannelState", org.webrtc.DataChannel.State.OPEN);
             setField(runtime, "rtcBackend", backend);
             setField(runtime, "sendRetryPending", true);
             setField(runtime, "retryPendingLane", AndroidRtcTransportBackend.LANE_BULK);
             setField(runtime, "congestionDraining", true);
 
-            List<String> sent = new ArrayList<>();
-            backend.setSendTextOverrideForTests(text -> {
-                sent.add(text);
-                return true;
-            });
-
             sendTargetMessage(runtime, "request-control-bypass");
 
             assertEquals("control frame must not wait behind bulk congestion",
-                1, sent.size());
-            assertEquals(Boolean.FALSE, field(runtime, "sendRetryPending"));
-            assertEquals(Boolean.FALSE, field(runtime, "congestionDraining"));
+                1, sentLanes.size());
+            assertEquals("control bypass must send on the control lane",
+                AndroidRtcTransportBackend.LANE_CONTROL, sentLanes.get(0));
+            assertEquals("bulk retry must remain parked after control bypass",
+                Boolean.TRUE, field(runtime, "sendRetryPending"));
+            assertEquals("bulk retry lane must survive control bypass",
+                AndroidRtcTransportBackend.LANE_BULK, field(runtime, "retryPendingLane"));
+            assertEquals("bulk congestion-draining state must survive control bypass",
+                Boolean.TRUE, field(runtime, "congestionDraining"));
+
+            // A second bulk frame sent while B1 is parked must stay queued
+            // behind the parked frame and must not be drained by the bypass.
+            setDesiredChannel(runtime, "channel-b", "shell");
+            setDesiredChannelOpened(runtime, "channel-b", true);
+            Method sendChannelMessage = runtime.getClass().getDeclaredMethod(
+                "sendChannelMessage", String.class, JSONObject.class);
+            sendChannelMessage.setAccessible(true);
+            sendChannelMessage.invoke(runtime, "channel-b",
+                new JSONObject().put("type", "buffer-sync"));
+
+            assertEquals("control bypass must not drain a queued bulk frame",
+                1, sentLanes.size());
+            java.util.ArrayDeque<?> retryDeferred =
+                (java.util.ArrayDeque<?>) field(runtime, "retryDeferredFrames");
+            assertEquals("parked bulk frame must remain the sole queued bulk owner",
+                1, retryDeferred.size());
+            assertFalse("bulk frame must not be sent by the control bypass",
+                sentLanes.contains(AndroidRtcTransportBackend.LANE_BULK));
             backend.closeQuietly("test");
         } finally {
             AndroidConnectionService.resetForTests();

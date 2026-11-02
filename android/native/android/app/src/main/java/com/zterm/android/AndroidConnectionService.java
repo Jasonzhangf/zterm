@@ -2341,6 +2341,13 @@ public class AndroidConnectionService extends Service {
             final boolean rtcLaneOpen = retryRtcBackend != null && retryRtcBackend.isOpen(lane);
             final long rtcLaneBuffered = retryRtcBackend != null
                 ? retryRtcBackend.bufferedAmount(lane) : 0L;
+            // A clear control lane may bypass a parked bulk-lane retry, but the
+            // bypass is admission-only: it must not consume, clear, or reschedule
+            // the parked bulk frame.
+            final boolean bypassingParkedBulkRetry =
+                AndroidRtcTransportBackend.LANE_CONTROL.equals(lane)
+                    && sendRetryPending
+                    && AndroidRtcTransportBackend.LANE_BULK.equals(retryPendingLane);
             // Congestion admission is lane-scoped: park only the head frame of
             // the lane whose buffered bytes are actually high. A bulk park
             // above high water never flags a clear control lane as congested,
@@ -2357,15 +2364,21 @@ public class AndroidConnectionService extends Service {
             }
             if (congestionDraining && rtcLaneOpen) {
                 if (rtcLaneBuffered > SEND_FLOW_LOW_WATER_BYTES) {
-                    setRetryPending(lane);
-                    scheduleSendRetry(() -> attemptSendWithRetry(
-                        frame, channelId, source, requireOpenedChannel, gate,
-                        retrySocket, retryRtcBackend, retryGeneration,
-                        retryNetworkGeneration, currentLifecycleEpoch,
-                        Math.min(attempt + 1, SEND_RETRY_MAX)));
-                    return;
+                    if (!bypassingParkedBulkRetry) {
+                        setRetryPending(lane);
+                        scheduleSendRetry(() -> attemptSendWithRetry(
+                            frame, channelId, source, requireOpenedChannel, gate,
+                            retrySocket, retryRtcBackend, retryGeneration,
+                            retryNetworkGeneration, currentLifecycleEpoch,
+                            Math.min(attempt + 1, SEND_RETRY_MAX)));
+                        return;
+                    }
+                    // Control lane is below its own high water while a bulk retry
+                    // is parked. Send on the clear control lane without touching
+                    // the parked bulk owner's congestion state.
+                } else if (!bypassingParkedBulkRetry) {
+                    congestionDraining = false;
                 }
-                congestionDraining = false;
             }
             try {
                 boolean sent = retryRtcBackend != null
@@ -2373,13 +2386,20 @@ public class AndroidConnectionService extends Service {
                     : retrySocket != null && retrySocket.send(frame.toString());
                 if (sent) {
                     boolean wasStalled = sendStalled;
-                    congestionDraining = false;
-                    sendStalled = false;
-                    sendStalledBufferedBytes = -1L;
-                    clearRetryPending();
+                    if (!bypassingParkedBulkRetry) {
+                        congestionDraining = false;
+                        sendStalled = false;
+                        sendStalledBufferedBytes = -1L;
+                        clearRetryPending();
+                    }
                     consumeSuccessfulRetryFrame(frame, safeRetryChannelId);
                     if (wasStalled) {
                         publishCurrentTransportFlow(System.currentTimeMillis());
+                    }
+                    if (bypassingParkedBulkRetry) {
+                        // Admission-only bypass: leave the parked bulk retry as
+                        // the sole owner of bulk queue resumption.
+                        return;
                     }
                     java.util.ArrayDeque<JSONObject> sameChannelQueue =
                         safeRetryChannelId == null || safeRetryChannelId.isEmpty()
@@ -2971,11 +2991,23 @@ public class AndroidConnectionService extends Service {
                 sendStalledBufferedBytes = -1L;
                 wasStalled = true;
             }
-            // A bulk high-water park must not keep the control lane draining.
-            // Clear the shared drain gate as soon as the control lane is at
-            // or below low water, even while bulk remains congested.
-            if (congestionDraining && controlBufferedBytes <= SEND_FLOW_LOW_WATER_BYTES) {
-                congestionDraining = false;
+            // Decide which lane owns the active draining state. A parked bulk
+            // retry owns congestionDraining until its own lane reaches low
+            // water; a clear control lane must not clear the bulk lane's state.
+            if (congestionDraining) {
+                if (sendRetryPending
+                    && AndroidRtcTransportBackend.LANE_BULK.equals(retryPendingLane)) {
+                    long bulkBufferedBytes = rtcBackend != null
+                        ? rtcBackend.bufferedAmount(AndroidRtcTransportBackend.LANE_BULK)
+                        : bufferedBytes;
+                    if (bulkBufferedBytes <= SEND_FLOW_LOW_WATER_BYTES) {
+                        congestionDraining = false;
+                    }
+                } else if (controlBufferedBytes <= SEND_FLOW_LOW_WATER_BYTES) {
+                    // Control retry or no lane-specific retry: retain the
+                    // control-lane low-water behavior.
+                    congestionDraining = false;
+                }
             }
             publishTransportFlow(aggregateBufferedBytes, sampledAt);
             if (wasStalled && !sendRetryPending) {
