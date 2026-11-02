@@ -34,6 +34,12 @@ mirror delivery.
 `@jsonstudio/zterm-daemon-win32-x64@0.1.4`) are published to the public npm
 registry. CLI `0.1.5` adds the `zterm app` cross-machine message and file
 commands; daemon `0.1.4` adds the `/app` WebSocket gateway they use.
+
+`@jsonstudio/zterm-cli@0.1.6` and `@jsonstudio/zterm-daemon@0.1.5` are now the
+public `latest` pair. CLI `0.1.6` adds multi-endpoint `/app` target resolution;
+daemon `0.1.5` adds the matching ordered endpoint fallback, so a fresh
+cross-machine `zterm app send` reaches a peer even when its first advertised
+endpoint is not yet live. Un-upgraded daemons remain single-endpoint.
 See [`../../docs/install-from-zero.md`](../../docs/install-from-zero.md) for the
 from-zero installation guide, `AppSDK`/`Collab` install order, and the verified
 vs. unverified blank-machine audit matrix. Windows x64, Linux x64 and macOS
@@ -69,12 +75,12 @@ and the exact server and session identity saved in the slot.
 
 ## Install
 
-Global npm installation (`@jsonstudio/zterm-cli@0.1.5` and `@jsonstudio/zterm-daemon@0.1.4`):
+Global npm installation (`@jsonstudio/zterm-cli@0.1.6` and `@jsonstudio/zterm-daemon@0.1.5`):
 
 ```sh
 npm install --global @jsonstudio/zterm-cli
 zterm --version
-zterm daemon install --version 0.1.4
+zterm daemon install --version 0.1.5
 ```
 
 See [`../../docs/install-from-zero.md`](../../docs/install-from-zero.md) for OS-specific dependency setup (including Node.js 22 LTS `ABI 127` for `zterm-daemon` and `TMUX_TMPDIR="$HOME/.tmux/run"`).
@@ -558,7 +564,7 @@ create a second installation lock, or promise an automatic rollback. A failed
 or cancelled npm operation is reported as `unverified`; it does not claim that
 the previous entry is still healthy.
 
-`@jsonstudio/zterm-cli@0.1.5` and `@jsonstudio/zterm-daemon@0.1.4` are published to the public npm registry, and isolated public registry installation plus the `zterm app` cross-machine message and file end-to-end gate pass. End-to-end upgrade/rollback on a genuinely blank physical machine or blank OS VM remains unverified until a blank-machine target is provisioned.
+`@jsonstudio/zterm-cli@0.1.6` and `@jsonstudio/zterm-daemon@0.1.5` are published to the public npm registry, and isolated public registry installation plus the `zterm app` cross-machine message and file end-to-end gate pass. End-to-end upgrade/rollback on a genuinely blank physical machine or blank OS VM remains unverified until a blank-machine target is provisioned.
 
 ## Daemon management
 
@@ -684,4 +690,4 @@ as a private workspace runtime dependency.
 | macOS | `darwin-arm64`, Node 22 | Full user path passed from an isolated npm tarball, including login, slot, snapshot, mirror, input, resize, `Ctrl+] q`, stale identity, logout, and cleanup. |
 | Linux | `linux-x64`, Node 22 | Real native staging, installed CLI, PTY, remote connection, and lifecycle evidence are pending platform CI or a Linux target host. |
 
-The npm isolation upgrade suite passed, and `@jsonstudio/zterm-cli@0.1.5` plus `@jsonstudio/zterm-daemon@0.1.4` (with all three platform payloads) are published to the public npm registry. The `zterm app` message and file gate passes against the public installed CLI. Note that CI runner, container, and existing-host verification do not substitute for a genuinely blank physical machine or blank OS VM; see [`../../docs/install-from-zero.md`](../../docs/install-from-zero.md) for the explicit blank-machine audit matrix.
+The npm isolation upgrade suite passed, and `@jsonstudio/zterm-cli@0.1.6` plus `@jsonstudio/zterm-daemon@0.1.5` (with all three platform payloads) are published to the public npm registry. The `zterm app` message and file gate passes against the public installed CLI. Note that CI runner, container, and existing-host verification do not substitute for a genuinely blank physical machine or blank OS VM; see [`../../docs/install-from-zero.md`](../../docs/install-from-zero.md) for the explicit blank-machine audit matrix.

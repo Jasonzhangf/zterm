@@ -182,6 +182,13 @@ top -pid <renderer_pid> -stats pid,cpu,mem,threads,state,time -l 2
 - 不要使用 `xattr -cr` 处理 `.app` bundle；它可能生成 `._*` AppleDouble 文件并破坏 sealed resources。若误生成，只能在该 `.app` 内精确删除 `._*` 后重新签名。可精确删除 `com.apple.quarantine`；不要把 `spctl --assess rejected` 当作 unsigned internal alpha 的启动失败证据，真实判定必须用 Finder/open 启动和进程路径。
 - 若 Finder 提示“恶意软件并移到废纸篓”，先查实际入口包的 `codesign --verify --deep --strict` 与 `spctl --assess --type execute --verbose=4`。若输出 `notarization indicates this code has been revoked`，根因是旧 revoked 包仍在实际路径，必须退出该路径的运行中明确 PID、把旧包改名备份、安装当前构建、重签、再从同一路径启动验证；`osascript tell application "ZTerm" to quit` 可能被 revoked app 挂住，卡住时只结束该明确 `osascript` PID，再用旧 ZTerm 明确 PID 关闭。
 
+### 3.4.1 运行时探针与失败重试（2026-10-27 硬规则）
+- 验证 TypeScript import、Node 运行时版本或包解析时，先用静态 import 链、已生成的 JS / `.d.ts`、项目测试或 Node 22 type-stripping 取证。禁止为了同一结论下载、解压、复制或启动 Electron / 其他 GUI framework。
+- 禁止运行 `ELECTRON_RUN_AS_NODE=1` 指向临时目录或缓存目录中的 Electron；禁止对第三方或缓存 Electron 执行 `codesign`、`xattr` 处理或重签。
+- 出现 macOS `Malware Blocked`、`Killed: 9` 或 `notarization ... revoked` 时立即停止。这些不是可重试的瞬时错误：不得重试、换目录、重签或绕过。保留原始命令与 stderr，结论写 `UNVERIFIED`，并把阻塞 finding 交给作者。
+- GUI 运行态证据只能用项目自己的 packaged `.app` 和 §3.6 协议。当前任务无法满足时，停止该验证路径，不用临时 runtime 替代。
+- reviewer 只做只读审查；不得创建临时 build / runtime 或启动 GUI。需要运行态复验时，输出明确 finding、证据缺口和复验条件，由作者按正式协议执行。
+
 ### 3.6 Packaged App 启动协议（2026-08-27 冻结）
 
 Unsigned 本地 package 启动必须严格按下列顺序，禁止改换步骤顺序。
