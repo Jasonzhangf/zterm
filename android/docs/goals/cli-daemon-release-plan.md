@@ -22,6 +22,22 @@
 - 公开安装 CLI 的完整 `app-messaging-e2e` 通过（`e2e.pass`）：双向消息、双向文件字节一致、接收端 daemon 重启续传、dedupe、slow-consumer、inbox 上限、权限拒绝。
 - 因此 `cli-cross-machine-messaging` 的“公开安装 CLI 入口用于验收”缺口已补齐；真实空白机端到端升级/回滚仍按上节保持 UNVERIFIED。
 
+## 本轮结果（2026-11-02）
+
+- 基于 `origin/main`（`a157d159`）及 PR #205（合并 `913ab408`，CI 主 run
+  `41412668374` 与 CLI Platform run `41412668405` 全绿）发布：
+  - `@jsonstudio/zterm-cli@0.1.6`：新增 `/app` 多端点目标解析，跨机器
+    `send` 在远端首个端点未监听时仍能连接。
+  - `@jsonstudio/zterm-daemon@0.1.5`（launcher）与 darwin-arm64 / linux-x64 /
+    win32-x64 三个 `0.1.5` payload：新增 `/app` 端点顺序 fallback。
+- 已按 payload → launcher 顺序发布 `next`，隔离公开 registry 安装验证
+  CLI `0.1.6` 与 daemon `0.1.5`（含 darwin-arm64 native 加载），随后提升
+  `latest`（registry `dist-tags`：daemon/CLI latest 均为 `0.1.5`/`0.1.6`）。
+- Mac Studio 与 MacBook Air（`macbookair` `100.86.84.63`）均已升级 CLI
+  `0.1.6` + daemon `0.1.5` 并验证 `/app`：无认证 404、带 Bearer 后 WebSocket
+  升级 101。Mac Studio → MacBook Air 实测 `zterm app send` 状态 `received`；
+  `send-file` 远端 SHA-256 与源一致（`3b817d58...`）。
+
 ## 仍保持 UNVERIFIED 的真实空白机缺口
 
 - 真实空白机（无预装依赖的物理机或全新 OS VM）从零安装与升级/回滚验收：当前双项目均无可用空白机或空白账号（CI runner、容器及现有开发机不冒充空白机）。
