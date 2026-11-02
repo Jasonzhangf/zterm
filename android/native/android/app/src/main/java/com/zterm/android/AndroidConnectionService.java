@@ -136,6 +136,43 @@ public class AndroidConnectionService extends Service {
     /** Wait wake-up for an OPEN connection that refuses a send. */
     static final long SEND_CONGESTION_WAKEUP_MS = 200L;
 
+    /**
+     * Lane assignment for the physical DataChannel split. High-volume payload
+     * frames ride `zterm-bulk`; every other mux frame stays on `zterm`. Mirrors
+     * `classifyTerminalMuxClientFrameLane` in the shared protocol.
+     */
+    private static final java.util.Set<String> BULK_LANE_MESSAGE_TYPES = java.util.Set.of(
+        "buffer-sync",
+        "file-download-chunk",
+        "file-download-complete",
+        "file-download-error",
+        "file-upload-chunk",
+        "file-upload-start",
+        "file-upload-end",
+        "attachment-asset-data",
+        "attach-file-start",
+        "paste-image-start",
+        "terminal-snapshot-result");
+
+    static String resolveClientFrameLane(JSONObject frame) {
+        if (frame == null) {
+            return AndroidRtcTransportBackend.LANE_CONTROL;
+        }
+        String type = frame.optString("type", "");
+        if ("mux-channel-binary".equals(type)) {
+            return AndroidRtcTransportBackend.LANE_BULK;
+        }
+        if ("mux-channel-message".equals(type)) {
+            JSONObject payload = frame.optJSONObject("payload");
+            JSONObject message = payload == null ? null : payload.optJSONObject("message");
+            if (message != null
+                && BULK_LANE_MESSAGE_TYPES.contains(message.optString("type", ""))) {
+                return AndroidRtcTransportBackend.LANE_BULK;
+            }
+        }
+        return AndroidRtcTransportBackend.LANE_CONTROL;
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
@@ -891,6 +928,10 @@ public class AndroidConnectionService extends Service {
         volatile long networkEpoch;
         volatile boolean stopped;
         volatile boolean sendRetryPending;
+        /** Lane ('control' or 'bulk') of the frame owning the pending retry,
+         * or null when no retry is parked. Used so a parked bulk frame does
+         * not block or reject a clear control lane. */
+        volatile String retryPendingLane;
         volatile RouteCandidateDiagnostic committedCandidate;
         /**
          * Index of the direct tier currently probing, or -1 for manual route
@@ -980,7 +1021,7 @@ public class AndroidConnectionService extends Service {
             activeRtcCandidate = null;
             activeDirectTier = -1;
             relayStartedThisAttempt = false;
-            sendRetryPending = false;
+            clearRetryPending();
             sendStalled = false;
             sendStalledBufferedBytes = -1L;
             congestionDraining = false;
@@ -1946,6 +1987,14 @@ public class AndroidConnectionService extends Service {
             if (webSocket != null) {
                 socket = webSocket;
             }
+            // Open the ordered-reliable `zterm-bulk` lane only for an RTC
+            // transport whose daemon advertises the capability in mux-ready.
+            // WebSocket and single-channel daemons keep every frame on `zterm`.
+            JSONObject bulkCapability = capabilities.optJSONObject("bulkChannel");
+            AndroidRtcTransportBackend readyRtc = rtcBackend;
+            if (webSocket == null && bulkCapability != null && readyRtc != null) {
+                readyRtc.createBulkChannel();
+            }
             stateMachine.dispatch(AndroidConnectionServiceEvent.muxReady(
                 generation, payload.toString()),
                 System.currentTimeMillis());
@@ -2100,6 +2149,21 @@ public class AndroidConnectionService extends Service {
                         channelLifecycleEpoch(channelId), 1);
                     return;
                 }
+                final String pendingLane = resolveClientFrameLane(frame);
+                if (AndroidRtcTransportBackend.LANE_CONTROL.equals(pendingLane)
+                    && AndroidRtcTransportBackend.LANE_BULK.equals(retryPendingLane)
+                    && currentRtc != null
+                    && currentRtc.isOpen(AndroidRtcTransportBackend.LANE_CONTROL)
+                    && !isSendCongested(currentRtc.bufferedAmount(AndroidRtcTransportBackend.LANE_CONTROL))) {
+                    // A parked bulk-lane congestion retry must not block or
+                    // reject control sends whose own lane is clear. Attempt the
+                    // control frame directly instead of queueing it behind the
+                    // bulk frame. A control-lane retry still queues FIFO.
+                    attemptSendWithRetry(frame, channelId, source, requireOpenedChannel, SendGate.MUX_READY,
+                        current, currentRtc, generation, transportNetworkGeneration,
+                        channelLifecycleEpoch(channelId), 1);
+                    return;
+                }
                 String safeChannelId = channelId == null ? null : channelId.trim();
                 if (safeChannelId == null || safeChannelId.isEmpty()) {
                     publishFrameRejected(source, "frame-dropped-transport-pending",
@@ -2224,6 +2288,16 @@ public class AndroidConnectionService extends Service {
                 ? null : channelLifecycleEpochs.get(safeChannelId);
         }
 
+        private void setRetryPending(String lane) {
+            sendRetryPending = true;
+            retryPendingLane = lane;
+        }
+
+        private void clearRetryPending() {
+            sendRetryPending = false;
+            retryPendingLane = null;
+        }
+
         private void attemptSendWithRetry(
             JSONObject frame,
             String channelId,
@@ -2250,7 +2324,7 @@ public class AndroidConnectionService extends Service {
                 || (gate == SendGate.MUX_READY && !isMuxReady())
                 || (currentLifecycleEpoch != null && requireOpenedChannel
                     && !isChannelOpened(safeRetryChannelId))) {
-                sendRetryPending = false;
+                clearRetryPending();
                 if (safeRetryChannelId != null && !safeRetryChannelId.isEmpty()
                     && requireOpenedChannel
                     && currentLifecycleEpoch != null
@@ -2263,13 +2337,24 @@ public class AndroidConnectionService extends Service {
                     retryLifecycleEpoch, gate));
                 return;
             }
-            // Congestion admission. For an OPEN RTC channel, a rising buffered
-            // amount is not a physical disconnect: keep the same frame at the
-            // head, park it, and let the drain callback / wake-up resume it.
-           if (retryRtcBackend != null && retryRtcBackend.isOpen()
-               && isSendCongested(retryRtcBackend.bufferedAmount())) {
-               congestionDraining = true;
-                sendRetryPending = true;
+            final String lane = resolveClientFrameLane(frame);
+            final boolean rtcLaneOpen = retryRtcBackend != null && retryRtcBackend.isOpen(lane);
+            final long rtcLaneBuffered = retryRtcBackend != null
+                ? retryRtcBackend.bufferedAmount(lane) : 0L;
+            // A clear control lane may bypass a parked bulk-lane retry, but the
+            // bypass is admission-only: it must not consume, clear, or reschedule
+            // the parked bulk frame.
+            final boolean bypassingParkedBulkRetry =
+                AndroidRtcTransportBackend.LANE_CONTROL.equals(lane)
+                    && sendRetryPending
+                    && AndroidRtcTransportBackend.LANE_BULK.equals(retryPendingLane);
+            // Congestion admission is lane-scoped: park only the head frame of
+            // the lane whose buffered bytes are actually high. A bulk park
+            // above high water never flags a clear control lane as congested,
+            // because bufferedAmount(lane) reports only that lane's bytes.
+            if (rtcLaneOpen && isSendCongested(rtcLaneBuffered)) {
+                congestionDraining = true;
+                setRetryPending(lane);
                 scheduleSendRetry(() -> attemptSendWithRetry(
                     frame, channelId, source, requireOpenedChannel, gate,
                     retrySocket, retryRtcBackend, retryGeneration,
@@ -2277,31 +2362,44 @@ public class AndroidConnectionService extends Service {
                     Math.min(attempt + 1, SEND_RETRY_MAX)));
                 return;
             }
-           if (congestionDraining && retryRtcBackend != null && retryRtcBackend.isOpen()) {
-               if (retryRtcBackend.bufferedAmount() > SEND_FLOW_LOW_WATER_BYTES) {
-                   sendRetryPending = true;
-                   scheduleSendRetry(() -> attemptSendWithRetry(
-                       frame, channelId, source, requireOpenedChannel, gate,
-                       retrySocket, retryRtcBackend, retryGeneration,
-                       retryNetworkGeneration, currentLifecycleEpoch,
-                       Math.min(attempt + 1, SEND_RETRY_MAX)));
-                   return;
-               }
-               congestionDraining = false;
-           }
+            if (congestionDraining && rtcLaneOpen) {
+                if (rtcLaneBuffered > SEND_FLOW_LOW_WATER_BYTES) {
+                    if (!bypassingParkedBulkRetry) {
+                        setRetryPending(lane);
+                        scheduleSendRetry(() -> attemptSendWithRetry(
+                            frame, channelId, source, requireOpenedChannel, gate,
+                            retrySocket, retryRtcBackend, retryGeneration,
+                            retryNetworkGeneration, currentLifecycleEpoch,
+                            Math.min(attempt + 1, SEND_RETRY_MAX)));
+                        return;
+                    }
+                    // Control lane is below its own high water while a bulk retry
+                    // is parked. Send on the clear control lane without touching
+                    // the parked bulk owner's congestion state.
+                } else if (!bypassingParkedBulkRetry) {
+                    congestionDraining = false;
+                }
+            }
             try {
                 boolean sent = retryRtcBackend != null
-                    ? retryRtcBackend.sendText(frame.toString())
+                    ? retryRtcBackend.sendText(frame.toString(), lane)
                     : retrySocket != null && retrySocket.send(frame.toString());
                 if (sent) {
                     boolean wasStalled = sendStalled;
-                    congestionDraining = false;
-                    sendStalled = false;
-                    sendStalledBufferedBytes = -1L;
-                    sendRetryPending = false;
+                    if (!bypassingParkedBulkRetry) {
+                        congestionDraining = false;
+                        sendStalled = false;
+                        sendStalledBufferedBytes = -1L;
+                        clearRetryPending();
+                    }
                     consumeSuccessfulRetryFrame(frame, safeRetryChannelId);
                     if (wasStalled) {
                         publishCurrentTransportFlow(System.currentTimeMillis());
+                    }
+                    if (bypassingParkedBulkRetry) {
+                        // Admission-only bypass: leave the parked bulk retry as
+                        // the sole owner of bulk queue resumption.
+                        return;
                     }
                     java.util.ArrayDeque<JSONObject> sameChannelQueue =
                         safeRetryChannelId == null || safeRetryChannelId.isEmpty()
@@ -2341,7 +2439,7 @@ public class AndroidConnectionService extends Service {
                 }
             } catch (RuntimeException error) {
                 if (attempt >= SEND_RETRY_MAX) {
-                    sendRetryPending = false;
+                    clearRetryPending();
                     parkCurrentAndDeferredForReconnect(new DeferredSend(
                         frame, channelId, source, requireOpenedChannel,
                         retryLifecycleEpoch, gate));
@@ -2351,11 +2449,11 @@ public class AndroidConnectionService extends Service {
             }
             // OPEN but send() returned false, or a retry was attempted, is a
             // congestion wait for RTC. It must not escalate to reconnect.
-            if (retryRtcBackend != null && retryRtcBackend.isOpen()) {
-                long currentBuffered = retryRtcBackend.bufferedAmount();
+            if (rtcLaneOpen) {
+                long currentBuffered = rtcLaneBuffered;
                 if (isSendCongested(currentBuffered)) {
                     congestionDraining = true;
-                    sendRetryPending = true;
+                    setRetryPending(lane);
                     publishTransportFlow(currentBuffered, System.currentTimeMillis());
                     scheduleSendRetry(() -> attemptSendWithRetry(
                         frame, channelId, source, requireOpenedChannel, gate,
@@ -2365,7 +2463,7 @@ public class AndroidConnectionService extends Service {
                     return;
                 }
                 if (attempt >= SEND_RETRY_MAX) {
-                    sendRetryPending = false;
+                    clearRetryPending();
                     sendStalled = true;
                     sendStalledBufferedBytes = currentBuffered;
                     parkStalledFrameAtHead(new DeferredSend(
@@ -2374,7 +2472,7 @@ public class AndroidConnectionService extends Service {
                     publishTransportFlow(currentBuffered, System.currentTimeMillis());
                     return;
                 }
-                sendRetryPending = true;
+                setRetryPending(lane);
                 scheduleSendRetry(() -> attemptSendWithRetry(
                     frame, channelId, source, requireOpenedChannel, gate,
                     retrySocket, retryRtcBackend, retryGeneration,
@@ -2383,7 +2481,7 @@ public class AndroidConnectionService extends Service {
                 return;
             }
             if (attempt >= SEND_RETRY_MAX) {
-                sendRetryPending = false;
+                clearRetryPending();
                 parkCurrentAndDeferredForReconnect(new DeferredSend(
                     frame, channelId, source, requireOpenedChannel,
                     retryLifecycleEpoch, gate));
@@ -2392,7 +2490,7 @@ public class AndroidConnectionService extends Service {
                     "send failed after " + SEND_RETRY_MAX + " attempts");
                 return;
             }
-            sendRetryPending = true;
+            setRetryPending(lane);
             final Long scheduledLifecycleEpoch = currentLifecycleEpoch;
             scheduleSendRetry(() -> attemptSendWithRetry(
                 frame,
@@ -2876,18 +2974,42 @@ public class AndroidConnectionService extends Service {
         }
 
         void handleRtcFlowChanged(long bufferedBytes, long sampledAt) {
+            long controlBufferedBytes = rtcBackend != null
+                ? rtcBackend.bufferedAmount(AndroidRtcTransportBackend.LANE_CONTROL)
+                : bufferedBytes;
+            // Use the backend's own aggregate so bulk falls back to control
+            // without double-counting control bytes (bufferedAmount(lane)
+            // projects bulk onto control until zterm-bulk opens).
+            long aggregateBufferedBytes = rtcBackend != null
+                ? rtcBackend.bufferedAmount()
+                : bufferedBytes;
             boolean wasStalled = false;
-            if (sendStalled && !isSendCongested(bufferedBytes)
+            if (sendStalled && !isSendCongested(aggregateBufferedBytes)
                 && sendStalledBufferedBytes >= 0L
-                && bufferedBytes < sendStalledBufferedBytes) {
+                && aggregateBufferedBytes < sendStalledBufferedBytes) {
                 sendStalled = false;
                 sendStalledBufferedBytes = -1L;
                 wasStalled = true;
             }
-            if (congestionDraining && bufferedBytes <= SEND_FLOW_LOW_WATER_BYTES) {
-                congestionDraining = false;
+            // Decide which lane owns the active draining state. A parked bulk
+            // retry owns congestionDraining until its own lane reaches low
+            // water; a clear control lane must not clear the bulk lane's state.
+            if (congestionDraining) {
+                if (sendRetryPending
+                    && AndroidRtcTransportBackend.LANE_BULK.equals(retryPendingLane)) {
+                    long bulkBufferedBytes = rtcBackend != null
+                        ? rtcBackend.bufferedAmount(AndroidRtcTransportBackend.LANE_BULK)
+                        : bufferedBytes;
+                    if (bulkBufferedBytes <= SEND_FLOW_LOW_WATER_BYTES) {
+                        congestionDraining = false;
+                    }
+                } else if (controlBufferedBytes <= SEND_FLOW_LOW_WATER_BYTES) {
+                    // Control retry or no lane-specific retry: retain the
+                    // control-lane low-water behavior.
+                    congestionDraining = false;
+                }
             }
-            publishTransportFlow(bufferedBytes, sampledAt);
+            publishTransportFlow(aggregateBufferedBytes, sampledAt);
             if (wasStalled && !sendRetryPending) {
                 resumeStalledSend();
             }

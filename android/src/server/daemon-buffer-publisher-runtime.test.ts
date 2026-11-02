@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import type { BufferSyncRequestPayload } from '@zterm/shared/types';
+import type { TerminalTransportLane } from '@zterm/shared/protocol';
 import {
   createDaemonBufferPublisherRuntime,
   type DaemonBufferPublisherDeps,
@@ -16,6 +17,7 @@ function makeTransport(options: {
   readyState?: number;
   bufferedAmount?: number;
   flowUnknown?: boolean;
+  isLaneOpen?: (lane: TerminalTransportLane) => boolean;
 } = {}) {
   return {
     kind: 'ws' as const,
@@ -23,6 +25,7 @@ function makeTransport(options: {
     bufferedAmount: options.bufferedAmount ?? 0,
     flowUnknown: options.flowUnknown,
     backpressureCount: 0,
+    isLaneOpen: options.isLaneOpen,
     sendText: () => undefined,
     close: () => undefined,
   } satisfies TerminalSessionTransport;
@@ -582,6 +585,441 @@ describe('daemon buffer publisher runtime', () => {
     session.transport!.bufferedAmount = 0;
     expect(publisher.flushPendingSubscriberBufferSync(mirror, session.id)).toBe('sent');
     expect(sent).toEqual([0, 1]);
+  });
+
+  it('freezes a partially sent live frame and completes it before a newer revision', () => {
+    const transport = makeTransport({ bufferedAmount: 0 });
+    const session = makeSession('s1', transport);
+    const sent: Array<{ revision: number; chunk: number; count: number }> = [];
+    let freezeOnNextSend = true;
+    const largeLines = Array.from({ length: 3000 }, (_, index) => ({
+      i: index,
+      t: 'x'.repeat(100),
+    }));
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      buildChangedRangesBufferSyncPayload: (mirror, ranges) => ({
+        revision: mirror.revision,
+        startIndex: ranges[0]?.startIndex ?? mirror.bufferStartIndex,
+        endIndex: ranges[ranges.length - 1]?.endIndex ?? mirror.bufferStartIndex,
+        lines: largeLines,
+      }) as never,
+      sendText: (_transport, text) => {
+        const payload = JSON.parse(text).payload as {
+          revision: number;
+          frameChunkIndex: number;
+          frameChunkCount: number;
+        };
+        sent.push({
+          revision: payload.revision,
+          chunk: payload.frameChunkIndex,
+          count: payload.frameChunkCount,
+        });
+        // Freeze the frame immediately after the first chunk crosses the wire.
+        if (freezeOnNextSend) {
+          freezeOnNextSend = false;
+          session.transport!.bufferedAmount = 200_000;
+        }
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 1);
+
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 0, endIndex: 3000 }],
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ revision: 1, chunk: 0 });
+    expect(session.bufferSyncState?.pendingLiveFrame?.revision).toBe(1);
+    expect(session.bufferSyncState?.pendingLiveFrame?.nextChunkIndex).toBe(1);
+
+    // A newer revision arrives while revision 1 is half sent; it stages behind.
+    mirror.revision = 2;
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 0, endIndex: 3000 }],
+    );
+
+    // Draining completes the frozen revision-1 frame before any revision-2 chunk.
+    session.transport!.bufferedAmount = 0;
+    expect(publisher.flushPendingSubscriberBufferSync(mirror, 's1')).toBe('sent');
+    const chunkCount = sent[0]!.count;
+    expect(sent).toHaveLength(chunkCount);
+    expect(sent.map((entry) => entry.revision)).toEqual(Array(chunkCount).fill(1));
+    for (let index = 0; index < chunkCount; index += 1) {
+      expect(sent[index]).toMatchObject({ revision: 1, chunk: index, count: chunkCount });
+    }
+    expect(session.bufferSyncState?.pendingLiveFrame).toBeNull();
+    expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toEqual([
+      { startIndex: 0, endIndex: 3000 },
+    ]);
+  });
+
+  it('discards a frozen live frame and resyncs from chunk 0 after a transport generation change', () => {
+    const transport = makeTransport({ bufferedAmount: 0 });
+    const session = makeSession('s1', transport);
+    const sent: Array<{ revision: number; chunk: number; transportId: string }> = [];
+    const largeLines = Array.from({ length: 3000 }, (_, index) => ({
+      i: index,
+      t: 'x'.repeat(100),
+    }));
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      buildChangedRangesBufferSyncPayload: (mirror, ranges) => ({
+        revision: mirror.revision,
+        startIndex: ranges[0]?.startIndex ?? mirror.bufferStartIndex,
+        endIndex: ranges[ranges.length - 1]?.endIndex ?? mirror.bufferStartIndex,
+        lines: largeLines,
+      }) as never,
+      sendText: (_transport, text) => {
+        const payload = JSON.parse(text).payload as {
+          revision: number;
+          frameChunkIndex: number;
+        };
+        sent.push({
+          revision: payload.revision,
+          chunk: payload.frameChunkIndex,
+          transportId: session.transportId,
+        });
+        session.transport!.bufferedAmount = 200_000;
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 1);
+
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 0, endIndex: 3000 }],
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ revision: 1, chunk: 0, transportId: 'transport-s1' });
+
+    // The session now rides a fresh physical transport after a reconnect.
+    session.transportId = 'transport-s1-r2';
+    session.transport!.bufferedAmount = 0;
+    expect(publisher.flushPendingSubscriberBufferSync(mirror, 's1')).toBe('stale-transport');
+    expect(session.bufferSyncState?.pendingLiveFrame).toBeNull();
+    expect(session.bufferSyncState?.resyncRequired).toBe(true);
+    expect(session.bufferSyncState?.resyncReason).toBe('transport-generation');
+    expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toEqual([
+      { startIndex: 0, endIndex: 3000 },
+    ]);
+
+    // The new transport queues one fresh authoritative frame from chunk 0.
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 0, endIndex: 3000 }],
+    );
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toMatchObject({ revision: 1, chunk: 0, transportId: 'transport-s1-r2' });
+  });
+
+  it('live buffer-sync frame pins control lane when bulk is closed at chunk 0 and stays control after bulk opens mid-frame', () => {
+    let bulkOpen = false;
+    const transport = makeTransport({
+      isLaneOpen: (lane) => lane === 'control' || bulkOpen,
+    });
+    const session = makeSession('s1', transport);
+    const sent: Array<{ lane: TerminalTransportLane; chunk: number; count: number }> = [];
+    const largeLines = Array.from({ length: 3000 }, (_, index) => ({
+      i: index,
+      t: 'x'.repeat(100),
+    }));
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      buildChangedRangesBufferSyncPayload: (mirror, ranges) => ({
+        revision: mirror.revision,
+        startIndex: ranges[0]?.startIndex ?? mirror.bufferStartIndex,
+        endIndex: ranges[ranges.length - 1]?.endIndex ?? mirror.bufferStartIndex,
+        lines: largeLines,
+      }) as never,
+      sendText: (_transport, text, lane) => {
+        const payload = JSON.parse(text).payload as {
+          revision: number;
+          frameChunkIndex: number;
+          frameChunkCount: number;
+        };
+        sent.push({
+          lane: lane ?? 'control',
+          chunk: payload.frameChunkIndex,
+          count: payload.frameChunkCount,
+        });
+        if (payload.frameChunkIndex === 0) {
+          transport.bufferedAmount = 200_000;
+        }
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 1);
+
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 0, endIndex: 3000 }],
+    );
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.lane).toBe('control');
+    expect(sent[0]!.chunk).toBe(0);
+    expect(session.bufferSyncState?.pendingLiveFrame?.effectiveLane).toBe('control');
+    expect(session.bufferSyncState?.pendingLiveFrame?.nextChunkIndex).toBe(1);
+
+    // zterm-bulk opens mid-frame: remaining chunks of the same frame stay on control.
+    bulkOpen = true;
+    transport.bufferedAmount = 0;
+    for (
+      let attempt = 0;
+      attempt < 100 && session.bufferSyncState?.pendingLiveFrame;
+      attempt += 1
+    ) {
+      publisher.flushPendingSubscriberBufferSync(mirror, 's1');
+    }
+    const chunkCount = sent[0]!.count;
+    expect(sent).toHaveLength(chunkCount);
+    expect(sent.map((entry) => entry.lane)).toEqual(Array(chunkCount).fill('control'));
+    expect(sent.map((entry) => entry.chunk)).toEqual(
+      Array.from({ length: chunkCount }, (_, index) => index),
+    );
+    expect(session.bufferSyncState?.pendingLiveFrame).toBeNull();
+    expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toEqual([]);
+
+    // A subsequent frame starts on the now-open bulk lane.
+    const controlSent = sent.length;
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 3000, endIndex: 4000 }],
+    );
+    expect(sent.slice(controlSent).every((entry) => entry.lane === 'bulk')).toBe(true);
+  });
+
+  it('live buffer-sync frame started on bulk discards and resends from chunk 0 on control when bulk closes mid-frame', () => {
+    let bulkOpen = true;
+    const transport = makeTransport({
+      isLaneOpen: (lane) => lane === 'control' || bulkOpen,
+    });
+    const session = makeSession('s1', transport);
+    const sent: Array<{ lane: TerminalTransportLane; chunk: number }> = [];
+    const largeLines = Array.from({ length: 3000 }, (_, index) => ({
+      i: index,
+      t: 'x'.repeat(100),
+    }));
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      buildChangedRangesBufferSyncPayload: (mirror, ranges) => ({
+        revision: mirror.revision,
+        startIndex: ranges[0]?.startIndex ?? mirror.bufferStartIndex,
+        endIndex: ranges[ranges.length - 1]?.endIndex ?? mirror.bufferStartIndex,
+        lines: largeLines,
+      }) as never,
+      sendText: (_transport, text, lane) => {
+        const payload = JSON.parse(text).payload as {
+          revision: number;
+          frameChunkIndex: number;
+          frameChunkCount: number;
+        };
+        sent.push({ lane: lane ?? 'control', chunk: payload.frameChunkIndex });
+        if (payload.frameChunkIndex === 0 && lane === 'bulk') {
+          bulkOpen = false;
+        }
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 1);
+
+    publisher.broadcastChangedRangesBufferSyncToSubscribers(
+      mirror,
+      [{ startIndex: 0, endIndex: 3000 }],
+    );
+
+    // Chunk 0 left on bulk; bulk closed before chunk 1 so the frame discards.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.lane).toBe('bulk');
+    expect(session.bufferSyncState?.pendingLiveFrame).toBeNull();
+    expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toEqual([
+      { startIndex: 0, endIndex: 3000 },
+    ]);
+
+    // Re-flush rebuilds the frame from chunk 0 on control.
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const state = session.bufferSyncState;
+      if (!state?.pendingLiveFrame && (state?.pendingChangedAbsoluteRanges.length ?? 0) === 0) {
+        break;
+      }
+      publisher.flushPendingSubscriberBufferSync(mirror, 's1');
+    }
+    const controlStart = sent.findIndex((entry) => entry.lane === 'control');
+    expect(controlStart).toBeGreaterThanOrEqual(1);
+    expect(sent.slice(controlStart).every((entry) => entry.lane === 'control')).toBe(true);
+    expect(sent.slice(controlStart).map((entry) => entry.chunk)).toEqual(
+      Array.from({ length: sent.length - controlStart }, (_, index) => index),
+    );
+    expect(session.bufferSyncState?.pendingLiveFrame).toBeNull();
+    expect(session.bufferSyncState?.pendingChangedAbsoluteRanges).toEqual([]);
+  });
+});
+
+describe('daemon buffer publisher lane pinning', () => {
+  it('range buffer-sync response pins control lane when bulk is closed at chunk 0 and stays control after bulk opens mid-response', () => {
+    let bulkOpen = false;
+    const transport = makeTransport({
+      isLaneOpen: (lane) => lane === 'control' || bulkOpen,
+    });
+    const session = makeSession('s1', transport);
+    session.bodySubscribed = false;
+    const sent: Array<{ lane: TerminalTransportLane; chunk: number }> = [];
+    const largeLines = Array.from({ length: 20_000 }, (_, index) => ({ i: index }));
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      buildRequestedRangeBufferPayload: (mirror, request) => ({
+        revision: mirror.revision,
+        startIndex: request.requestStartIndex,
+        endIndex: request.requestEndIndex,
+        availableStartIndex: mirror.bufferStartIndex,
+        availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+        cols: mirror.cols,
+        rows: mirror.rows,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor,
+        requestSentAt: request.requestedAt,
+        lines: largeLines,
+      }) as never,
+      sendText: (_transport, text, lane) => {
+        const payload = JSON.parse(text).payload as {
+          requestSentAt: number;
+          frameChunkIndex: number;
+          frameChunkCount: number;
+        };
+        sent.push({ lane: lane ?? 'control', chunk: payload.frameChunkIndex });
+        if (payload.frameChunkIndex === 0 && payload.requestSentAt === 101) {
+          transport.bufferedAmount = 200_000;
+        }
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 9);
+    const request = {
+      knownRevision: 8,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 0,
+      requestEndIndex: 20_000,
+      requestedAt: 101,
+      targetHeadRevision: 9,
+    } satisfies BufferSyncRequestPayload;
+
+    expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, request)).toBe('queued');
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.lane).toBe('control');
+    expect(session.bufferSyncState?.pendingRangeResponses?.[0]?.effectiveLane).toBe('control');
+    expect(session.bufferSyncState?.pendingRangeResponses?.[0]?.nextChunkIndex).toBe(1);
+
+    // zterm-bulk opens mid-response: remaining chunks stay on control.
+    bulkOpen = true;
+    transport.bufferedAmount = 0;
+    for (
+      let attempt = 0;
+      attempt < 100 && (session.bufferSyncState?.pendingRangeResponses?.length ?? 0) > 0;
+      attempt += 1
+    ) {
+      publisher.flushPendingBufferSyncToSubscribers(mirror);
+    }
+
+    const chunkCount = Math.max(1, ...sent.map((entry) => entry.chunk)) + 1;
+    expect(sent).toHaveLength(chunkCount);
+    expect(sent.every((entry) => entry.lane === 'control')).toBe(true);
+    expect(sent.map((entry) => entry.chunk)).toEqual(
+      Array.from({ length: chunkCount }, (_, index) => index),
+    );
+    expect(session.bufferSyncState?.pendingRangeResponses).toHaveLength(0);
+
+    // A subsequent range response starts on the now-open bulk lane.
+    const beforeSecond = sent.length;
+    publisher.enqueueRangeBufferSyncResponse(session, mirror, { ...request, requestedAt: 102 });
+    for (
+      let attempt = 0;
+      attempt < 100 && (session.bufferSyncState?.pendingRangeResponses?.length ?? 0) > 0;
+      attempt += 1
+    ) {
+      publisher.flushPendingBufferSyncToSubscribers(mirror);
+    }
+    expect(sent.slice(beforeSecond).every((entry) => entry.lane === 'bulk')).toBe(true);
+    expect(session.bufferSyncState?.pendingRangeResponses).toHaveLength(0);
+  });
+
+  it('range buffer-sync response started on bulk resets to chunk 0 on control when bulk closes mid-response', () => {
+    let bulkOpen = true;
+    const transport = makeTransport({
+      isLaneOpen: (lane) => lane === 'control' || bulkOpen,
+    });
+    const session = makeSession('s1', transport);
+    session.bodySubscribed = false;
+    const sent: Array<{ lane: TerminalTransportLane; chunk: number }> = [];
+    const largeLines = Array.from({ length: 20_000 }, (_, index) => ({ i: index }));
+    const deps = makeDeps({
+      sessions: new Map([['s1', session]]),
+      buildRequestedRangeBufferPayload: (mirror, request) => ({
+        revision: mirror.revision,
+        startIndex: request.requestStartIndex,
+        endIndex: request.requestEndIndex,
+        availableStartIndex: mirror.bufferStartIndex,
+        availableEndIndex: mirror.bufferStartIndex + mirror.bufferLines.length,
+        cols: mirror.cols,
+        rows: mirror.rows,
+        cursorKeysApp: mirror.cursorKeysApp,
+        cursor: mirror.cursor,
+        requestSentAt: request.requestedAt,
+        lines: largeLines,
+      }) as never,
+      sendText: (_transport, text, lane) => {
+        const payload = JSON.parse(text).payload as {
+          frameChunkIndex: number;
+          frameChunkCount: number;
+        };
+        sent.push({ lane: lane ?? 'control', chunk: payload.frameChunkIndex });
+        if (payload.frameChunkIndex === 0 && lane === 'bulk') {
+          bulkOpen = false;
+        }
+      },
+    });
+    const publisher = createDaemonBufferPublisherRuntime(deps);
+    const mirror = makeMirror(['s1'], 9);
+    const request = {
+      knownRevision: 8,
+      localStartIndex: 0,
+      localEndIndex: 0,
+      requestStartIndex: 0,
+      requestEndIndex: 20_000,
+      requestedAt: 101,
+      targetHeadRevision: 9,
+    } satisfies BufferSyncRequestPayload;
+
+    expect(publisher.enqueueRangeBufferSyncResponse(session, mirror, request)).toBe('queued');
+
+    // Chunk 0 left on bulk; bulk closed before chunk 1 so the response resets.
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.lane).toBe('bulk');
+    expect(session.bufferSyncState?.pendingRangeResponses?.[0]?.nextChunkIndex).toBe(0);
+    expect(session.bufferSyncState?.pendingRangeResponses?.[0]?.effectiveLane).toBe('control');
+
+    transport.bufferedAmount = 0;
+    for (
+      let attempt = 0;
+      attempt < 100 && (session.bufferSyncState?.pendingRangeResponses?.length ?? 0) > 0;
+      attempt += 1
+    ) {
+      publisher.flushPendingBufferSyncToSubscribers(mirror);
+    }
+
+    expect(sent.length).toBeGreaterThan(1);
+    const controlStart = sent.findIndex((entry) => entry.lane === 'control');
+    expect(controlStart).toBeGreaterThanOrEqual(1);
+    expect(sent.slice(controlStart).every((entry) => entry.lane === 'control')).toBe(true);
+    expect(sent.slice(controlStart).map((entry) => entry.chunk)).toEqual(
+      Array.from({ length: sent.length - controlStart }, (_, index) => index),
+    );
+    expect(session.bufferSyncState?.pendingRangeResponses).toHaveLength(0);
   });
 });
 

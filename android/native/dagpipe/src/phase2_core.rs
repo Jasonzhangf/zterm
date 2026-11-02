@@ -76,6 +76,7 @@ fn make_registry() -> Registry {
     // daemon.connection_channel_catalog
     register!(DaemonAcceptConnection);
     register!(DaemonNegotiateMux);
+    register!(DaemonBindBulkChannel);
     register!(DaemonRegisterChannel);
     register!(DaemonBindBodySubscription);
     register!(DaemonBuildSessionCatalog);
@@ -451,6 +452,37 @@ impl Operator for DaemonNegotiateMux {
             "muxSessionId": format!("mux-{}", get_str(&accepted, "connectionId")),
             "channels": channels,
             "state": "mux-ready",
+        }))
+    }
+}
+
+struct DaemonBindBulkChannel;
+
+impl Operator for DaemonBindBulkChannel {
+    fn name(&self) -> &'static str {
+        "daemon.connection_gateway.bind_bulk_channel"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let mux = obj(inputs(input).first().cloned().unwrap_or_default());
+        let mux_session_id = get_str(&mux, "muxSessionId").to_string();
+        if mux_session_id.is_empty() {
+            return Err("bulk channel binding requires a negotiated mux session".into());
+        }
+        Ok(json!({
+            "muxSessionId": mux_session_id,
+            "channels": mux.get("channels").cloned().unwrap_or_else(|| json!([])),
+            "bulkLane": "zterm-bulk",
+            "bulkOpen": false,
+            "state": "bound",
         }))
     }
 }

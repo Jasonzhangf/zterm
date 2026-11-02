@@ -154,6 +154,159 @@ describe('rtc-bridge', () => {
     expect(echoed).toBe('hello-over-rtc');
   });
 
+  it('dispatches zterm and zterm-bulk sends to their own lane and keeps a bulk-only close physical-safe', { timeout: 20_000 }, async () => {
+    const httpServer = createServer();
+    const signalWss = new WebSocketServer({ noServer: true });
+    const physicalCloses: string[] = [];
+    let serverTransport: any = null;
+    const rtcBridge = createRtcBridgeServer({
+      onTransportOpen: (transport) => {
+        serverTransport = transport;
+        return {
+          onMessage: (_transportId, data) => {
+            const text = data.toString('utf8');
+            if (text.startsWith('control:')) {
+              transport.sendText(text.slice('control:'.length), 'control');
+              return;
+            }
+            transport.sendText(text, 'bulk');
+          },
+          onClose: (_transportId, reason) => {
+            physicalCloses.push(reason);
+          },
+        };
+      },
+    });
+
+    cleanupTasks.push(async () => {
+      rtcBridge.dispose();
+      await new Promise<void>((resolve) => signalWss.close(() => resolve()));
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()));
+    });
+
+    httpServer.on('upgrade', (request, socket, head) => {
+      if (new URL(request.url || '/', 'ws://127.0.0.1').pathname !== '/signal') {
+        socket.destroy();
+        return;
+      }
+      signalWss.handleUpgrade(request, socket, head, (ws) => {
+        rtcBridge.handleSignalConnection(ws, 'ws://127.0.0.1');
+      });
+    });
+
+    await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', () => resolve()));
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to resolve test server address');
+    }
+
+    const signalUrl = `ws://127.0.0.1:${address.port}/signal`;
+    const signal = new WebSocket(signalUrl);
+    const pc = new RTCPeerConnection({ iceServers: [] });
+    const control = pc.createDataChannel('zterm', { ordered: true });
+    const bulk = pc.createDataChannel('zterm-bulk', { ordered: true });
+
+    cleanupTasks.push(() => {
+      closeTestResource('control channel', () => control.close());
+      closeTestResource('bulk channel', () => bulk.close());
+      closeTestResource('peer connection', () => pc.close());
+      closeTestResource('signal socket', () => signal.close());
+    });
+
+    const received: string[] = [];
+    control.onmessage = (event) => { received.push(`control:${String(event.data)}`); };
+    bulk.onmessage = (event) => { received.push(`bulk:${String(event.data)}`); };
+
+    const waitFor = (predicate: () => boolean, timeoutMs: number, label: string) =>
+      new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`${label} timeout`)), timeoutMs);
+        cleanupTasks.push(() => clearTimeout(timer));
+        const poll = () => {
+          if (predicate()) {
+            clearTimeout(timer);
+            resolve();
+            return;
+          }
+          setTimeout(poll, 20);
+        };
+        poll();
+      });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('rtc bridge lanes timeout')), 15000);
+      cleanupTasks.push(() => clearTimeout(timer));
+      pc.onicecandidate = (event) => {
+        if (!event.candidate || signal.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        signal.send(JSON.stringify({ type: 'rtc-candidate', payload: event.candidate.toJSON() }));
+      };
+      signal.onopen = async () => {
+        signal.send(JSON.stringify({ type: 'rtc-init', payload: { iceServers: [] } }));
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        signal.send(JSON.stringify({ type: 'rtc-offer', payload: { type: offer.type, sdp: offer.sdp } }));
+      };
+      signal.onmessage = async (event) => {
+        const msg = JSON.parse(String(event.data)) as { type: string; payload?: Record<string, unknown> };
+        if (msg.type === 'rtc-answer') {
+          await pc.setRemoteDescription(new RTCSessionDescription({
+            type: 'answer',
+            sdp: typeof msg.payload?.sdp === 'string' ? msg.payload.sdp : '',
+          }));
+          return;
+        }
+        if (msg.type === 'rtc-candidate') {
+          await pc.addIceCandidate(new RTCIceCandidate(msg.payload as RTCIceCandidateInit));
+        }
+      };
+      let controlOpen = false;
+      let bulkOpen = false;
+      const maybeResolve = () => {
+        if (controlOpen && bulkOpen) {
+          clearTimeout(timer);
+          resolve();
+        }
+      };
+      control.onopen = () => { controlOpen = true; maybeResolve(); };
+      bulk.onopen = () => { bulkOpen = true; maybeResolve(); };
+    });
+
+    // Give the daemon a beat to attach the in-band zterm-bulk channel, then a
+    // bulk send must land on zterm-bulk and a control send on zterm.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    control.send('bulk-hello');
+    await waitFor(() => received.includes('bulk:bulk-hello'), 5000, 'bulk lane echo');
+    control.send('control:control-hello');
+    await waitFor(() => received.includes('control:control-hello'), 5000, 'control lane echo');
+    expect(received).not.toContain('control:bulk-hello');
+    expect(received).not.toContain('bulk:control-hello');
+
+    // The service-side transport must project each lane independently. The
+    // real wrtc channel is used as a carrier here; only its bufferedAmount
+    // property is replaced with deterministic values for the assertion.
+    const serverControl = serverTransport?.controlChannel;
+    const serverBulk = serverTransport?.bulkChannel;
+    expect(serverControl).toBeTruthy();
+    expect(serverBulk).toBeTruthy();
+    Object.defineProperty(serverControl, 'bufferedAmount', {
+      configurable: true,
+      value: 0,
+    });
+    Object.defineProperty(serverBulk, 'bufferedAmount', {
+      configurable: true,
+      value: 140_000,
+    });
+    expect(serverTransport.bufferedAmountForLane('control')).toBe(0);
+    expect(serverTransport.bufferedAmountForLane('bulk')).toBe(140_000);
+    expect(serverTransport.bufferedAmount).toBe(140_000);
+
+    // Closing only the bulk channel must never surface as a physical close.
+    bulk.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(physicalCloses).toHaveLength(0);
+  });
+
   it('buffers early relay candidates until the rtc offer arrives so candidate reordering does not break the peer', { timeout: 15_000 }, async () => {
     const httpServer = createServer();
     const signalWss = new WebSocketServer({ noServer: true });

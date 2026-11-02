@@ -23,6 +23,7 @@ import okhttp3.ResponseBody;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -60,6 +61,60 @@ public final class AndroidRtcTransportBackendTest {
         public void setRemoteDescription(SdpObserver observer, SessionDescription description) {
             lastRemoteSet = description;
             remoteDescription = description;
+        }
+
+        @Override
+        public void close() {
+        }
+
+        @Override
+        public void dispose() {
+        }
+    }
+
+    private static final class FakeDataChannel extends DataChannel {
+        private final long bufferedAmount;
+
+        FakeDataChannel(long bufferedAmount) {
+            super(0L);
+            this.bufferedAmount = Math.max(0L, bufferedAmount);
+        }
+
+        @Override
+        public long bufferedAmount() {
+            return bufferedAmount;
+        }
+
+        @Override
+        public State state() {
+            return State.OPEN;
+        }
+
+        @Override
+        public void registerObserver(Observer observer) {
+        }
+
+        @Override
+        public void unregisterObserver() {
+        }
+
+        @Override
+        public void close() {
+        }
+
+        @Override
+        public void dispose() {
+        }
+    }
+
+    private static final class ThrowingBulkPeerConnection extends PeerConnection {
+        ThrowingBulkPeerConnection() {
+            super(() -> 0L);
+        }
+
+        @Override
+        public DataChannel createDataChannel(String label, DataChannel.Init init) {
+            throw new RuntimeException("bulk create failed");
         }
 
         @Override
@@ -493,5 +548,132 @@ public final class AndroidRtcTransportBackendTest {
         assertTrue("RTC open must immediately publish a 0-byte flow observation",
             listener.flowReadings.contains(0L));
         backend.closeQuietly("test");
+    }
+
+    @Test
+    public void laneBufferedAmountFallsBackToControlWhenBulkChannelIsClosed() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, listener);
+        setField(backend, "bufferedBytes", 4096L);
+
+        // With no live bulk channel, both the control and bulk lane projections
+        // and the no-arg aggregate read the control truth (single-channel fallback).
+        assertEquals("no-arg aggregate must be the control projection",
+            4096L, backend.bufferedAmount());
+        assertEquals("control lane projection must be the control truth",
+            4096L, backend.bufferedAmount(AndroidRtcTransportBackend.LANE_CONTROL));
+        assertEquals("bulk lane must fall back to the control projection",
+            4096L, backend.bufferedAmount(AndroidRtcTransportBackend.LANE_BULK));
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void laneSendTextFallsBackToControlOverrideWhenBulkChannelIsClosed() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, listener);
+        backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
+        List<String> attempted = new ArrayList<>();
+        backend.setSendTextOverrideForTests(text -> {
+            attempted.add(text);
+            return true;
+        });
+
+        assertTrue("control lane send must reach the override",
+            backend.sendText("control-frame", AndroidRtcTransportBackend.LANE_CONTROL));
+        assertTrue("bulk lane send must fall back to the control override",
+            backend.sendText("bulk-frame", AndroidRtcTransportBackend.LANE_BULK));
+        assertEquals(List.of("control-frame", "bulk-frame"), attempted);
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void bulkLaneOpenFallsBackToControlWhenBulkChannelIsNotCreated() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, listener);
+        backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
+
+        assertTrue("bulk lane must report open via the control fallback",
+            backend.isOpen(AndroidRtcTransportBackend.LANE_BULK));
+        assertTrue("control lane must be open",
+            backend.isOpen(AndroidRtcTransportBackend.LANE_CONTROL));
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void laneBufferedAmountSeparatesControlAndBulk() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, listener);
+        setField(backend, "dataChannel", new FakeDataChannel(0L));
+        setField(backend, "bulkDataChannel", new FakeDataChannel(140_000L));
+        backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
+        setField(backend, "bulkDataChannelState", DataChannel.State.OPEN);
+
+        assertEquals(0L, backend.bufferedAmount(AndroidRtcTransportBackend.LANE_CONTROL));
+        assertEquals(140_000L, backend.bufferedAmount(AndroidRtcTransportBackend.LANE_BULK));
+        assertEquals(140_000L, backend.bufferedAmount());
+
+        setField(backend, "bulkDataChannelState", DataChannel.State.CLOSED);
+        assertEquals("bulk fallback must project the control lane",
+            0L, backend.bufferedAmount(AndroidRtcTransportBackend.LANE_BULK));
+        assertEquals(0L, backend.bufferedAmount());
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void bulkChannelCreationFailureStaysOnControlWithoutRtcError() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, listener);
+        setField(backend, "peerConnection", new ThrowingBulkPeerConnection());
+        backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
+
+        assertFalse(backend.createBulkChannel());
+        assertTrue("bulk creation failure must keep the physical RTC transport open",
+            backend.isOpen());
+        assertTrue("bulk creation failure must not publish a control-lane error",
+            listener.events.stream().noneMatch(event -> event.startsWith("error:")));
+        assertTrue("bulk lane must fall back to the open control lane",
+            backend.isOpen(AndroidRtcTransportBackend.LANE_BULK));
+        backend.closeQuietly("test");
+    }
+
+    @Test
+    public void unexpectedBulkBinaryFrameClosesOnlyBulkLaneWithoutRtcError() throws Exception {
+        RecordingListener listener = new RecordingListener();
+        AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+            null, null, "wss://relay.example/client", new JSONArray(), "all",
+            true, listener);
+        setField(backend, "bulkDataChannel", new FakeDataChannel(0L));
+        setField(backend, "bulkDataChannelState", DataChannel.State.OPEN);
+        backend.simulateDataChannelStateForTests(DataChannel.State.OPEN);
+
+        Field observerField = AndroidRtcTransportBackend.class
+            .getDeclaredField("bulkDataObserver");
+        observerField.setAccessible(true);
+        DataChannel.Observer observer = (DataChannel.Observer) observerField.get(backend);
+        observer.onMessage(new DataChannel.Buffer(
+            ByteBuffer.wrap(new byte[] { 1, 2, 3 }), true));
+
+        assertTrue(backend.isOpen(AndroidRtcTransportBackend.LANE_CONTROL));
+        assertTrue("bulk protocol violation must not publish rtc error",
+            listener.events.stream().noneMatch(event -> event.startsWith("error:")));
+        assertEquals("bulk lane must be detached after the protocol violation",
+            null, field(backend, "bulkDataChannel"));
+        backend.closeQuietly("test");
+    }
+
+    private static Object field(Object target, String name) throws Exception {
+        Field field = target.getClass().getDeclaredField(name);
+        field.setAccessible(true);
+        return field.get(target);
     }
 }

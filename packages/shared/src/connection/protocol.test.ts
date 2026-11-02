@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   TERMINAL_MUX_PROTOCOL_VERSION,
+  TERMINAL_MUX_BULK_CHANNEL_LABEL,
   buildTerminalMuxCapabilities,
   buildTerminalMuxChannelBinary,
   buildTerminalMuxChannelMessage,
@@ -12,6 +13,9 @@ import {
   buildTerminalMuxServerTargetMessage,
   buildTerminalMuxTargetMessage,
   buildTerminalMuxUnwrappedSessionMessageError,
+  classifyTerminalMuxMessageLane,
+  classifyTerminalMuxClientFrameLane,
+  classifyTerminalMuxServerFrameLane,
   classifyTerminalMuxClientMessage,
   isTerminalMuxDebugClientMessageType,
   isTerminalMuxClientFrame,
@@ -247,6 +251,66 @@ describe('terminal mux protocol contract', () => {
         idleTimeoutMs: 120000,
       },
     });
+  });
+
+  it('advertises the zterm-bulk lane and classifies client/server frames by lane', () => {
+    expect(TERMINAL_MUX_BULK_CHANNEL_LABEL).toBe('zterm-bulk');
+    expect(buildTerminalMuxCapabilities()).toMatchObject({
+      bulkChannel: { version: 1, label: 'zterm-bulk' },
+    });
+
+    // message-level classification: only high-volume payload types ride bulk.
+    expect(classifyTerminalMuxMessageLane({ type: 'buffer-sync' })).toBe('bulk');
+    expect(classifyTerminalMuxMessageLane({ type: 'file-download-chunk' })).toBe('bulk');
+    expect(classifyTerminalMuxMessageLane({ type: 'file-download-complete' })).toBe('bulk');
+    expect(classifyTerminalMuxMessageLane({ type: 'file-download-error' })).toBe('bulk');
+    expect(classifyTerminalMuxMessageLane({ type: 'file-upload-start' })).toBe('bulk');
+    expect(classifyTerminalMuxMessageLane({ type: 'file-upload-end' })).toBe('bulk');
+    expect(classifyTerminalMuxMessageLane({ type: 'attach-file-start' })).toBe('bulk');
+    expect(classifyTerminalMuxMessageLane({ type: 'paste-image-start' })).toBe('bulk');
+    expect(classifyTerminalMuxMessageLane({ type: 'file-download-request' })).toBe('control');
+    expect(classifyTerminalMuxMessageLane({ type: 'file-upload-progress' })).toBe('control');
+    expect(classifyTerminalMuxMessageLane({ type: 'input' })).toBe('control');
+    expect(classifyTerminalMuxMessageLane({ type: 'mux-pong' as never })).toBe('control');
+
+    // client frames: raw binary and bulk inner messages ride bulk; control stays control.
+    expect(classifyTerminalMuxClientFrameLane({ type: 'mux-channel-binary' })).toBe('bulk');
+    expect(classifyTerminalMuxClientFrameLane({
+      type: 'mux-channel-message',
+      payload: { message: { type: 'buffer-sync' } },
+    })).toBe('bulk');
+    expect(classifyTerminalMuxClientFrameLane({
+      type: 'mux-channel-message',
+      payload: { message: { type: 'file-upload-start' } },
+    })).toBe('bulk');
+    expect(classifyTerminalMuxClientFrameLane({
+      type: 'mux-channel-message',
+      payload: { message: { type: 'attach-file-start' } },
+    })).toBe('bulk');
+    expect(classifyTerminalMuxClientFrameLane({
+      type: 'mux-channel-message',
+      payload: { message: { type: 'input' } },
+    })).toBe('control');
+    expect(classifyTerminalMuxClientFrameLane({ type: 'mux-hello' })).toBe('control');
+
+    // server frames: bulk payload inner messages ride bulk on both envelopes.
+    expect(classifyTerminalMuxServerFrameLane({
+      type: 'mux-channel-message',
+      payload: { message: { type: 'buffer-sync' } },
+    })).toBe('bulk');
+    expect(classifyTerminalMuxServerFrameLane({
+      type: 'mux-target-message',
+      payload: { message: { type: 'file-download-chunk' } },
+    })).toBe('bulk');
+    expect(classifyTerminalMuxServerFrameLane({
+      type: 'mux-target-message',
+      payload: { message: { type: 'file-download-complete' } },
+    })).toBe('bulk');
+    expect(classifyTerminalMuxServerFrameLane({
+      type: 'mux-channel-message',
+      payload: { message: { type: 'input-ack' } },
+    })).toBe('control');
+    expect(classifyTerminalMuxServerFrameLane({ type: 'mux-ready' })).toBe('control');
   });
 
   it('classifies target, channel, and legacy messages without hidden fallback', () => {

@@ -49,6 +49,10 @@ import okio.ByteString;
  */
 public final class AndroidRtcTransportBackend extends WebSocketListener {
     private static final String TAG = "ZTermRtcBackend";
+    static final String CONTROL_CHANNEL_LABEL = "zterm";
+    static final String BULK_CHANNEL_LABEL = "zterm-bulk";
+    static final String LANE_CONTROL = "control";
+    static final String LANE_BULK = "bulk";
     static final long RTC_DIRECT_OPEN_STABILITY_MS = 0L;
     private static final Object FACTORY_LOCK = new Object();
     private static PeerConnectionFactory sharedPeerConnectionFactory;
@@ -122,6 +126,8 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
     private PeerConnection peerConnection;
     private DataChannel dataChannel;
     private volatile DataChannel.State dataChannelState = DataChannel.State.CONNECTING;
+    private DataChannel bulkDataChannel;
+    private volatile DataChannel.State bulkDataChannelState = DataChannel.State.CONNECTING;
     private volatile PeerConnection.IceConnectionState iceConnectionState =
         PeerConnection.IceConnectionState.NEW;
     private volatile boolean disposed;
@@ -232,18 +238,45 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         return !disposed && openPublished && dataChannelState == DataChannel.State.OPEN;
     }
 
+    /**
+     * Lane-aware open check. The bulk lane is usable when `zterm-bulk` is OPEN,
+     * or via the control `zterm` lane until the bulk channel exists or opens
+     * (single-channel fallback). A bulk-only failure never closes the physical
+     * transport: control owns recovery.
+     */
+    public boolean isOpen(String lane) {
+        if (disposed) {
+            return false;
+        }
+        if (LANE_BULK.equals(lane)) {
+            if (bulkDataChannel != null && bulkDataChannelState == DataChannel.State.OPEN) {
+                return true;
+            }
+            return openPublished && dataChannelState == DataChannel.State.OPEN;
+        }
+        return openPublished && dataChannelState == DataChannel.State.OPEN;
+    }
+
     public boolean sendText(String text) {
-        if (!isOpen()) {
+        return sendText(text, LANE_CONTROL);
+    }
+
+    public boolean sendText(String text, String lane) {
+        if (disposed) {
+            return false;
+        }
+        if (!isOpen(lane)) {
             return false;
         }
         java.util.function.Predicate<String> override = sendTextOverrideForTests;
         if (override != null) {
             return override.test(text);
         }
-        if (dataChannel == null) {
+        DataChannel channel = resolveSendChannel(lane);
+        if (channel == null) {
             return false;
         }
-        boolean sent = dataChannel.send(new DataChannel.Buffer(
+        boolean sent = channel.send(new DataChannel.Buffer(
             ByteBuffer.wrap(text.getBytes(StandardCharsets.UTF_8)), false));
         if (sent) {
             publishBufferedAmount();
@@ -251,16 +284,48 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         return sent;
     }
 
+    /** Bulk frames fall back to the control channel until `zterm-bulk` is OPEN. */
+    private DataChannel resolveSendChannel(String lane) {
+        if (LANE_BULK.equals(lane) && bulkDataChannel != null
+            && bulkDataChannelState == DataChannel.State.OPEN) {
+            return bulkDataChannel;
+        }
+        return dataChannel;
+    }
+
     /** Current sender-owned buffered bytes on the live DataChannel, or 0 when closed. */
     public long bufferedAmount() {
-        if (disposed || dataChannelState != DataChannel.State.OPEN) {
+        if (disposed) {
             return 0L;
         }
-        DataChannel channel = dataChannel;
-        if (channel == null) {
-            return Math.max(0L, bufferedBytes);
+        long total = controlBufferedAmount();
+        DataChannel bulk = bulkDataChannel;
+        if (bulk != null && bulkDataChannelState == DataChannel.State.OPEN) {
+            total += Math.max(0L, bulk.bufferedAmount());
         }
-        return Math.max(0L, channel.bufferedAmount());
+        return total;
+    }
+
+    /** Lane-aware buffered bytes; bulk reports the bulk lane when open, else the
+     * control lane (single-channel fallback). */
+    public long bufferedAmount(String lane) {
+        if (disposed) {
+            return 0L;
+        }
+        if (LANE_BULK.equals(lane)) {
+            if (bulkDataChannel != null && bulkDataChannelState == DataChannel.State.OPEN) {
+                return Math.max(0L, bulkDataChannel.bufferedAmount());
+            }
+        }
+        return controlBufferedAmount();
+    }
+
+    private long controlBufferedAmount() {
+        DataChannel control = dataChannel;
+        if (dataChannelState == DataChannel.State.OPEN && control != null) {
+            return Math.max(0L, control.bufferedAmount());
+        }
+        return Math.max(0L, bufferedBytes);
     }
 
     /** Test seam: deterministically control sendText() without native libjingle. */
@@ -278,9 +343,11 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         cancelDisconnectedFuture();
         stabilityScheduler.shutdownNow();
         DataChannel channel = dataChannel;
+        DataChannel bulk = bulkDataChannel;
         PeerConnection peer = peerConnection;
         WebSocket signal = signalSocket;
         dataChannel = null;
+        bulkDataChannel = null;
         peerConnection = null;
         signalSocket = null;
         if (channel != null) {
@@ -291,6 +358,15 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
                 // best-effort teardown
             }
             channel.dispose();
+        }
+        if (bulk != null) {
+            bulk.unregisterObserver();
+            try {
+                bulk.close();
+            } catch (RuntimeException ignored) {
+                // best-effort teardown
+            }
+            bulk.dispose();
         }
         bufferedBytes = 0L;
         if (peer != null) {
@@ -383,7 +459,7 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
 
             DataChannel.Init init = new DataChannel.Init();
             init.ordered = true;
-            dataChannel = peerConnection.createDataChannel("zterm", init);
+            dataChannel = peerConnection.createDataChannel(CONTROL_CHANNEL_LABEL, init);
             dataChannel.registerObserver(dataObserver);
 
             flushPendingOutboundSignals();
@@ -391,6 +467,40 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         } catch (RuntimeException error) {
             listener.onRtcError(error.getMessage() == null ? "rtc init error" : error.getMessage());
             closeQuietly("rtc init error");
+        }
+    }
+
+    /**
+     * Open the ordered-reliable `zterm-bulk` DataChannel in-band on the
+     * established PeerConnection (SCTP DCEP). Called once the daemon advertises
+     * the capability in `mux-ready`; no new offer/answer or signaling socket is
+     * required. Idempotent; returns false for unsupported/closed transports so
+     * the caller keeps every frame on the control `zterm` lane.
+     */
+    public synchronized boolean createBulkChannel() {
+        if (disposed || peerConnection == null || bulkDataChannel != null) {
+            return bulkDataChannel != null
+                && bulkDataChannelState == DataChannel.State.OPEN;
+        }
+        try {
+            DataChannel.Init init = new DataChannel.Init();
+            init.ordered = true;
+            bulkDataChannel = peerConnection.createDataChannel(BULK_CHANNEL_LABEL, init);
+            if (bulkDataChannel == null) {
+                return false;
+            }
+            bulkDataChannel.registerObserver(bulkDataObserver);
+            return true;
+        } catch (RuntimeException error) {
+            android.util.Log.w(TAG, "bulk channel init failed: "
+                + (error.getMessage() == null ? "rtc bulk channel init error" : error.getMessage()));
+            DataChannel failed = bulkDataChannel;
+            bulkDataChannel = null;
+            bulkDataChannelState = DataChannel.State.CONNECTING;
+            if (failed != null) {
+                failed.close();
+            }
+            return false;
         }
     }
 
@@ -769,6 +879,43 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
         }
     };
 
+    private final DataChannel.Observer bulkDataObserver = new DataChannel.Observer() {
+        @Override
+        public void onBufferedAmountChange(long l) {
+            publishBufferedAmount();
+        }
+
+        @Override
+        public void onStateChange() {
+            DataChannel channel = bulkDataChannel;
+            if (channel == null) {
+                return;
+            }
+            handleBulkDataChannelState(channel.state());
+        }
+
+        @Override
+        public void onMessage(DataChannel.Buffer buffer) {
+            ByteBuffer data = buffer.data;
+            byte[] bytes = new byte[data.remaining()];
+            data.get(bytes);
+            // Bulk lane carries text JSON mux frames (buffer-sync / file chunks).
+            // A raw binary frame is a protocol violation, but it must not tear
+            // down the physical transport: the control lane owns recovery.
+            if (buffer.binary) {
+                android.util.Log.w(TAG, "rtc bulk channel binary frame unexpected");
+                DataChannel failed = bulkDataChannel;
+                bulkDataChannel = null;
+                bulkDataChannelState = DataChannel.State.CONNECTING;
+                if (failed != null) {
+                    failed.close();
+                }
+                return;
+            }
+            listener.onRtcText(new String(bytes, StandardCharsets.UTF_8));
+        }
+    };
+
     /** Test seam: drive the data-channel state machine without native WebRTC. */
     void simulateDataChannelStateForTests(DataChannel.State state) {
         handleDataChannelState(state);
@@ -829,6 +976,20 @@ public final class AndroidRtcTransportBackend extends WebSocketListener {
             listener.onRtcClosed(1000, "rtc data channel closed");
             closeQuietly("rtc data channel closed");
         }
+    }
+
+    private void handleBulkDataChannelState(DataChannel.State state) {
+        bulkDataChannelState = state;
+        if (disposed) {
+            return;
+        }
+        // A bulk-only close/error falls back to the control `zterm` lane; it
+        // never tears down the physical transport or closes the peer connection.
+        if (state == DataChannel.State.CLOSED) {
+            bulkDataChannel = null;
+            bulkDataChannelState = DataChannel.State.CONNECTING;
+        }
+        publishBufferedAmount();
     }
 
     private void publishBufferedAmount() {

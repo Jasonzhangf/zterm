@@ -37,6 +37,7 @@ import {
   setSessionHandshakeTimeout as setSessionHandshakeTimeoutRuntime,
   startSocketHeartbeat as startSocketHeartbeatRuntime,
 } from './session-context-socket-runtime';
+import { classifyTerminalMuxClientFrameLane, type TerminalMuxClientFrame } from '@zterm/shared/protocol';
 import {
   cleanupControlTransportSocket as cleanupControlTransportSocketRuntime,
   createSessionContextTransportAccessors,
@@ -356,7 +357,24 @@ export function sendSocketPayloadInfraRuntime(options: {
   recordOptions?: RecordSessionTxOptions;
 }) {
   options.recordSessionTx(options.sessionId, options.data, options.recordOptions);
-  options.ws.send(options.data);
+  options.ws.send(options.data, resolveOutboundSocketLane(options.data));
+}
+
+function resolveOutboundSocketLane(data: string | ArrayBuffer): 'control' | 'bulk' {
+  if (typeof data !== 'string') {
+    return 'bulk';
+  }
+  try {
+    const frame = JSON.parse(data) as { type?: string; payload?: unknown };
+    if (!frame || typeof frame.type !== 'string') {
+      return 'control';
+    }
+    return classifyTerminalMuxClientFrameLane(
+      frame as Pick<TerminalMuxClientFrame, 'type'> & { payload?: unknown },
+    );
+  } catch {
+    return 'control';
+  }
 }
 
 function hasRelayRtcEndpointCandidate(host: Host) {

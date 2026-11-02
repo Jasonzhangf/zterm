@@ -331,7 +331,10 @@ describe('SessionConnection route identity', () => {
   });
 });
 
-function readyFrame(daemonHostId = 'daemon-1'): TerminalMuxServerFrame {
+function readyFrame(
+  daemonHostId = 'daemon-1',
+  options: { bulkChannel?: boolean } = {},
+): TerminalMuxServerFrame {
   return {
     type: 'mux-ready',
     payload: {
@@ -342,6 +345,9 @@ function readyFrame(daemonHostId = 'daemon-1'): TerminalMuxServerFrame {
         channelEnvelope: true,
         targetMessages: true,
         boundedBodyScheduler: true,
+        ...(options.bulkChannel
+          ? { bulkChannel: { version: 1, label: 'zterm-bulk' as const } }
+          : {}),
       },
     },
   };
@@ -397,6 +403,10 @@ class BoundInitialFixtureSocket implements SessionConnectionTraversalSocket {
 
   syncReadyOnAttempt = false;
 
+  readyFrameOverride: TerminalMuxServerFrame | null = null;
+
+  bulkEnables = 0;
+
   readonly sends: Array<{
     method: 'attempt' | 'ready';
     attemptId?: AttemptId;
@@ -449,7 +459,7 @@ class BoundInitialFixtureSocket implements SessionConnectionTraversalSocket {
       this.emit({
         type: 'message',
         attemptId: id,
-        data: JSON.stringify(readyFrame()),
+        data: JSON.stringify(this.readyFrameOverride ?? readyFrame()),
       });
     }
     return true;
@@ -489,6 +499,11 @@ class BoundInitialFixtureSocket implements SessionConnectionTraversalSocket {
       attemptId: this.confirmedAttemptId ?? undefined,
       data,
     });
+  }
+
+  enableBulkChannel() {
+    this.bulkEnables += 1;
+    return true;
   }
 
   close(code?: number, reason?: string) {
@@ -1211,6 +1226,33 @@ describe('SessionConnection bound-initial attempt handoff', () => {
     expect(connection.state).toBe('ready');
     expect(timers.pendingCount()).toBe(0);
     connection.close('test-complete');
+  });
+
+  it('opens the bulk lane only when the daemon advertises the capability', async () => {
+    const withBulkTimers = new ManualTimers();
+    const withBulkSocket = new BoundInitialFixtureSocket();
+    withBulkSocket.syncReadyOnAttempt = true;
+    withBulkSocket.readyFrameOverride = readyFrame('daemon-1', { bulkChannel: true });
+    const withBulk = createBoundInitialConnection(withBulkSocket, withBulkTimers);
+
+    withBulkSocket.begin(1);
+    await withBulk.connection.ready();
+
+    expect(withBulk.connection.state).toBe('ready');
+    expect(withBulkSocket.bulkEnables).toBe(1);
+    withBulk.connection.close('test-complete');
+
+    const withoutBulkTimers = new ManualTimers();
+    const withoutBulkSocket = new BoundInitialFixtureSocket();
+    withoutBulkSocket.syncReadyOnAttempt = true;
+    const withoutBulk = createBoundInitialConnection(withoutBulkSocket, withoutBulkTimers);
+
+    withoutBulkSocket.begin(1);
+    await withoutBulk.connection.ready();
+
+    expect(withoutBulk.connection.state).toBe('ready');
+    expect(withoutBulkSocket.bulkEnables).toBe(0);
+    withoutBulk.connection.close('test-complete');
   });
 
   it('hands an opened A over to B and ignores A ready, messages, and old timer', async () => {

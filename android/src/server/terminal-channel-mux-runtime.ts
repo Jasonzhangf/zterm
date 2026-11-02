@@ -1,5 +1,9 @@
 import { buildTerminalMuxServerChannelMessage } from '@zterm/shared/protocol';
 import type { BridgeServerMessage as ServerMessage } from '@zterm/shared/protocol';
+import {
+  isTerminalMuxBulkMessageType,
+  type TerminalTransportLane,
+} from '@zterm/shared/protocol';
 import type {
   TerminalSessionTransport,
   TerminalTransportConnection,
@@ -8,7 +12,11 @@ import type {
 
 export interface TerminalChannelMuxRuntimeDeps {
   sessions: Map<string, TerminalTransportSubscriber>;
-  sendText: (transport: TerminalSessionTransport | null | undefined, text: string) => void;
+  sendText: (
+    transport: TerminalSessionTransport | null | undefined,
+    text: string,
+    lane?: TerminalTransportLane,
+  ) => void;
   defaultSessionName: string;
 }
 
@@ -43,7 +51,17 @@ export function createTerminalChannelMuxRuntime(
       get bufferedAmount() {
         return Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
       },
-      sendText(text: string) {
+      bufferedAmountForLane(lane) {
+        return connection.transport.bufferedAmountForLane
+          ? connection.transport.bufferedAmountForLane(lane)
+          : Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
+      },
+      isLaneOpen(lane) {
+        return connection.transport.isLaneOpen
+          ? connection.transport.isLaneOpen(lane)
+          : lane === 'control' && connection.transport.readyState === 1;
+      },
+      sendText(text: string, lane: TerminalTransportLane = 'control') {
         let message: ServerMessage;
         try {
           message = JSON.parse(text) as ServerMessage;
@@ -61,18 +79,23 @@ export function createTerminalChannelMuxRuntime(
         deps.sendText(
           connection.transport,
           JSON.stringify(buildTerminalMuxServerChannelMessage(channelId, message)),
+          isTerminalMuxBulkMessageType(message.type) ? 'bulk' : lane,
         );
       },
       close(reason = 'server closed channel transport', code?: string) {
         connection.muxChannels?.delete(channelId);
-        deps.sendText(connection.transport, JSON.stringify({
-          type: 'mux-channel-closed',
-          payload: {
-            channelId,
-            reason,
-            ...(code ? { code } : {}),
-          },
-        }));
+        deps.sendText(
+          connection.transport,
+          JSON.stringify({
+            type: 'mux-channel-closed',
+            payload: {
+              channelId,
+              reason,
+              ...(code ? { code } : {}),
+            },
+          }),
+          'control',
+        );
       },
     };
   }
@@ -96,14 +119,18 @@ export function createTerminalChannelMuxRuntime(
       transport: createMuxChannelTransport(connection, normalizedChannelId),
       closeTransport: (reason: string, code?: string) => {
         connection.muxChannels?.delete(normalizedChannelId);
-        deps.sendText(connection.transport, JSON.stringify({
-          type: 'mux-channel-closed',
-          payload: {
-            channelId: normalizedChannelId,
-            reason,
-            ...(code ? { code } : {}),
-          },
-        }));
+        deps.sendText(
+          connection.transport,
+          JSON.stringify({
+            type: 'mux-channel-closed',
+            payload: {
+              channelId: normalizedChannelId,
+              reason,
+              ...(code ? { code } : {}),
+            },
+          }),
+          'control',
+        );
       },
       connectedSent: false,
       muxChannelId: normalizedChannelId,

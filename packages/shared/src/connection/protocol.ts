@@ -1266,6 +1266,7 @@ export interface TerminalSessionCatalog {
 }
 
 export const TERMINAL_MUX_PROTOCOL_VERSION = 1 as const;
+export const TERMINAL_MUX_BULK_CHANNEL_LABEL = 'zterm-bulk' as const;
 
 export type TerminalMuxErrorCode =
   | 'daemon_multiplex_upgrade_required'
@@ -1282,6 +1283,10 @@ export interface TerminalMuxCapabilities {
   channelEnvelope: true;
   targetMessages: true;
   boundedBodyScheduler: true;
+  bulkChannel?: {
+    version: 1;
+    label: typeof TERMINAL_MUX_BULK_CHANNEL_LABEL;
+  };
   reliableInput?: TerminalSessionCapabilitiesPayload['reliableInput'];
   relayPeerResume?: {
     version: 1;
@@ -1523,6 +1528,64 @@ export function classifyTerminalMuxClientMessage(message: Pick<BridgeClientMessa
   return 'channel' as const;
 }
 
+export const TERMINAL_MUX_BULK_MESSAGE_TYPES = [
+  'buffer-sync',
+  'file-download-chunk',
+  'file-download-complete',
+  'file-download-error',
+  'file-upload-chunk',
+  'file-upload-start',
+  'file-upload-end',
+  'attachment-asset-data',
+  'attach-file-start',
+  'paste-image-start',
+  'terminal-snapshot-result',
+] as const;
+
+export type TerminalMuxBulkMessageType = typeof TERMINAL_MUX_BULK_MESSAGE_TYPES[number];
+export type TerminalTransportLane = 'control' | 'bulk';
+
+const TERMINAL_MUX_BULK_MESSAGE_SET = new Set<string>(TERMINAL_MUX_BULK_MESSAGE_TYPES);
+
+/**
+ * Single lane classifier for the physical DataChannel split. High-volume
+ * payload frames ride `zterm-bulk`; every other frame (mux handshake, target
+ * control, channel lifecycle, reliable input, ACKs, requests, and file
+ * transfer control) stays on the control `zterm` lane.
+ */
+export function isTerminalMuxBulkMessageType(type: string): type is TerminalMuxBulkMessageType {
+  return TERMINAL_MUX_BULK_MESSAGE_SET.has(type);
+}
+
+export function classifyTerminalMuxMessageLane(
+  message: Pick<BridgeClientMessage | BridgeServerMessage, 'type'>,
+): TerminalTransportLane {
+  return isTerminalMuxBulkMessageType(message.type) ? 'bulk' : 'control';
+}
+
+export function classifyTerminalMuxClientFrameLane(
+  frame: Pick<TerminalMuxClientFrame, 'type'> & { payload?: unknown },
+): TerminalTransportLane {
+  if (frame.type === 'mux-channel-binary') {
+    return 'bulk';
+  }
+  if (frame.type === 'mux-channel-message') {
+    const inner = (frame.payload as { message?: { type?: string } } | undefined)?.message;
+    return inner && isTerminalMuxBulkMessageType(inner.type ?? '') ? 'bulk' : 'control';
+  }
+  return 'control';
+}
+
+export function classifyTerminalMuxServerFrameLane(
+  frame: Pick<TerminalMuxServerFrame, 'type'> & { payload?: unknown },
+): TerminalTransportLane {
+  if (frame.type === 'mux-channel-message' || frame.type === 'mux-target-message') {
+    const inner = (frame.payload as { message?: { type?: string } } | undefined)?.message;
+    return inner && isTerminalMuxBulkMessageType(inner.type ?? '') ? 'bulk' : 'control';
+  }
+  return 'control';
+}
+
 export function buildTerminalMuxCapabilities(
   options: Partial<Omit<TerminalMuxCapabilities, 'version' | 'channelEnvelope' | 'targetMessages' | 'boundedBodyScheduler'>> = {},
 ): TerminalMuxCapabilities {
@@ -1531,6 +1594,10 @@ export function buildTerminalMuxCapabilities(
     channelEnvelope: true,
     targetMessages: true,
     boundedBodyScheduler: true,
+    bulkChannel: {
+      version: 1,
+      label: TERMINAL_MUX_BULK_CHANNEL_LABEL,
+    },
     ...options,
   };
 }

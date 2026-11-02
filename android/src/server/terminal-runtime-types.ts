@@ -2,6 +2,7 @@ import type { WasmBridge } from '@jsonstudio/wtermmod-core';
 import type {
   AttachFileStartPayload,
   PasteImageStartPayload,
+  TerminalTransportLane,
 } from '@zterm/shared/protocol';
 import type {
   TerminalCell,
@@ -17,13 +18,15 @@ export interface TerminalSessionTransport {
   kind: 'ws' | 'rtc';
   readyState: number;
   bufferedAmount?: number;
+  bufferedAmountForLane?: (lane: TerminalTransportLane) => number;
+  isLaneOpen?: (lane: TerminalTransportLane) => boolean;
   flowUnknown?: boolean;
   lastSendAt?: number;
   lastSendBytes?: number;
   totalSendBytes?: number;
   lastSendError?: string | null;
   backpressureCount?: number;
-  sendText: (text: string) => void;
+  sendText: (text: string, lane?: TerminalTransportLane) => void;
   close: (reason?: string, code?: string) => void;
   ping?: () => void;
   requestOrigin?: string;
@@ -87,8 +90,16 @@ export interface TerminalSubscriberBufferSyncState {
     payload: TerminalBufferPayload;
     transportId: string;
     nextChunkIndex?: number;
+    effectiveLane?: TerminalTransportLane;
   }>;
-  pendingLiveChunkIndex?: number;
+  pendingLiveFrame?: {
+    messages: Array<{ text: string; payload: TerminalBufferPayload }>;
+    frozenRanges: TerminalAbsoluteRange[];
+    revision: number;
+    transportId: string;
+    nextChunkIndex: number;
+    effectiveLane?: TerminalTransportLane;
+  } | null;
 }
 
 export interface TerminalTransportSubscriber {
