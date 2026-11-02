@@ -26,6 +26,7 @@ import {
   buildTerminalMuxHello,
   buildTerminalMuxTargetMessage,
   isTerminalMuxServerFrame,
+  classifyTerminalMuxClientFrameLane,
   type TerminalBackendKind,
   type TerminalInputAckPayload,
   type TerminalMuxChannelClientMessage,
@@ -123,9 +124,11 @@ export interface SessionConnectionRouteContext {
 
 export interface SessionConnectionTraversalSocket extends InitialAttemptControl {
   onclose: ((event?: { code?: number; reason?: string }) => void) | null;
-  send(data: string | ArrayBuffer): void;
+  send(data: string | ArrayBuffer, lane?: 'control' | 'bulk'): void;
   close(code?: number, reason?: string): void;
   getDiagnostics(): TraversalDiagnostics;
+  enableBulkChannel?(): boolean;
+  bufferedAmountForLane?(lane: 'control' | 'bulk'): number;
 }
 
 export interface SessionConnectionTraversalOptions {
@@ -960,6 +963,16 @@ export class SessionConnection {
     this.clearHandshakeTimer();
     this.readyCommitted = true;
     this.setState('ready');
+    // Open the ordered-reliable `zterm-bulk` lane only when the daemon
+    // advertises the capability. Old daemons omit `bulkChannel`; every frame
+    // then keeps using `zterm` exactly as before.
+    if (frame.payload.capabilities.bulkChannel) {
+      try {
+        socket.enableBulkChannel?.();
+      } catch (error) {
+        console.warn('[SessionConnection] failed to enable zterm-bulk lane:', error);
+      }
+    }
     this.resolveReady();
     this.emit({
       type: 'ready',
@@ -1308,7 +1321,10 @@ export class SessionConnection {
       });
     }
     try {
-      this.socket.send(JSON.stringify(frame));
+      this.socket.send(
+        JSON.stringify(frame),
+        classifyTerminalMuxClientFrameLane(frame),
+      );
     } catch (error) {
       throw new SessionConnectionError('transport write failed', {
         stage: frame.type === 'mux-channel-message' || frame.type === 'mux-channel-binary'

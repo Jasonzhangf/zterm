@@ -189,13 +189,15 @@ export interface BridgeTransportSocket {
   readonly readyState: number;
   readonly transportOwnership?: 'client' | 'service';
   readonly bufferedAmount?: number;
+  readonly bufferedAmountForLane?: (lane: 'control' | 'bulk') => number;
   onopen: ((event?: Event) => void) | null;
   onmessage: ((event: BridgeSocketMessageLike) => void) | null;
   onerror: ((event?: Event) => void) | null;
   onclose: ((event?: BridgeSocketCloseLike) => void) | null;
-  send(data: string | ArrayBuffer): void;
+  send(data: string | ArrayBuffer, lane?: string): void;
   close(code?: number, reason?: string): void;
   confirmTransportReady?(): void;
+  enableBulkChannel?(): boolean;
   reportFailure(reason: string, options?: { authFailure?: boolean }): void;
   getDiagnostics(): TraversalDiagnostics;
 }

@@ -26,6 +26,37 @@ public final class AndroidConnectionServiceTransportTest {
     private static final java.util.function.BiConsumer<Runnable, Long> IMMEDIATE_SCHEDULER =
         (runnable, delayMillis) -> runnable.run();
 
+    private static final class FakeDataChannel extends org.webrtc.DataChannel {
+        private final long bufferedAmount;
+
+        FakeDataChannel(long bufferedAmount) {
+            super(0L);
+            this.bufferedAmount = Math.max(0L, bufferedAmount);
+        }
+
+        @Override
+        public long bufferedAmount() {
+            return bufferedAmount;
+        }
+
+        @Override
+        public State state() {
+            return State.OPEN;
+        }
+
+        @Override
+        public void unregisterObserver() {
+        }
+
+        @Override
+        public void close() {
+        }
+
+        @Override
+        public void dispose() {
+        }
+    }
+
     private static void useImmediateScheduler(AndroidConnectionService service) throws Exception {
         setField(service, "sendRetryScheduler", IMMEDIATE_SCHEDULER);
     }
@@ -3144,5 +3175,105 @@ public final class AndroidConnectionServiceTransportTest {
             "retireForNetworkChange", String.class);
         retire.setAccessible(true);
         retire.invoke(runtime, reason);
+    }
+
+    @Test
+    public void resolveClientFrameLaneClassifiesBulkPayloadsWithoutCrossingLane() throws Exception {
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(null));
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject().put("type", "mux-hello")));
+        assertEquals(AndroidRtcTransportBackend.LANE_BULK,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject().put("type", "mux-channel-binary")));
+        assertEquals(AndroidRtcTransportBackend.LANE_BULK,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject()
+                    .put("type", "mux-channel-message")
+                    .put("payload", new JSONObject()
+                        .put("message", new JSONObject().put("type", "buffer-sync")))));
+        for (String type : new String[] {
+            "file-download-complete",
+            "file-download-error",
+            "file-upload-start",
+            "file-upload-end",
+            "attach-file-start",
+            "paste-image-start"
+        }) {
+            assertEquals("boundary message must share the bulk transfer stream: " + type,
+                AndroidRtcTransportBackend.LANE_BULK,
+                AndroidConnectionService.resolveClientFrameLane(
+                    new JSONObject()
+                        .put("type", "mux-channel-message")
+                        .put("payload", new JSONObject()
+                            .put("message", new JSONObject().put("type", type)))));
+        }
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject()
+                    .put("type", "mux-channel-message")
+                    .put("payload", new JSONObject()
+                        .put("message", new JSONObject().put("type", "file-download-request")))));
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject()
+                    .put("type", "mux-channel-message")
+                    .put("payload", new JSONObject()
+                        .put("message", new JSONObject().put("type", "file-upload-progress")))));
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject()
+                    .put("type", "mux-channel-message")
+                    .put("payload", new JSONObject()
+                        .put("message", new JSONObject().put("type", "input")))));
+    }
+
+    @Test
+    public void controlLaneSendsWhileBulkIsCongested() throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            AndroidConnectionServiceTarget target = target("target-control-bypass");
+            Object runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine", readyStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+
+            AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+                null, null, "wss://relay.example/client", new JSONArray(), "all",
+                true, new AndroidRtcTransportBackend.Listener() {
+                    @Override public void onRtcOpen() { }
+                    @Override public void onRtcText(String text) { }
+                    @Override public void onRtcError(String message) { }
+                    @Override public void onRtcClosed(int code, String reason) { }
+                });
+            backend.simulateDataChannelStateForTests(org.webrtc.DataChannel.State.OPEN);
+            setField(backend, "dataChannel", new FakeDataChannel(0L));
+            setField(backend, "bulkDataChannel", new FakeDataChannel(140_000L));
+            setField(backend, "bulkDataChannelState", org.webrtc.DataChannel.State.OPEN);
+            setField(runtime, "rtcBackend", backend);
+            setField(runtime, "sendRetryPending", true);
+            setField(runtime, "retryPendingLane", AndroidRtcTransportBackend.LANE_BULK);
+            setField(runtime, "congestionDraining", true);
+
+            List<String> sent = new ArrayList<>();
+            backend.setSendTextOverrideForTests(text -> {
+                sent.add(text);
+                return true;
+            });
+
+            sendTargetMessage(runtime, "request-control-bypass");
+
+            assertEquals("control frame must not wait behind bulk congestion",
+                1, sent.size());
+            assertEquals(Boolean.FALSE, field(runtime, "sendRetryPending"));
+            assertEquals(Boolean.FALSE, field(runtime, "congestionDraining"));
+            backend.closeQuietly("test");
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
     }
 }

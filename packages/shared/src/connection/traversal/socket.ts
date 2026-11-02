@@ -162,7 +162,9 @@ function stripRtcDirectSdp(sdp: string) {
 type Backend = {
   readonly readyState: number;
   readonly bufferedAmount: number;
-  send(data: string | ArrayBuffer): void;
+  bufferedAmountForLane?(lane: 'control' | 'bulk'): number;
+  send(data: string | ArrayBuffer, lane?: 'control' | 'bulk'): void;
+  enableBulkChannel?(): boolean;
   close(code?: number, reason?: string): void;
   start(handlers: {
     onopen: () => void;
@@ -289,7 +291,7 @@ class WebSocketBackend implements Backend {
     };
   }
 
-  public send(data: string | ArrayBuffer) {
+  public send(data: string | ArrayBuffer, _lane?: 'control' | 'bulk') {
     this.socket.send(data);
   }
 
@@ -307,6 +309,8 @@ class WebRtcBackend implements Backend {
 
   private dataChannel: TraversalDataChannelLike | null = null;
 
+  private bulkDataChannel: TraversalDataChannelLike | null = null;
+
   private disconnectedTimer: TraversalTimerHandle | null = null;
 
   private openStabilityTimer: TraversalTimerHandle | null = null;
@@ -316,6 +320,12 @@ class WebRtcBackend implements Backend {
   private disposed = false;
 
   private channelFailureReported = false;
+
+  private bulkChannelEnabled = false;
+
+  private handlers: {
+    onmessage: (event: BridgeSocketMessageLike) => void;
+  } | null = null;
 
   private socketFailureReported = false;
 
@@ -345,6 +355,29 @@ class WebRtcBackend implements Backend {
   }
 
   public get bufferedAmount() {
+    return Math.max(0, Math.floor(this.dataChannel?.bufferedAmount || 0)) + this.bulkBufferedAmount();
+  }
+
+  /**
+   * Aggregate projection for backpressure and congestion admission. The total
+   * wire bytes waiting on the physical transport are both lanes combined.
+   */
+  private bulkBufferedAmount() {
+    if (this.bulkDataChannel?.readyState === 'open') {
+      return Math.max(0, Math.floor(this.bulkDataChannel.bufferedAmount || 0));
+    }
+    return 0;
+  }
+
+  /**
+   * Lane-aware buffered bytes. `bulk` reports the `zterm-bulk` lane when it is
+   * open; until then bulk frames ride `zterm`, so it falls back to the control
+   * channel buffered amount.
+   */
+  public bufferedAmountForLane(lane: 'control' | 'bulk') {
+    if (lane === 'bulk' && this.bulkDataChannel?.readyState === 'open') {
+      return Math.max(0, Math.floor(this.bulkDataChannel.bufferedAmount || 0));
+    }
     return Math.max(0, Math.floor(this.dataChannel?.bufferedAmount || 0));
   }
 
@@ -486,11 +519,14 @@ class WebRtcBackend implements Backend {
     this.clearOpenStabilityTimer();
     this.openPublished = false;
     this.pendingRemoteIceCandidates = [];
+    this.handlers = null;
 
     const channel = this.dataChannel;
+    const bulkChannel = this.bulkDataChannel;
     const peerConnection = this.peerConnection;
     const signalSocket = this.signalSocket;
     this.dataChannel = null;
+    this.bulkDataChannel = null;
     this.peerConnection = null;
     this.signalSocket = null;
 
@@ -503,6 +539,16 @@ class WebRtcBackend implements Backend {
         channel.close();
       } catch (error) {
         console.warn('[TraversalSocket] Failed to close RTC data channel:', error);
+      }
+    }
+    if (bulkChannel) {
+      bulkChannel.onmessage = null;
+      bulkChannel.onerror = null;
+      bulkChannel.onclose = null;
+      try {
+        bulkChannel.close();
+      } catch (error) {
+        console.warn('[TraversalSocket] Failed to close RTC bulk data channel:', error);
       }
     }
     if (peerConnection) {
@@ -598,6 +644,7 @@ class WebRtcBackend implements Backend {
   }) {
     const signalSocket = this.platform.createWebSocket(this.candidate.signalUrl);
     this.signalSocket = signalSocket;
+    this.handlers = { onmessage: handlers.onmessage };
     signalSocket.onopen = async () => {
       try {
         if (this.disposed || this.signalSocket !== signalSocket) {
@@ -848,15 +895,62 @@ class WebRtcBackend implements Backend {
     };
   }
 
-  public send(data: string | ArrayBuffer) {
-    if (!this.dataChannel) {
+  public send(data: string | ArrayBuffer, lane: 'control' | 'bulk' = 'control') {
+    if (lane === 'bulk' && this.bulkDataChannel?.readyState === 'open') {
+      this.bulkDataChannel.send(data);
       return;
     }
-    if (typeof data === 'string') {
-      this.dataChannel.send(data);
-      return;
+    this.dataChannel?.send(data);
+  }
+
+  /**
+   * Create the ordered-reliable `zterm-bulk` lane in-band on the established
+   * PeerConnection (SCTP DCEP). Idempotent. Returns true when the bulk lane is
+   * (or becomes) available; the control `zterm` lane keeps carrying every frame
+   * until `zterm-bulk` is OPEN.
+   */
+  public enableBulkChannel(): boolean {
+    if (this.bulkChannelEnabled) {
+      return this.bulkDataChannel?.readyState === 'open';
     }
-    this.dataChannel.send(data);
+    const peerConnection = this.peerConnection;
+    const handlers = this.handlers;
+    if (this.disposed || !peerConnection || !handlers) {
+      return false;
+    }
+    this.bulkChannelEnabled = true;
+    try {
+      const channel = peerConnection.createDataChannel('zterm-bulk', {
+        ordered: true,
+      });
+      this.bulkDataChannel = channel;
+      channel.binaryType = 'arraybuffer';
+      channel.onmessage = (event) => {
+        handlers.onmessage({ data: normalizeSocketMessageData(event.data) });
+      };
+      // A bulk-only failure must not tear down the physical transport: the
+      // control `zterm` lane owns recovery. Drop the bulk channel and fall back
+      // to `zterm` for every subsequent frame.
+      channel.onerror = () => {
+        if (this.bulkDataChannel === channel) {
+          this.bulkDataChannel = null;
+        }
+        try {
+          channel.close();
+        } catch (error) {
+          console.warn('[TraversalSocket] Failed to close errored RTC bulk data channel:', error);
+        }
+      };
+      channel.onclose = () => {
+        if (this.bulkDataChannel === channel) {
+          this.bulkDataChannel = null;
+        }
+      };
+    } catch (error) {
+      console.warn('[TraversalSocket] Failed to open zterm-bulk channel:', error);
+      return false;
+    }
+    return this.bulkDataChannel?.readyState === 'open';
   }
 
   public close(_code?: number, _reason = 'rtc close') {
@@ -1081,6 +1175,13 @@ export class TraversalSocket implements BridgeTransportSocket, InitialAttemptCon
 
   public get bufferedAmount() {
     return Math.max(0, Math.floor(this.backend?.bufferedAmount || 0));
+  }
+
+  public bufferedAmountForLane(lane: 'control' | 'bulk') {
+    if (this.backend?.bufferedAmountForLane) {
+      return Math.max(0, Math.floor(this.backend.bufferedAmountForLane(lane) || 0));
+    }
+    return this.bufferedAmount;
   }
 
   public getDiagnostics() {
@@ -2068,11 +2169,22 @@ export class TraversalSocket implements BridgeTransportSocket, InitialAttemptCon
     return this.initialAttemptControl?.fail(id, failure) || false;
   }
 
-  public send(data: string | ArrayBuffer) {
+  public send(data: string | ArrayBuffer, lane?: 'control' | 'bulk') {
     if (!this.backend || this.backend.readyState !== OPEN) {
       throw new Error('Traversal socket is not open');
     }
-    this.backend.send(data);
+    this.backend.send(data, lane);
+  }
+
+  /**
+   * Open the `zterm-bulk` lane once the daemon advertises the capability in
+   * `mux-ready`. No-op for non-RTC candidates and single-channel daemons.
+   */
+  public enableBulkChannel(): boolean {
+    if (!this.backend?.enableBulkChannel) {
+      return false;
+    }
+    return this.backend.enableBulkChannel();
   }
 
   /**

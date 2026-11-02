@@ -1,5 +1,6 @@
 import type {
   BridgeServerMessage as ServerMessage,
+  TerminalTransportLane,
 } from '@zterm/shared/protocol';
 import type {
   TerminalPerformanceTraceRecord,
@@ -48,6 +49,7 @@ export interface DaemonBufferPublisherDeps {
   sendText: (
     transport: TerminalSessionTransport | null | undefined,
     text: string,
+    lane?: TerminalTransportLane,
   ) => void;
   recordPerformanceTrace?: (record: TerminalPerformanceTraceRecord) => void;
   buildBufferHeadPayload: (
@@ -211,7 +213,7 @@ export function createDaemonBufferPublisherRuntime(
       state.pendingSince = now;
     }
     state.pendingTransportId = session.transportId;
-    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
+    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport, 'bulk');
     if (snapshot?.backpressure) {
       state.highWaterActive = true;
       if (!state.highWaterEnteredAt) {
@@ -244,8 +246,12 @@ export function createDaemonBufferPublisherRuntime(
     return state;
   }
 
-  function shouldHoldPendingForBackpressure(state: TerminalSubscriberBufferSyncState, session: TerminalSession) {
-    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
+  function shouldHoldPendingForBackpressure(
+    state: TerminalSubscriberBufferSyncState,
+    session: TerminalSession,
+    lane: 'control' | 'bulk' = 'bulk',
+  ) {
+    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport, lane);
     if (!snapshot?.ready) {
       return true;
     }
@@ -269,8 +275,51 @@ export function createDaemonBufferPublisherRuntime(
     return false;
   }
 
-  function clearSubscriberPendingBufferSync(state: TerminalSubscriberBufferSyncState, sentRevision: number) {
+  function isTransportLaneOpen(
+    transport: TerminalSessionTransport | null | undefined,
+    lane: 'control' | 'bulk',
+  ) {
+    if (!transport || transport.readyState !== 1) {
+      return false;
+    }
+    return transport.isLaneOpen
+      ? transport.isLaneOpen(lane)
+      : lane === 'control';
+  }
+
+  function pinFrameLane(
+    transport: TerminalSessionTransport,
+    current?: 'control' | 'bulk',
+  ): 'control' | 'bulk' {
+    return current ?? (isTransportLaneOpen(transport, 'bulk') ? 'bulk' : 'control');
+  }
+
+  function discardPendingLiveFrame(state: TerminalSubscriberBufferSyncState) {
+    const frame = state.pendingLiveFrame;
+    if (!frame) {
+      return;
+    }
+    // The frozen frame never crossed the transport. Re-stage its ranges so the
+    // new transport (or resync path) rebuilds one authoritative frame from
+    // chunk 0 instead of resuming a half frame.
+    state.pendingChangedAbsoluteRanges = mergeAbsoluteRanges([
+      ...state.pendingChangedAbsoluteRanges,
+      ...frame.frozenRanges,
+    ]);
+    state.pendingLiveFrame = null;
+  }
+
+  function completePendingLiveFrame(state: TerminalSubscriberBufferSyncState, sentRevision: number) {
     state.lastSentRevision = sentRevision;
+    state.pendingLiveFrame = null;
+    // `pendingChangedAbsoluteRanges` holds only ranges queued after the frame
+    // was frozen, so it is already the staged remainder.
+    if (state.pendingChangedAbsoluteRanges.length === 0) {
+      clearStagedPendingBufferSync(state);
+    }
+  }
+
+  function clearStagedPendingBufferSync(state: TerminalSubscriberBufferSyncState) {
     state.pendingLatestRevision = null;
     state.pendingChangedAbsoluteRanges = [];
     state.pendingSince = 0;
@@ -279,7 +328,7 @@ export function createDaemonBufferPublisherRuntime(
     state.highWaterEnteredAt = 0;
     state.resyncRequired = false;
     state.resyncReason = null;
-    state.pendingLiveChunkIndex = 0;
+    state.pendingLiveFrame = null;
   }
 
   function enqueueRangeBufferSyncResponse(
@@ -327,7 +376,15 @@ export function createDaemonBufferPublisherRuntime(
     if (!session.transport || session.transport.readyState !== 1) {
       return { status: 'transport-not-open', sentChunks: 0 };
     }
-    if (shouldHoldPendingForBackpressure(state, session)) {
+    const effectiveLane = pinFrameLane(session.transport, item.effectiveLane);
+    item.effectiveLane = effectiveLane;
+    // A bulk-started frame whose bulk lane closed before its final chunk must
+    // restart from chunk 0 on control instead of splitting across lanes.
+    if (effectiveLane === 'bulk' && !isTransportLaneOpen(session.transport, 'bulk')) {
+      item.nextChunkIndex = 0;
+      item.effectiveLane = 'control';
+    }
+    if (shouldHoldPendingForBackpressure(state, session, effectiveLane)) {
       return { status: 'backpressured', sentChunks: 0 };
     }
     let sentChunks = 0;
@@ -337,15 +394,20 @@ export function createDaemonBufferPublisherRuntime(
       const start = Math.max(0, item.nextChunkIndex || 0);
       const end = Math.min(messages.length, start + Math.max(1, Math.floor(maxChunks)));
       for (let index = start; index < end; index += 1) {
+        if (effectiveLane === 'bulk' && !isTransportLaneOpen(session.transport, 'bulk')) {
+          item.nextChunkIndex = 0;
+          item.effectiveLane = 'control';
+          return { status: 'sent', sentChunks };
+        }
         // Re-check admission before every chunk: a mid-frame queue rise must
         // pause this response and resume from the same nextChunkIndex so the
         // subscriber never sees a half-applied different revision.
-        if (shouldHoldPendingForBackpressure(state, session)) {
+        if (shouldHoldPendingForBackpressure(state, session, effectiveLane)) {
           return sentChunks > 0
             ? { status: 'sent', sentChunks }
             : { status: 'backpressured', sentChunks: 0 };
         }
-        deps.sendText(session.transport, messages[index]!.text);
+        deps.sendText(session.transport, messages[index]!.text, effectiveLane);
         item.nextChunkIndex = index + 1;
         sentChunks += 1;
       }
@@ -411,52 +473,89 @@ export function createDaemonBufferPublisherRuntime(
       return flushRangeBufferSyncResponse(mirror, session, maxChunks);
     }
     const state = ensureSubscriberBufferSyncState(session);
-    if (state.pendingLatestRevision === null || state.pendingChangedAbsoluteRanges.length === 0) {
+    if (!state.pendingLiveFrame
+        && (state.pendingLatestRevision === null || state.pendingChangedAbsoluteRanges.length === 0)) {
       return flushRangeBufferSyncResponse(mirror, session, maxChunks);
     }
     if (state.pendingTransportId && state.pendingTransportId !== session.transportId) {
       markSubscriberBufferSyncResyncRequired(state, 'transport-generation', false);
+      discardPendingLiveFrame(state);
       return { status: 'stale-transport', sentChunks: 0 };
     }
     validateSubscriberPendingBounds(state);
     if (!session.transport || session.transport.readyState !== 1) {
       return { status: 'transport-not-open', sentChunks: 0 };
     }
-    if (shouldHoldPendingForBackpressure(state, session)) {
+    const intendedLane = state.pendingLiveFrame?.effectiveLane ?? pinFrameLane(session.transport);
+    if (shouldHoldPendingForBackpressure(state, session, intendedLane)) {
       return { status: 'backpressured', sentChunks: 0 };
     }
-    const payload = deps.buildChangedRangesBufferSyncPayload(
-      mirror,
-      state.pendingChangedAbsoluteRanges,
-    );
-    if (!payload) {
-      clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
-      return { status: 'no-pending', sentChunks: 0 };
+
+    // Phase 1 freeze: if a live frame is already partially sent, keep that
+    // exact authoritative frame frozen and resume from its next chunk. Newer
+    // mirror ranges/revisions stage behind it until its final chunk is sent.
+    let frame = state.pendingLiveFrame;
+    if (!frame) {
+      const payload = deps.buildChangedRangesBufferSyncPayload(
+        mirror,
+        state.pendingChangedAbsoluteRanges,
+      );
+      if (!payload) {
+        completePendingLiveFrame(
+          state,
+          Math.max(state.lastSentRevision, state.pendingLatestRevision ?? state.lastSentRevision),
+        );
+        return { status: 'no-pending', sentChunks: 0 };
+      }
+      const messages = splitBufferSyncPayloadMessages(payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
+      frame = {
+        messages,
+        frozenRanges: [...state.pendingChangedAbsoluteRanges],
+        revision: payload.revision,
+        transportId: session.transportId,
+        nextChunkIndex: 0,
+        effectiveLane: intendedLane,
+      };
+      state.pendingLiveFrame = frame;
+      state.pendingChangedAbsoluteRanges = [];
     }
-    const messages = splitBufferSyncPayloadMessages(payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
-    const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
+    if (frame.transportId !== session.transportId) {
+      discardPendingLiveFrame(state);
+      return { status: 'stale-transport', sentChunks: 0 };
+    }
+    // A bulk-started frame whose bulk lane closed before its final chunk must
+    // restart from chunk 0 on control instead of splitting across lanes.
+    if (frame.effectiveLane === 'bulk' && !isTransportLaneOpen(session.transport, 'bulk')) {
+      discardPendingLiveFrame(state);
+      return { status: 'sent', sentChunks: 0 };
+    }
+
+    const traceId = `${session.id}:${Math.max(0, Math.floor(frame.revision || 0))}`;
     const traceBase = {
       sessionId: session.id,
       traceId,
-      mirrorRevision: Math.max(0, Math.floor(payload.revision || 0)),
+      mirrorRevision: Math.max(0, Math.floor(frame.revision || 0)),
       subscriberId: session.id,
       transportKind: session.transport.kind,
     };
-    const start = Math.max(0, state.pendingLiveChunkIndex || 0);
-    const end = Math.min(messages.length, start + Math.max(1, Math.floor(maxChunks)));
+    const start = Math.max(0, frame.nextChunkIndex || 0);
+    const end = Math.min(frame.messages.length, start + Math.max(1, Math.floor(maxChunks)));
     let sentChunks = 0;
     try {
       deps.ensureSessionReady(session, mirror);
       for (let index = start; index < end; index += 1) {
-        // Per-chunk admission: pause and keep the same frame identity when the
-        // shared physical transport is at the high-water mark. Resuming from
-        // pendingLiveChunkIndex preserves the single authoritative frame.
-        if (shouldHoldPendingForBackpressure(state, session)) {
+        if (frame.effectiveLane === 'bulk'
+            && !isTransportLaneOpen(session.transport, 'bulk')) {
+          discardPendingLiveFrame(state);
+          return { status: 'sent', sentChunks };
+        }
+        if (shouldHoldPendingForBackpressure(state, session, frame.effectiveLane ?? 'control')) {
+          frame.nextChunkIndex = index;
           return sentChunks > 0
             ? { status: 'sent', sentChunks }
             : { status: 'backpressured', sentChunks: 0 };
         }
-        const message = messages[index]!;
+        const message = frame.messages[index]!;
         deps.recordPerformanceTrace?.({
           ...traceBase,
           stage: 'send-start',
@@ -464,8 +563,8 @@ export function createDaemonBufferPublisherRuntime(
           bytes: Buffer.byteLength(message.text, 'utf8'),
           lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
         });
-        deps.sendText(session.transport, message.text);
-        state.pendingLiveChunkIndex = index + 1;
+        deps.sendText(session.transport, message.text, frame.effectiveLane ?? 'control');
+        frame.nextChunkIndex = index + 1;
         sentChunks += 1;
         deps.recordPerformanceTrace?.({
           ...traceBase,
@@ -478,10 +577,12 @@ export function createDaemonBufferPublisherRuntime(
     } catch {
       return { status: 'send-error', sentChunks };
     }
-    if (end < messages.length) {
+    if (end < frame.messages.length) {
       return { status: 'sent', sentChunks };
     }
-    clearSubscriberPendingBufferSync(state, payload.revision);
+    // Frozen frame fully sent. Clear only its staged ranges; any newer ranges
+    // queued behind it remain pending and become the next authoritative frame.
+    completePendingLiveFrame(state, frame.revision);
     const remainingChunks = Math.max(0, Math.floor(maxChunks) - sentChunks);
     if (remainingChunks === 0) {
       return { status: 'sent', sentChunks };

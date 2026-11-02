@@ -1,5 +1,9 @@
 import { WebSocket, type RawData } from 'ws';
 import wrtc from '@roamhq/wrtc';
+import {
+  TERMINAL_MUX_BULK_CHANNEL_LABEL,
+  type TerminalTransportLane,
+} from '@zterm/shared/protocol';
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as unknown as {
   RTCPeerConnection: typeof globalThis.RTCPeerConnection;
@@ -22,7 +26,9 @@ export interface RtcServerTransport {
   requestOrigin: string;
   readyState: number;
   bufferedAmount?: number;
-  sendText(text: string): void;
+  bufferedAmountForLane?(lane: TerminalTransportLane): number;
+  isLaneOpen?(lane: TerminalTransportLane): boolean;
+  sendText(text: string, lane?: TerminalTransportLane): void;
   close(reason?: string): void;
 }
 
@@ -93,11 +99,15 @@ export function buildRtcPeerConnectionConfig(payload?: Record<string, unknown>):
 class RtcPeerTransport implements RtcServerTransport {
   public id: string;
 
-  private channel: RTCDataChannel | null = null;
+  private controlChannel: RTCDataChannel | null = null;
+
+  private bulkChannel: RTCDataChannel | null = null;
 
   private peerConnection: RTCPeerConnection | null = null;
 
   private handlers: TransportHandlers | null = null;
+
+  private readonly attachedChannels = new WeakSet<RTCDataChannel>();
 
   private closed = false;
 
@@ -111,20 +121,37 @@ class RtcPeerTransport implements RtcServerTransport {
   }
 
   public get readyState() {
-    if (this.channel?.readyState === 'open') {
+    if (this.controlChannel?.readyState === 'open') {
       return OPEN;
     }
-    if (this.channel?.readyState === 'closing') {
+    if (this.controlChannel?.readyState === 'closing') {
       return CLOSING;
     }
-    if (this.channel?.readyState === 'closed') {
+    if (this.controlChannel?.readyState === 'closed') {
       return CLOSED;
     }
     return CONNECTING;
   }
 
   public get bufferedAmount() {
-    return Math.max(0, Math.floor(this.channel?.bufferedAmount || 0));
+    let total = Math.max(0, Math.floor(this.controlChannel?.bufferedAmount || 0));
+    if (this.bulkChannel?.readyState === 'open') {
+      total += Math.max(0, Math.floor(this.bulkChannel.bufferedAmount || 0));
+    }
+    return total;
+  }
+
+  public bufferedAmountForLane(lane: TerminalTransportLane) {
+    if (lane === 'bulk' && this.bulkChannel?.readyState === 'open') {
+      return Math.max(0, Math.floor(this.bulkChannel.bufferedAmount || 0));
+    }
+    return Math.max(0, Math.floor(this.controlChannel?.bufferedAmount || 0));
+  }
+
+  public isLaneOpen(lane: TerminalTransportLane) {
+    return lane === 'bulk'
+      ? this.bulkChannel?.readyState === 'open'
+      : this.controlChannel?.readyState === 'open';
   }
 
   public adopt(peerConnection: RTCPeerConnection, releaseGeneration: () => void) {
@@ -134,12 +161,39 @@ class RtcPeerTransport implements RtcServerTransport {
   }
 
   public prepareChannel(channel: RTCDataChannel) {
-    this.channel = channel;
+    if (channel.label === TERMINAL_MUX_BULK_CHANNEL_LABEL) {
+      this.bulkChannel = channel;
+    } else {
+      this.controlChannel = channel;
+    }
   }
 
   public attach(peerConnection: RTCPeerConnection, channel: RTCDataChannel, handlers: TransportHandlers) {
-    if (this.closed || this.peerConnection !== peerConnection || this.channel !== channel) return;
+    if (this.closed || this.peerConnection !== peerConnection || this.controlChannel !== channel) return;
     this.handlers = handlers;
+    this.attachLaneChannel(channel, handlers);
+    if (this.bulkChannel) {
+      this.attachLaneChannel(this.bulkChannel, handlers);
+    }
+  }
+
+  /**
+   * Attach the optional bulk lane to the already-created control handlers.
+   * A bulk-only failure must never call onClose: physical recovery stays with
+   * the control lane.
+   */
+  public attachBulk(peerConnection: RTCPeerConnection, channel: RTCDataChannel) {
+    if (this.closed || this.peerConnection !== peerConnection || this.bulkChannel !== channel || !this.handlers) {
+      return;
+    }
+    this.attachLaneChannel(channel, this.handlers);
+  }
+
+  private attachLaneChannel(channel: RTCDataChannel, handlers: TransportHandlers) {
+    if (this.attachedChannels.has(channel)) {
+      return;
+    }
+    this.attachedChannels.add(channel);
     channel.binaryType = 'arraybuffer';
     channel.onmessage = (event) => {
       const value = event.data;
@@ -158,15 +212,31 @@ class RtcPeerTransport implements RtcServerTransport {
       handlers.onMessage(this.id, Buffer.from(String(value)), false);
     };
     channel.onclose = () => {
-      handlers.onClose(this.id, 'rtc data channel closed');
+      if (channel === this.controlChannel) {
+        handlers.onClose(this.id, 'rtc data channel closed');
+        return;
+      }
+      if (channel === this.bulkChannel) {
+        this.bulkChannel = null;
+      }
     };
     channel.onerror = () => {
-      handlers.onError?.(this.id, 'rtc data channel error');
+      if (channel === this.controlChannel) {
+        handlers.onError?.(this.id, 'rtc data channel error');
+        return;
+      }
+      if (channel === this.bulkChannel) {
+        this.bulkChannel = null;
+      }
     };
   }
 
-  public sendText(text: string) {
-    this.channel?.send(text);
+  public sendText(text: string, lane: TerminalTransportLane = 'control') {
+    const bulkChannel = this.bulkChannel;
+    const target = lane === 'bulk' && bulkChannel?.readyState === 'open'
+      ? bulkChannel
+      : this.controlChannel;
+    target?.send(text);
   }
 
   public close(reason = 'rtc close') {
@@ -174,11 +244,14 @@ class RtcPeerTransport implements RtcServerTransport {
       return;
     }
     this.closed = true;
-    const channel = this.channel;
+    const channels = [this.controlChannel, this.bulkChannel].filter(
+      (channel): channel is RTCDataChannel => Boolean(channel),
+    );
     const peerConnection = this.peerConnection;
     const handlers = this.handlers;
     const releaseGeneration = this.releaseGeneration;
-    this.channel = null;
+    this.controlChannel = null;
+    this.bulkChannel = null;
     this.peerConnection = null;
     this.handlers = null;
     this.releaseGeneration = null;
@@ -187,17 +260,19 @@ class RtcPeerTransport implements RtcServerTransport {
       peerConnection.ondatachannel = null;
       peerConnection.oniceconnectionstatechange = null;
     }
-    if (channel) {
+    for (const channel of channels) {
       channel.onopen = null;
       channel.onmessage = null;
       channel.onclose = null;
       channel.onerror = null;
     }
     releaseGeneration?.();
-    try {
-      channel?.close();
-    } catch (error) {
-      console.warn('[rtc-bridge] Failed to close RTC data channel:', error);
+    for (const channel of channels) {
+      try {
+        channel.close();
+      } catch (error) {
+        console.warn('[rtc-bridge] Failed to close RTC data channel:', error);
+      }
     }
     try {
       peerConnection?.close();
@@ -341,6 +416,23 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
         return;
       }
       peer.transport.prepareChannel(channel);
+      if (channel.label === TERMINAL_MUX_BULK_CHANNEL_LABEL) {
+        // The bulk lane is negotiated in-band after mux-ready on the control
+        // channel. It must not trigger the physical-open/ready callback; the
+        // control channel owns transport readiness and physical recovery.
+        const attachBulk = () => {
+          if (peer.peerConnection !== peerConnection) {
+            return;
+          }
+          peer.transport.attachBulk(peerConnection, channel);
+        };
+        if (channel.readyState === 'open') {
+          attachBulk();
+        } else {
+          channel.onopen = attachBulk;
+        }
+        return;
+      }
       channel.onopen = () => {
         if (peer.ready || peer.peerConnection !== peerConnection) {
           return;

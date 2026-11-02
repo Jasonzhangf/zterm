@@ -102,11 +102,34 @@
       "iterator": "Whole"
     },
     {
+      "id": "bind_client_bulk_channel",
+      "operator": "client.connection.bind_bulk_channel",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.mux_session"
+      ],
+      "output": {
+        "id": "arc.bulk_channel_binding",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
       "id": "open_session_channels",
       "operator": "client.session_channel.open_all",
       "operator_version": "0.1",
       "inputs": [
-        "arc.mux_session",
+        "arc.bulk_channel_binding",
         "arc.session_demand_set",
         "arc.connection_policy"
       ],
@@ -281,8 +304,13 @@
     },
     {
       "from": "negotiate_mux",
-      "to": "open_session_channels",
+      "to": "bind_client_bulk_channel",
       "arc_id": "arc.mux_session"
+    },
+    {
+      "from": "bind_client_bulk_channel",
+      "to": "open_session_channels",
+      "arc_id": "arc.bulk_channel_binding"
     },
     {
       "from": "open_session_channels",
