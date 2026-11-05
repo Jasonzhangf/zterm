@@ -21,6 +21,7 @@ import {
 import { TraversalRelayClientDebugStore } from './client-debug-store';
 import {
   DeviceCleanupRejectedError,
+  MachineIdentityError,
   TraversalRelayStore,
   type TraversalRelayPublicUser,
 } from './store';
@@ -630,6 +631,17 @@ function rejectUnknownBodyKeys(
   }
 }
 
+function requireMachineString(
+  body: Record<string, unknown>,
+  key: string,
+): string {
+  const value = asString(body[key]);
+  if (!value) {
+    throw new ApiRouteError(400, 'invalid_machine_request', `${key} is required`);
+  }
+  return value;
+}
+
 function extractBearerAccessToken(request: IncomingMessage): string {
   const authorization = asString(request.headers.authorization);
   if (!authorization.toLowerCase().startsWith('bearer ')) {
@@ -744,6 +756,13 @@ function handleApiRouteError(response: ServerResponse, error: unknown): void {
       ok: false,
       error: { code: 'device_cleanup_rejected', message: 'device cleanup rejected' },
     }, 409);
+    return;
+  }
+  if (error instanceof MachineIdentityError) {
+    serveJson(response, {
+      ok: false,
+      error: { code: error.code, message: error.message },
+    }, error.statusCode);
     return;
   }
   console.error('relay api request failed', error);
@@ -938,6 +957,24 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
     return;
   }
 
+  if (request.method === 'POST' && pathname === routePath('/api/auth/logout')) {
+    try {
+      const accessToken = extractBearerAccessToken(request);
+      if (!accessToken) {
+        throw new ApiRouteError(401, 'auth_invalid', 'bearer authentication is required');
+      }
+      const user = store.authenticate(accessToken);
+      if (!user) {
+        throw new ApiRouteError(401, 'auth_invalid', 'invalid access token');
+      }
+      store.revokeToken(accessToken);
+      serveJson(response, { ok: true, user: { id: user.id } });
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
+    return;
+  }
+
   if (request.method === 'GET' && pathname === routePath('/api/auth/me')) {
     const accessToken = extractAccessToken(request, url);
     const user = accessToken ? store.authenticate(accessToken) : null;
@@ -961,6 +998,139 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
       user,
       devices: store.listDevices(user.id),
     });
+    return;
+  }
+
+  if (request.method === 'GET' && pathname === routePath('/api/machines')) {
+    const accessToken = extractAccessToken(request, url);
+    const user = accessToken ? store.authenticate(accessToken) : null;
+    if (!user) {
+      serveJson(response, { ok: false, message: 'unauthorized' }, 401);
+      return;
+    }
+    serveJson(response, {
+      ok: true,
+      user,
+      machines: store.listMachines(user.id),
+    });
+    return;
+  }
+
+  if (request.method === 'POST' && pathname === routePath('/api/machines/enroll/challenge')) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const body = await readBoundedJsonObject(request, 'invalid_machine_request');
+      rejectUnknownBodyKeys(body, ['deviceId'], 'invalid_machine_request');
+      const challenge = store.createEnrollChallenge(
+        user.id,
+        requireMachineString(body, 'deviceId'),
+      );
+      serveJson(response, { ok: true, ...challenge });
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && pathname === routePath('/api/machines/enroll/verify')) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const body = await readBoundedJsonObject(request, 'invalid_machine_request');
+      rejectUnknownBodyKeys(
+        body,
+        ['requestId', 'challenge', 'deviceToken', 'displayName'],
+        'invalid_machine_request',
+      );
+      const machine = store.verifyEnrollChallenge({
+        userId: user.id,
+        requestId: requireMachineString(body, 'requestId'),
+        challenge: requireMachineString(body, 'challenge'),
+        deviceToken: requireMachineString(body, 'deviceToken'),
+        displayName: asString(body.displayName),
+      });
+      serveJson(response, {
+        ok: true,
+        machineId: machine.machineId,
+        ownerAccountId: machine.ownerAccountId,
+      });
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && pathname === routePath('/api/machines/possession/challenge')) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const body = await readBoundedJsonObject(request, 'invalid_machine_request');
+      rejectUnknownBodyKeys(body, ['machineId'], 'invalid_machine_request');
+      const challenge = store.createPossessionChallenge(
+        user.id,
+        requireMachineString(body, 'machineId'),
+      );
+      serveJson(response, { ok: true, ...challenge });
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && pathname === routePath('/api/machines/possession/verify')) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const body = await readBoundedJsonObject(request, 'invalid_machine_request');
+      rejectUnknownBodyKeys(
+        body,
+        ['requestId', 'challenge', 'deviceToken'],
+        'invalid_machine_request',
+      );
+      const machine = store.verifyPossessionChallenge({
+        userId: user.id,
+        requestId: requireMachineString(body, 'requestId'),
+        challenge: requireMachineString(body, 'challenge'),
+        deviceToken: requireMachineString(body, 'deviceToken'),
+      });
+      serveJson(response, {
+        ok: true,
+        machineId: machine.machineId,
+        ownerAccountId: machine.ownerAccountId,
+      });
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
+    return;
+  }
+
+  const machineRevokePrefix = routePath('/api/machines/');
+  if (
+    request.method === 'POST'
+    && pathname.startsWith(machineRevokePrefix)
+    && pathname.endsWith('/revoke')
+  ) {
+    try {
+      const user = authenticateBearerRequest(request);
+      const rawMachineId = pathname.slice(
+        machineRevokePrefix.length,
+        -'/revoke'.length,
+      );
+      if (!rawMachineId || rawMachineId.includes('/')) {
+        throw new ApiRouteError(404, 'machine_not_found', 'machine was not found');
+      }
+      let machineId = '';
+      try {
+        machineId = decodeURIComponent(rawMachineId);
+      } catch {
+        throw new ApiRouteError(400, 'invalid_machine_request', 'machineId is invalid');
+      }
+      const machine = store.revokeMachine(user.id, machineId);
+      serveJson(response, {
+        ok: true,
+        machineId: machine.machineId,
+        status: machine.status,
+      });
+    } catch (error) {
+      handleApiRouteError(response, error);
+    }
     return;
   }
 
