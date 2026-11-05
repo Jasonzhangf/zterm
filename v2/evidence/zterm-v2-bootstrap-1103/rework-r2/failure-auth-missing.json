@@ -1,0 +1,12 @@
+{
+  "status": 401,
+  "body": {
+    "error": {
+      "code": "V2_CREDENTIAL_REQUIRED",
+      "owningModule": "daemon",
+      "operationId": "auth",
+      "cause": "A V2 credential is required.",
+      "message": "V2 credential is required."
+    }
+  }
+}

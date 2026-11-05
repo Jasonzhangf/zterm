@@ -1,0 +1,12 @@
+{
+  "status": 401,
+  "body": {
+    "error": {
+      "code": "V2_CREDENTIAL_INVALID",
+      "owningModule": "daemon",
+      "operationId": "auth",
+      "cause": "The V2 credential is invalid.",
+      "message": "V2 credential is invalid."
+    }
+  }
+}

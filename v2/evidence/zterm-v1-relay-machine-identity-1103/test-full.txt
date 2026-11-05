@@ -1,0 +1,17 @@
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.1[39m [90m/workspaces/10/android[39m
+
+ [32m✓[39m src/traversal-relay/server.test.ts [2m ([22m[2m12 tests[22m[2m)[22m[33m 357[2mms[22m[39m
+ [32m✓[39m src/traversal-relay/machine-identity.test.ts [2m ([22m[2m3 tests[22m[2m)[22m[33m 562[2mms[22m[39m
+ [32m✓[39m src/traversal-relay/slot-config-store.test.ts [2m ([22m[2m11 tests[22m[2m)[22m[90m 20[2mms[22m[39m
+ [32m✓[39m src/traversal-relay/relay-server-release-package.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 3[2mms[22m[39m
+ [32m✓[39m src/traversal-relay/server-helpers.test.ts [2m ([22m[2m4 tests[22m[2m)[22m[90m 2[2mms[22m[39m
+ [32m✓[39m src/traversal-relay/client-debug-store.test.ts [2m ([22m[2m2 tests[22m[2m)[22m[90m 2[2mms[22m[39m
+ [32m✓[39m src/traversal-relay/store.test.ts [2m ([22m[2m20 tests[22m[2m)[22m[33m 2721[2mms[22m[39m
+ [32m✓[39m src/traversal-relay/slot-config-api.test.ts [2m ([22m[2m14 tests[22m[2m)[22m[33m 5363[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m      Tests [22m [1m[32m70 passed[39m[22m[90m (70)[39m
+[2m   Start at [22m 21:36:33
+[2m   Duration [22m 5.62s[2m (transform 169ms, setup 38ms, collect 275ms, tests 9.03s, environment 1ms, prepare 485ms)[22m
+

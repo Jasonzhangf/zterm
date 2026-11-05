@@ -1,0 +1,25 @@
+# Green gate summary
+
+Candidate implementation/test root:
+`12397b3eb05fc37a7408fc8e543a79392adf98cb53e5b18094b894ce10b9c41759`
+
+```text
+pnpm --dir android exec vitest run src/traversal-relay/machine-identity.test.ts
+1 file passed, 3 tests passed
+
+pnpm --dir android exec vitest run src/traversal-relay
+8 files passed, 70 tests passed
+
+pnpm --dir android run type-check
+exit 0; source-JS pollution check clean
+
+node v2/evidence/zterm-v1-relay-machine-identity-1103/machine-identity-self-check.mjs
+relay-machine-identity-blackbox-ok
+```
+
+Raw outputs:
+
+- `test-targeted.txt`
+- `test-full.txt`
+- `type-check.txt`
+- `blackbox-output.txt`

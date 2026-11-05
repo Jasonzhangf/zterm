@@ -1,0 +1,6 @@
+host-directory-non-empty devices=1
+enrolled machineId=mach_c9f4b9fb57337c69cf91a3a8c2ba1e87 status=active
+canonical-list-active count=1 machineId=mach_c9f4b9fb57337c69cf91a3a8c2ba1e87 status=active legacyDeviceId=canonical-laptop
+revoked machineId=mach_c9f4b9fb57337c69cf91a3a8c2ba1e87 status=revoked
+canonical-list-inactive count=1 machineId=mach_c9f4b9fb57337c69cf91a3a8c2ba1e87 status=revoked
+accounts-relay-canonical-list-blackbox-ok host-directory->enroll->canonical-list->revoke->inactive-list

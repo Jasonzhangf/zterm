@@ -1,0 +1,106 @@
+{
+  "createWorkspace": {
+    "createWorkspace": {
+      "ok": true,
+      "value": {
+        "workspaceId": "ws_8d09ec69-def1-430d-b003-54f83410e67b",
+        "name": "Acme",
+        "rootGroupId": "grp_abe43c7a-ac47-4510-8654-165521ad0ea3",
+        "revision": 1
+      }
+    }
+  },
+  "createGroup": {
+    "createGroup": {
+      "ok": true,
+      "value": {
+        "groupId": "grp_bff655e5-46db-4fab-b325-af18fb5da7bf",
+        "workspaceId": "ws_8d09ec69-def1-430d-b003-54f83410e67b",
+        "parentGroupId": "grp_abe43c7a-ac47-4510-8654-165521ad0ea3",
+        "name": "team",
+        "path": "/Acme/team"
+      }
+    }
+  },
+  "duplicateGroup": {
+    "duplicateGroup": {
+      "ok": false,
+      "code": "GROUP_NAME_CONFLICT",
+      "owningModule": "organization"
+    }
+  },
+  "addMember": {
+    "addMember": {
+      "ok": true,
+      "value": {
+        "memberId": "mbr_e81323aa-a2d9-4078-b21f-4bf6be61db7a",
+        "workspaceId": "ws_8d09ec69-def1-430d-b003-54f83410e67b",
+        "groupId": "grp_bff655e5-46db-4fab-b325-af18fb5da7bf",
+        "name": "Bot",
+        "machineId": "mac-1",
+        "hostKind": "tmux",
+        "agentKind": "codex",
+        "launchProfileRef": "lp-default"
+      }
+    }
+  },
+  "reopen": {
+    "reopen": {
+      "ok": true,
+      "value": true
+    }
+  },
+  "bind": {
+    "bind": {
+      "ok": true,
+      "value": {
+        "memberId": "mbr_e81323aa-a2d9-4078-b21f-4bf6be61db7a",
+        "sessionId": "sess-a",
+        "anchor": "pane:0",
+        "generation": 1
+      }
+    }
+  },
+  "staleBinding": {
+    "staleBinding": {
+      "ok": false,
+      "code": "BINDING_GENERATION_STALE",
+      "owningModule": "members"
+    }
+  },
+  "resolve": {
+    "resolve": {
+      "ok": true,
+      "value": {
+        "memberId": "mbr_e81323aa-a2d9-4078-b21f-4bf6be61db7a",
+        "machineId": "mac-1",
+        "groupId": "grp_bff655e5-46db-4fab-b325-af18fb5da7bf",
+        "groupPath": "/Acme/team",
+        "bindingGeneration": 1,
+        "sessionId": "sess-a",
+        "anchor": "pane:0"
+      }
+    }
+  },
+  "unknownRoute": {
+    "unknownRoute": {
+      "ok": false,
+      "code": "ROUTE_NOT_FOUND",
+      "owningModule": "routing"
+    }
+  },
+  "ambiguousRoute": {
+    "ambiguousRoute": {
+      "ok": false,
+      "code": "ROUTE_AMBIGUOUS",
+      "owningModule": "routing"
+    }
+  },
+  "unverifiedAuth": {
+    "unverifiedAuth": {
+      "ok": false,
+      "code": "UNAUTHENTICATED",
+      "owningModule": "accounts"
+    }
+  }
+}

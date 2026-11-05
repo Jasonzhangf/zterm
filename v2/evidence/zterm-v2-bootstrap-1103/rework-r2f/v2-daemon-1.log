@@ -1,0 +1,5 @@
+{"event":"listening","host":"127.0.0.1","port":38345,"v1WsUrl":"ws://127.0.0.1:4438/ws?token=%3Credacted%3E","v2AuthRequired":true,"v1AuthConfigured":true}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request.error","path":"/api/sessions","error":{"code":"V1_CONNECTION_AUTH_FAILED","owningModule":"terminal","operationId":"v1-mux-client","cause":{"detail":"V1 daemon rejected the mux credential."},"message":"V1 mux connection authentication failed."}}
+{"event":"request","method":"POST","path":"/api/terminal/input"}
+{"event":"request.error","path":"/api/terminal/input","error":{"code":"V1_CONNECTION_AUTH_FAILED","owningModule":"terminal","operationId":"v1-mux-client","cause":{"detail":"V1 daemon rejected the mux credential."},"message":"V1 mux connection authentication failed."}}

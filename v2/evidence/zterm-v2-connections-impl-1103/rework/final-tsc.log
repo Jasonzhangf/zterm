@@ -1,0 +1,5 @@
+
+> @zterm/v2-connections@0.0.1 type-check /workspaces/4/v2/modules/connections
+> node ../../../packages/cli/node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+
+TSC_EXIT=0

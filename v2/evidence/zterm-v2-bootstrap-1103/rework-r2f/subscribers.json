@@ -1,0 +1,5 @@
+{
+  "bothReceivedInitialBuffer": true,
+  "survivorReceivedUpdateAfterPeerClose": true,
+  "tmuxAliveAfterBothClosed": true
+}

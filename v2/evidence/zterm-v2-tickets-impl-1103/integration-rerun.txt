@@ -1,0 +1,26 @@
+✖ real Vikunja /api/v2 blackbox: create/get/report/close/reopen and non-idempotency (0.432125ms)
+✖ real Vikunja /api/v2 blackbox: cross-project read is 403 (0.753125ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 87.95275
+
+✖ failing tests:
+
+test at tests/integration/vikunja-real.test.ts:56:1
+✖ real Vikunja /api/v2 blackbox: create/get/report/close/reopen and non-idempotency (0.432125ms)
+  Error: UNVERIFIED: no reachable isolated Vikunja v2.7.1 at <unset>; VIKUNJA_BASE and VIKUNJA_TOKEN were not supplied or /api/v2/info did not respond
+      at TestContext.<anonymous> (file:///workspaces/1/v2/modules/tickets/tests/integration/vikunja-real.test.ts:59:11)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/integration/vikunja-real.test.ts:119:1
+✖ real Vikunja /api/v2 blackbox: cross-project read is 403 (0.753125ms)
+  Error: UNVERIFIED: no reachable isolated Vikunja v2.7.1
+      at TestContext.<anonymous> (file:///workspaces/1/v2/modules/tickets/tests/integration/vikunja-real.test.ts:122:11)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)

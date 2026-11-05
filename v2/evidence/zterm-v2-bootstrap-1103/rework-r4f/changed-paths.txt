@@ -1,0 +1,22 @@
+Bootstrap R3 rework R4F changed paths.
+
+Source (fixed):
+v2/modules/terminal/src/terminal-port.mjs
+v2/modules/terminal/src/v1-mux-client.mjs
+
+Tests (new red tests and fixture extension):
+v2/modules/terminal/tests/repair-closure.test.mjs
+v2/modules/terminal/tests/v1-mux-client.test.mjs
+v2/modules/terminal/tests/v1-mux-fixture.mjs
+
+Evidence:
+v2/evidence/zterm-v2-bootstrap-1103/rework-r4f/plan.md
+v2/evidence/zterm-v2-bootstrap-1103/rework-r4f/red-failure.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r4f/green-unit.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r4f/repair-chain.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r4f/repair-chain-probe.mjs
+v2/evidence/zterm-v2-bootstrap-1103/rework-r4f/changed-paths.txt
+
+Note: LayerFS materializes the v2 branch tree as untracked on the workspace
+base (git status shows `?? v2/`). This list is the task-scoped touched set;
+no files outside the allowed paths were modified.

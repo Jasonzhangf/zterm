@@ -1,0 +1,24 @@
+✔ creates structural workspaces, groups, and members with one revision per mutation (8.204458ms)
+✔ rejects duplicate member names in one group and allows them in different groups (12.721208ms)
+✔ updates group names and parents while preserving descendant paths (7.634292ms)
+✔ deletes only empty non-root groups and protects the root (5.083167ms)
+✔ updates member name and group and deletes members without changing their id (4.107833ms)
+✔ keeps stable ids across updates, another delete, and store reopen (3.770375ms)
+✔ rejects missing and stale revisions without changing the store (1.452083ms)
+✔ checks scope, workspace, and member allowlist before touching the store (1.824542ms)
+✔ treats an explicit empty member allowlist as denying every member (2.313375ms)
+✔ blocks mount when source read is denied and leaves no side effect (2.896542ms)
+✔ rejects self, descendant, duplicate, and name-conflicting mounts (7.670625ms)
+✔ persists mounts after reopen without copying source members (5.143167ms)
+✔ unmounts only the reference and increments the target revision (6.446083ms)
+✔ never exposes members runtime fields through organization outputs (2.019458ms)
+✔ filters denied members from query results and blocks their mutations (3.333167ms)
+✔ serializes simultaneous A->B and B->A mounts into one MOUNT_CYCLE and acyclic reopen (3.952875ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 121.930376

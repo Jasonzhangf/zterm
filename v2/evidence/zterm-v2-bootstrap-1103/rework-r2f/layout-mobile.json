@@ -1,0 +1,40 @@
+{
+  "innerWidth": 390,
+  "innerHeight": 844,
+  "documentOverflow": false,
+  "terminalOverflow": false,
+  "inputRight": 294,
+  "buttonRight": 376,
+  "topbar": {
+    "left": 0,
+    "top": 0,
+    "right": 390,
+    "bottom": 55.84375,
+    "width": 390,
+    "height": 55.84375
+  },
+  "terminalShell": {
+    "left": 0,
+    "top": 180.375,
+    "right": 390,
+    "bottom": 844,
+    "width": 390,
+    "height": 663.625
+  },
+  "surface": {
+    "left": 0,
+    "top": 276.9375,
+    "right": 390,
+    "bottom": 716.9375,
+    "width": 390,
+    "height": 440
+  },
+  "terminal": {
+    "left": 4,
+    "top": 280.9375,
+    "right": 386,
+    "bottom": 712.9375,
+    "width": 382,
+    "height": 432
+  }
+}

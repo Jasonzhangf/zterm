@@ -1,0 +1,9 @@
+HTTP/1.1 200 OK
+content-type: application/json; charset=utf-8
+cache-control: no-store
+Date: Tue, 03 Nov 2026 10:34:59 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+{"status":"ok","observation":{"source":"tmux","observedAt":"2026-11-03T10:34:59.642Z","value":{"socketName":"zterm-v2-r2","sessions":1}}}

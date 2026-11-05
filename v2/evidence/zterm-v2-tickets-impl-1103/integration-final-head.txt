@@ -1,0 +1,16 @@
+# Final-head real Vikunja v2.7.1 /api/v2 blackbox
+# branch head before this evidence commit: 129c5bc38db2b9348f9fda4cda8923d17a8c03e73bbcac9d5c7057f2876a60e498
+# instance: isolated zterm-vikunja-tickets-1103c at 127.0.0.1:12745 (version v2.7.1, registration enabled)
+# fixture: two throwaway users/projects created for this run; tokens kept in host /tmp only, never committed
+# command: cd v2/modules/tickets && VIKUNJA_BASE=http://host.docker.internal:12745/api/v2 VIKUNJA_TOKEN=<redacted> VIKUNJA_TOKEN_B=<redacted> VIKUNJA_PROJECT_A=19 VIKUNJA_PROJECT_B=20 node --test tests/integration/vikunja-real.test.ts
+# exit: 0
+✔ real Vikunja /api/v2 blackbox: persistent store create/get/report/close/reopen and same-ref no re-POST (89.951541ms)
+✔ real Vikunja /api/v2 blackbox: cross-project read is 403 (8.511333ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 170.507292

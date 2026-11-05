@@ -1,0 +1,11 @@
+{"event":"listening","host":"127.0.0.1","port":3401,"tmuxSocket":"zterm-v2-r2","v2AuthRequired":true}
+{"event":"request","method":"GET","path":"/api/health"}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request.error","path":"/api/sessions","error":{"code":"V2_CREDENTIAL_REQUIRED","owningModule":"daemon","operationId":"auth","cause":"A V2 credential is required.","message":"V2 credential is required."}}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request.error","path":"/api/sessions?token=wrong-token","error":{"code":"V2_CREDENTIAL_INVALID","owningModule":"daemon","operationId":"auth","cause":"The V2 credential is invalid.","message":"V2 credential is invalid."}}
+{"event":"request","method":"GET","path":"/api/terminal/stream"}
+{"event":"request.error","path":"/api/terminal/stream?target=does-not-exist&token=r2-integ-token","error":{"code":"TARGET_NOT_FOUND","owningModule":"host-adapters","operationId":"capture","cause":{"socketName":"zterm-v2-r2","target":"does-not-exist","detail":"can't find pane: does-not-exist"},"message":"Terminal target was not found."}}
+{"event":"request","method":"POST","path":"/api/terminal/input"}
+{"event":"request.error","path":"/api/terminal/input?token=r2-integ-token","error":{"code":"TARGET_NOT_FOUND","owningModule":"host-adapters","operationId":"sendKeys","cause":{"socketName":"zterm-v2-r2","target":"does-not-exist","detail":"can't find pane: does-not-exist"},"message":"Terminal target was not found."}}

@@ -1,0 +1,10 @@
+✔ real Vikunja /api/v2 blackbox: persistent store create/get/report/close/reopen and same-ref no re-POST (93.21175ms)
+✔ real Vikunja /api/v2 blackbox: cross-project read is 403 (11.241166ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 186.766417

@@ -1,0 +1,15 @@
+# REAL GREEN evidence: Vikunja v2.7.1 /api/v2 blackbox (rework2 recovery1)
+# instance: zterm-vikunja-tickets-1103c at host 127.0.0.1:12745 (workspace host.docker.internal:12745)
+# /info HTTP 200, version v2.7.1
+# fixture project A id: 40; two throwaway users registered by this runner
+# tokens existed only in this process environment and were not printed or written
+✔ real Vikunja /api/v2 blackbox: persistent store create/get/report/close/reopen and same-ref no re-POST (109.837208ms)
+✔ real Vikunja /api/v2 blackbox: cross-project read is 403 (30.40925ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 222.563583

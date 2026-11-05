@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Zterm V2</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --canvas: #f4f6f5;
+        --surface: #ffffff;
+        --surface-muted: #e9eeeb;
+        --ink: #17211c;
+        --muted: #5a6660;
+        --line: #cbd5cf;
+        --accent: #0f766e;
+        --accent-soft: #d7efeb;
+        --danger: #a12828;
+        --danger-soft: #fbe7e4;
+        --terminal: #111713;
+        --terminal-ink: #d9f2df;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--canvas);
+        color: var(--ink);
+        font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      .app {
+        min-height: 100vh;
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 20px;
+        border-bottom: 1px solid var(--line);
+        background: var(--surface);
+      }
+
+      .brand {
+        display: flex;
+        align-items: baseline;
+        gap: 10px;
+      }
+
+      .brand strong {
+        font-size: 18px;
+        letter-spacing: 0;
+      }
+
+      .brand span,
+      .session-meta {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .health {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .health-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+
+      .health-dot.online {
+        background: var(--accent);
+      }
+
+      .workspace {
+        min-height: 0;
+        display: grid;
+        grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      }
+
+      .sidebar {
+        min-height: 0;
+        border-right: 1px solid var(--line);
+        background: var(--surface);
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+      }
+
+      .sidebar-head {
+        padding: 16px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .sidebar h1 {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 650;
+      }
+
+      #session-list {
+        margin: 0;
+        padding: 8px;
+        list-style: none;
+        overflow: auto;
+      }
+
+      .session-button {
+        width: 100%;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        color: var(--ink);
+        padding: 9px 10px;
+        text-align: left;
+        cursor: pointer;
+      }
+
+      .session-button:hover,
+      .session-button:focus-visible {
+        background: var(--surface-muted);
+        outline: none;
+      }
+
+      .session-button[aria-pressed="true"] {
+        border-color: var(--accent);
+        background: var(--accent-soft);
+      }
+
+      .session-name {
+        display: block;
+        font-weight: 600;
+        overflow-wrap: anywhere;
+      }
+
+      .terminal-shell {
+        min-height: 0;
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr) auto;
+        background: var(--surface);
+      }
+
+      .terminal-head {
+        grid-row: 1;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: center;
+        padding: 12px 18px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .terminal-title {
+        font-weight: 650;
+        overflow-wrap: anywhere;
+      }
+
+      .terminal-buffer {
+        grid-row: 3;
+        margin: 0;
+        padding: 18px;
+        overflow: auto;
+        background: var(--terminal);
+        color: var(--terminal-ink);
+        font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        tab-size: 8;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+
+      .input-bar {
+        grid-row: 4;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px;
+        padding: 12px 18px;
+        border-top: 1px solid var(--line);
+      }
+
+      #command-input {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 9px 11px;
+        background: var(--surface);
+        color: var(--ink);
+      }
+
+      #command-input:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 1px;
+      }
+
+      #send-button {
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        min-width: 72px;
+        padding: 9px 14px;
+        background: var(--accent);
+        color: #ffffff;
+        cursor: pointer;
+      }
+
+      #send-button:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+      }
+
+      .message {
+        grid-row: 2;
+        margin: 0;
+        padding: 9px 18px;
+        border-bottom: 1px solid var(--line);
+        background: var(--danger-soft);
+        color: var(--danger);
+      }
+
+      .message[hidden] {
+        display: none;
+      }
+
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+      }
+
+      .empty {
+        padding: 12px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      @media (max-width: 700px) {
+        .workspace {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto minmax(0, 1fr);
+        }
+
+        .sidebar {
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+          grid-template-rows: auto auto;
+        }
+
+        #session-list {
+          display: flex;
+          gap: 6px;
+          overflow-x: auto;
+        }
+
+        #session-list li {
+          flex: 0 0 auto;
+        }
+
+        .session-button {
+          width: auto;
+          min-width: 150px;
+        }
+
+        .topbar {
+          padding: 12px 14px;
+        }
+
+        .terminal-head,
+        .input-bar {
+          padding-left: 14px;
+          padding-right: 14px;
+        }
+
+        .terminal-buffer {
+          padding: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <strong>Zterm V2</strong>
+          <span>Local tmux</span>
+        </div>
+        <div class="health" aria-live="polite">
+          <span id="health-dot" class="health-dot"></span>
+          <span id="health-text">Connecting</span>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar" aria-label="Sessions">
+          <div class="sidebar-head">
+            <h1>Sessions</h1>
+          </div>
+          <ul id="session-list" aria-live="polite"></ul>
+        </aside>
+
+        <section class="terminal-shell" aria-label="Terminal">
+          <div class="terminal-head">
+            <div>
+              <div id="terminal-title" class="terminal-title">No session selected</div>
+              <div id="session-meta" class="session-meta"></div>
+            </div>
+          </div>
+          <p id="error-message" class="message" role="alert" hidden></p>
+          <pre id="terminal-buffer" class="terminal-buffer" aria-label="Terminal buffer">Waiting for buffer.</pre>
+          <form id="input-form" class="input-bar">
+            <label for="command-input" class="visually-hidden">Command</label>
+            <input id="command-input" name="command" autocomplete="off" spellcheck="false" placeholder="Command" aria-label="Command" disabled>
+            <button id="send-button" type="submit" disabled>Send</button>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const state = {
+        sessions: [],
+        target: null,
+        stream: null,
+      };
+
+      const sessionList = document.querySelector("#session-list");
+      const terminalTitle = document.querySelector("#terminal-title");
+      const sessionMeta = document.querySelector("#session-meta");
+      const terminalBuffer = document.querySelector("#terminal-buffer");
+      const errorMessage = document.querySelector("#error-message");
+      const inputForm = document.querySelector("#input-form");
+      const commandInput = document.querySelector("#command-input");
+      const sendButton = document.querySelector("#send-button");
+      const healthDot = document.querySelector("#health-dot");
+      const healthText = document.querySelector("#health-text");
+
+      function showError(message) {
+        errorMessage.textContent = message;
+        errorMessage.hidden = false;
+      }
+
+      function clearError() {
+        errorMessage.textContent = "";
+        errorMessage.hidden = true;
+      }
+
+      function setHealth(online, label) {
+        healthDot.classList.toggle("online", online);
+        healthText.textContent = label;
+      }
+
+      function renderSessions() {
+        sessionList.replaceChildren();
+        if (state.sessions.length === 0) {
+          const empty = document.createElement("li");
+          empty.className = "empty";
+          empty.textContent = "No tmux sessions found.";
+          sessionList.append(empty);
+          return;
+        }
+
+        for (const session of state.sessions) {
+          const item = document.createElement("li");
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "session-button";
+          button.dataset.target = session.name;
+          button.setAttribute("aria-pressed", String(session.name === state.target));
+
+          const name = document.createElement("span");
+          name.className = "session-name";
+          name.textContent = session.name;
+          button.append(name);
+
+          button.addEventListener("click", () => selectTarget(session.name));
+          item.append(button);
+          sessionList.append(item);
+        }
+      }
+
+      function selectTarget(target) {
+        const session = state.sessions.find((candidate) => candidate.name === target);
+        if (!session) {
+          showError(`Target ${target} is not available.`);
+          return;
+        }
+
+        clearError();
+        state.target = target;
+        renderSessions();
+        terminalTitle.textContent = session.name;
+        sessionMeta.textContent = `${session.id} | ${session.createdIso}`;
+        terminalBuffer.textContent = "Connecting...";
+        commandInput.disabled = false;
+        sendButton.disabled = false;
+
+        if (state.stream) {
+          state.stream.close();
+        }
+
+        const stream = new EventSource(`/api/terminal/stream?target=${encodeURIComponent(target)}`);
+        state.stream = stream;
+
+        stream.addEventListener("ready", () => {
+          setHealth(true, "Live");
+        });
+
+        stream.addEventListener("buffer", (event) => {
+          const frame = JSON.parse(event.data);
+          terminalBuffer.textContent = frame.buffer;
+          clearError();
+        });
+
+        stream.addEventListener("error", (event) => {
+          setHealth(false, "Unavailable");
+          if (event.data) {
+            try {
+              const payload = JSON.parse(event.data);
+              showError(`${payload.error.code}: ${payload.error.message}`);
+            } catch {
+              showError("Terminal stream returned an invalid error.");
+            }
+          } else {
+            showError(`Target ${target} is not available.`);
+          }
+          stream.close();
+        });
+      }
+
+      async function loadSessions() {
+        setHealth(false, "Connecting");
+        try {
+          const response = await fetch("/api/sessions", { cache: "no-store" });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(payload.error?.message || "Sessions request failed.");
+          }
+          state.sessions = payload.sessions;
+          renderSessions();
+          setHealth(true, "Connected");
+
+          const requested = new URLSearchParams(location.search).get("target");
+          const initial = requested || state.sessions[0]?.name;
+          if (initial) {
+            selectTarget(initial);
+          }
+        } catch (error) {
+          setHealth(false, "Unavailable");
+          showError(error.message);
+        }
+      }
+
+      inputForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!state.target || !commandInput.value) {
+          return;
+        }
+
+        const data = commandInput.value;
+        sendButton.disabled = true;
+        try {
+          const response = await fetch("/api/terminal/input", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ target: state.target, data }),
+          });
+          const payload = await response.json();
+          if (!response.ok) {
+            throw new Error(`${payload.error?.code || "INPUT_FAILED"}: ${payload.error?.message || "Input failed."}`);
+          }
+          commandInput.value = "";
+          clearError();
+        } catch (error) {
+          showError(error.message);
+        } finally {
+          sendButton.disabled = false;
+          commandInput.focus();
+        }
+      });
+
+      loadSessions();
+    </script>
+  </body>
+</html>

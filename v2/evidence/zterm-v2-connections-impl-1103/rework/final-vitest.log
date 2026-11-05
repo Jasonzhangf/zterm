@@ -1,0 +1,17 @@
+
+> @zterm/v2-connections@0.0.1 test /workspaces/4/v2/modules/connections
+> vitest run --config vitest.config.ts
+
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.0[39m [90m/workspaces/4/v2/modules/connections[39m
+
+ [2m[90m↓[39m[22m tests/integration/real-daemon.test.ts [2m ([22m[2m3 tests[22m [2m|[22m [33m3 skipped[39m[2m)[22m
+ [32m✓[39m tests/contract/connection-manager.contract.test.ts [2m ([22m[2m18 tests[22m[2m)[22m[90m 10[2mms[22m[39m
+ [32m✓[39m tests/integration/real-entry.test.ts [2m ([22m[2m9 tests[22m[2m)[22m[90m 150[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (3)[39m
+[2m      Tests [22m [1m[32m27 passed[39m[22m[2m | [22m[33m3 skipped[39m[90m (30)[39m
+[2m   Start at [22m 23:35:06
+[2m   Duration [22m 580ms[2m (transform 246ms, setup 0ms, collect 688ms, tests 160ms, environment 0ms, prepare 273ms)[22m
+
+VITEST_EXIT=0

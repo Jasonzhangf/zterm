@@ -1,0 +1,6 @@
+{
+  "authed": false,
+  "ready": false,
+  "error": "Unauthorized bridge token",
+  "closeCode": 4001
+}

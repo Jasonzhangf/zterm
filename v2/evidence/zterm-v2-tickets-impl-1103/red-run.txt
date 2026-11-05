@@ -1,0 +1,210 @@
+# RED evidence: new P1 failure-mode tests run against the ORIGINAL branch implementation
+# original module copy: .tmp-tickets-branch2-1103 (extracted from branch head 120e129c)
+# command: node --experimental-strip-types --test tests/contract/red-vs-old.test.ts
+# expected on OLD code: every assertion fails (0 pass, 9 fail). Each test asserts the CORRECT post-fix behavior.
+
+TAP version 13
+# Subtest: [F1] 内存 store 无法跨实例/进程恢复：重启后 same-ref 会重新 POST
+not ok 1 - [F1] 内存 store 无法跨实例/进程恢复：重启后 same-ref 会重新 POST
+  ---
+  duration_ms: 1.644542
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:116:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    1 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 1
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:131:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async startSubtestAfterBootstrap (node:internal/test_runner/harness:296:3)
+  ...
+# Subtest: [F2] 两个服务共享 store 时都分配 binding-1 并互相覆盖
+not ok 2 - [F2] 两个服务共享 store 时都分配 binding-1 并互相覆盖
+  ---
+  duration_ms: 0.350792
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:134:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected "actual" to be strictly unequal to:
+    
+    'binding-1'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'binding-1'
+  actual: 'binding-1'
+  operator: 'notStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:143:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [F3] workspace remap 后旧票读写仍应使用 binding.providerInstanceId 的凭据
+not ok 3 - [F3] workspace remap 后旧票读写仍应使用 binding.providerInstanceId 的凭据
+  ---
+  duration_ms: 1.21625
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:146:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      [
+    +   'vk-2'
+    -   'vk-1'
+      ]
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    0: 'vk-1'
+  actual:
+    0: 'vk-2'
+  operator: 'deepStrictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:163:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [F4] 旧 close 在途→新 reopen 完成后，旧 close 不得被改回 succeeded
+not ok 4 - [F4] 旧 close 在途→新 reopen 完成后，旧 close 不得被改回 succeeded
+  ---
+  duration_ms: 0.438833
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:166:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'unknown'
+    - 'superseded'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'superseded'
+  actual: 'unknown'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:195:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [F4] 旧 state 操作会把 unknown appendReport 一并 supersede，报告应保持可核实
+not ok 5 - [F4] 旧 state 操作会把 unknown appendReport 一并 supersede，报告应保持可核实
+  ---
+  duration_ms: 0.3755
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:198:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + 'superseded'
+    - 'unknown'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'unknown'
+  actual: 'superseded'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:210:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [F5] listPendingWrites 撤权后应零读取并拒绝
+not ok 6 - [F5] listPendingWrites 撤权后应零读取并拒绝
+  ---
+  duration_ms: 0.726041
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:213:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  operator: 'rejects'
+  stack: |-
+    async TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:228:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [F6] 已成功 create 不得被 confirmRemoteResult 重绑到另一 task
+not ok 7 - [F6] 已成功 create 不得被 confirmRemoteResult 重绑到另一 task
+  ---
+  duration_ms: 0.451625
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:231:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  operator: 'rejects'
+  stack: |-
+    async TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:239:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [F7] listForGoalTopFive 超过五项时仍应提供 nextCursor
+not ok 8 - [F7] listForGoalTopFive 超过五项时仍应提供 nextCursor
+  ---
+  duration_ms: 4.133125
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:249:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The expression evaluated to a falsy value:
+    
+      assert.ok(obs.nextCursor)
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:271:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: [F7] 转固定 code 后 errorRef 仍应保留原 cause
+not ok 9 - [F7] 转固定 code 后 errorRef 仍应保留原 cause
+  ---
+  duration_ms: 0.491333
+  type: 'test'
+  location: '/Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:274:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    + actual - expected
+    
+    + undefined
+    - 'connect ECONNREFUSED'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'connect ECONNREFUSED'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/extension/code/zterm/.tmp-tickets-v2-work/tests/contract/red-vs-old.test.ts:280:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 0
+# fail 9
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 125.714209

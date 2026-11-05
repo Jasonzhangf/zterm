@@ -1,0 +1,10 @@
+
+> @zterm/v2-connections@0.0.1 type-check /workspaces/19/v2/modules/connections
+> node ../../../packages/cli/node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+
+tests/integration/real-entry.test.ts(27,67): error TS2339: Property 'includes' does not exist on type 'never'.
+tests/integration/real-entry.test.ts(385,43): error TS2554: Expected 0 arguments, but got 1.
+tests/integration/real-entry.test.ts(396,15): error TS2339: Property 'onChannelCloseFailure' does not exist on type 'ConnectionManager'.
+tests/integration/real-entry.test.ts(409,13): error TS2339: Property 'retryLateOpenClose' does not exist on type 'ConnectionManager'.
+ ELIFECYCLE  Command failed with exit code 2.
+ WARN   Local package.json exists, but node_modules missing, did you mean to install?

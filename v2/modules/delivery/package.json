@@ -1,0 +1,11 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/contract/*.test.ts",
+    "test:integration": "node --test tests/integration/*.test.ts"
+  },
+  "dependencies": {
+    "@zterm/android": "workspace:*"
+  }
+}
