@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "../../../packages/cli/node_modules/@types",
+      "node_modules"
+    ],
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@zterm/shared/connection/traversal": [
+        "../../../packages/shared/src/connection/traversal/index.ts"
+      ],
+      "@zterm/shared/connection/protocol": [
+        "../../../packages/shared/src/connection/protocol.ts"
+      ],
+      "@zterm/shared/connection/app-protocol": [
+        "../../../packages/shared/src/connection/app-protocol.ts"
+      ]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "vitest.config.ts"
+  ]
+}

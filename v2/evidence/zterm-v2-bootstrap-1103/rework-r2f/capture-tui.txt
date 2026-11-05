@@ -1,0 +1,24 @@
+top - 15:41:19 up 12:58,  0 user,  load average: 0.18, 0.26, 0.22
+Tasks:  32 total,   2 running,  30 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.0 us,  0.0 sy,  0.0 ni,100.0 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st
+MiB Mem :   5910.3 total,    129.0 free,   4410.6 used,   1620.2 buff/cache
+MiB Swap:      0.0 total,      0.0 free,      0.0 used.   1499.7 avail Mem
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+  27808 layerfs   20   0   35.3g   1.8g  56704 S  46.7  31.2   0:03.55 MainThread
+  28007 layerfs   20   0 1447.8g 222028 126652 S  26.7   3.7   0:00.75 chrome
+  27758 layerfs   20   0 9761808 168288  47700 S   6.7   2.8   0:00.53 MainThread
+  27902 layerfs   20   0   17.2g 101844  52712 S   6.7   1.7   0:00.20 MainThread
+  27916 layerfs   20   0   52.6g 203684 164748 S   6.7   3.4   0:00.46 chrome
+      1 root      20   0     872    244    192 S   0.0   0.0   0:01.09 docker-init
+      7 root      20   0 2222200 436496   8132 S   0.0   7.2   0:33.31 layerfs-daemon
+   4554 layerfs   20   0    5568   2836   2036 S   0.0   0.0   0:00.00 tmux: server
+   4555 layerfs   20   0    4036   2096   1560 S   0.0   0.0   0:00.00 bash
+  14777 layerfs   20   0    5568   2812   2012 S   0.0   0.0   0:00.00 tmux: server
+  14778 layerfs   20   0    4036   2860   2320 S   0.0   0.0   0:00.00 bash
+  16137 layerfs   20   0    5616   2948   2012 S   0.0   0.0   0:00.00 tmux: server
+  16138 layerfs   20   0    4036   2872   2336 S   0.0   0.0   0:00.00 bash
+  16143 layerfs   20   0    4036   2876   2336 S   0.0   0.0   0:00.00 bash
+  27752 layerfs   20   0    3772   2704   2448 S   0.0   0.0   0:00.00 bash
+  27759 layerfs   20   0    2264   1092    992 S   0.0   0.0   0:00.00 tail
+  27774 layerfs   20   0    6688   4644   2636 S   0.0   0.1   0:00.15 tmux: server

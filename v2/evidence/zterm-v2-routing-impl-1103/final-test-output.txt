@@ -1,0 +1,27 @@
+✔ unique address returns member, runtime binding machine id, generation, session and anchor (9.835333ms)
+✔ unknown machine, group path, or member is rejected without a fuzzy fallback (2.935167ms)
+✔ co-located distinct members are ambiguous without a selector and each selector disambiguates (3.666666ms)
+✔ memberName matches the readable name only (3.581125ms)
+✔ same group path and member name in another workspace stays isolated (3.987416ms)
+✔ expectedGeneration mismatch is rejected with the current generation (2.669041ms)
+✔ wrong action scope is rejected before any read with no binding side effects (2.533375ms)
+✔ cross-account workspace target is rejected before any read with no binding side effects (4.694084ms)
+✔ member allowlist only accepts string[]: absent narrows nothing, empty rejects, wildcard rejects (3.571875ms)
+✔ machineId and runtime config come from the runtime binding, not the organization member (5.685083ms)
+✔ directed selection propagates runtime binding typed failures (4.909917ms)
+✔ machine+group scan records bindingFailures instead of treating failed members as matches (3.192708ms)
+✔ no-selector scan rejects an empty member grant before any binding read (5.206583ms)
+✔ no-selector scan narrow grant only admits authorized members (3.83925ms)
+✔ no-selector scan keeps ambiguity for multiple authorized targets (5.19325ms)
+✔ no-selector scan rejects when only an unauthorized member would match (3.67625ms)
+✔ resolve carries group reference, organization revision and binding runtime config (3.640292ms)
+✔ constructor requires a getRuntimeBinding reader and rejects the old getBinding port (0.416458ms)
+✔ missing or unknown token is rejected as UNAUTHENTICATED (1.5125ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 119.213708

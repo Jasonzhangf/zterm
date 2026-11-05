@@ -1,0 +1,10 @@
+✔ real Vikunja /api/v2 blackbox: create/get/report/close/reopen and non-idempotency (128.822958ms)
+✔ real Vikunja /api/v2 blackbox: cross-project read is 403 (28.452292ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 231.63225

@@ -1,0 +1,45 @@
+# R3 directed fixes - changed paths
+# branch: v2-bootstrap-1103-r1
+# base commit: 126e707c (r2-followup real E2E)
+
+## source
+v2/modules/terminal/src/terminal-port.mjs
+v2/modules/terminal/src/v1-mux-client.mjs
+
+## tests
+v2/modules/terminal/tests/repair-closure.test.mjs
+v2/modules/terminal/tests/v1-mux-client.test.mjs
+
+## evidence (v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/)
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/capture-after-input.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/capture-after-refresh.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/capture-before.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/capture-mobile.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/capture-tui.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/changed-paths.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/curl-health.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/curl-sessions-noauth.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/curl-sessions-wrongauth.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/curl-sessions.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/e2e-result.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/layout-desktop.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/layout-mobile.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/mux-frames.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/repair-closure.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/session-after-refresh.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/session-before.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/subscribers.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/type-check.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/unit-results.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/v1-auth-boundary.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/v1-auth-negative.json
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/v1-daemon.log
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/v2-daemon-0.log
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/v2-daemon-1.log
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/v2-daemon.log
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/webui-after-input.png
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/webui-after-refresh.png
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/webui-desktop.png
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/webui-failure-auth.png
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/webui-mobile.png
+v2/evidence/zterm-v2-bootstrap-1103/rework-r3f/webui-tui.png

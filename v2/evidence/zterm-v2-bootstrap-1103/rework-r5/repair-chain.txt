@@ -1,0 +1,46 @@
+Bootstrap R3 rework R4F/R5 terminal repair-chain probe - fixture socket chain.
+
+Scope correction: this probe drives createV1MuxFixture({ autoCapture: false }) over a
+real WebSocket to a real tmux session, then manually emits synthetic buffer-sync
+frames and a synthetic repair frame. It proves assembly -> exact wire request ->
+single commit on a real socket. It does NOT prove that a real V1 daemon receives
+the request and generates a correct repair response. The real V1 repair-response
+endpoint is still pending and must be re-run at formal milestone combination.
+
+Command: NODE_PATH=android/node_modules node v2/evidence/zterm-v2-bootstrap-1103/rework-r5/repair-chain-probe.mjs
+
+NODE_PATH=android/node_modules is required because @jsonstudio/wtermmod terminal
+packages are not published into this workspace yet (OPEN: package owner).
+
+exitCode: 0
+
+{
+  "committedBeforeRepair": {
+    "count": 1,
+    "revision": 1,
+    "startIndex": 0,
+    "endIndex": 3
+  },
+  "wireRequest": {
+    "knownRevision": 1,
+    "localStartIndex": 0,
+    "localEndIndex": 3,
+    "requestStartIndex": 0,
+    "requestEndIndex": 3
+  },
+  "committedFrames": [
+    {
+      "revision": 1,
+      "startIndex": 0,
+      "endIndex": 3,
+      "text": "a|b|c"
+    },
+    {
+      "revision": 3,
+      "startIndex": 0,
+      "endIndex": 3,
+      "text": "c|d|e"
+    }
+  ],
+  "repairedCommitCount": 1
+}

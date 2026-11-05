@@ -1,0 +1,57 @@
+# GREEN evidence: full tickets contract suite after branch head 126d574a
+# command: cd v2/modules/tickets && node --test tests/contract/*.test.ts
+# exit: 0
+✔ list continues a top-five cursor through every remaining page (6.588917ms)
+✔ the same operationId is independent across different actor accounts (1.791875ms)
+✔ the same account and operationId is independent across workspaces (0.780417ms)
+✔ two services sharing one store allocate distinct binding ids and never overwrite (0.964625ms)
+✔ two workspaces sharing one store do not overwrite each other bindings (0.383792ms)
+✔ a sequential service rebuild over the same store keeps an unknown operation reconcilable (0.727459ms)
+✔ the persistent store continues its binding sequence after a real reload (16.188541ms)
+✔ a truly separate process recovers an unknown operation without re-POSTing it (256.976417ms)
+✔ a newer reopen supersedes an older unknown close and does not re-PATCH it (1.551375ms)
+✔ a controllable-delay old close cannot overwrite a completed newer reopen (0.679167ms)
+✔ an unknown appendReport is not superseded by a newer state operation and stays reconcilable (1.152083ms)
+✔ a late provider state change is observable but the local adapter does not claim fencing (0.558792ms)
+✔ create succeeds, binds workspace/goal/member, and writes provider exactly once (2.206667ms)
+✔ same OperationRef with same request replays without a second provider call (2.008042ms)
+✔ same OperationRef with a different typed request is OPERATION_CONFLICT with no provider call (3.697083ms)
+✔ scope denial rejects before touching the store (0.181ms)
+✔ rejecting a non-self owner member without delegation is delegation-forbidden with no store calls (0.156833ms)
+✔ provider 201 without a stable task id stays unknown and is never re-POSTed (0.360292ms)
+✔ transport failure maps create to unknown without retry and preserves the cause (0.277167ms)
+✔ get returns a fresh observation and records lastObserved fields (0.252709ms)
+✔ get maps provider 401 to PROVIDER_UNAUTHORIZED and never returns stale cache (2.936625ms)
+✔ get with no projection and transport failure is unavailable, not empty (0.401458ms)
+✔ list scope denial happens before any store read (0.1665ms)
+✔ appendReport succeeds with a comment id and no auto retry (0.451792ms)
+✔ appendReport provider 403 is failed PROVIDER_FORBIDDEN (2.405416ms)
+✔ appendReport rejects a self-reported member mismatch before any provider call (0.141917ms)
+✔ close succeeds only after provider observation reaches the target state (0.610666ms)
+✔ close that times out stays unknown until a newer reopen supersedes it (1.041459ms)
+✔ confirmRemoteResult requires reconcile permission and refuses before leaking operation content (0.39575ms)
+✔ confirmRemoteResult refuses without explicit attribution evidence (0.148375ms)
+✔ confirmRemoteResult records manual success and never claims a provider receipt (0.209542ms)
+✔ confirmRemoteResult refuses to rebind an already-succeeded create to another task (1.993542ms)
+✔ confirmRemoteResult refuses a comment already claimed by another operation (3.067375ms)
+✔ listPendingWrites returns own unknown writes without a provider call (0.203166ms)
+✔ listPendingWrites checks current read scope and reads the store zero times after revoke (0.14ms)
+✔ listForGoalTopFive sorts by priority desc then externalTaskId asc and slices to five (2.01175ms)
+✔ listForGoalTopFive exposes a nextCursor when more than five candidates exist (2.777834ms)
+✔ workspace provider config persists and create uses it with cause retention on transport (0.163416ms)
+✔ create maps explicit provider rejections to failed operations (1.7385ms)
+✔ create maps 5xx to unknown with manual reconciliation (0.271083ms)
+✔ get maps 404 to PROVIDER_NOT_FOUND (0.467958ms)
+✔ appendReport maps 400 to failed and 500 to unknown (0.452917ms)
+✔ successful create parses the provider id and project from the task body (0.363459ms)
+✔ two providers with the same task id are routed by the binding provider instance (0.525916ms)
+✔ a workspace mapping change after binding does not retarget the old ticket (0.237875ms)
+✔ an unavailable fixed provider instance is reported as unavailable, not retargeted (0.124542ms)
+ℹ tests 46
+ℹ suites 0
+ℹ pass 46
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 354.726792

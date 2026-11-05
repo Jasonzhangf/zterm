@@ -1,0 +1,27 @@
+Command:
+layerfs --project zterm workspace exec 3:/workspaces/31 "node --test v2/modules/organization/tests/organization.test.mjs"
+
+Result (exact test-run summary segment):
+✖ creates structural workspaces, groups, and members with one revision per mutation (6.799459ms)
+✖ rejects duplicate member names in one group and allows them in different groups (3.978541ms)
+✖ updates group names and parents while preserving descendant paths (4.2585ms)
+✖ deletes only empty non-root groups and protects the root (2.9015ms)
+✖ updates member name and group and deletes members without changing their id (3.25225ms)
+✖ keeps stable ids across updates, another delete, and store reopen (3.128208ms)
+✖ rejects missing and stale revisions without changing the store (3.119333ms)
+✖ checks scope, workspace, and member allowlist before touching the store (1.059792ms)
+✖ treats an explicit empty member allowlist as denying every member (1.095292ms)
+✖ blocks mount when source read is denied and leaves no side effect (2.854292ms)
+✖ rejects self, descendant, duplicate, and name-conflicting mounts (5.709458ms)
+✖ persists mounts after reopen without copying source members (3.374041ms)
+✖ unmounts only the reference and increments the target revision (3.386125ms)
+✖ never exposes members runtime fields through organization outputs (2.823959ms)
+✖ filters denied members from query results and blocks their mutations (1.954333ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 0
+ℹ fail 15
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 91.781333

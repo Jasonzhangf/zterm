@@ -1,0 +1,192 @@
+{
+  "kind": "members-impl-real-tmux-self-check",
+  "publicEntry": "v2/modules/members/src/public/index.mjs",
+  "authDouble": "v2/modules/members/tests/support/trusted-auth-double.mjs (TEST DOUBLE, not a production account store)",
+  "hostProbe": "v2/modules/members/tests/support/tmux-session-probe.mjs (test fixture, session/anchor only; no machine identity)",
+  "workspace": {
+    "branch": "zterm-v2-members-1103"
+  },
+  "realTmux": {
+    "first": {
+      "sessionId": "$0",
+      "paneId": "%0",
+      "name": "zterm-members-impl-a-13348"
+    },
+    "second": {
+      "sessionId": "$1",
+      "paneId": "%1",
+      "name": "zterm-members-impl-b-13348"
+    },
+    "socket": "/tmp/zterm-members-impl-5T0pde/tmux/socket-13348",
+    "closeCommands": [
+      "tmux -S /tmp/zterm-members-impl-5T0pde/tmux/socket-13348 kill-session -t zterm-members-impl-a-13348",
+      "tmux -S /tmp/zterm-members-impl-5T0pde/tmux/socket-13348 kill-session -t zterm-members-impl-b-13348"
+    ],
+    "after": {
+      "remainingSessions": null,
+      "server": "exited: Command failed: tmux -S /tmp/zterm-members-impl-5T0pde/tmux/socket-13348 list-sessions -F #{session_name}"
+    }
+  },
+  "member": {
+    "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+    "workspaceId": "ws_a829a2dd-51e1-4921-8e1c-864ae6bfd370"
+  },
+  "configured": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-impl",
+      "hostKind": "tmux",
+      "agentKind": "codex",
+      "launchProfileRef": "lp-impl"
+    }
+  },
+  "queried": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-impl",
+      "hostKind": "tmux",
+      "agentKind": "codex",
+      "launchProfileRef": "lp-impl"
+    }
+  },
+  "bound": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-impl",
+      "sessionId": "$0",
+      "anchor": "%0",
+      "generation": 1
+    }
+  },
+  "advanced": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-impl",
+      "sessionId": "$1",
+      "anchor": "%1",
+      "generation": 2
+    }
+  },
+  "stale": {
+    "ok": false,
+    "code": "BINDING_GENERATION_STALE",
+    "owningModule": "members",
+    "retryDisposition": "retryable",
+    "message": "binding generation 2 != expected 1"
+  },
+  "verifiedLive": {
+    "ok": false,
+    "code": "BINDING_HOST_IDENTITY_UNAVAILABLE",
+    "owningModule": "members",
+    "retryDisposition": "terminal",
+    "message": "host adapter did not report an authoritative machine identity"
+  },
+  "restoredLive": {
+    "ok": false,
+    "code": "BINDING_HOST_IDENTITY_UNAVAILABLE",
+    "owningModule": "members",
+    "retryDisposition": "terminal",
+    "message": "host adapter did not report an authoritative machine identity"
+  },
+  "readerConsistent": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-impl",
+      "hostKind": "tmux",
+      "agentKind": "codex",
+      "launchProfileRef": "lp-impl",
+      "bindingGeneration": 2,
+      "sessionId": "$1",
+      "anchor": "%1"
+    }
+  },
+  "crossWorkspace": {
+    "ok": false,
+    "code": "MEMBER_FORBIDDEN_WORKSPACE",
+    "owningModule": "members",
+    "retryDisposition": "terminal",
+    "message": "workspace ws_a829a2dd-51e1-4921-8e1c-864ae6bfd370 is not in the granted scope"
+  },
+  "crossWorkspaceBind": {
+    "ok": false,
+    "code": "MEMBER_FORBIDDEN_WORKSPACE",
+    "owningModule": "members",
+    "retryDisposition": "terminal",
+    "message": "workspace ws_a829a2dd-51e1-4921-8e1c-864ae6bfd370 is not in the granted scope"
+  },
+  "storesEqual": true,
+  "runtimeChanged": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-other",
+      "hostKind": "tmux",
+      "agentKind": "codex",
+      "launchProfileRef": "lp-impl"
+    }
+  },
+  "readerAfterChange": {
+    "ok": false,
+    "code": "MEMBER_BINDING_NOT_FOUND",
+    "owningModule": "members",
+    "retryDisposition": "terminal",
+    "message": "member mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae has no binding"
+  },
+  "reuseOldGeneration": {
+    "ok": false,
+    "code": "BINDING_GENERATION_STALE",
+    "owningModule": "members",
+    "retryDisposition": "retryable",
+    "message": "binding generation 2 != expected 0"
+  },
+  "rebound": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-impl",
+      "sessionId": "$1",
+      "anchor": "%1",
+      "generation": 3
+    }
+  },
+  "reopenedRuntime": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-impl",
+      "hostKind": "tmux",
+      "agentKind": "codex",
+      "launchProfileRef": "lp-impl"
+    }
+  },
+  "reopenedBinding": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_235cb5ac-b3e3-4491-a392-c54873d0fdae",
+      "machineId": "mac-impl",
+      "sessionId": "$1",
+      "anchor": "%1",
+      "generation": 3
+    }
+  },
+  "unavailableVerify": {
+    "ok": false,
+    "code": "BINDING_HOST_UNAVAILABLE",
+    "owningModule": "members",
+    "retryDisposition": "retryable",
+    "message": "host session/anchor is not reachable"
+  },
+  "unavailableRestore": {
+    "ok": false,
+    "code": "BINDING_HOST_UNAVAILABLE",
+    "owningModule": "members",
+    "retryDisposition": "retryable",
+    "message": "host session/anchor is not reachable"
+  },
+  "outcome": "PASS"
+}

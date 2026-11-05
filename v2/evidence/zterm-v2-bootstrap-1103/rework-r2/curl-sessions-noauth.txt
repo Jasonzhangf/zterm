@@ -1,0 +1,9 @@
+HTTP/1.1 401 Unauthorized
+content-type: application/json; charset=utf-8
+cache-control: no-store
+Date: Tue, 03 Nov 2026 10:34:59 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+{"error":{"code":"V2_CREDENTIAL_REQUIRED","owningModule":"daemon","operationId":"auth","cause":"A V2 credential is required.","message":"V2 credential is required."}}

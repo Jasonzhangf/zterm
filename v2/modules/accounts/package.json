@@ -1,0 +1,8 @@
+{
+  "name": "@zterm/v2-accounts",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/contract/*.test.ts tests/integration/*.test.ts"
+  }
+}

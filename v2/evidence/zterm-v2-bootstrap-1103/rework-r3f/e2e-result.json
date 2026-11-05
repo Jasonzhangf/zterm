@@ -1,0 +1,26 @@
+{
+  "status": "PASS",
+  "publicEntry": "http://127.0.0.1:41097",
+  "tmuxSocket": "/tmp/zterm-r2f-v1home-32628/.tmux/run/tmux-501/default",
+  "sessionName": "r2f-real-32628",
+  "gates": {
+    "desktopRendered": true,
+    "inputReachedPane": true,
+    "refreshPreservedSession": true,
+    "mobileLayout": true,
+    "tuiRendered": true,
+    "twoSubscribers": true,
+    "v1AuthBoundary": true
+  },
+  "reused": [
+    "released @jsonstudio/wtermmod-react@0.1.9 renderer",
+    "packages/stream-boundary terminal buffer render runtime"
+  ],
+  "newEvidence": [
+    "real V1 daemon listening log",
+    "real V1 mux frames (hello/ready/list/open/buffer)",
+    "real V2 daemon facade logs and HTTP responses",
+    "Playwright desktop/mobile/TUI screenshots"
+  ],
+  "realV1Daemon": true
+}

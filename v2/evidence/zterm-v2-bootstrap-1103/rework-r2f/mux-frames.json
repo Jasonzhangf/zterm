@@ -1,0 +1,93 @@
+{
+  "sentHello": true,
+  "ready": {
+    "version": 1,
+    "capabilities": {
+      "version": 1,
+      "channelEnvelope": true,
+      "targetMessages": true,
+      "boundedBodyScheduler": true,
+      "bulkChannel": {
+        "version": 1,
+        "label": "zterm-bulk"
+      },
+      "reliableInput": {
+        "version": 1
+      }
+    }
+  },
+  "targetList": {
+    "sessions": [
+      "r2f-real-27758",
+      "r2f-real-27758-big",
+      "r2f-real-27758-mobile"
+    ],
+    "sessionCatalog": [
+      {
+        "name": "r2f-real-27758",
+        "backend": "tmux",
+        "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2227774%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1793720469%7D",
+        "cwd": "/workspaces/4"
+      },
+      {
+        "name": "r2f-real-27758-big",
+        "backend": "tmux",
+        "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2227774%22%2C%22sessionId%22%3A%22%241%22%2C%22createdAt%22%3A1793720469%7D",
+        "cwd": "/workspaces/4"
+      },
+      {
+        "name": "r2f-real-27758-mobile",
+        "backend": "tmux",
+        "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2227774%22%2C%22sessionId%22%3A%22%242%22%2C%22createdAt%22%3A1793720469%7D",
+        "cwd": "/workspaces/4"
+      }
+    ]
+  },
+  "channelOpened": {
+    "channelId": "r2f-probe-channel",
+    "sessionName": "r2f-real-27758-big",
+    "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2227774%22%2C%22sessionId%22%3A%22%241%22%2C%22createdAt%22%3A1793720469%7D",
+    "capabilities": {
+      "reliableInput": {
+        "version": 1
+      }
+    }
+  },
+  "bufferHeads": [
+    {
+      "sessionId": "162bdf11-a45b-474a-9197-3c571bf56da1:r2f-probe-channel",
+      "revision": 1,
+      "latestEndIndex": 704,
+      "availableStartIndex": 0,
+      "availableEndIndex": 704,
+      "cursorKeysApp": false,
+      "cursor": {
+        "rowIndex": 703,
+        "col": 36,
+        "visible": true
+      }
+    }
+  ],
+  "bufferSyncChunks": [
+    {
+      "revision": 1,
+      "frameChunkIndex": 0,
+      "frameChunkCount": 2,
+      "frameStartIndex": 0,
+      "frameEndIndex": 704,
+      "startIndex": 0,
+      "endIndex": 499,
+      "lineCount": 499
+    },
+    {
+      "revision": 1,
+      "frameChunkIndex": 1,
+      "frameChunkCount": 2,
+      "frameStartIndex": 0,
+      "frameEndIndex": 704,
+      "startIndex": 499,
+      "endIndex": 704,
+      "lineCount": 205
+    }
+  ]
+}

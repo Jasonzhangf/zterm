@@ -1,0 +1,9 @@
+HTTP/1.1 404 Not Found
+content-type: application/json; charset=utf-8
+cache-control: no-store
+Date: Tue, 03 Nov 2026 10:34:59 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+Transfer-Encoding: chunked
+
+{"error":{"code":"TARGET_NOT_FOUND","owningModule":"host-adapters","operationId":"capture","cause":{"socketName":"zterm-v2-r2","target":"does-not-exist","detail":"can't find pane: does-not-exist"},"message":"Terminal target was not found."}}
