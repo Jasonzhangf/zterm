@@ -5,12 +5,15 @@ import type {
 } from "../domain/receipt.ts";
 import type {
   DeliveryDependencies,
+  ReceiptQueryAuthorizationResult,
 } from "../ports/dependencies.ts";
 import type { QueryResult } from "../public/delivery-port.ts";
 import { chainFromException } from "./error-chain.ts";
 
 const READ_UNAVAILABLE_EXCEPTION =
   "delivery.persistence.read-unavailable";
+const AUTHORIZATION_QUERY_UNAVAILABLE_EXCEPTION =
+  "delivery.authorization.query-unavailable";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -81,11 +84,20 @@ export async function queryReceipt<AuthContext, TargetAddress>(
   }
 
   const exactRef = freezeDeliveryRef(ref);
-  const authorization =
-    await dependencies.authorization.authorizeReceiptQuery(
-      actor,
-      exactRef,
-    );
+  let authorization: ReceiptQueryAuthorizationResult;
+  try {
+    authorization =
+      await dependencies.authorization.authorizeReceiptQuery(
+        actor,
+        exactRef,
+      );
+  } catch (error) {
+    return {
+      kind: "unavailable",
+      errorRef: AUTHORIZATION_QUERY_UNAVAILABLE_EXCEPTION,
+      errorChain: chainFromException("authorize", error),
+    };
+  }
   if (authorization.kind === "denied") {
     return {
       kind: "denied",

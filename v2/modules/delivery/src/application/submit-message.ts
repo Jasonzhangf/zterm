@@ -6,6 +6,8 @@ import type {
 } from "../domain/receipt.ts";
 import type {
   DeliveryDependencies,
+  SubmissionAuthorizationResult,
+  TargetResolutionResult,
 } from "../ports/dependencies.ts";
 import type {
   AcceptMessageCommand,
@@ -18,6 +20,10 @@ import { chainFromException } from "./error-chain.ts";
 
 const ACCEPTANCE_UNKNOWN_EXCEPTION =
   "delivery.persistence.acceptance-unknown";
+const AUTHORIZATION_SUBMISSION_UNAVAILABLE_EXCEPTION =
+  "delivery.authorization.submit-unavailable";
+const ROUTING_UNAVAILABLE_EXCEPTION =
+  "delivery.routing.resolve-unavailable";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -137,11 +143,20 @@ export async function submitMessage<AuthContext, TargetAddress>(
     return { kind: "rejected", code: "INVALID_INPUT" };
   }
 
-  const authorization =
-    await dependencies.authorization.authorizeSubmission(
-      actor,
-      targetAddress,
-    );
+  let authorization: SubmissionAuthorizationResult;
+  try {
+    authorization =
+      await dependencies.authorization.authorizeSubmission(
+        actor,
+        targetAddress,
+      );
+  } catch {
+    return {
+      kind: "rejected",
+      code: "AUTHORIZATION_UNAVAILABLE",
+      errorRef: AUTHORIZATION_SUBMISSION_UNAVAILABLE_EXCEPTION,
+    };
+  }
   if (authorization.kind === "denied") {
     return {
       kind: "rejected",
@@ -166,10 +181,19 @@ export async function submitMessage<AuthContext, TargetAddress>(
     return { kind: "rejected", code: "INVALID_INPUT" };
   }
 
-  const resolution = await dependencies.routing.resolveTarget({
-    workspaceId: identity.workspaceId,
-    targetAddress,
-  });
+  let resolution: TargetResolutionResult;
+  try {
+    resolution = await dependencies.routing.resolveTarget({
+      workspaceId: identity.workspaceId,
+      targetAddress,
+    });
+  } catch {
+    return {
+      kind: "rejected",
+      code: "ROUTING_UNAVAILABLE",
+      errorRef: ROUTING_UNAVAILABLE_EXCEPTION,
+    };
+  }
   if (resolution.kind === "not-found") {
     return {
       kind: "rejected",

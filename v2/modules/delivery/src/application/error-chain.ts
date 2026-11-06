@@ -3,10 +3,14 @@ import type {
   DeliveryErrorFrame,
 } from "../ports/receipt-store.ts";
 
-export type DeliveryOperation = "accept" | "read";
+export type DeliveryOperation = "accept" | "read" | "authorize";
 
 const MAX_CAUSE_DEPTH = 8;
-const STORE_SOURCE = "delivery-receipt-store";
+const DEFAULT_SOURCE: Readonly<Record<DeliveryOperation, string>> = {
+  accept: "delivery-receipt-store",
+  read: "delivery-receipt-store",
+  authorize: "delivery-authorization",
+};
 const CAUSE_SOURCE = "cause";
 
 function messageOf(value: unknown): string {
@@ -46,7 +50,7 @@ export function chainFromException(
     {
       code: `delivery.${operation}.${codeOf(error, "unknown")}`,
       message: messageOf(error),
-      source: sourceOf(error, STORE_SOURCE),
+      source: sourceOf(error, DEFAULT_SOURCE[operation]),
     },
   ];
 

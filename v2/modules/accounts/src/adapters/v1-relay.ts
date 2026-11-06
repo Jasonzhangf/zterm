@@ -485,7 +485,14 @@ export class V1RelayAdapter implements RelayAuthPort, AccountDirectoryPort, Mach
           }))
           .filter((device) => device.deviceId.length > 0)
       : []
-    const updatedAt = typeof body.updatedAt === 'string' ? body.updatedAt : new Date().toISOString()
+    if (typeof body.updatedAt !== 'string' || body.updatedAt.length === 0) {
+      throw new AccountsError(
+        'RELAY_PROTOCOL_ERROR',
+        502,
+        'relay directory response is missing updatedAt',
+      )
+    }
+    const updatedAt = body.updatedAt
     return {
       schemaVersion: 1,
       user: { id, username },
@@ -498,7 +505,7 @@ export class V1RelayAdapter implements RelayAuthPort, AccountDirectoryPort, Mach
     code: AccountsError['code'],
     status: AccountsError['status'],
     message: string,
-    details?: Readonly<Record<string, unknown>>,
+    details: Readonly<Record<string, unknown>> | undefined,
     cause: unknown,
   ): AccountsError {
     const error = new AccountsError(code, status, message, details)
