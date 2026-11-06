@@ -50,13 +50,13 @@ test('a truly separate process recovers an unknown operation without re-POSTing 
   }
 })
 
-test('a process that exits after issuing the remote POST leaves a durable pending that recovery turns unknown', async () => {
+test('a process that exits at the simulated provider create boundary leaves a durable pending that recovery turns unknown', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'zterm-tickets-crash-'))
   try {
     const filePath = join(dir, 'tickets.sqlite')
 
-    // This child exits inside createTask after the POST is issued but before
-    // the local state commit, exactly the crash window the contract describes.
+    // This child exits at the fake createTask provider boundary before the
+    // local state commit, matching the recoverable interruption window.
     await runChild(['crash-after-post', filePath, String(1000)])
 
     const store = new SqliteBindingStore({ path: filePath })

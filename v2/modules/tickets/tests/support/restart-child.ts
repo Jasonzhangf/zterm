@@ -51,8 +51,8 @@ const client = {
   async createTask() {
     createCalls += 1
     if (mode === 'crash-after-post') {
-      // The remote write has been issued; the process dies before the local
-      // state commit, leaving a durable pending operation with a live lease.
+      // The simulated provider boundary has been reached; the process dies
+      // before the local state commit, leaving a durable pending operation.
       process.exit(0)
     }
     if (mode === 'write') {
