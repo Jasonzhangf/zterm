@@ -307,7 +307,10 @@ export function createTerminalFileTransferListRuntime(
           }, 20);
           return;
         }
-        const bufferedBytes = Math.max(0, Math.floor(transport.bufferedAmount || 0));
+        const laneBufferedBytes = transport.bufferedAmountForLane
+          ? transport.bufferedAmountForLane('bulk')
+          : transport.bufferedAmount || 0;
+        const bufferedBytes = Math.max(0, Math.floor(laneBufferedBytes));
         const holding = draining
           ? bufferedBytes > TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES
           : bufferedBytes >= TRANSPORT_BACKPRESSURE_BUFFERED_BYTES;

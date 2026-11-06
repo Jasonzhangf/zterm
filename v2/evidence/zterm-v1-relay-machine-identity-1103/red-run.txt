@@ -1,0 +1,28 @@
+# Recorded red contract run
+
+Red contract commit:
+`1222aec5c6c927fa6fb213899eff69f5cc8d8ac1cd5f3de53b90f098463c4c5510`
+
+Command recorded during the implementation run:
+
+```sh
+pnpm --dir android exec vitest run src/traversal-relay/machine-identity.test.ts
+```
+
+Observed result before the implementation commit:
+
+```text
+Test Files  1 failed (1)
+Tests       3 failed (3)
+```
+
+The three failures matched the pre-fix contract:
+
+1. Logout expected `200`; the current route returned `404`, and the token
+   remained usable for `/api/auth/me`.
+2. Enrollment challenge expected `200`; the current route returned `404`.
+3. Possession challenge expected `200`; the current route returned `404`.
+
+This is a recorded excerpt because the original full console transcript was not
+retained. The final green transcript is in `test-targeted.txt` and
+`test-full.txt`.

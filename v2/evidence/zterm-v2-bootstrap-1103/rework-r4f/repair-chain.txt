@@ -1,0 +1,38 @@
+Bootstrap R3 rework R4F terminal repair chain probe - fixture socket chain.
+Scope correction (R5): this is a fixture WebSocket driving a real tmux session with
+hand-emitted synthetic frames. It is NOT a real V1 daemon repair response.
+See v2/evidence/zterm-v2-bootstrap-1103/rework-r5/repair-chain.txt for the corrected record.
+Command: node v2/evidence/zterm-v2-bootstrap-1103/rework-r4f/repair-chain-probe.mjs
+
+exitCode: 0
+
+{
+  "committedBeforeRepair": {
+    "count": 1,
+    "revision": 1,
+    "startIndex": 0,
+    "endIndex": 3
+  },
+  "wireRequest": {
+    "knownRevision": 1,
+    "localStartIndex": 0,
+    "localEndIndex": 3,
+    "requestStartIndex": 0,
+    "requestEndIndex": 3
+  },
+  "committedFrames": [
+    {
+      "revision": 1,
+      "startIndex": 0,
+      "endIndex": 3,
+      "text": "a|b|c"
+    },
+    {
+      "revision": 3,
+      "startIndex": 0,
+      "endIndex": 3,
+      "text": "c|d|e"
+    }
+  ],
+  "repairedCommitCount": 1
+}

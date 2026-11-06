@@ -1,0 +1,57 @@
+Command:
+  cd /workspaces/<id>/v2/modules/accounts
+  NODE_PATH=/workspaces/<id>/android/node_modules \
+    node --test tests/contract/*.test.ts tests/integration/*.test.ts
+
+Result: 49 pass, 0 fail, duration 746.549042ms.
+
+Passed:
+  register creates a relay account without issuing or consuming a session token
+  register duplicate username maps to ACCOUNT_EXISTS 409
+  register missing password maps to INVALID_REQUEST 400
+  register missing username maps to INVALID_REQUEST 400
+  register upstream 401 maps to AUTHENTICATION_REQUIRED 401
+  register upstream 403 maps to SESSION_REVOKED 403
+  register upstream 429 maps to RELAY_SERVICE_ERROR 429
+  register upstream 500 maps to RELAY_SERVICE_ERROR 502 with upstream status
+  register bad JSON maps to RELAY_PROTOCOL_ERROR 502
+  verifySession revalidates through /me and backfills the caller token as accessToken
+  login success issues a relay token and an active auth context
+  invalid credentials propagate authority rejection as 401
+  missing, empty, and unknown tokens are rejected as authentication required
+  logout revokes the relay bearer session
+  listAuthorizedMachines maps the account directory scoped to the authenticated account
+  one account cannot see another account devices
+  enrollMachine rejects an empty device id before any registration
+  enrollMachine requires proof-of-possession material
+  enrollMachine rejects a device already owned by this account
+  enrollMachine returns the canonical relay machine identity
+  enrollMachine preserves a cross-account canonical proof conflict
+  verifyMachinePossession returns the owner machine or preserves rejection
+  verifyMachinePossession rejects missing machine or proof material
+  revokeMachine returns a revoked machine and preserves owner rejection
+  missing or invalid token is rejected before list, enroll, possession, or revoke work
+  cross-account grant and revoke are disabled, but the token is verified first
+  V1 relay valid login maps 200 to a session
+  V1 relay login 401 remains authentication required
+  V1 relay /me 403 remains session revoked
+  V1 relay fetch failure maps to transport error and preserves cause
+  V1 relay upstream 500 maps to service error with upstream status
+  V1 relay upstream 429 maps to service error with upstream status
+  V1 relay bad JSON maps to protocol error and preserves parse cause
+  V1 relay 200 missing required session fields maps to protocol error
+  V1 relay malformed directory maps to protocol error
+  V1 relay directory envelope maps the real server shape
+  V1 relay register maps 201 to account info without a session
+  V1 relay register duplicate maps 400 to account exists
+  V1 relay register required field maps 400 to invalid request
+  V1 relay register keeps 401 and 403 authorization classifications
+  V1 relay register keeps 429 and 500 service classifications
+  V1 relay register bad JSON maps to protocol error
+  V1 relay /me without accessToken backfills the caller token
+  machine relay 403 codes remain canonical typed rejections
+  machine relay canonical 409 codes remain typed conflicts
+  machine relay 404 machine_not_found remains a typed missing machine
+  machine relay unreadable 403 is a protocol error, not a revoked session
+  machine adapter forwards bearer authority and canonical request bodies
+  real V1 relay proves enrollment, possession, owner revoke, and logout

@@ -1,0 +1,11 @@
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.0[39m [90m/workspaces/4/v2/modules/connections[39m
+
+ [32m✓[39m tests/integration/real-daemon.test.ts [2m ([22m[2m3 tests[22m[2m)[22m[90m 97[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 23:35:16
+[2m   Duration [22m 394ms[2m (transform 120ms, setup 0ms, collect 150ms, tests 97ms, environment 0ms, prepare 63ms)[22m
+
+REAL_EXIT=0

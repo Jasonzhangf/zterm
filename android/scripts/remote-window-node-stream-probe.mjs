@@ -5,7 +5,7 @@ const wrtc = require('@roamhq/wrtc');
 const { RTCPeerConnection, RTCVideoSink } = wrtc;
 const nonstandard = wrtc.nonstandard || {};
 const Sink = RTCVideoSink || nonstandard.RTCVideoSink;
-const token = 'wterm-4123456';
+const token = process.env.ZTERM_AUTH_TOKEN || 'wterm-redacted-test-token';
 const open = (p) => new Promise((res, rej) => { const ws = new WebSocket(`ws://127.0.0.1:4333${p}?token=${token}`); ws.on('open', () => res(ws)); ws.on('error', rej); });
 const control = await open('/ws');
 let ticket = null;

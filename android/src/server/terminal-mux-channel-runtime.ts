@@ -5,9 +5,11 @@ import {
   buildTerminalMuxServerTargetMessage,
   isTerminalMuxClientFrame,
   validateTerminalMuxChannelEnvelope,
+  isTerminalMuxBulkMessageType,
   type TerminalMuxClientFrame,
   type TerminalMuxServerFrame,
   type TerminalTransportServerFrame,
+  type TerminalTransportLane,
 } from '@zterm/shared/protocol';
 import type { BridgeServerMessage as ServerMessage } from '@zterm/shared/protocol';
 import type { SessionMirror } from './terminal-runtime-types';
@@ -34,6 +36,7 @@ export interface TerminalMuxChannelRuntimeDeps {
   sendTransportMessage: (
     transport: TerminalSessionTransport | null | undefined,
     message: TerminalTransportServerFrame,
+    lane?: TerminalTransportLane,
   ) => void;
   createMuxChannelSubscriber: (
     connection: TerminalTransportConnection,
@@ -61,14 +64,28 @@ export interface TerminalMuxChannelRuntimeDeps {
 }
 
 export interface TerminalMuxChannelRuntime {
-  sendMuxFrame: (connection: TerminalTransportConnection, frame: TerminalMuxServerFrame) => void;
+  sendMuxFrame: (
+    connection: TerminalTransportConnection,
+    frame: TerminalMuxServerFrame,
+    lane?: TerminalTransportLane,
+  ) => void;
   handleMuxFrame: (connection: DaemonTransportConnection, candidate: unknown) => Promise<void>;
 }
 
 export function createTerminalMuxChannelRuntime(
   deps: TerminalMuxChannelRuntimeDeps,
 ): TerminalMuxChannelRuntime {
-  function sendMuxFrame(connection: TerminalTransportConnection, frame: TerminalMuxServerFrame) {
+  function sendMuxFrame(
+    connection: TerminalTransportConnection,
+    frame: TerminalMuxServerFrame,
+    lane: TerminalTransportLane = 'control',
+  ) {
+    // Only bulk frames carry an explicit lane. Control is the transport
+    // default, so keep the historical two-argument send contract intact.
+    if (lane === 'bulk') {
+      deps.sendTransportMessage(connection.transport, frame, 'bulk');
+      return;
+    }
     deps.sendTransportMessage(connection.transport, frame);
   }
 
@@ -118,7 +135,17 @@ export function createTerminalMuxChannelRuntime(
         get bufferedAmount() {
           return Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
         },
-        sendText(text: string) {
+        bufferedAmountForLane(lane) {
+          return connection.transport.bufferedAmountForLane
+            ? connection.transport.bufferedAmountForLane(lane)
+            : Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
+        },
+        isLaneOpen(lane) {
+          return connection.transport.isLaneOpen
+            ? connection.transport.isLaneOpen(lane)
+            : lane === 'control' && connection.transport.readyState === 1;
+        },
+        sendText(text: string, lane: TerminalTransportLane = 'control') {
           let message: ServerMessage;
           try {
             message = JSON.parse(text) as ServerMessage;
@@ -135,6 +162,7 @@ export function createTerminalMuxChannelRuntime(
               message as Parameters<typeof buildTerminalMuxServerTargetMessage>[0],
               requestId,
             ),
+            isTerminalMuxBulkMessageType(message.type) ? 'bulk' : lane,
           );
         },
         close: connection.transport.close,

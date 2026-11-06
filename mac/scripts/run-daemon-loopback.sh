@@ -12,7 +12,7 @@ fi
 
 HOST="${ZTERM_LAB_HOST:-127.0.0.1}"
 PORT="${ZTERM_LAB_PORT:-3333}"
-TOKEN="${ZTERM_AUTH_TOKEN:-wterm-4123456}"
+TOKEN="${ZTERM_AUTH_TOKEN:?ZTERM_AUTH_TOKEN is required}"
 
 echo "[run-daemon-loopback] host=$HOST port=$PORT"
 

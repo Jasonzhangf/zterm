@@ -838,8 +838,9 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
     });
   });
 
-  it('calls confirmTransportReady on mux-ready when the socket supports it', () => {
+  it('calls confirmTransportReady and enables bulk on capable mux-ready', () => {
     const confirmTransportReady = vi.fn();
+    const enableBulkChannel = vi.fn(() => true);
     const ws = {
       readyState: WebSocket.OPEN,
       onopen: null,
@@ -847,6 +848,7 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
       onerror: null,
       onclose: null,
       confirmTransportReady,
+      enableBulkChannel,
       getDiagnostics: () => ({ reason: '' }),
     } as any;
 
@@ -886,12 +888,18 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
         type: 'mux-ready',
         payload: {
           version: 1,
-          capabilities: { version: 1, channelEnvelope: true, targetMessages: true },
+          capabilities: {
+            version: 1,
+            channelEnvelope: true,
+            targetMessages: true,
+            bulkChannel: { version: 1, label: 'zterm-bulk' },
+          },
         },
       }),
     });
 
     expect(confirmTransportReady).toHaveBeenCalledTimes(1);
+    expect(enableBulkChannel).toHaveBeenCalledTimes(1);
   });
 
   it('does not throw when confirmTransportReady is absent on mux-ready', () => {

@@ -1,0 +1,30 @@
+{
+  "sessions": {
+    "status": 502,
+    "body": {
+      "error": {
+        "code": "V1_CONNECTION_AUTH_FAILED",
+        "owningModule": "terminal",
+        "operationId": "v1-mux-client",
+        "cause": {
+          "detail": "V1 daemon rejected the mux credential."
+        },
+        "message": "V1 mux connection authentication failed."
+      }
+    }
+  },
+  "input": {
+    "status": 502,
+    "body": {
+      "error": {
+        "code": "V1_CONNECTION_AUTH_FAILED",
+        "owningModule": "terminal",
+        "operationId": "v1-mux-client",
+        "cause": {
+          "detail": "V1 daemon rejected the mux credential."
+        },
+        "message": "V1 mux connection authentication failed."
+      }
+    }
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "ok": true,
+  "endpoint": "http://127.0.0.1:38213",
+  "cases": [
+    {
+      "name": "logout-current-session",
+      "status": 200
+    },
+    {
+      "name": "me-after-logout",
+      "status": 401
+    },
+    {
+      "name": "enroll-canonical-owner",
+      "status": 200,
+      "ownerMatches": true,
+      "returnedMachineId": true
+    },
+    {
+      "name": "same-account-idempotent-enrollment",
+      "status": 200,
+      "sameMachineId": true
+    },
+    {
+      "name": "cross-account-proof-reuse",
+      "status": 409,
+      "code": "machine_already_owned"
+    },
+    {
+      "name": "wrong-possession-proof",
+      "status": 403,
+      "code": "possession_invalid"
+    },
+    {
+      "name": "valid-possession-proof",
+      "status": 200,
+      "sameMachineId": true
+    },
+    {
+      "name": "foreign-machine-revoke",
+      "status": 403,
+      "code": "machine_not_owned"
+    },
+    {
+      "name": "owner-machine-revoke",
+      "status": 200,
+      "machineStatus": "revoked"
+    },
+    {
+      "name": "possession-after-revoke",
+      "status": 403,
+      "code": "machine_revoked"
+    }
+  ],
+  "persistence": {
+    "machineRecords": 1,
+    "machineStatus": "revoked",
+    "proofMaterialPersistedAsPlaintext": false
+  }
+}
+relay-machine-identity-blackbox-ok

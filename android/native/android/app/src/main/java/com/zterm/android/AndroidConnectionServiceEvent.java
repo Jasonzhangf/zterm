@@ -99,11 +99,18 @@ public final class AndroidConnectionServiceEvent {
     public static AndroidConnectionServiceEvent transportFlowChanged(
         String generation, long nativeBufferedBytes, long serviceQueuedBytes,
         long serviceQueuedFrames, boolean backpressured, long sampledAt) {
+        return transportFlowChanged(generation, nativeBufferedBytes, serviceQueuedBytes,
+            serviceQueuedFrames, backpressured, false, sampledAt);
+    }
+
+    public static AndroidConnectionServiceEvent transportFlowChanged(
+        String generation, long nativeBufferedBytes, long serviceQueuedBytes,
+        long serviceQueuedFrames, boolean backpressured, boolean sendStalled, long sampledAt) {
         return new Builder(Type.TRANSPORT_FLOW_CHANGED)
             .generation(generation)
             .flowObservation(new AndroidConnectionServiceSnapshot.FlowObservation(
                 nativeBufferedBytes, serviceQueuedBytes, serviceQueuedFrames,
-                backpressured, sampledAt))
+                backpressured, sendStalled, sampledAt))
             .build();
     }
 

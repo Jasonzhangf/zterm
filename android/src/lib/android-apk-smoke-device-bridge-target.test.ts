@@ -122,7 +122,7 @@ describe('android apk smoke device bridge target parser', () => {
       'bridge-settings',
       ':l{"targetHost":"100.66.1.82",',
       '$Port":3333',
-      '0AuthToken":"wterm-4123456","xCacheLines":3000}',
+      '0AuthToken":"wterm-redacted-test-token","xCacheLines":3000}',
       '_http://localhost',
       'zterm:open-tabs7R',
       '[{"sessionId":',
@@ -135,7 +135,7 @@ describe('android apk smoke device bridge target parser', () => {
       source: 'open-tab',
       bridgeHost: '100.66.1.82',
       bridgePort: 3333,
-      authToken: 'wterm-4123456',
+      authToken: 'wterm-redacted-test-token',
       sessionId: 'session-1778544465921-yq0l9dr6',
     }));
   });
@@ -151,7 +151,7 @@ describe('android apk smoke device bridge target parser', () => {
       'bridge-settings',
       ':l{"targetHost":"100.66.1.82",',
       '$Port":3333',
-      '0AuthToken":"wterm-4123456","xCacheLines":3000}',
+      '0AuthToken":"wterm-redacted-test-token","xCacheLines":3000}',
       '_http://localhost',
       'zterm:open-tabs',
       'T[]',
@@ -162,7 +162,7 @@ describe('android apk smoke device bridge target parser', () => {
       source: 'bridge-settings-target',
       bridgeHost: '100.66.1.82',
       bridgePort: 3333,
-      authToken: 'wterm-4123456',
+      authToken: 'wterm-redacted-test-token',
     }));
     expect(parsed.target).not.toEqual(expect.objectContaining({
       sessionId: 'session-1778544465921-yq0l9dr6',

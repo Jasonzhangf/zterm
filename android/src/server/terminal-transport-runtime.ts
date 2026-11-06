@@ -3,7 +3,9 @@ import { WebSocket } from 'ws';
 import type {
   BridgeServerMessage as ServerMessage,
   TerminalTransportServerFrame,
+  TerminalTransportLane,
 } from '@zterm/shared/protocol';
+import { isTerminalMuxBulkMessageType } from '@zterm/shared/protocol';
 import type { TerminalPerformanceTraceRecord } from '@zterm/shared/terminal/performance-trace';
 import type {
   TerminalTransportSubscriber,
@@ -49,8 +51,21 @@ export interface TerminalTransportRuntimeDeps {
 export interface TerminalTransportRuntime {
   createWebSocketSessionTransport: (ws: WebSocket) => TerminalSessionTransport;
   createRtcSessionTransport: (transport: RtcServerTransport) => TerminalSessionTransport;
-  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
-  sendText: (transport: TerminalSessionTransport | null | undefined, text: string) => void;
+  sendTransportMessage: (
+    transport: TerminalSessionTransport | null | undefined,
+    message: TerminalTransportServerFrame,
+    lane?: TerminalTransportLane,
+  ) => void;
+  sendText: (
+    transport: TerminalSessionTransport | null | undefined,
+    text: string,
+    lane?: TerminalTransportLane,
+  ) => void;
+  sendTextLane: (
+    transport: TerminalSessionTransport | null | undefined,
+    text: string,
+    lane: TerminalTransportLane,
+  ) => void;
   sendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
   createTransportConnection: (
@@ -68,13 +83,31 @@ export function estimateTransportMessageBytes(text: string) {
   return Buffer.byteLength(text, 'utf8');
 }
 
+function resolveServerFrameLane(message: TerminalTransportServerFrame): TerminalTransportLane {
+  if (message.type === 'mux-channel-message') {
+    return isTerminalMuxBulkMessageType(message.payload.message.type) ? 'bulk' : 'control';
+  }
+  if (message.type === 'mux-target-message') {
+    return isTerminalMuxBulkMessageType(message.payload.message.type) ? 'bulk' : 'control';
+  }
+  return isTerminalMuxBulkMessageType(message.type) ? 'bulk' : 'control';
+}
+
 export function readTerminalTransportBackpressureSnapshot(
   transport: TerminalSessionTransport | null | undefined,
+  lane: TerminalTransportLane = 'control',
 ): TerminalTransportBackpressureSnapshot | null {
   if (!transport) {
     return null;
   }
-  const bufferedBytes = Math.max(0, Math.floor(transport.bufferedAmount || 0));
+  const bufferedBytes = Math.max(
+    0,
+    Math.floor(
+      transport.bufferedAmountForLane
+        ? transport.bufferedAmountForLane(lane)
+        : transport.bufferedAmount || 0,
+    ),
+  );
   const flowUnknown = !!transport.flowUnknown;
   const backpressure = bufferedBytes >= TRANSPORT_BACKPRESSURE_BUFFERED_BYTES;
   if (backpressure) {
@@ -150,7 +183,21 @@ export function createTerminalTransportRuntime(
       get bufferedAmount() {
         return Math.max(0, Math.floor(transport.bufferedAmount || 0));
       },
-      sendText(text: string) {
+      bufferedAmountForLane(lane) {
+        return transport.bufferedAmountForLane
+          ? transport.bufferedAmountForLane(lane)
+          : Math.max(0, Math.floor(transport.bufferedAmount || 0));
+      },
+      isLaneOpen(lane) {
+        return transport.isLaneOpen
+          ? transport.isLaneOpen(lane)
+          : lane === 'control' && transport.readyState === WebSocket.OPEN;
+      },
+      sendText(text: string, lane: TerminalTransportLane = 'control') {
+        if (lane === 'bulk' && transport.bufferedAmountForLane) {
+          transport.sendText(text, 'bulk');
+          return;
+        }
         transport.sendText(text);
       },
       close(reason?: string) {
@@ -159,19 +206,24 @@ export function createTerminalTransportRuntime(
     };
   }
 
-  function sendTransportMessage(transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) {
+  function sendTransportMessage(
+    transport: TerminalSessionTransport | null | undefined,
+    message: TerminalTransportServerFrame,
+    laneOverride?: TerminalTransportLane,
+  ) {
     if (!transport || transport.readyState !== WebSocket.OPEN) {
       return;
     }
     const text = JSON.stringify(message);
     const bytes = estimateTransportMessageBytes(text);
+    const lane: TerminalTransportLane = laneOverride ?? resolveServerFrameLane(message);
     try {
-      transport.sendText(text);
+      transport.sendText(text, lane);
       transport.lastSendAt = Date.now();
       transport.lastSendBytes = bytes;
       transport.totalSendBytes = Math.max(0, Math.floor(transport.totalSendBytes || 0)) + bytes;
       transport.lastSendError = null;
-      readTerminalTransportBackpressureSnapshot(transport);
+      readTerminalTransportBackpressureSnapshot(transport, lane);
     } catch (error) {
       transport.lastSendAt = Date.now();
       transport.lastSendBytes = bytes;
@@ -180,18 +232,30 @@ export function createTerminalTransportRuntime(
     }
   }
 
-  function sendText(transport: TerminalSessionTransport | null | undefined, text: string) {
+  function sendText(
+    transport: TerminalSessionTransport | null | undefined,
+    text: string,
+    lane: TerminalTransportLane = 'control',
+  ) {
+    sendTextLane(transport, text, lane);
+  }
+
+  function sendTextLane(
+    transport: TerminalSessionTransport | null | undefined,
+    text: string,
+    lane: TerminalTransportLane,
+  ) {
     if (!transport || transport.readyState !== WebSocket.OPEN) {
       return;
     }
     const bytes = estimateTransportMessageBytes(text);
     try {
-      transport.sendText(text);
+      transport.sendText(text, lane);
       transport.lastSendAt = Date.now();
       transport.lastSendBytes = bytes;
       transport.totalSendBytes = Math.max(0, Math.floor(transport.totalSendBytes || 0)) + bytes;
       transport.lastSendError = null;
-      readTerminalTransportBackpressureSnapshot(transport);
+      readTerminalTransportBackpressureSnapshot(transport, lane);
     } catch (error) {
       transport.lastSendAt = Date.now();
       transport.lastSendBytes = bytes;
@@ -224,7 +288,7 @@ export function createTerminalTransportRuntime(
           lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
           transportKind: session.transport.kind,
         });
-        sendText(session.transport, text);
+        sendTextLane(session.transport, text, isTerminalMuxBulkMessageType(message.type) ? 'bulk' : 'control');
         deps.recordPerformanceTrace?.({
           sessionId: session.id,
           traceId,
@@ -283,6 +347,7 @@ export function createTerminalTransportRuntime(
     createWebSocketSessionTransport,
     createRtcSessionTransport,
     sendText,
+    sendTextLane,
     sendTransportMessage,
     sendMessage,
     broadcastRuntimeDebugControl,

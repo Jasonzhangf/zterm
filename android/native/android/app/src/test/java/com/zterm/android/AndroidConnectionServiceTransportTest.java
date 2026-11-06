@@ -26,6 +26,37 @@ public final class AndroidConnectionServiceTransportTest {
     private static final java.util.function.BiConsumer<Runnable, Long> IMMEDIATE_SCHEDULER =
         (runnable, delayMillis) -> runnable.run();
 
+    private static class FakeDataChannel extends org.webrtc.DataChannel {
+        private final long bufferedAmount;
+
+        FakeDataChannel(long bufferedAmount) {
+            super(0L);
+            this.bufferedAmount = Math.max(0L, bufferedAmount);
+        }
+
+        @Override
+        public long bufferedAmount() {
+            return bufferedAmount;
+        }
+
+        @Override
+        public State state() {
+            return State.OPEN;
+        }
+
+        @Override
+        public void unregisterObserver() {
+        }
+
+        @Override
+        public void close() {
+        }
+
+        @Override
+        public void dispose() {
+        }
+    }
+
     private static void useImmediateScheduler(AndroidConnectionService service) throws Exception {
         setField(service, "sendRetryScheduler", IMMEDIATE_SCHEDULER);
     }
@@ -2903,6 +2934,192 @@ public final class AndroidConnectionServiceTransportTest {
         }
     }
 
+    @Test
+    public void openRtcLowQueueRepeatedSendFalseBoundsRetriesPublishesSendStalledAndClearsOnRecoveryOrTeardown()
+        throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            java.util.List<Runnable> scheduledRetries = new java.util.ArrayList<>();
+            setField(service, "sendRetryScheduler",
+                (java.util.function.BiConsumer<Runnable, Long>) (runnable, delayMillis) ->
+                    scheduledRetries.add(runnable));
+
+            AndroidConnectionServiceTarget target = target("target-open-low-queue-stall");
+            Object runtime = newRuntime(service, target,
+                AndroidConnectionServiceRoutePolicy.manual(
+                    AndroidConnectionServiceRoutePolicy.Path.RTC_DIRECT));
+            AndroidConnectionStateMachine stateMachine = readyStateMachine(target);
+            setField(runtime, "stateMachine", stateMachine);
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+
+            AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+                null, null, "wss://relay.example/client", new JSONArray(), "all",
+                true, new AndroidRtcTransportBackend.Listener() {
+                    @Override public void onRtcOpen() { }
+                    @Override public void onRtcText(String text) { }
+                    @Override public void onRtcError(String message) { }
+                    @Override public void onRtcClosed(int code, String reason) { }
+                });
+            backend.simulateDataChannelStateForTests(org.webrtc.DataChannel.State.OPEN);
+            Field bufferedBytesField = AndroidRtcTransportBackend.class
+                .getDeclaredField("bufferedBytes");
+            bufferedBytesField.setAccessible(true);
+            bufferedBytesField.setLong(backend, 4096L);
+
+            java.util.concurrent.atomic.AtomicBoolean allowSend =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+            java.util.List<String> attemptedTexts = new java.util.ArrayList<>();
+            java.util.List<String> sentTexts = new java.util.ArrayList<>();
+            backend.setSendTextOverrideForTests(text -> {
+                attemptedTexts.add(text);
+                if (allowSend.get()) {
+                    sentTexts.add(text);
+                    return true;
+                }
+                return false;
+            });
+            setField(runtime, "rtcBackend", backend);
+
+            setDesiredChannel(runtime, "channel-a", "shell-a");
+            setDesiredChannelOpened(runtime, "channel-a", true);
+
+            sendChannelMessage(runtime, "channel-a", new JSONObject().put("seq", 1));
+            assertEquals("head frame must attempt a send", 1, attemptedTexts.size());
+            sendChannelMessage(runtime, "channel-a", new JSONObject().put("seq", 2));
+
+            int iterations = 0;
+            while (iterations < scheduledRetries.size() && iterations < 10) {
+                scheduledRetries.get(iterations).run();
+                iterations++;
+            }
+
+            assertEquals(
+                "OPEN low-queue sendText()==false must stop at SEND_RETRY_MAX attempts (1 initial + 2 retries)",
+                AndroidConnectionService.SEND_RETRY_MAX, attemptedTexts.size());
+            assertFalse("retry timer loop must stop after bounded low-queue stalls",
+                Boolean.TRUE.equals(field(runtime, "sendRetryPending")));
+
+            AndroidConnectionServiceSnapshot stalledSnapshot = stateMachine.readSnapshot();
+            assertTrue("OPEN low-queue stall must stay connected",
+                stalledSnapshot.state == AndroidConnectionServiceSnapshot.State.MUX_READY
+                    || stalledSnapshot.state == AndroidConnectionServiceSnapshot.State.CHANNELS_READY
+                    || stalledSnapshot.state == AndroidConnectionServiceSnapshot.State.HEALTHY);
+            assertFalse("OPEN low-queue stall must not escalate to reconnect",
+                stalledSnapshot.state == AndroidConnectionServiceSnapshot.State.BACKOFF_RECONNECT);
+            assertEquals("gen-1", stalledSnapshot.generation);
+            AndroidConnectionServiceSnapshot.FlowObservation stalledFlow =
+                stalledSnapshot.transportFlow;
+            assertNotNull("low-queue stall must publish a typed flow observation", stalledFlow);
+            assertFalse("low-queue stall is not high-water backpressure", stalledFlow.backpressured);
+            assertTrue("low-queue stall must raise sendStalled", stalledFlow.sendStalled);
+            assertEquals("stall must record the native buffered bytes at entry",
+                4096L, stalledFlow.nativeBufferedBytes);
+            assertEquals("head frame plus queued second frame both stay queued",
+                2L, stalledFlow.serviceQueuedFrames);
+
+            // Equal or higher buffered callbacks below the high watermark are not
+            // evidence of drain. They must keep the parked head and queue intact.
+            allowSend.set(true);
+            Method handleRtcFlowChanged = runtime.getClass().getDeclaredMethod(
+                "handleRtcFlowChanged", long.class, long.class);
+            handleRtcFlowChanged.setAccessible(true);
+            handleRtcFlowChanged.invoke(runtime, 4096L, System.currentTimeMillis());
+
+            AndroidConnectionServiceSnapshot equalFlowSnapshot = stateMachine.readSnapshot();
+            assertTrue("equal buffered observation must keep sendStalled",
+                equalFlowSnapshot.transportFlow.sendStalled);
+            assertEquals("equal buffered observation must keep both frames queued",
+                2L, equalFlowSnapshot.transportFlow.serviceQueuedFrames);
+            assertEquals("equal buffered observation must not send the parked head",
+                0, sentTexts.size());
+            assertEquals("equal buffered observation must keep the stall baseline",
+                4096L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+
+            handleRtcFlowChanged.invoke(runtime, 8192L, System.currentTimeMillis());
+
+            AndroidConnectionServiceSnapshot higherFlowSnapshot = stateMachine.readSnapshot();
+            assertTrue("higher but below-high-water buffered observation must keep sendStalled",
+                higherFlowSnapshot.transportFlow.sendStalled);
+            assertEquals("higher buffered observation must keep both frames queued",
+                2L, higherFlowSnapshot.transportFlow.serviceQueuedFrames);
+            assertEquals("higher buffered observation must not send the parked head",
+                0, sentTexts.size());
+            assertEquals("higher buffered observation must keep the stall baseline",
+                4096L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+
+            // A strict decrease proves drain and resumes the parked FIFO.
+            bufferedBytesField.setLong(backend, 2048L);
+            handleRtcFlowChanged.invoke(runtime, 2048L, System.currentTimeMillis());
+
+            AndroidConnectionServiceSnapshot recoveredSnapshot = stateMachine.readSnapshot();
+            assertFalse("strict buffered decrease must clear sendStalled",
+                recoveredSnapshot.transportFlow.sendStalled);
+            assertEquals("strict buffered decrease must reset the stall baseline",
+                -1L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+            assertEquals("all parked frames must drain after recovery",
+                0L, recoveredSnapshot.transportFlow.serviceQueuedFrames);
+            assertEquals("both frames must be sent in FIFO order", 2, sentTexts.size());
+            assertEquals(1, frameSeq(sentTexts.get(0)));
+            assertEquals(2, frameSeq(sentTexts.get(1)));
+            assertEquals("gen-1", recoveredSnapshot.generation);
+
+            // Re-establish a stall so the teardown/generation resets can be asserted.
+            allowSend.set(false);
+            bufferedBytesField.setLong(backend, 4096L);
+            int retryCursor = scheduledRetries.size();
+            sendChannelMessage(runtime, "channel-a", new JSONObject().put("seq", 3));
+            while (retryCursor < scheduledRetries.size() && retryCursor < 20) {
+                scheduledRetries.get(retryCursor).run();
+                retryCursor++;
+            }
+            assertTrue("re-stall must be active before reset checks",
+                Boolean.TRUE.equals(field(runtime, "sendStalled")));
+            assertEquals("re-stall must record its own buffered baseline",
+                4096L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+
+            Method transportFailure = runtime.getClass().getDeclaredMethod(
+                "transportFailure", String.class, String.class);
+            transportFailure.setAccessible(true);
+            transportFailure.invoke(runtime, "test-stall", "forced transport failure");
+            assertFalse("transportFailure must clear sendStalled",
+                Boolean.TRUE.equals(field(runtime, "sendStalled")));
+            assertEquals("transportFailure must clear the stall baseline",
+                -1L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+
+            setField(runtime, "sendStalled", true);
+            setField(runtime, "sendStalledBufferedBytes", 4096L);
+            Method resetAttemptState = runtime.getClass().getDeclaredMethod("resetAttemptState");
+            resetAttemptState.setAccessible(true);
+            resetAttemptState.invoke(runtime);
+            assertFalse("resetAttemptState must clear sendStalled",
+                Boolean.TRUE.equals(field(runtime, "sendStalled")));
+            assertEquals("resetAttemptState must clear the stall baseline",
+                -1L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+
+            setField(runtime, "sendStalled", true);
+            setField(runtime, "sendStalledBufferedBytes", 4096L);
+            runtime.getClass().getDeclaredMethod("close", String.class)
+                .invoke(runtime, "service-close");
+            assertFalse("close must clear sendStalled",
+                Boolean.TRUE.equals(field(runtime, "sendStalled")));
+            assertEquals("close must clear the stall baseline",
+                -1L, ((Number) field(runtime, "sendStalledBufferedBytes")).longValue());
+
+            backend.closeQuietly("test");
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
+    private static int frameSeq(String text) throws Exception {
+        return new JSONObject(text)
+            .getJSONObject("payload").getJSONObject("message").getInt("seq");
+    }
+
     private static void registerRuntime(
         AndroidConnectionService service, String targetKey, Object runtime
     ) throws Exception {
@@ -2944,11 +3161,151 @@ public final class AndroidConnectionServiceTransportTest {
         sendChannelMessage.invoke(runtime, channelId, new JSONObject().put("text", "hello"));
     }
 
+    private static void sendChannelMessage(Object runtime, String channelId, JSONObject message)
+        throws Exception {
+        Method sendChannelMessage = runtime.getClass().getDeclaredMethod(
+            "sendChannelMessage", String.class, JSONObject.class);
+        sendChannelMessage.setAccessible(true);
+        sendChannelMessage.invoke(runtime, channelId, message);
+    }
+
     private static void invokeRetireForNetworkChange(Object runtime, String reason)
         throws Exception {
         Method retire = runtime.getClass().getDeclaredMethod(
             "retireForNetworkChange", String.class);
         retire.setAccessible(true);
         retire.invoke(runtime, reason);
+    }
+
+    @Test
+    public void resolveClientFrameLaneClassifiesBulkPayloadsWithoutCrossingLane() throws Exception {
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(null));
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject().put("type", "mux-hello")));
+        assertEquals(AndroidRtcTransportBackend.LANE_BULK,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject().put("type", "mux-channel-binary")));
+        assertEquals(AndroidRtcTransportBackend.LANE_BULK,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject()
+                    .put("type", "mux-channel-message")
+                    .put("payload", new JSONObject()
+                        .put("message", new JSONObject().put("type", "buffer-sync")))));
+        for (String type : new String[] {
+            "file-download-complete",
+            "file-download-error",
+            "file-upload-start",
+            "file-upload-end",
+            "attach-file-start",
+            "paste-image-start"
+        }) {
+            assertEquals("boundary message must share the bulk transfer stream: " + type,
+                AndroidRtcTransportBackend.LANE_BULK,
+                AndroidConnectionService.resolveClientFrameLane(
+                    new JSONObject()
+                        .put("type", "mux-channel-message")
+                        .put("payload", new JSONObject()
+                            .put("message", new JSONObject().put("type", type)))));
+        }
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject()
+                    .put("type", "mux-channel-message")
+                    .put("payload", new JSONObject()
+                        .put("message", new JSONObject().put("type", "file-download-request")))));
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject()
+                    .put("type", "mux-channel-message")
+                    .put("payload", new JSONObject()
+                        .put("message", new JSONObject().put("type", "file-upload-progress")))));
+        assertEquals(AndroidRtcTransportBackend.LANE_CONTROL,
+            AndroidConnectionService.resolveClientFrameLane(
+                new JSONObject()
+                    .put("type", "mux-channel-message")
+                    .put("payload", new JSONObject()
+                        .put("message", new JSONObject().put("type", "input")))));
+    }
+
+    @Test
+    public void controlLaneSendsWhileBulkIsCongested() throws Exception {
+        AndroidConnectionService.resetForTests();
+        try {
+            AndroidConnectionService service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            AndroidConnectionServiceTarget target = target("target-control-bypass");
+            Object runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine", readyStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+
+            AndroidRtcTransportBackend backend = new AndroidRtcTransportBackend(
+                null, null, "wss://relay.example/client", new JSONArray(), "all",
+                true, new AndroidRtcTransportBackend.Listener() {
+                    @Override public void onRtcOpen() { }
+                    @Override public void onRtcText(String text) { }
+                    @Override public void onRtcError(String message) { }
+                    @Override public void onRtcClosed(int code, String reason) { }
+                });
+            backend.simulateDataChannelStateForTests(org.webrtc.DataChannel.State.OPEN);
+            List<String> sentLanes = new ArrayList<>();
+            setField(backend, "dataChannel", new FakeDataChannel(0L) {
+                @Override
+                public boolean send(org.webrtc.DataChannel.Buffer buffer) {
+                    sentLanes.add(AndroidRtcTransportBackend.LANE_CONTROL);
+                    return true;
+                }
+            });
+            setField(backend, "bulkDataChannel", new FakeDataChannel(140_000L) {
+                @Override
+                public boolean send(org.webrtc.DataChannel.Buffer buffer) {
+                    sentLanes.add(AndroidRtcTransportBackend.LANE_BULK);
+                    return true;
+                }
+            });
+            setField(backend, "bulkDataChannelState", org.webrtc.DataChannel.State.OPEN);
+            setField(runtime, "rtcBackend", backend);
+            setField(runtime, "sendRetryPending", true);
+            setField(runtime, "retryPendingLane", AndroidRtcTransportBackend.LANE_BULK);
+            setField(runtime, "congestionDraining", true);
+
+            sendTargetMessage(runtime, "request-control-bypass");
+
+            assertEquals("control frame must not wait behind bulk congestion",
+                1, sentLanes.size());
+            assertEquals("control bypass must send on the control lane",
+                AndroidRtcTransportBackend.LANE_CONTROL, sentLanes.get(0));
+            assertEquals("bulk retry must remain parked after control bypass",
+                Boolean.TRUE, field(runtime, "sendRetryPending"));
+            assertEquals("bulk retry lane must survive control bypass",
+                AndroidRtcTransportBackend.LANE_BULK, field(runtime, "retryPendingLane"));
+            assertEquals("bulk congestion-draining state must survive control bypass",
+                Boolean.TRUE, field(runtime, "congestionDraining"));
+
+            // A second bulk frame sent while B1 is parked must stay queued
+            // behind the parked frame and must not be drained by the bypass.
+            setDesiredChannel(runtime, "channel-b", "shell");
+            setDesiredChannelOpened(runtime, "channel-b", true);
+            Method sendChannelMessage = runtime.getClass().getDeclaredMethod(
+                "sendChannelMessage", String.class, JSONObject.class);
+            sendChannelMessage.setAccessible(true);
+            sendChannelMessage.invoke(runtime, "channel-b",
+                new JSONObject().put("type", "buffer-sync"));
+
+            assertEquals("control bypass must not drain a queued bulk frame",
+                1, sentLanes.size());
+            java.util.ArrayDeque<?> retryDeferred =
+                (java.util.ArrayDeque<?>) field(runtime, "retryDeferredFrames");
+            assertEquals("parked bulk frame must remain the sole queued bulk owner",
+                1, retryDeferred.size());
+            assertFalse("bulk frame must not be sent by the control bypass",
+                sentLanes.contains(AndroidRtcTransportBackend.LANE_BULK));
+            backend.closeQuietly("test");
+        } finally {
+            AndroidConnectionService.resetForTests();
+        }
     }
 }

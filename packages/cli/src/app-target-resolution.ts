@@ -10,7 +10,11 @@ import type {
   RelayEndpointCandidate,
 } from '../../shared/src/connection/relay-directory.js';
 import { DEFAULT_BRIDGE_PORT } from '../../shared/src/connection/mobile-config.js';
-import type { AppTarget } from '../../shared/src/connection/app-protocol.js';
+import type {
+  AppTarget,
+  AppTargetDirectEndpointKind,
+  AppTargetEndpoint,
+} from '../../shared/src/connection/app-protocol.js';
 
 export class AppCliError extends Error {
   readonly code: string;
@@ -84,32 +88,42 @@ export function resolveLocalAppDaemonConfig(options?: {
   const zterm = object(config.zterm);
   const android = object(zterm.android);
   const mobile = object(config.mobile);
-  const daemon = Object.keys(object(android.daemon)).length > 0
-    ? object(android.daemon)
-    : object(mobile.daemon);
-  const relay = Object.keys(object(android.relay)).length > 0
-    ? object(android.relay)
-    : object(mobile.relay);
-  const host = text(env.ZTERM_HOST) || text(env.HOST) || text(daemon.host) || '0.0.0.0';
+  const androidDaemon = object(android.daemon);
+  const mobileDaemon = object(mobile.daemon);
+  const androidRelay = object(android.relay);
+  const mobileRelay = object(mobile.relay);
+  const host = text(env.ZTERM_HOST)
+    || text(env.HOST)
+    || text(androidDaemon.host)
+    || text(mobileDaemon.host)
+    || '0.0.0.0';
   const port = positiveInteger(env.ZTERM_PORT)
     ?? positiveInteger(env.PORT)
-    ?? positiveInteger(daemon.port)
+    ?? positiveInteger(androidDaemon.port)
+    ?? positiveInteger(mobileDaemon.port)
     ?? DEFAULT_BRIDGE_PORT;
-  const authToken = text(env.ZTERM_AUTH_TOKEN) || text(daemon.authToken);
+  const authToken = text(env.ZTERM_AUTH_TOKEN)
+    || text(androidDaemon.authToken)
+    || text(mobileDaemon.authToken);
   if (!authToken) {
     throw new AppCliError(
       'missing_auth_token',
       '/app requires a configured daemon token; set zterm.android.daemon.authToken',
     );
   }
-  const deviceId = text(env.ZTERM_TRAVERSAL_DEVICE_ID) || text(relay.deviceId);
+  const deviceId = text(env.ZTERM_TRAVERSAL_DEVICE_ID)
+    || text(androidRelay.deviceId)
+    || text(mobileRelay.deviceId);
   if (!deviceId) {
     throw new AppCliError(
       'missing_identity',
       'local deviceId is missing; configure zterm.android.relay.deviceId',
     );
   }
-  const daemonHostId = text(env.ZTERM_TRAVERSAL_HOST_ID) || text(relay.hostId) || readDaemonId(home);
+  const daemonHostId = text(env.ZTERM_TRAVERSAL_HOST_ID)
+    || text(androidRelay.hostId)
+    || text(mobileRelay.hostId)
+    || readDaemonId(home);
   if (!daemonHostId) {
     throw new AppCliError(
       'missing_identity',
@@ -144,12 +158,47 @@ function exactDevice(directory: RelayAccountDirectory, peerDeviceId: string): Re
   return matches[0]!;
 }
 
-function directEndpoint(daemon: RelayDirectoryDaemon): RelayEndpointCandidate | undefined {
-  return daemon.endpoints.find((endpoint) => {
-    if (endpoint.kind === 'rtc-direct' || endpoint.kind === 'relay-rtc') return false;
-    if (endpoint.wsUrl) return true;
-    return Boolean(endpoint.host);
+const DIRECT_APP_ENDPOINT_PRIORITY: Readonly<Record<AppTargetDirectEndpointKind, number>> = {
+  lan: 0,
+  ipv6: 1,
+  ipv4: 2,
+  tailscale: 3,
+};
+
+function directEndpointKind(kind: RelayEndpointCandidate['kind']): AppTargetDirectEndpointKind | undefined {
+  switch (kind) {
+    case 'lan':
+    case 'ipv6':
+    case 'ipv4':
+    case 'tailscale':
+      return kind;
+    default:
+      return undefined;
+  }
+}
+
+function directEndpoints(daemon: RelayDirectoryDaemon): AppTargetEndpoint[] {
+  const candidates = daemon.endpoints.filter(
+    (endpoint) => directEndpointKind(endpoint.kind) !== undefined && Boolean(endpoint.wsUrl || endpoint.host),
+  );
+  candidates.sort((left, right) => {
+    const leftKind = directEndpointKind(left.kind);
+    const rightKind = directEndpointKind(right.kind);
+    return (leftKind ? DIRECT_APP_ENDPOINT_PRIORITY[leftKind] : Number.MAX_SAFE_INTEGER)
+      - (rightKind ? DIRECT_APP_ENDPOINT_PRIORITY[rightKind] : Number.MAX_SAFE_INTEGER);
   });
+
+  const seen = new Set<string>();
+  const endpoints: AppTargetEndpoint[] = [];
+  for (const candidate of candidates) {
+    const kind = directEndpointKind(candidate.kind);
+    if (!kind) continue;
+    const wsUrl = endpointUrl(candidate);
+    if (seen.has(wsUrl)) continue;
+    seen.add(wsUrl);
+    endpoints.push({ kind, wsUrl, authToken: candidate.authToken ?? '' });
+  }
+  return endpoints;
 }
 
 function endpointUrl(endpoint: RelayEndpointCandidate): string {
@@ -175,15 +224,16 @@ export function resolveAppTargetFromDirectory(input: {
   if (input.daemonHostId && device.daemon.hostId !== input.daemonHostId) {
     throw new AppCliError('peer_identity_mismatch', 'daemonHostId does not match the resolved peer daemon');
   }
-  const endpoint = directEndpoint(device.daemon);
-  if (!endpoint) {
+  const endpoints = directEndpoints(device.daemon);
+  if (endpoints.length === 0) {
     throw new AppCliError('no_direct_endpoint', `peer daemon has no LAN, Tailscale, IPv4, or IPv6 /app endpoint: ${input.peerDeviceId}`);
   }
   return {
     deviceId: device.deviceId,
     daemonHostId: device.daemon.hostId,
-    wsUrl: endpointUrl(endpoint),
-    authToken: endpoint.authToken ?? '',
+    wsUrl: endpoints[0]!.wsUrl,
+    authToken: endpoints[0]!.authToken,
+    endpoints,
   };
 }
 

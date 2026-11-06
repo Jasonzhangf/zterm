@@ -1,0 +1,11 @@
+Added: v2/modules/terminal/tests/terminal-late-close.test.mjs
+Modified: v2/modules/terminal/src/terminal-port.mjs
+Modified: v2/modules/terminal/src/v1-mux-client.mjs
+Modified: v2/modules/terminal/tests/v1-mux-fixture.mjs
+Modified: v2/modules/terminal/tests/v1-mux-client.test.mjs
+Modified: v2/evidence/zterm-v2-bootstrap-1103/rework-r4f/repair-chain.txt (title/scope correction)
+Added: v2/evidence/zterm-v2-bootstrap-1103/rework-r5/repair-chain.txt
+Added: v2/evidence/zterm-v2-bootstrap-1103/rework-r5/repair-chain-probe.mjs
+Added: v2/evidence/zterm-v2-bootstrap-1103/rework-r5/red-failure.txt
+Added: v2/evidence/zterm-v2-bootstrap-1103/rework-r5/unit-results.txt
+Added: v2/evidence/zterm-v2-bootstrap-1103/rework-r5/changed-paths.txt

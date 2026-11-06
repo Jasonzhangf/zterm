@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from 'fs';
 import { dirname } from 'path';
-import { randomBytes, scryptSync, timingSafeEqual } from 'crypto';
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'crypto';
 import {
   normalizeRelayEndpointCandidates,
   normalizeRelayTmuxSessionSnapshots,
@@ -34,6 +34,7 @@ export interface TraversalRelayTokenRecord {
   userId: string;
   createdAt: string;
   lastUsedAt: string;
+  revokedAt?: string;
 }
 
 export interface TraversalRelayDeviceRecord {
@@ -60,6 +61,39 @@ export interface TraversalRelayStoreData {
   users: TraversalRelayUserRecord[];
   tokens: TraversalRelayTokenRecord[];
   devices: TraversalRelayDeviceRecord[];
+  machines: TraversalRelayMachineRecord[];
+}
+
+export interface TraversalRelayMachineRecord {
+  machineId: string;
+  ownerAccountId: string;
+  deviceId: string;
+  displayName: string;
+  status: 'active' | 'revoked';
+  deviceTokenHash: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TraversalRelayMachineSnapshot {
+  machineId: string;
+  ownerAccountId: string;
+  deviceId: string;
+  displayName: string;
+  status: 'active' | 'revoked';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export class MachineIdentityError extends Error {
+  public constructor(
+    public readonly statusCode: number,
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'MachineIdentityError';
+  }
 }
 
 export class DeviceCleanupRejectedError extends Error {
@@ -110,6 +144,7 @@ function createEmptyStore(): TraversalRelayStoreData {
     users: [],
     tokens: [],
     devices: [],
+    machines: [],
   };
 }
 
@@ -122,6 +157,7 @@ function cloneStoreData(data: TraversalRelayStoreData): TraversalRelayStoreData 
       daemonEndpoints: device.daemonEndpoints.map((endpoint) => ({ ...endpoint })),
       daemonSessions: device.daemonSessions.map((session) => ({ ...session })),
     })),
+    machines: data.machines.map((machine) => ({ ...machine })),
   };
 }
 
@@ -147,6 +183,10 @@ function normalizeUsername(value: string) {
 
 function normalizeDeviceId(value: string) {
   return value.trim();
+}
+
+function hashDeviceToken(value: string) {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 function asStoredDevice(record: Partial<TraversalRelayDeviceRecord>): TraversalRelayDeviceRecord | null {
@@ -184,11 +224,45 @@ function asStoredDevice(record: Partial<TraversalRelayDeviceRecord>): TraversalR
   };
 }
 
+function asStoredMachine(record: Partial<TraversalRelayMachineRecord>): TraversalRelayMachineRecord | null {
+  const machineId = typeof record.machineId === 'string' ? record.machineId.trim() : '';
+  const ownerAccountId = typeof record.ownerAccountId === 'string' ? record.ownerAccountId.trim() : '';
+  const deviceId = typeof record.deviceId === 'string' ? normalizeDeviceId(record.deviceId) : '';
+  const deviceTokenHash = typeof record.deviceTokenHash === 'string' ? record.deviceTokenHash.trim() : '';
+  if (!machineId || !ownerAccountId || !deviceId || !deviceTokenHash) {
+    return null;
+  }
+  const createdAt = typeof record.createdAt === 'string' && record.createdAt.trim() ? record.createdAt : stableNow();
+  const updatedAt = typeof record.updatedAt === 'string' && record.updatedAt.trim() ? record.updatedAt : createdAt;
+  return {
+    machineId,
+    ownerAccountId,
+    deviceId,
+    displayName: typeof record.displayName === 'string' ? record.displayName.trim() : '',
+    status: record.status === 'revoked' ? 'revoked' : 'active',
+    deviceTokenHash,
+    createdAt,
+    updatedAt,
+  };
+}
+
 function toPublicUser(user: TraversalRelayUserRecord): TraversalRelayPublicUser {
   return {
     id: user.id,
     username: user.username,
     createdAt: user.createdAt,
+  };
+}
+
+function toMachineSnapshot(record: TraversalRelayMachineRecord): TraversalRelayMachineSnapshot {
+  return {
+    machineId: record.machineId,
+    ownerAccountId: record.ownerAccountId,
+    deviceId: record.deviceId,
+    displayName: record.displayName,
+    status: record.status,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
   };
 }
 
@@ -244,6 +318,16 @@ function toDirectoryDevice(record: TraversalRelayDeviceRecord): RelayDirectoryDe
 }
 
 const MAX_TOKENS_PER_USER = 64;
+const MACHINE_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+interface TraversalRelayMachineChallenge {
+  requestId: string;
+  challenge: string;
+  userId: string;
+  deviceId: string;
+  machineId: string;
+  expiresAt: string;
+}
 
 function pruneTokensPerUser(
   tokens: TraversalRelayTokenRecord[],
@@ -283,6 +367,8 @@ function pruneTokensPerUser(
 
 export class TraversalRelayStore {
   private data: TraversalRelayStoreData;
+  private readonly enrollChallenges = new Map<string, TraversalRelayMachineChallenge>();
+  private readonly possessionChallenges = new Map<string, TraversalRelayMachineChallenge>();
 
   public constructor(private readonly path: string) {
     this.data = this.load();
@@ -307,6 +393,11 @@ export class TraversalRelayStore {
             .map((entry) => asStoredDevice(entry as Partial<TraversalRelayDeviceRecord>))
             .filter((entry): entry is TraversalRelayDeviceRecord => entry !== null)
         : [],
+        machines: Array.isArray(parsed.machines)
+          ? parsed.machines
+              .map((entry) => asStoredMachine(entry as Partial<TraversalRelayMachineRecord>))
+              .filter((entry): entry is TraversalRelayMachineRecord => entry !== null)
+          : [],
     };
   }
 
@@ -357,6 +448,42 @@ export class TraversalRelayStore {
       throw new Error(`user ${userId} not found`);
     }
     return user;
+  }
+
+  private challengeKey(userId: string, requestId: string) {
+    return `${userId}:${requestId}`;
+  }
+
+  private pruneExpiredChallenges(
+    challenges: Map<string, TraversalRelayMachineChallenge>,
+    nowMs = Date.now(),
+  ) {
+    for (const [key, challenge] of challenges) {
+      if (Date.parse(challenge.expiresAt) <= nowMs) {
+        challenges.delete(key);
+      }
+    }
+  }
+
+  private consumeChallenge(
+    challenges: Map<string, TraversalRelayMachineChallenge>,
+    userId: string,
+    requestId: string,
+    challengeValue: string,
+  ) {
+    const key = this.challengeKey(userId, requestId);
+    const challenge = challenges.get(key);
+    if (!challenge) {
+      throw new MachineIdentityError(404, 'challenge_not_found', 'machine challenge was not found');
+    }
+    challenges.delete(key);
+    if (Date.parse(challenge.expiresAt) <= Date.now()) {
+      throw new MachineIdentityError(410, 'challenge_expired', 'machine challenge has expired');
+    }
+    if (challenge.challenge !== challengeValue) {
+      throw new MachineIdentityError(403, 'challenge_invalid', 'machine challenge proof is invalid');
+    }
+    return challenge;
   }
 
   private getOrCreateDevice(data: TraversalRelayStoreData, userId: string, deviceId: string) {
@@ -473,7 +600,7 @@ export class TraversalRelayStore {
 
   public authenticate(token: string) {
     const record = this.data.tokens.find((entry) => entry.token === token.trim());
-    if (!record) {
+    if (!record || record.revokedAt) {
       return null;
     }
     const user = this.data.users.find((entry) => entry.id === record.userId);
@@ -488,6 +615,22 @@ export class TraversalRelayStore {
       }
       candidateRecord.lastUsedAt = lastUsedAt;
       return { result: toPublicUser(user), commit: true };
+    });
+  }
+
+  public revokeToken(token: string) {
+    const normalizedToken = token.trim();
+    if (!normalizedToken) {
+      return false;
+    }
+    const now = stableNow();
+    return this.commitCandidate((candidate) => {
+      const record = candidate.tokens.find((entry) => entry.token === normalizedToken);
+      if (!record || record.revokedAt) {
+        return { result: false, commit: false };
+      }
+      record.revokedAt = now;
+      return { result: true, commit: true };
     });
   }
 
@@ -723,6 +866,197 @@ export class TraversalRelayStore {
       .map((entry) => toDeviceSnapshot(entry));
   }
 
+  public createEnrollChallenge(userId: string, deviceId: string) {
+    this.requireUserById(this.data, userId);
+    const normalizedDeviceId = normalizeDeviceId(deviceId);
+    if (!normalizedDeviceId) {
+      throw new MachineIdentityError(400, 'invalid_machine_request', 'deviceId is required');
+    }
+    this.pruneExpiredChallenges(this.enrollChallenges);
+    const requestId = randomHex(16);
+    const challenge: TraversalRelayMachineChallenge = {
+      requestId,
+      challenge: randomHex(24),
+      userId,
+      deviceId: normalizedDeviceId,
+      machineId: '',
+      expiresAt: new Date(Date.now() + MACHINE_CHALLENGE_TTL_MS).toISOString(),
+    };
+    this.enrollChallenges.set(this.challengeKey(userId, requestId), challenge);
+    return {
+      requestId: challenge.requestId,
+      challenge: challenge.challenge,
+      expiresAt: challenge.expiresAt,
+    };
+  }
+
+  public verifyEnrollChallenge(options: {
+    userId: string;
+    requestId: string;
+    challenge: string;
+    deviceToken: string;
+    displayName?: string;
+  }) {
+    this.requireUserById(this.data, options.userId);
+    const pending = this.consumeChallenge(
+      this.enrollChallenges,
+      options.userId,
+      options.requestId,
+      options.challenge,
+    );
+    const deviceToken = options.deviceToken;
+    if (!deviceToken.trim()) {
+      throw new MachineIdentityError(
+        400,
+        'invalid_machine_request',
+        'deviceToken is required',
+      );
+    }
+    const deviceTokenHash = hashDeviceToken(deviceToken);
+    const now = stableNow();
+    return this.commitCandidate((candidate) => {
+      this.requireUserById(candidate, options.userId);
+      const existingByProof = candidate.machines.find(
+        (machine) => machine.deviceTokenHash === deviceTokenHash,
+      );
+      if (existingByProof) {
+        if (existingByProof.ownerAccountId !== options.userId) {
+          throw new MachineIdentityError(
+            409,
+            'machine_already_owned',
+            'machine proof is already owned by another account',
+          );
+        }
+        if (existingByProof.status === 'revoked') {
+          throw new MachineIdentityError(403, 'machine_revoked', 'machine is revoked');
+        }
+        if (existingByProof.deviceId !== pending.deviceId) {
+          throw new MachineIdentityError(
+            409,
+            'machine_device_conflict',
+            'machine proof is already bound to another deviceId',
+          );
+        }
+        return { result: toMachineSnapshot(existingByProof), commit: false };
+      }
+      const existingDevice = candidate.machines.find(
+        (machine) => (
+          machine.ownerAccountId === options.userId
+          && machine.deviceId === pending.deviceId
+        ),
+      );
+      if (existingDevice) {
+        throw new MachineIdentityError(
+          409,
+          'machine_device_conflict',
+          'deviceId is already enrolled for this account',
+        );
+      }
+      const machine: TraversalRelayMachineRecord = {
+        machineId: `mach_${randomHex(16)}`,
+        ownerAccountId: options.userId,
+        deviceId: pending.deviceId,
+        displayName: options.displayName?.trim() || pending.deviceId,
+        status: 'active',
+        deviceTokenHash,
+        createdAt: now,
+        updatedAt: now,
+      };
+      candidate.machines.push({ ...machine });
+      return { result: toMachineSnapshot(machine), commit: true };
+    });
+  }
+
+  public createPossessionChallenge(userId: string, machineId: string) {
+    this.requireUserById(this.data, userId);
+    const machine = this.data.machines.find((entry) => entry.machineId === machineId);
+    if (!machine) {
+      throw new MachineIdentityError(404, 'machine_not_found', 'machine was not found');
+    }
+    if (machine.ownerAccountId !== userId) {
+      throw new MachineIdentityError(403, 'machine_not_owned', 'machine is not owned by this account');
+    }
+    if (machine.status !== 'active') {
+      throw new MachineIdentityError(403, 'machine_revoked', 'machine is revoked');
+    }
+    this.pruneExpiredChallenges(this.possessionChallenges);
+    const requestId = randomHex(16);
+    const challenge: TraversalRelayMachineChallenge = {
+      requestId,
+      challenge: randomHex(24),
+      userId,
+      deviceId: machine.deviceId,
+      machineId: machine.machineId,
+      expiresAt: new Date(Date.now() + MACHINE_CHALLENGE_TTL_MS).toISOString(),
+    };
+    this.possessionChallenges.set(this.challengeKey(userId, requestId), challenge);
+    return {
+      requestId: challenge.requestId,
+      challenge: challenge.challenge,
+      expiresAt: challenge.expiresAt,
+    };
+  }
+
+  public verifyPossessionChallenge(options: {
+    userId: string;
+    requestId: string;
+    challenge: string;
+    deviceToken: string;
+  }) {
+    this.requireUserById(this.data, options.userId);
+    const pending = this.consumeChallenge(
+      this.possessionChallenges,
+      options.userId,
+      options.requestId,
+      options.challenge,
+    );
+    const machine = this.data.machines.find((entry) => entry.machineId === pending.machineId);
+    if (!machine) {
+      throw new MachineIdentityError(404, 'machine_not_found', 'machine was not found');
+    }
+    if (machine.ownerAccountId !== options.userId) {
+      throw new MachineIdentityError(403, 'machine_not_owned', 'machine is not owned by this account');
+    }
+    if (machine.status !== 'active') {
+      throw new MachineIdentityError(403, 'machine_revoked', 'machine is revoked');
+    }
+    if (machine.deviceTokenHash !== hashDeviceToken(options.deviceToken)) {
+      throw new MachineIdentityError(403, 'possession_invalid', 'device proof is invalid');
+    }
+    return toMachineSnapshot(machine);
+  }
+
+  public revokeMachine(userId: string, machineId: string) {
+    this.requireUserById(this.data, userId);
+    const now = stableNow();
+    return this.commitCandidate((candidate) => {
+      const machine = candidate.machines.find((entry) => entry.machineId === machineId);
+      if (!machine) {
+        throw new MachineIdentityError(404, 'machine_not_found', 'machine was not found');
+      }
+      if (machine.ownerAccountId !== userId) {
+        throw new MachineIdentityError(403, 'machine_not_owned', 'machine is not owned by this account');
+      }
+      if (machine.status === 'revoked') {
+        return { result: toMachineSnapshot(machine), commit: false };
+      }
+      machine.status = 'revoked';
+      machine.updatedAt = now;
+      return { result: toMachineSnapshot(machine), commit: true };
+    });
+  }
+
+  public listMachines(userId: string) {
+    this.requireUserById(this.data, userId);
+    return this.data.machines
+      .filter((machine) => machine.ownerAccountId === userId)
+      .sort((left, right) => (
+        right.updatedAt.localeCompare(left.updatedAt)
+        || left.machineId.localeCompare(right.machineId)
+      ))
+      .map((machine) => toMachineSnapshot(machine));
+  }
+
   public getAccountDirectory(userId: string): RelayAccountDirectory {
     const user = this.requireUserById(this.data, userId);
     const devices = this.data.devices
@@ -745,6 +1079,8 @@ export class TraversalRelayStore {
       users: this.data.users.length,
       tokens: this.data.tokens.length,
       devices: this.data.devices.length,
+      machines: this.data.machines.length,
     };
   }
 }
+

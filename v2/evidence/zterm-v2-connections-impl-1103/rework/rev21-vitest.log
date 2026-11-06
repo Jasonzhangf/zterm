@@ -1,0 +1,12 @@
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.0[39m [90m/workspaces/19/v2/modules/connections[39m
+
+ [2m[90m↓[39m[22m tests/integration/real-daemon.test.ts [2m ([22m[2m3 tests[22m [2m|[22m [33m3 skipped[39m[2m)[22m
+ [32m✓[39m tests/contract/connection-manager.contract.test.ts [2m ([22m[2m22 tests[22m[2m)[22m[90m 9[2mms[22m[39m
+ [32m✓[39m tests/integration/real-entry.test.ts [2m ([22m[2m14 tests[22m[2m)[22m[33m 16235[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (3)[39m
+[2m      Tests [22m [1m[32m36 passed[39m[22m[2m | [22m[33m3 skipped[39m[90m (39)[39m
+[2m   Start at [22m 04:28:22
+[2m   Duration [22m 16.56s[2m (transform 193ms, setup 0ms, collect 472ms, tests 16.24s, environment 0ms, prepare 228ms)[22m
+

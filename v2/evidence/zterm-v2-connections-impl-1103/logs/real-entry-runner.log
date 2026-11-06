@@ -1,0 +1,67 @@
+{
+  "step": "connect",
+  "link": {
+    "id": "link:machine-lan-peer",
+    "machineId": "machine-lan-peer",
+    "generation": 1
+  },
+  "obs": {
+    "machineId": "machine-lan-peer",
+    "generation": 1,
+    "path": "direct",
+    "status": "connected",
+    "freshness": "fresh",
+    "observedAt": 1793714936741,
+    "transportKind": "lan",
+    "peerIdentity": "daemon-lan-peer",
+    "capabilities": {
+      "channelKinds": [
+        "message",
+        "file",
+        "receipt",
+        "status"
+      ],
+      "transportKind": "lan"
+    },
+    "backpressure": {
+      "queuedBytes": 0,
+      "bufferedBytes": 0,
+      "backpressured": false
+    }
+  }
+}
+{
+  "step": "channel",
+  "channel": {
+    "id": "link:machine-lan-peer:message",
+    "linkId": "link:machine-lan-peer",
+    "kind": "message"
+  }
+}
+{
+  "step": "close",
+  "obs": {
+    "machineId": "machine-lan-peer",
+    "generation": 1,
+    "path": "direct",
+    "status": "closed",
+    "freshness": "stale",
+    "observedAt": 1793714936742,
+    "transportKind": "lan",
+    "peerIdentity": "daemon-lan-peer",
+    "capabilities": {
+      "channelKinds": [
+        "message",
+        "file",
+        "receipt",
+        "status"
+      ],
+      "transportKind": "lan"
+    },
+    "backpressure": {
+      "queuedBytes": 0,
+      "bufferedBytes": 0,
+      "backpressured": false
+    }
+  }
+}

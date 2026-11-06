@@ -1,0 +1,137 @@
+{
+  "kind": "routing-port-fixture-receipt",
+  "task": "zterm-v2-routing-impl-1103",
+  "branch": "zterm-v2-routing-impl-1103",
+  "publicEntry": "v2/modules/routing/src/public/index.mjs",
+  "dependencies": {
+    "membersReader": "deferred to Jenny combined milestone after members getRuntimeBinding head lands",
+    "fixture": "in-memory Map port (not the real members reader)"
+  },
+  "crossWorkspaceIsolation": {
+    "alpha": "ws_6355698a-4c2f-4d36-9d43-a948cb47434d",
+    "beta": "ws_5cc886ca-39de-4cf4-96cb-04d13d9cf35c"
+  },
+  "cases": [
+    {
+      "name": "unique resolve returns group reference, revision, runtime machine id, config, generation, session and anchor",
+      "expected": "ok memberId=mbr_87d42857-933b-4983-ba4b-e604319155bc groupId=grp_ce92f9eb-3512-4505-8ee9-2837bb18941c groupPath=/Acme/team organizationRevision=3 machineId=mac-1 hostKind=vm agentKind=other launchProfileRef=lp-live-alpha bindingGeneration=1 sessionId=sess-alpha anchor=pane-alpha",
+      "actual": "ok memberId=mbr_87d42857-933b-4983-ba4b-e604319155bc groupId=grp_ce92f9eb-3512-4505-8ee9-2837bb18941c groupPath=/Acme/team organizationRevision=3 machineId=mac-1 hostKind=vm agentKind=other launchProfileRef=lp-live-alpha bindingGeneration=1 sessionId=sess-alpha anchor=pane-alpha",
+      "pass": true
+    },
+    {
+      "name": "old organization machineId is not used for matching",
+      "expected": "ROUTE_NOT_FOUND",
+      "actual": "ROUTE_NOT_FOUND",
+      "pass": true
+    },
+    {
+      "name": "unknown group path rejected",
+      "expected": "ROUTE_NOT_FOUND",
+      "actual": "ROUTE_NOT_FOUND",
+      "pass": true
+    },
+    {
+      "name": "co-located distinct members rejected as ambiguous without a selector",
+      "expected": "ROUTE_AMBIGUOUS with matchCount 2",
+      "actual": "ROUTE_AMBIGUOUS matchCount=2",
+      "pass": true
+    },
+    {
+      "name": "memberName selector resolves the named member",
+      "expected": "memberId=mbr_191907d1-b4a2-45b3-9435-55098bfcee7f",
+      "actual": "memberId=mbr_191907d1-b4a2-45b3-9435-55098bfcee7f",
+      "pass": true
+    },
+    {
+      "name": "memberId selector does not match a readable name",
+      "expected": "ROUTE_NOT_FOUND",
+      "actual": "ROUTE_NOT_FOUND",
+      "pass": true
+    },
+    {
+      "name": "same group path and member name in another workspace stays isolated",
+      "expected": "alpha=mbr_87d42857-933b-4983-ba4b-e604319155bc beta=mbr_7184a74a-bcd3-4d85-accc-b621f3c1a5b3",
+      "actual": "alpha=mbr_87d42857-933b-4983-ba4b-e604319155bc beta=mbr_7184a74a-bcd3-4d85-accc-b621f3c1a5b3",
+      "pass": true
+    },
+    {
+      "name": "stale expectedGeneration rejected with the current generation",
+      "expected": "BINDING_GENERATION_STALE with currentGeneration 1",
+      "actual": "BINDING_GENERATION_STALE currentGeneration=1",
+      "pass": true
+    },
+    {
+      "name": "wrong action scope rejected before any read",
+      "expected": "ROUTE_FORBIDDEN for routing:resolve",
+      "actual": "ROUTE_FORBIDDEN action=routing:resolve",
+      "pass": true
+    },
+    {
+      "name": "cross-account workspace target rejected with no member leak",
+      "expected": "ROUTE_FORBIDDEN with workspaceId and no memberId detail",
+      "actual": "ROUTE_FORBIDDEN workspaceId=ws_6355698a-4c2f-4d36-9d43-a948cb47434d",
+      "pass": true
+    },
+    {
+      "name": "empty member grant rejects instead of widening",
+      "expected": "ROUTE_FORBIDDEN",
+      "actual": "ROUTE_FORBIDDEN",
+      "pass": true
+    },
+    {
+      "name": "wildcard member grant is not an undeclared expansion",
+      "expected": "ROUTE_FORBIDDEN",
+      "actual": "ROUTE_FORBIDDEN",
+      "pass": true
+    },
+    {
+      "name": "no-selector scan rejects empty member grant before reading any binding",
+      "expected": "ROUTE_FORBIDDEN and zero runtime-binding reads",
+      "actual": "ROUTE_FORBIDDEN reads=0",
+      "pass": true
+    },
+    {
+      "name": "no-selector scan narrow grant does not read or leak an unauthorized member",
+      "expected": "ROUTE_NOT_FOUND with no unauthorized member id and one authorized read",
+      "actual": "ROUTE_NOT_FOUND reads=1 leak=false",
+      "pass": true
+    },
+    {
+      "name": "no-selector scan narrow grant resolves the authorized member only",
+      "expected": "memberId=mbr_87d42857-933b-4983-ba4b-e604319155bc reads=1",
+      "actual": "memberId=mbr_87d42857-933b-4983-ba4b-e604319155bc reads=1",
+      "pass": true
+    },
+    {
+      "name": "no-selector scan keeps ambiguity across multiple authorized targets",
+      "expected": "ROUTE_AMBIGUOUS with matchCount 2 and two authorized reads",
+      "actual": "ROUTE_AMBIGUOUS matchCount=2 reads=2",
+      "pass": true
+    },
+    {
+      "name": "directed selection propagates runtime binding typed failure",
+      "expected": "MEMBER_BINDING_INVALID",
+      "actual": "MEMBER_BINDING_INVALID",
+      "pass": true
+    },
+    {
+      "name": "machine+group scan reports bindingFailures and does not treat failures as matches",
+      "expected": "ROUTE_NOT_FOUND with bindingFailures [MEMBER_RUNTIME_NOT_CONFIGURED]",
+      "actual": "ROUTE_NOT_FOUND matchCount=0 bindingFailures=[{\"memberId\":\"mbr_87d42857-933b-4983-ba4b-e604319155bc\",\"code\":\"MEMBER_RUNTIME_NOT_CONFIGURED\",\"message\":\"not configured\"}]",
+      "pass": true
+    },
+    {
+      "name": "constructor requires getRuntimeBinding and rejects the old getBinding port",
+      "expected": "TypeError for getBinding-only port",
+      "actual": "TypeError",
+      "pass": true
+    },
+    {
+      "name": "missing/unknown token rejected",
+      "expected": "UNAUTHENTICATED",
+      "actual": "UNAUTHENTICATED",
+      "pass": true
+    }
+  ],
+  "outcome": "PASS"
+}

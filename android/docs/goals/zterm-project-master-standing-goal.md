@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Jenny, zterm project master
-Updated: 2026-10-30
+Updated: 2026-11-04
 
 ## Objective
 
@@ -12,7 +12,7 @@ publish only authorized artifacts, and close owned resources.
 
 ## Active Board Tasks
 
-All project board tasks are closed and merged to `main`:
+All project board tasks closed before 2026-11-04 are merged to `main`; open work is listed under "Current cycle (2026-11-04)":
 
 - `session-drawer-collab-roles-1028` (P0): merged `d0b0bf1e` (PR #178).
 - `session-drawer-ux-1028` (P1): master filter delegates to the Collab
@@ -27,6 +27,55 @@ All project board tasks are closed and merged to `main`:
 - `android-expert-review-1029` (P1): independent Android-expert plan + review of
   the cycle's technical rulings; VERDICT PASS.
 - `public-release-blank-machine-audit-20261029` (P1): audit deliverable accepted.
+
+Current cycle (2026-10-31):
+
+- `udp-send-stalled-1031` (P1, Alice/android expert): close the two P1 findings
+  from `udp-lan-expert-review-20261031`: bound persistent OPEN RTC
+  send-rejection with a typed send-stalled observation and supervised exit, and
+  produce foreground 15T rtc-direct file-bytes and terminal apply/commit
+  latency evidence. Contract:
+  `/Volumes/Intel/playground/zterm/.worker-runs/udp-send-stalled-1031/task.md`.
+- `udp-baseline-15t-1031` (P1, Bob): baseline foreground 15T measurement on
+  installed `0.1.4.3239` for the A/B comparison. Contract:
+  `/Volumes/Intel/playground/zterm/.worker-runs/udp-baseline-15t-1031/task.md`.
+- `cli-delivery-verify-1031` (P2, Carol): independent public-npm re-verification
+  of CLI 0.1.5 / daemon 0.1.4 message and file delivery. Contract:
+  `/Volumes/Intel/playground/zterm/.worker-runs/cli-delivery-verify-1031/task.md`.
+  Result: PASS. Public install and local `e2e.pass`; real two-host run
+  `100.66.1.82` <-> `100.93.143.20` delivered a multiline message and a
+  48000-byte file with matching SHA-256, reverse message, and restart with no
+  duplicate. Report:
+  `/Volumes/Intel/playground/zterm/.worker-runs/cli-delivery-verify-1031/verify.md`.
+- `udp-send-stalled-1031` CLOSED and merged to `origin/main` as `9437dbbe`
+  (PR #198). Rework commit `f4204655` implements strict-decrease resume from
+  the recorded `sendStalledBufferedBytes`. Independent review PASS with zero
+  findings; Alice Android-expert confirmation PASS; PR #198 CI green; build
+  `0.1.4.3242` foreground 15T manual:rtc-direct L5 acceptance PASS
+  (5 MiB SHA-256 match, 512 KiB burst, terminal apply/commit p50/p95/p99,
+  HOME/resume same generation, reconnectDelta=0, overflowDelta=0, route
+  restored to auto). Evidence:
+  `/Volumes/Intel/playground/zterm/.worker-runs/udp-send-stalled-1031/evidence/3242-15t-acceptance.json`
+  and
+  `/Volumes/Intel/playground/zterm/.worker-runs/udp-send-stalled-1031/review/review-udp-send-stalled-1031-rework/review.final.md`.
+  Local worktree and local+remote `fix/udp-send-stalled-1031` branches removed.
+- `udp-baseline-15t-1031` BLOCKED with a changed premise. The device is now
+  idle (asleep, `com.zterm.android/.MainActivity` foreground) but installed
+  build is `0.1.4.3242` (the fix already landed), not the required pre-fix
+  `0.1.4.3239`. Capturing the pre-fix baseline would require reinstalling
+  `3239`, which the task contract forbids. Disposition is pending the CEO/user:
+  close the task as obsolete or re-scope the comparison. All baseline fields
+  remain UNVERIFIED.
+- `cli-delivery-verify-1031` (Carol): accepted and closed by master with the
+  two-host and local evidence; no merge or cleanup was required.
+
+Review ruling: `udp-lan-expert-review-20261031` (codex-review, profile oauth,
+model codex-auto-review, commit `4d248997`, base `93a693d4`) returned FAIL with
+two P1 findings: (1) persistent OPEN `sendText()==false` below the high
+watermark can reschedule forever because the RTC branch runs before the bounded
+`SEND_RETRY_MAX` branch; (2) the foreground 15T rtc-direct file-integrity and
+terminal-latency acceptance is missing. The review confirmed the
+non-duplication claim for route selection and remote-window budget.
 
 Remaining gates (external resources, not code):
 
@@ -52,21 +101,116 @@ Remaining gates (external resources, not code):
 - Preserve dirty, active, shared, or unknown resources.
 - Report only substantive project progress or verified blockers to the CEO.
 
+## Current cycle (2026-11-04) — zterm V2 first seam
+
+Open work (owner / reviewer / next_step in `collab board show`):
+
+- `zterm-v2-terminal-milestone-e2e-1103` (P1, Jenny, integration): env recovery
+  waits on r2 writer PID 49522 still running; then product seam — real V1
+  login, session/target discovery, V2 pane input echo. WebUI
+  `http://127.0.0.1:8801/` returns HTTP 200 but does not prove seam passed.
+  Next: after writer exit, GCM offline `pnpm install --offline --frozen-lockfile`
+  in `1:/workspaces/21`, verify `ws` + `esbuild`, then product seam.
+- `client-rotation-recovery-impl-1103` (P1, Alice): LayerFS candidate head
+  125168b3, container unit tests + type-check pass. Host GCM rebuilt
+  `0.1.5.3245` (APK sha256 `d4720a3b...`), ran an isolated HOME/port daemon
+  (3334) plus fake relay (19091) on `emulator-5560`. Old-token rejection and
+  unchanged-token no-reconnect are PASS. The clean rerun did not yet exercise
+  the intended picker path; the session-open retry loop still reconnects with
+  the stale token and never adopts the rotated directory token. Verifier is
+  rebuilding the harness to test the real picker `handleRefreshNow` path
+  before a final FAIL/PASS. Not delivered.
+- `zterm-v2-accounts-relay-wiring-1103-r1` (P1, Grace, David): accepted
+  candidate 1263bd42 on LayerFS main; pending merge/combination E2E + final
+  audit.
+- `zterm-v2-bootstrap-r6-followup-1103` (P1, Grace, David): accepted; integrate
+  onto main then record collab task integrated.
+- `zterm-v2-tickets-impl-1103` (P1, Jenny, David): accepted 127b81ff; awaits
+  merge onto main then record integrated.
+- `zterm-v2-webui-frontend-test` (P0, Iris): delivered contract. Iris
+  re-verified 127f6e57: all 8 blocking items closed PASS (U3b kept P2), plus
+  4 extra measured PASS items. Conclusion moved from FAIL to PASS for the
+  current candidate.
+- `zterm-v2-webui-impl-1103` (P1, Frank): 127f6e57 accepted (revision 9,
+  status accepted). UI rework (8 blockers) closed; evidence linked in the
+  task. Frontend publish still requires the tester verdict before release.
+
+Blocked:
+
+- `udp-baseline-15t-1031` (P1, Bob): blocked by changed premise — installed
+  build is already `0.1.4.3242` (the fix), not the required pre-fix
+  `0.1.4.3239`, and reinstalling 3239 is forbidden. 15T is now reported
+  online, but the task still needs a CEO disposition: close as obsolete or
+  re-scope the comparison. All baseline fields remain UNVERIFIED.
+
+Open defects: `public-release-blank-machine-audit-20261029`, `Implement zterm
+V2 accounts first increment`.
+
+Pending merges: `zterm-v2-accounts-relay-wiring-1103-r1`,
+`zterm-v2-bootstrap-r6-followup-1103`, `zterm-v2-tickets-impl-1103`.
+
+Worktree inventory (2026-11-04): 1 registered (`main`
+`/Volumes/extension/code/zterm`, dirty with in-flight and other-owner edits),
+no `.git/worktrees` entries, no orphan worktree dirs under
+`/Volumes/Intel/playground/zterm/`; 0 closed, 1 PROTECTED_HOLD. No new
+worktrees; new tasks use LayerFS task branches.
+
+## Current cycle (2026-11-02)
+
+- `cli-daemon-release-1102` (P1, Jenny): PR #205 merged `913ab408` and only
+  bumps the daemon version source `android/package.json` to `0.1.5`. CI main
+  run `41412668374` and CLI Platform run `41412668405` both green. Published
+  `next` then promoted `latest` for `@jsonstudio/zterm-cli@0.1.6` and
+  `@jsonstudio/zterm-daemon@0.1.5` (launcher) plus the darwin-arm64/linux-x64/
+  win32-x64 `0.1.5` payloads. Isolated public-registry install verified CLI
+  `0.1.6` and daemon `0.1.5` (launcher + darwin-arm64 payload native load).
+  Upgraded and verified Mac Studio (CLI `0.1.6`, daemon `0.1.5`, `/app`
+  bearer `101`, pid `99318`) and MacBook Air `macbookair` `100.86.84.63`
+  (CLI `0.1.6`, daemon `0.1.5`, `/app` bearer `101`, pid `76062`, token
+  configured). Cross-machine verified from Mac Studio: `zterm app send
+  --peer macbook-air` state `received`; `send-file` remote SHA-256
+  `3b817d58...` matches source.
+- `udp-dual-channel-1102` (P1, Jenny board task; GCM worker in progress in
+  `/Volumes/Intel/playground/zterm/udp-dual-channel-1102`): protocol
+  `bulkChannel` capability and lane routing being implemented per
+  `android-lan-udp-hol-plan-1031` plan (Android-expert rereview PASS); emulator
+  `-5558` L5 smoke replaces the blocked 15T baseline.
+- Second MacBook Air `jennys-macbook-air` `100.93.143.20`: SSH port 22 open
+  but `fanzhang`/`jenny`/`jennyzhang`/`jason` all rejected publickey; daemon
+  ports 3333/42233 closed. Blocked on machine-side SSH key authorization; no
+  daemon install or verification performed. Original error preserved.
+- Email-reset mechanism for daemon token (`m1793602192887-512`) remains
+  unimplemented; not claimed complete.
+
 ## Current Verified Facts
 
-- `main` base `6c46195e`; release PR #194 bumps CLI to `0.1.5` and daemon to
-  `0.1.4`. Local OTA `~/.zterm/updates/latest.json` now points at
+- Release PR #194 bumps CLI to `0.1.5` and daemon to `0.1.4`; PR #195 records
+  the cold-start verification. Local OTA `~/.zterm/updates/latest.json` points at
   `0.1.4.3239` (versionCode 1100032390) after the cold-start DAGpipe fix
-  build; Relay publish stayed off.
+  build. Relay public OTA is still `0.1.3.3232`; publishing `0.1.4.3242` to
+  Relay remains a release action awaiting authorization.
+- `main` base is now `9437dbbe` (`origin/main`), including PR #196 `8a4c9abb`,
+  PR #197/#198 `udp-send-stalled-1031` fix `f4204655`, and the CLI 0.1.5 /
+  daemon 0.1.4 release chain. The 15T is installed with `0.1.4.3242`
+  (versionCode 1100032420).
 - Worktrees: `main` plus the unmerged diagnostic branch
   `android-error-boundary-diag-20261030` (`fix/android-error-boundary-diag`,
-  `a6ff0213`). No other orphan worktree.
+  `c329d134`, clean, not merged). No other orphan worktree.
+- Credential rotation decision still pending: the daemon `authToken`, Relay
+  `signalToken`, and TURN credential that were previously exposed in old `3240`
+  evidence are now redacted but have not been rotated. Rotation requires
+  explicit user/CEO authorization.
+- The codex-review tool (`review_start`/`review_list`) was tested and produced a
+  valid PASS verdict with exit 0.
 - Cold-start DAGpipe fix: installed 3238 failed `compileAllDagpipePhases`
   with missing `reconcile_body_subscription`; 3239 from `main` (PR #192,
   `4d248997`) compiles all 25 graphs `ok:true`. Verified on emulator-5558
-  with cold start, HOME/resume, and zero render errors. Evidence
-  `android/evidence/2026-10-31-coldstart-dagpipe-3239/`. 15T install and
-  network-transition L5 still pending.
+  and on the 15T (`0.1.4.3239`): cold start, HOME/resume, and zero
+  `zterm:react-error` / `页面加载失败` / missing-operator hits; screenshot shows
+  Settings at 0.1.4.3239. Evidence
+  `android/evidence/2026-10-31-coldstart-dagpipe-3239/` and
+  `/tmp/zterm-15t-fg-3239.png`. The 15T network-transition L5 (LAN/cellular/
+  Tailscale) still needs a coordinated window.
 - Session drawer: master filter uses the Collab projection (no user-entered
   master), only real tmux sessions render, and hide/restore happens in-list.
   Merged `e156ca7a` (PR #182); `android-expert-review-1029` VERDICT PASS.

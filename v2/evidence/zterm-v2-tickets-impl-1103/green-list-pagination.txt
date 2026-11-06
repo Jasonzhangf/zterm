@@ -1,0 +1,12 @@
+# GREEN evidence: list cursor expansion after branch head 126d574a
+# command: cd v2/modules/tickets && node --test tests/contract/list-pagination.test.ts
+# exit: 0
+✔ list continues a top-five cursor through every remaining page (8.92725ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 143.62775

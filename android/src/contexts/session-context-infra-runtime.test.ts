@@ -13,6 +13,7 @@ import {
   buildTraversalSocketForHostRuntime,
   isSessionTransportActiveRuntime,
   resolvePhysicalBodySubscribedSessionIdsRuntime,
+  sendSocketPayloadInfraRuntime,
   shouldUseLegacyWsOverrideForHostRuntime,
 } from './session-context-infra-runtime';
 
@@ -417,6 +418,52 @@ describe('applySessionActionRuntime', () => {
       liveSessionIds: ['s2'],
       activeBodySubscriptionSuppressed: true,
     })]).toEqual(['s2']);
+  });
+});
+
+describe('sendSocketPayloadInfraRuntime lane classification', () => {
+  it('routes bulk client frames and binary payloads to bulk while control frames stay on control', () => {
+    const sent: Array<{ data: string | ArrayBuffer; lane?: string }> = [];
+    const ws = {
+      readyState: WebSocket.OPEN,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      send: (data: string | ArrayBuffer, lane?: string) => {
+        sent.push({ data, lane });
+      },
+      close: vi.fn(),
+    } as unknown as Parameters<typeof sendSocketPayloadInfraRuntime>[0]['ws'];
+    const recordSessionTx = vi.fn();
+
+    sendSocketPayloadInfraRuntime({
+      sessionId: 's1',
+      ws,
+      data: JSON.stringify({
+        type: 'mux-channel-message',
+        payload: { message: { type: 'input', payload: 'ls' } },
+      }),
+      recordSessionTx,
+    });
+    sendSocketPayloadInfraRuntime({
+      sessionId: 's1',
+      ws,
+      data: JSON.stringify({
+        type: 'mux-channel-message',
+        payload: { message: { type: 'file-upload-chunk', payload: {} } },
+      }),
+      recordSessionTx,
+    });
+    sendSocketPayloadInfraRuntime({
+      sessionId: 's1',
+      ws,
+      data: new ArrayBuffer(8),
+      recordSessionTx,
+    });
+
+    expect(sent.map((entry) => entry.lane)).toEqual(['control', 'bulk', 'bulk']);
+    expect(recordSessionTx).toHaveBeenCalledTimes(3);
   });
 });
 

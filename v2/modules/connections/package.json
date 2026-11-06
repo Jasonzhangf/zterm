@@ -1,0 +1,11 @@
+{
+  "name": "@zterm/v2-connections",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Zterm V2 connections module: machine-link + logical channels (first increment).",
+  "scripts": {
+    "type-check": "node ../../../packages/cli/node_modules/typescript/bin/tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  }
+}

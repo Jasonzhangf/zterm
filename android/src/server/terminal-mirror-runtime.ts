@@ -3,6 +3,7 @@ import type {
 } from '@zterm/shared/terminal/performance-trace';
 import type {
   BridgeServerMessage as ServerMessage,
+  TerminalTransportLane,
 } from '@zterm/shared/protocol';
 import type {
   TerminalCell,
@@ -30,7 +31,11 @@ export interface TerminalMirrorRuntimeDeps {
   sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
-  sendText: (transport: import('./terminal-runtime-types').TerminalSessionTransport | null | undefined, text: string) => void;
+  sendText: (
+    transport: import('./terminal-runtime-types').TerminalSessionTransport | null | undefined,
+    text: string,
+    lane?: TerminalTransportLane,
+  ) => void;
   recordPerformanceTrace?: (record: TerminalPerformanceTraceRecord) => void;
   sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   buildConnectedPayload: (

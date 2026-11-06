@@ -1,0 +1,71 @@
+{"event":"listening","host":"127.0.0.1","port":36955,"v1WsUrl":"ws://127.0.0.1:4438/ws?token=%3Credacted%3E","v2AuthRequired":true,"v1AuthConfigured":true}
+{"event":"request","method":"GET","path":"/api/health"}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request","method":"GET","path":"/"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.css"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.js"}
+{"event":"request","method":"GET","path":"/api/auth/session"}
+{"event":"request","method":"GET","path":"/favicon.ico"}
+{"event":"request.error","path":"/favicon.ico","error":{"code":"ROUTE_NOT_FOUND","owningModule":"daemon","operationId":"static","cause":"/favicon.ico","message":"Route was not found."}}
+{"event":"request","method":"POST","path":"/api/auth/login"}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request","method":"GET","path":"/api/terminal/stream"}
+{"event":"terminal.target.opened","target":"r2f-real-27758","channelId":"1:zterm-v2-mux-client","stableId":"tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2227774%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1793720469%7D"}
+{"event":"terminal.frame.committed","target":"r2f-real-27758","revision":1,"startIndex":0,"endIndex":24}
+{"event":"request","method":"POST","path":"/api/terminal/input"}
+{"event":"terminal.frame.committed","target":"r2f-real-27758","revision":2,"startIndex":0,"endIndex":24}
+{"event":"request","method":"GET","path":"/"}
+{"event":"terminal.target.closed","target":"r2f-real-27758","channelId":"1:zterm-v2-mux-client"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.css"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.js"}
+{"event":"request","method":"GET","path":"/api/auth/session"}
+{"event":"request","method":"GET","path":"/favicon.ico"}
+{"event":"request.error","path":"/favicon.ico","error":{"code":"ROUTE_NOT_FOUND","owningModule":"daemon","operationId":"static","cause":"/favicon.ico","message":"Route was not found."}}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request","method":"GET","path":"/api/terminal/stream"}
+{"event":"terminal.target.opened","target":"r2f-real-27758","channelId":"2:zterm-v2-mux-client","stableId":"tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2227774%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1793720469%7D"}
+{"event":"terminal.frame.committed","target":"r2f-real-27758","revision":1,"startIndex":0,"endIndex":24}
+{"event":"request","method":"GET","path":"/"}
+{"event":"terminal.target.closed","target":"r2f-real-27758","channelId":"2:zterm-v2-mux-client"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.css"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.js"}
+{"event":"request","method":"GET","path":"/api/auth/session"}
+{"event":"request","method":"GET","path":"/favicon.ico"}
+{"event":"request.error","path":"/favicon.ico","error":{"code":"ROUTE_NOT_FOUND","owningModule":"daemon","operationId":"static","cause":"/favicon.ico","message":"Route was not found."}}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request","method":"GET","path":"/api/terminal/stream"}
+{"event":"request","method":"GET","path":"/api/terminal/stream"}
+{"event":"terminal.target.opened","target":"r2f-real-27758","channelId":"3:zterm-v2-mux-client","stableId":"tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2227774%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1793720469%7D"}
+{"event":"terminal.target.opened","target":"r2f-real-27758-mobile","channelId":"4:zterm-v2-mux-client","stableId":"tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2227774%22%2C%22sessionId%22%3A%22%242%22%2C%22createdAt%22%3A1793720469%7D"}
+{"event":"terminal.frame.committed","target":"r2f-real-27758","revision":1,"startIndex":0,"endIndex":24}
+{"event":"terminal.frame.committed","target":"r2f-real-27758-mobile","revision":1,"startIndex":0,"endIndex":24}
+{"event":"request","method":"GET","path":"/"}
+{"event":"terminal.target.closed","target":"r2f-real-27758-mobile","channelId":"4:zterm-v2-mux-client"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.css"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.js"}
+{"event":"request","method":"GET","path":"/api/auth/session"}
+{"event":"request","method":"GET","path":"/favicon.ico"}
+{"event":"request.error","path":"/favicon.ico","error":{"code":"ROUTE_NOT_FOUND","owningModule":"daemon","operationId":"static","cause":"/favicon.ico","message":"Route was not found."}}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request","method":"GET","path":"/api/terminal/stream"}
+{"event":"request","method":"POST","path":"/api/terminal/input"}
+{"event":"terminal.frame.committed","target":"r2f-real-27758","revision":2,"startIndex":0,"endIndex":24}
+{"event":"terminal.frame.committed","target":"r2f-real-27758","revision":3,"startIndex":0,"endIndex":27}
+{"event":"request","method":"POST","path":"/api/terminal/input"}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request.error","path":"/api/sessions","error":{"code":"V2_CREDENTIAL_REQUIRED","owningModule":"daemon","operationId":"auth","cause":null,"message":"A V2 credential is required."}}
+{"event":"request","method":"GET","path":"/api/sessions"}
+{"event":"request.error","path":"/api/sessions","error":{"code":"V2_CREDENTIAL_INVALID","owningModule":"daemon","operationId":"auth","cause":null,"message":"V2 credential is invalid."}}
+{"event":"request","method":"GET","path":"/"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.css"}
+{"event":"request","method":"GET","path":"/features/terminal/bundle.js"}
+{"event":"request","method":"GET","path":"/api/auth/session"}
+{"event":"request","method":"GET","path":"/favicon.ico"}
+{"event":"request.error","path":"/favicon.ico","error":{"code":"ROUTE_NOT_FOUND","owningModule":"daemon","operationId":"static","cause":"/favicon.ico","message":"Route was not found."}}
+{"event":"terminal.frame.committed","target":"r2f-real-27758","revision":4,"startIndex":0,"endIndex":28}
+{"event":"request","method":"POST","path":"/api/auth/login"}
+{"event":"request.error","path":"/api/auth/login","error":{"code":"V2_CREDENTIAL_INVALID","owningModule":"daemon","operationId":"auth.login","cause":null,"message":"V2 credential is invalid."}}
+{"event":"request","method":"GET","path":"/api/terminal/stream"}
+{"event":"request","method":"GET","path":"/api/terminal/stream"}
+{"event":"request","method":"POST","path":"/api/terminal/input"}
+{"event":"terminal.frame.committed","target":"r2f-real-27758","revision":5,"startIndex":0,"endIndex":30}

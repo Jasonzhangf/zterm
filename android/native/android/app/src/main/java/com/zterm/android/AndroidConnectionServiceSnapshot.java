@@ -84,6 +84,7 @@ public final class AndroidConnectionServiceSnapshot {
         public final long serviceQueuedBytes;
         public final long serviceQueuedFrames;
         public final boolean backpressured;
+        public final boolean sendStalled;
         public final long sampledAt;
 
         public FlowObservation(
@@ -92,10 +93,22 @@ public final class AndroidConnectionServiceSnapshot {
             long serviceQueuedFrames,
             boolean backpressured,
             long sampledAt) {
+            this(nativeBufferedBytes, serviceQueuedBytes, serviceQueuedFrames,
+                backpressured, false, sampledAt);
+        }
+
+        public FlowObservation(
+            long nativeBufferedBytes,
+            long serviceQueuedBytes,
+            long serviceQueuedFrames,
+            boolean backpressured,
+            boolean sendStalled,
+            long sampledAt) {
             this.nativeBufferedBytes = Math.max(0L, nativeBufferedBytes);
             this.serviceQueuedBytes = Math.max(0L, serviceQueuedBytes);
             this.serviceQueuedFrames = Math.max(0L, serviceQueuedFrames);
             this.backpressured = backpressured;
+            this.sendStalled = sendStalled;
             this.sampledAt = sampledAt;
         }
 
@@ -105,6 +118,7 @@ public final class AndroidConnectionServiceSnapshot {
             json.put("serviceQueuedBytes", serviceQueuedBytes);
             json.put("serviceQueuedFrames", serviceQueuedFrames);
             json.put("backpressured", backpressured);
+            json.put("sendStalled", sendStalled);
             json.put("sampledAt", sampledAt);
             return json;
         }
@@ -268,8 +282,12 @@ public final class AndroidConnectionServiceSnapshot {
                 that.transportFlow == null ? null : that.transportFlow.nativeBufferedBytes)
             && Objects.equals(transportFlow == null ? null : transportFlow.serviceQueuedBytes,
                 that.transportFlow == null ? null : that.transportFlow.serviceQueuedBytes)
+            && Objects.equals(transportFlow == null ? null : transportFlow.serviceQueuedFrames,
+                that.transportFlow == null ? null : that.transportFlow.serviceQueuedFrames)
             && Objects.equals(transportFlow == null ? null : transportFlow.backpressured,
-                that.transportFlow == null ? null : that.transportFlow.backpressured);
+                that.transportFlow == null ? null : that.transportFlow.backpressured)
+            && Objects.equals(transportFlow == null ? null : transportFlow.sendStalled,
+                that.transportFlow == null ? null : that.transportFlow.sendStalled);
     }
 
     private static boolean channelsEqual(List<Channel> a, List<Channel> b) {
@@ -299,7 +317,9 @@ public final class AndroidConnectionServiceSnapshot {
             transportFlow == null ? 0 : Objects.hash(
                 transportFlow.nativeBufferedBytes,
                 transportFlow.serviceQueuedBytes,
-                transportFlow.backpressured));
+                transportFlow.serviceQueuedFrames,
+                transportFlow.backpressured,
+                transportFlow.sendStalled));
     }
 
     public static final class Builder {

@@ -1,0 +1,30 @@
+Bootstrap R3 rework R4F green evidence (post-fix).
+Command: node --test v2/modules/daemon/tests/terminal-slice.test.mjs v2/modules/terminal/tests/terminal-port.test.mjs v2/modules/terminal/tests/repair-closure.test.mjs v2/modules/terminal/tests/v1-mux-client.test.mjs
+
+exitCode: 0
+
+✔ daemon facade bridges V1 mux sessions, input, and subscribers without touching tmux (4267.986503ms)
+✔ V1 credential failure maps to an explicit connection error before any target access (16.146666ms)
+✔ cookie login gates input behind CSRF (30.27925ms)
+✔ frame repair keeps the committed frame, writes the exact range, and dispatches once per revision (1.684ms)
+✔ interleaved rejection dispatches the runtime repair range (0.153708ms)
+✔ invalid-frame rejection dispatches its valid repair range (0.113625ms)
+✔ repair keeps the exact non-overlapping wire range outside the local cache (0.461917ms)
+✔ stale-frame with a null repair range does not dispatch (0.176875ms)
+✔ real V1 mux rejection requests an exact range and commits one complete repair frame (101.215708ms)
+✔ lists real tmux sessions and streams committed V1 mux frames (244.999792ms)
+✔ reuses one channel for two subscribers and keeps tmux alive after close (281.756833ms)
+✔ assembles multi-chunk frames and emits only committed snapshots (20.161875ms)
+✔ rejects missing and wrong V1 credentials before target access (14.120791ms)
+✔ closeChannel rejects an unknown channel with a typed error (0.624292ms)
+✔ open timeout releases a late mux-channel-opened without affecting the transport (49.92ms)
+✔ late opened close failure stays retryable and exposes a typed error (47.483ms)
+✔ closeChannel send failure is typed, keeps the record, and does not leak to another subscriber (33.412834ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4440.191544

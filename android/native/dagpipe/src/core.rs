@@ -204,6 +204,7 @@ fn register_all(registry: &mut Registry) {
     register!(RelayAccountPublishDevice);
     register!(ConnectionEstablishTransport);
     register!(ConnectionNegotiateMux);
+    register!(ConnectionBindBulkChannel);
     register!(SessionChannelOpenAll);
     register!(SessionChannelSubscribeBodies);
     register!(ConnectionMaintain);
@@ -531,6 +532,41 @@ impl Operator for ConnectionNegotiateMux {
             "state": "ready",
             "transportGeneration": get_u64(&transport, "generation"),
             "role": "client.connection.negotiate_mux",
+        }))
+    }
+}
+
+struct ConnectionBindBulkChannel;
+
+impl Operator for ConnectionBindBulkChannel {
+    fn name(&self) -> &'static str {
+        "client.connection.bind_bulk_channel"
+    }
+
+    fn version(&self) -> &'static str {
+        "0.1"
+    }
+
+    fn input_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn output_type(&self) -> ValueType {
+        ValueType::Object
+    }
+
+    fn execute(&self, input: Value, _context: &OperatorContext) -> Result<Value, String> {
+        let mux = obj(input);
+        let target_key = get_str(&mux, "targetKey").to_string();
+        if target_key.is_empty() {
+            return Err("bulk channel binding requires a negotiated mux session".into());
+        }
+        Ok(json!({
+            "targetKey": target_key,
+            "bulkLane": "zterm-bulk",
+            "bulkOpen": false,
+            "state": "bound",
+            "role": "client.connection.bind_bulk_channel",
         }))
     }
 }

@@ -157,7 +157,7 @@ hardening commits, in worktree
 Evidence directory: `android/evidence/daemon-release-368bd970/` (gitignored,
 contains the raw JSON/PNG/tmux captures referenced here).
 
-- `node android/scripts/daemon-attach-lease-smoke.mjs 3344 wterm-4123456
+- `node android/scripts/daemon-attach-lease-smoke.mjs 3344 wterm-redacted-test-token
   zterm-release-368bd970 resubscribe`
   (`l2-attach-lease-resubscribe.jsonl`): `foreground-hold lifecycle=ready
   attached=true`; `background-release closedCode=no_body_demand

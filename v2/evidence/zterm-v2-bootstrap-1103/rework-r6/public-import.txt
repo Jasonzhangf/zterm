@@ -1,0 +1,14 @@
+R6 follow-up public import evidence (branch v2-bootstrap-1103-r1@125e6868).
+
+Without declared dependency wiring:
+node --experimental-strip-types -e "await import(\"./v2/modules/terminal/src/terminal-port.mjs\"); console.log(\"public-import-ok\")"
+ERR_MODULE_NOT_FOUND: Cannot find package \"@zterm/stream-boundary\"
+
+With temporary node_modules symlinks (module-test setup only):
+v2/modules/terminal/node_modules/@zterm/stream-boundary -> /Volumes/extension/code/zterm/packages/stream-boundary
+v2/modules/terminal/node_modules/@zterm/shared -> /Volumes/extension/code/zterm/packages/shared
+v2/modules/terminal/node_modules/@zterm/runtime-contracts -> /Volumes/extension/code/zterm/packages/runtime-contracts
+node --experimental-strip-types -e "await import(\"./v2/modules/terminal/src/terminal-port.mjs\"); console.log(\"public-import-ok\")"
+public-import-ok
+
+The symlink path proves module tests can load under temporary wiring; it is not formal package-consumer acceptance.

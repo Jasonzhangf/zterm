@@ -194,11 +194,34 @@
       "iterator": "Whole"
     },
     {
+      "id": "bind_daemon_bulk_channel",
+      "operator": "daemon.connection_gateway.bind_bulk_channel",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.mux_ready"
+      ],
+      "output": {
+        "id": "arc.bulk_channel_binding",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
       "id": "register_session_channel",
       "operator": "daemon.channel_mux.register",
       "operator_version": "0.1",
       "inputs": [
-        "arc.mux_ready"
+        "arc.bulk_channel_binding"
       ],
       "output": {
         "id": "arc.channel_registry",
@@ -443,8 +466,13 @@
     },
     {
       "from": "negotiate_mux",
-      "to": "register_session_channel",
+      "to": "bind_daemon_bulk_channel",
       "arc_id": "arc.mux_ready"
+    },
+    {
+      "from": "bind_daemon_bulk_channel",
+      "to": "register_session_channel",
+      "arc_id": "arc.bulk_channel_binding"
     },
     {
       "from": "register_session_channel",

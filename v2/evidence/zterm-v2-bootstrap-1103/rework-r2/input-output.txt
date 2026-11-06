@@ -1,0 +1,2 @@
+input: echo ZTERM_V2_E2E
+output line present: true

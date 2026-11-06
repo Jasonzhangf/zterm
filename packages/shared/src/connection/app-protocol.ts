@@ -110,11 +110,20 @@ export interface AppHelloPayload {
   capabilities: Record<string, unknown>;
 }
 
+export type AppTargetDirectEndpointKind = 'lan' | 'ipv6' | 'ipv4' | 'tailscale';
+
+export interface AppTargetEndpoint {
+  kind?: AppTargetDirectEndpointKind;
+  wsUrl: string;
+  authToken: string;
+}
+
 export interface AppTarget {
   deviceId: string;
   daemonHostId: string;
   wsUrl: string;
   authToken: string;
+  endpoints?: AppTargetEndpoint[];
 }
 
 export interface AppSendMessagePayload {
@@ -463,12 +472,57 @@ export function validateAppTarget(value: unknown, stage: string): AppTarget {
   if (!isRecord(value)) {
     throw new AppProtocolError({ code: 'invalid_frame', message: 'target must be an object', stage });
   }
-  return {
+  const target: AppTarget = {
     deviceId: requiredString(value.deviceId, 'target.deviceId', stage),
     daemonHostId: requiredString(value.daemonHostId, 'target.daemonHostId', stage),
     wsUrl: requiredString(value.wsUrl, 'target.wsUrl', stage),
     authToken: typeof value.authToken === 'string' ? value.authToken : '',
   };
+  if (value.endpoints !== undefined) {
+    if (!Array.isArray(value.endpoints)) {
+      throw new AppProtocolError({
+        code: 'invalid_frame',
+        message: 'target.endpoints must be an array',
+        stage,
+      });
+    }
+    target.endpoints = value.endpoints.map((endpoint, index) => {
+      if (!isRecord(endpoint)) {
+        throw new AppProtocolError({
+          code: 'invalid_frame',
+          message: `target.endpoints[${index}] must be an object`,
+          stage,
+        });
+      }
+      const kind = endpoint.kind;
+      if (
+        kind !== undefined
+        && kind !== 'lan'
+        && kind !== 'ipv6'
+        && kind !== 'ipv4'
+        && kind !== 'tailscale'
+      ) {
+        throw new AppProtocolError({
+          code: 'invalid_frame',
+          message: `target.endpoints[${index}].kind must be one of lan, ipv6, ipv4, tailscale`,
+          stage,
+        });
+      }
+      if (typeof endpoint.authToken !== 'string') {
+        throw new AppProtocolError({
+          code: 'invalid_frame',
+          message: `target.endpoints[${index}].authToken must be a string`,
+          stage,
+        });
+      }
+      return {
+        ...(kind === undefined ? {} : { kind }),
+        wsUrl: requiredString(endpoint.wsUrl, `target.endpoints[${index}].wsUrl`, stage),
+        authToken: endpoint.authToken,
+      };
+    });
+  }
+  return target;
 }
 
 function optionalAppTarget(value: unknown, stage: string): AppTarget | undefined {

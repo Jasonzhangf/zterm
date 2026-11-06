@@ -363,17 +363,31 @@ impl Operator for ObserveTransportFlow {
         if get_str(&transport, "state") != "connected" {
             return Ok(json!({
                 "nativeBufferedBytes": 0,
+                "controlBufferedBytes": 0,
+                "bulkBufferedBytes": 0,
                 "serviceQueuedBytes": 0,
                 "serviceQueuedFrames": 0,
                 "backpressured": false,
+                "sendStalled": false,
                 "transportFlow": Value::Null,
             }));
         }
         let flow = transport.get("flow").cloned().unwrap_or(Value::Null);
-        let native = flow
+        // The physical transport reports both DataChannel lanes. Keep a
+        // legacy aggregate-only observation valid for older callers.
+        let legacy_native = flow
             .get("nativeBufferedBytes")
             .and_then(Value::as_u64)
             .unwrap_or(0);
+        let control = flow
+            .get("controlBufferedBytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(legacy_native);
+        let bulk = flow
+            .get("bulkBufferedBytes")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let native = control.saturating_add(bulk);
         let queued_bytes = flow
             .get("serviceQueuedBytes")
             .and_then(Value::as_u64)
@@ -382,16 +396,26 @@ impl Operator for ObserveTransportFlow {
             .get("serviceQueuedFrames")
             .and_then(Value::as_u64)
             .unwrap_or(0);
+        let send_stalled = flow
+            .get("sendStalled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         Ok(json!({
             "nativeBufferedBytes": native,
+            "controlBufferedBytes": control,
+            "bulkBufferedBytes": bulk,
             "serviceQueuedBytes": queued_bytes,
             "serviceQueuedFrames": queued_frames,
             "backpressured": native >= 131_072,
+            "sendStalled": send_stalled,
             "transportFlow": {
                 "nativeBufferedBytes": native,
+                "controlBufferedBytes": control,
+                "bulkBufferedBytes": bulk,
                 "serviceQueuedBytes": queued_bytes,
                 "serviceQueuedFrames": queued_frames,
                 "backpressured": native >= 131_072,
+                "sendStalled": send_stalled,
             },
         }))
     }

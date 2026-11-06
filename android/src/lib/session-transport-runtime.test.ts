@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Host } from './types';
 import {
   buildTransportRouteCandidateKey,
@@ -38,6 +38,7 @@ import {
   setSessionChannelBodySubscribed,
   updateSessionTerminalChannelState,
 } from './terminal-channel-mux-runtime';
+import { createClientDaemonConnection } from './client-daemon-connection';
 
 function makeHost(overrides?: Partial<Host>): Host {
   return {
@@ -482,6 +483,32 @@ describe('session transport runtime store', () => {
     expect(resource.socketState).toBe('missing');
     expect(resource.terminalSocket).toBe(targetSocket);
     expect(resource.runtime?.activeSocket).toBe(legacySessionSocket);
+  });
+
+  it('does not project a ready mux target socket when the session channel is closed or closing', () => {
+    for (const channelState of ['closed', 'closing'] as const) {
+      const store = createSessionTransportRuntimeStore();
+      upsertSessionTransportRuntime(store, 'session-1', makeHost({ sessionName: 'alpha' }));
+      const targetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
+      const targetSocket = makeSocket(`target-terminal-${channelState}`);
+
+      setTargetTerminalTransport(store, targetKey, targetSocket as any);
+      ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: `channel-${channelState}` });
+      setSessionTargetTerminalMuxReady(store, 'session-1', true);
+      updateSessionTerminalChannelState(store.terminalChannels, 'session-1', channelState);
+
+      const resource = getSessionTransportResource(store, 'session-1');
+      expect(resource.socket).toBeNull();
+      expect(resource.socketState).toBe('missing');
+      expect(resource.terminalSocket).toBe(targetSocket);
+      expect(resource.channel?.state).toBe(channelState);
+
+      const connection = createClientDaemonConnection({
+        readSessionTransportResource: (sessionId) => getSessionTransportResource(store, sessionId),
+        sendSocketPayload: vi.fn(),
+      });
+      expect(connection.readSessionSocket('session-1')).toBeNull();
+    }
   });
 
   it('keeps channel state and body subscription isolated per session', () => {

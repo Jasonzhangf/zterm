@@ -75,6 +75,37 @@ export type AppStagingMetadata = {
   absolutePath?: string;
 };
 
+export type AppDeliveryRef = {
+  sourceMachineId: string;
+  workspaceId: string;
+  actorAccountId: string;
+  requestId: string;
+};
+
+export type AppDeliveryTarget = {
+  memberId: string;
+  machineId: string;
+  bindingGeneration: number;
+};
+
+export type AppDeliveryStage = 'accepted' | 'remote-stored' | 'host-delivered' | 'consumed';
+
+export type AppDeliveryOutcome = 'pending' | 'confirmed' | 'unknown' | 'rejected' | 'failed';
+
+export type AppDeliveryRecord = {
+  schemaVersion: 2;
+  deliveryRef: AppDeliveryRef;
+  target: AppDeliveryTarget;
+  kind: 'message';
+  subject?: string;
+  body: string;
+  durableStage: AppDeliveryStage;
+  outcome: AppDeliveryOutcome;
+  errorRef?: string;
+  acceptedAt: string;
+  observedAt: string;
+};
+
 export class AppStoreError extends Error {
   readonly code: 'storage_error' | 'inbox_full' | 'chunk_conflict' | 'storage_inconsistent';
 
@@ -152,6 +183,7 @@ async function readJson<T>(filePath: string): Promise<T | null> {
 export class DaemonAppMessagingStore {
   readonly inboxRoot: string;
   readonly outboxRoot: string;
+  readonly deliveryRoot: string;
   private readonly maxInboxRecords: number;
   private readonly maxInboxBytes: number;
   private queue: Promise<unknown> = Promise.resolve();
@@ -159,6 +191,7 @@ export class DaemonAppMessagingStore {
   constructor(options: { appRootDir: string; maxInboxRecords?: number; maxInboxBytes?: number }) {
     this.inboxRoot = join(options.appRootDir, 'app-inbox');
     this.outboxRoot = join(options.appRootDir, 'app-outbox');
+    this.deliveryRoot = join(options.appRootDir, 'app-delivery');
     this.maxInboxRecords = options.maxInboxRecords ?? APP_MAX_INBOX_RECORDS;
     this.maxInboxBytes = options.maxInboxBytes ?? APP_MAX_INBOX_BYTES;
   }
@@ -166,6 +199,7 @@ export class DaemonAppMessagingStore {
   async initialize() {
     await mkdir(this.inboxRoot, { recursive: true });
     await mkdir(this.outboxRoot, { recursive: true });
+    await mkdir(this.deliveryRoot, { recursive: true });
   }
 
   runExclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -220,6 +254,53 @@ export class DaemonAppMessagingStore {
 
   finalFilePath(senderDaemonHostId: string, messageId: string, safeFileName: string) {
     return join(this.filesDir(senderDaemonHostId, messageId), safeFileName);
+  }
+
+  private deliveryRecordDir(ref: AppDeliveryRef) {
+    return join(
+      this.deliveryRoot,
+      'records',
+      encodeAppPathSegment(assertSegment(ref.sourceMachineId)),
+      encodeAppPathSegment(assertSegment(ref.workspaceId)),
+      encodeAppPathSegment(assertSegment(ref.actorAccountId)),
+      encodeAppPathSegment(assertSegment(ref.requestId)),
+    );
+  }
+
+  deliveryRecordPath(ref: AppDeliveryRef) {
+    return join(this.deliveryRecordDir(ref), 'record.json');
+  }
+
+  async writeDeliveryRecord(record: AppDeliveryRecord) {
+    await atomicWriteJson(this.deliveryRecordPath(record.deliveryRef), record);
+  }
+
+  async readDeliveryRecord(ref: AppDeliveryRef): Promise<AppDeliveryRecord | null> {
+    return readJson<AppDeliveryRecord>(this.deliveryRecordPath(ref));
+  }
+
+  async findDeliveryRecordByRequestId(requestId: string): Promise<AppDeliveryRecord | null> {
+    if (requestId.length === 0 || new TextEncoder().encode(requestId).length > APP_MAX_PATH_IDENTITY_BYTES) {
+      return null;
+    }
+    const recordsRoot = join(this.deliveryRoot, 'records');
+    const matches: AppDeliveryRecord[] = [];
+    await this.walkJson(recordsRoot, (value) => {
+      if (!value || (value as AppDeliveryRecord).schemaVersion !== 2) return;
+      const record = value as AppDeliveryRecord;
+      if (record.deliveryRef.requestId === requestId) matches.push(record);
+    });
+    return matches.length === 1 ? matches[0] : null;
+  }
+
+  async listDeliveryRecords(): Promise<AppDeliveryRecord[]> {
+    const records: AppDeliveryRecord[] = [];
+    await this.walkJson(join(this.deliveryRoot, 'records'), (value) => {
+      if (value && (value as AppDeliveryRecord).schemaVersion === 2) {
+        records.push(value as AppDeliveryRecord);
+      }
+    });
+    return records;
   }
 
   async writeInboxRecord(record: AppInboxRecord) {
@@ -420,6 +501,33 @@ export class DaemonAppMessagingStore {
       }
     }
     await this.writeInboxRecord(record);
+    return isNew;
+  }
+
+  async computeDeliveryUsage() {
+    let records = 0;
+    let bytes = 0;
+    for (const record of await this.listDeliveryRecords()) {
+      records += 1;
+      bytes += Buffer.byteLength(record.body, 'utf8');
+    }
+    return { records, bytes };
+  }
+
+  async admitDeliveryRecord(record: AppDeliveryRecord, reservedBytes: number) {
+    const existing = await this.readDeliveryRecord(record.deliveryRef);
+    const isNew = existing === null;
+    if (isNew) {
+      const legacy = await this.computeInboxUsage();
+      const delivery = await this.computeDeliveryUsage();
+      if (legacy.records + delivery.records + 1 > this.maxInboxRecords) {
+        throw new AppStoreError('inbox_full', 'durable delivery record limit reached');
+      }
+      if (legacy.bytes + delivery.bytes + reservedBytes > this.maxInboxBytes) {
+        throw new AppStoreError('inbox_full', 'durable delivery byte limit reached');
+      }
+    }
+    await this.writeDeliveryRecord(record);
     return isNew;
   }
 
