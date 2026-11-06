@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  buildTerminalMuxError,
   buildTerminalMuxReady,
   buildTerminalMuxServerTargetMessage,
   isTerminalMuxClientFrame,
@@ -473,6 +474,40 @@ describe('tmux-sessions transport contract', () => {
     expect(socket.sent).toHaveLength(3);
     socket.triggerSessions(['recovered']);
     await expect(second).resolves.toEqual(['recovered']);
+  });
+
+  it('surfaces a pre-negotiation unauthorized legacy error without masking it as an invalid mux frame', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+    const promise = fetchTmuxSessions(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+
+    socket.triggerOpen();
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'error',
+        payload: { message: 'Unauthorized bridge token', code: 'unauthorized' },
+      }),
+    });
+
+    await expect(promise).rejects.toThrow('Unauthorized bridge token');
+    expect(socket.closeCalls).toBe(1);
+  });
+
+  it('surfaces a pre-negotiation multiplex upgrade requirement with its daemon message', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+    const promise = fetchTmuxSessions(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+
+    socket.triggerOpen();
+    socket.onmessage?.({
+      data: JSON.stringify(buildTerminalMuxError(
+        'daemon_multiplex_upgrade_required',
+        'daemon upgrade required for terminal multiplex transport',
+      )),
+    });
+
+    await expect(promise).rejects.toThrow('daemon upgrade required for terminal multiplex transport');
+    expect(socket.closeCalls).toBe(1);
   });
 
   it('rejects a legacy unwrapped sessions response and discards the transport', async () => {
