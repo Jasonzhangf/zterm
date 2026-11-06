@@ -1,0 +1,46 @@
+{
+  "status": "COMPLETE",
+  "branch": "zterm-v2-tickets-claim-reconcile-fix-1106-20261106",
+  "baseline_head": "9cdf99e76131efae1ef7bc2757817621d007e296",
+  "changed_paths": [
+    "v2/modules/tickets/src/adapters/sqlite-binding-store.ts",
+    "v2/modules/tickets/tests/contract/comment-provider-scope.test.ts",
+    "v2/evidence/zterm-v2-tickets-claim-reconcile-fix-1106/plan.md",
+    "v2/evidence/zterm-v2-tickets-claim-reconcile-fix-1106/red-baseline.txt",
+    "v2/evidence/zterm-v2-tickets-claim-reconcile-fix-1106/green-focused.txt",
+    "v2/evidence/zterm-v2-tickets-claim-reconcile-fix-1106/green-related.txt",
+    "v2/evidence/zterm-v2-tickets-claim-reconcile-fix-1106/green-contract.txt",
+    "v2/evidence/zterm-v2-tickets-claim-reconcile-fix-1106/result.md",
+    "v2/evidence/zterm-v2-tickets-claim-reconcile-fix-1106/result.json"
+  ],
+  "focused_tests": {
+    "pre_fix": {
+      "command": "node --test tests/contract/*.test.ts",
+      "pass": 56,
+      "fail": 2,
+      "receipt": "red-baseline.txt"
+    },
+    "post_fix": {
+      "command": "node --test tests/contract/comment-provider-scope.test.ts",
+      "pass": 3,
+      "fail": 0,
+      "receipt": "green-focused.txt"
+    },
+    "related": {
+      "command": "node --test tests/contract/comment-provider-scope.test.ts tests/contract/operation-ref.test.ts tests/contract/pending-recovery.test.ts tests/contract/restart-new-process.test.ts",
+      "pass": 17,
+      "fail": 0,
+      "receipt": "green-related.txt"
+    },
+    "full_contract": {
+      "command": "node --test tests/contract/*.test.ts",
+      "pass": 58,
+      "fail": 0,
+      "receipt": "green-contract.txt"
+    }
+  },
+  "remote_actions": false,
+  "commit_created": false,
+  "push_performed": false,
+  "merge_performed": false
+}

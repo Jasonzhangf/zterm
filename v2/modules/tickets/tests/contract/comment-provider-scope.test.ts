@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { DatabaseSync } from 'node:sqlite'
 import {
+  type TicketError,
   InMemoryBindingStore,
   SqliteBindingStore,
   TicketService,
@@ -14,6 +15,7 @@ import {
   actor,
   appendInput,
   binding,
+  confirmInput,
   expectTicketError,
   FakeCredentials,
   FakeReaders,
@@ -105,13 +107,70 @@ test('a single provider cannot hand the same numeric comment id to a second oper
   })
 })
 
-test('reopening an existing candidate database drops the legacy global comment index', async () => {
+test('manual reconciliation exposes the original provider-scoped claim attribution across SQLite readback', async () => {
+  await withStores(async (store) => {
+    await store.putProviderInstance(providerInstance({ providerInstanceId: 'vk-1' }))
+    await store.putBinding(binding({ bindingId: 'binding-1', providerInstanceId: 'vk-1', externalTaskId: 27 }))
+    const client = clientReturningComment(COMMENT_ID)
+    const service = serviceFor(store, client)
+
+    const first = await service.appendReport(actor(), appendInput({ operationId: 'op-a', bindingId: 'binding-1' }))
+    assert.equal(first.operation.state, 'succeeded')
+    assert.equal(client.count('createComment'), 1)
+
+    const secondRef = { workspaceId: 'ws-1', actorAccountId: 'acct-a', operationId: 'op-b' }
+    await store.putOperation({
+      operationRef: secondRef,
+      bindingId: 'binding-1',
+      kind: 'appendReport',
+      request: { kind: 'appendReport', bindingId: 'binding-1', actorMemberId: 'member-a', reportKind: 'status', body: 'progress' },
+      state: 'unknown',
+      resolution: 'none',
+    })
+    client.set('listComments', async () => ({
+      kind: 'ok',
+      status: 200,
+      value: [{ id: COMMENT_ID, comment: 'body', created: '2026-11-03T05:00:00Z', author: { id: 1 } }],
+    }))
+
+    await assert.rejects(
+      service.confirmRemoteResult(actor(), confirmInput({
+        operationRef: secondRef,
+        candidateExternalCommentId: COMMENT_ID,
+        evidenceRef: 'evidence://manual/claim-conflict',
+      })),
+      (error: unknown): boolean => {
+        expectTicketError('BINDING_CONFLICT')(error)
+        assert.deepEqual((error as TicketError).operationRef, {
+          workspaceId: 'ws-1',
+          actorAccountId: 'acct-a',
+          operationId: 'op-a',
+        })
+        return true
+      },
+    )
+
+    assert.equal(client.count('createComment'), 1)
+
+    const claim = await store.getOperationByExternalComment('vk-1', COMMENT_ID)
+    assert.equal(claim?.operationRef.operationId, 'op-a')
+  })
+})
+
+test('reopening an existing candidate database drops the legacy global index and migrates legacy claim keys', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'zterm-tickets-reopen-'))
   const path = join(dir, 'tickets.sqlite')
   try {
     const legacy = new SqliteBindingStore({ path })
+    await seedTwoProviderBindings(legacy)
+    const legacyService = serviceFor(legacy, clientReturningComment(COMMENT_ID))
+    const legacyResult = await legacyService.appendReport(actor(), appendInput({ operationId: 'op-a', bindingId: 'binding-1' }))
+    assert.equal(legacyResult.operation.state, 'succeeded')
     legacy.close()
     const raw = new DatabaseSync(path)
+    raw
+      .prepare('UPDATE comment_claims SET ref_key = ? WHERE provider_instance_id = ? AND external_comment_id = ?')
+      .run('ws-1\u0000acct-a\u0000op-a', 'vk-1', COMMENT_ID)
     raw.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS operations_comment_unique ON operations(external_comment_id) WHERE external_comment_id IS NOT NULL;",
     )
@@ -126,13 +185,84 @@ test('reopening an existing candidate database drops the legacy global comment i
       probe.close()
       assert.equal(index, undefined)
 
-      await seedTwoProviderBindings(store)
-      const client = clientReturningComment(COMMENT_ID)
-      const service = serviceFor(store, client)
-      const first = await service.appendReport(actor(), appendInput({ operationId: 'op-a', bindingId: 'binding-1' }))
+      const migrated = await store.getOperationByExternalComment('vk-1', COMMENT_ID)
+      assert.equal(migrated?.operationRef.operationId, 'op-a')
+
+      const service = serviceFor(store, clientReturningComment(COMMENT_ID))
       const second = await service.appendReport(actor(), appendInput({ operationId: 'op-b', bindingId: 'binding-2' }))
-      assert.equal(first.operation.state, 'succeeded')
       assert.equal(second.operation.state, 'succeeded')
+    } finally {
+      store.close()
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('legacy claim migration preserves attribution through public confirmRemoteResult conflict', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'zterm-tickets-reopen-confirm-'))
+  const path = join(dir, 'tickets.sqlite')
+  try {
+    const client = clientReturningComment(COMMENT_ID)
+    const legacy = new SqliteBindingStore({ path })
+    await seedTwoProviderBindings(legacy)
+    const legacyService = serviceFor(legacy, client)
+    const legacyResult = await legacyService.appendReport(actor(), appendInput({ operationId: 'op-a', bindingId: 'binding-1' }))
+    assert.equal(legacyResult.operation.state, 'succeeded')
+    legacy.close()
+
+    const raw = new DatabaseSync(path)
+    raw
+      .prepare('UPDATE comment_claims SET ref_key = ? WHERE provider_instance_id = ? AND external_comment_id = ?')
+      .run('ws-1\u0000acct-a\u0000op-a', 'vk-1', COMMENT_ID)
+    raw.exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS operations_comment_unique ON operations(external_comment_id) WHERE external_comment_id IS NOT NULL;",
+    )
+    raw.close()
+
+    const store = new SqliteBindingStore({ path })
+    try {
+      const service = serviceFor(store, client)
+      const conflictingRef = { workspaceId: 'ws-1', actorAccountId: 'acct-a', operationId: 'op-b' }
+      await store.putOperation({
+        operationRef: conflictingRef,
+        bindingId: 'binding-1',
+        kind: 'appendReport',
+        request: { kind: 'appendReport', bindingId: 'binding-1', actorMemberId: 'member-a', reportKind: 'status', body: 'progress' },
+        state: 'unknown',
+        resolution: 'none',
+      })
+      client.set('listComments', async () => ({
+        kind: 'ok',
+        status: 200,
+        value: [{ id: COMMENT_ID, comment: 'body', created: '2026-11-03T05:00:00Z', author: { id: 1 } }],
+      }))
+
+      const createCommentCount = client.count('createComment')
+      await assert.rejects(
+        service.confirmRemoteResult(actor(), confirmInput({
+          operationRef: conflictingRef,
+          candidateExternalCommentId: COMMENT_ID,
+          evidenceRef: 'evidence://manual/legacy-claim-conflict',
+        })),
+        (error: unknown): boolean => {
+          expectTicketError('BINDING_CONFLICT')(error)
+          assert.deepEqual((error as TicketError).operationRef, {
+            workspaceId: 'ws-1',
+            actorAccountId: 'acct-a',
+            operationId: 'op-a',
+          })
+          return true
+        },
+      )
+
+      const claim = await store.getOperationByExternalComment('vk-1', COMMENT_ID)
+      assert.deepEqual(claim?.operationRef, {
+        workspaceId: 'ws-1',
+        actorAccountId: 'acct-a',
+        operationId: 'op-a',
+      })
+      assert.equal(client.count('createComment'), createCommentCount)
     } finally {
       store.close()
     }

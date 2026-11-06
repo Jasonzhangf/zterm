@@ -1,0 +1,120 @@
+TAP version 13
+# (node:62915) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: two providers may own the same numeric comment id and each claim stays queryable
+ok 1 - two providers may own the same numeric comment id and each claim stays queryable
+  ---
+  duration_ms: 16.287083
+  type: 'test'
+  ...
+# Subtest: a single provider cannot hand the same numeric comment id to a second operation
+ok 2 - a single provider cannot hand the same numeric comment id to a second operation
+  ---
+  duration_ms: 9.636125
+  type: 'test'
+  ...
+# Subtest: reopening an existing candidate database drops the legacy global index and migrates legacy claim keys
+ok 3 - reopening an existing candidate database drops the legacy global index and migrates legacy claim keys
+  ---
+  duration_ms: 11.905458
+  type: 'test'
+  ...
+# (node:62916) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the same operationId is independent across different actor accounts
+ok 4 - the same operationId is independent across different actor accounts
+  ---
+  duration_ms: 1.512041
+  type: 'test'
+  ...
+# Subtest: the same account and operationId is independent across workspaces
+ok 5 - the same account and operationId is independent across workspaces
+  ---
+  duration_ms: 0.804125
+  type: 'test'
+  ...
+# Subtest: two services sharing one store allocate distinct binding ids and never overwrite
+ok 6 - two services sharing one store allocate distinct binding ids and never overwrite
+  ---
+  duration_ms: 0.301375
+  type: 'test'
+  ...
+# Subtest: two workspaces sharing one store do not overwrite each other bindings
+ok 7 - two workspaces sharing one store do not overwrite each other bindings
+  ---
+  duration_ms: 0.265417
+  type: 'test'
+  ...
+# Subtest: a sequential service rebuild over the same store keeps an unknown operation reconcilable
+ok 8 - a sequential service rebuild over the same store keeps an unknown operation reconcilable
+  ---
+  duration_ms: 0.706459
+  type: 'test'
+  ...
+# Subtest: the SQLite store continues its binding sequence after a real reload
+ok 9 - the SQLite store continues its binding sequence after a real reload
+  ---
+  duration_ms: 14.708292
+  type: 'test'
+  ...
+# (node:62917) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: recovery leaves a pending write with a still-valid lease untouched
+ok 10 - recovery leaves a pending write with a still-valid lease untouched
+  ---
+  duration_ms: 11.228
+  type: 'test'
+  ...
+# Subtest: recovery turns an expired pending write into unknown without guessing success
+ok 11 - recovery turns an expired pending write into unknown without guessing success
+  ---
+  duration_ms: 6.763584
+  type: 'test'
+  ...
+# Subtest: recovery never rewrites an already succeeded operation
+ok 12 - recovery never rewrites an already succeeded operation
+  ---
+  duration_ms: 7.746042
+  type: 'test'
+  ...
+# Subtest: a stale pending create replays as unknown, never re-posts, and can then be manually confirmed
+ok 13 - a stale pending create replays as unknown, never re-posts, and can then be manually confirmed
+  ---
+  duration_ms: 9.209334
+  type: 'test'
+  ...
+# Subtest: manual reconciliation cannot preempt a pending executor whose lease is still valid
+ok 14 - manual reconciliation cannot preempt a pending executor whose lease is still valid
+  ---
+  duration_ms: 6.029541
+  type: 'test'
+  ...
+# Subtest: a stale pending appendReport replays as unknown without re-posting the comment
+ok 15 - a stale pending appendReport replays as unknown without re-posting the comment
+  ---
+  duration_ms: 6.955416
+  type: 'test'
+  ...
+# (node:62918) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a truly separate process recovers an unknown operation without re-POSTing it
+ok 16 - a truly separate process recovers an unknown operation without re-POSTing it
+  ---
+  duration_ms: 221.776
+  type: 'test'
+  ...
+# Subtest: a process that exits after issuing the remote POST leaves a durable pending that recovery turns unknown
+ok 17 - a process that exits after issuing the remote POST leaves a durable pending that recovery turns unknown
+  ---
+  duration_ms: 230.352917
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 573.992541

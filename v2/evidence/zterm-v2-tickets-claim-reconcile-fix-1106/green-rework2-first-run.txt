@@ -1,0 +1,42 @@
+TAP version 13
+# (node:83849) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: two providers may own the same numeric comment id and each claim stays queryable
+ok 1 - two providers may own the same numeric comment id and each claim stays queryable
+  ---
+  duration_ms: 12.762667
+  type: 'test'
+  ...
+# Subtest: a single provider cannot hand the same numeric comment id to a second operation
+ok 2 - a single provider cannot hand the same numeric comment id to a second operation
+  ---
+  duration_ms: 7.028166
+  type: 'test'
+  ...
+# Subtest: manual reconciliation exposes the original provider-scoped claim attribution across SQLite readback
+ok 3 - manual reconciliation exposes the original provider-scoped claim attribution across SQLite readback
+  ---
+  duration_ms: 7.03275
+  type: 'test'
+  ...
+# Subtest: reopening an existing candidate database drops the legacy global index and migrates legacy claim keys
+ok 4 - reopening an existing candidate database drops the legacy global index and migrates legacy claim keys
+  ---
+  duration_ms: 8.378584
+  type: 'test'
+  ...
+# Subtest: legacy claim migration preserves attribution through public confirmRemoteResult conflict
+ok 5 - legacy claim migration preserves attribution through public confirmRemoteResult conflict
+  ---
+  duration_ms: 8.262708
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 158.209709
