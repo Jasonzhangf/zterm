@@ -1,0 +1,16 @@
+{
+  "status": 404,
+  "body": {
+    "error": {
+      "code": "TARGET_NOT_FOUND",
+      "owningModule": "host-adapters",
+      "operationId": "capture",
+      "cause": {
+        "socketName": "zterm-v2-r2",
+        "target": "does-not-exist",
+        "detail": "can't find pane: does-not-exist"
+      },
+      "message": "Terminal target was not found."
+    }
+  }
+}

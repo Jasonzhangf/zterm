@@ -1,0 +1,35 @@
+# Canonical machine list gap (real relay black-box)
+
+Task: zterm-v2-accounts-relay-wiring-1103-r1
+Candidate: layerfs:zterm/zterm-v2-accounts-relay-wiring-1103-r1
+Probe: 2026-11-03 (isolated real V1 relay over loopback HTTP)
+
+## Real relay black-box
+
+An isolated real V1 relay process was started from
+`android/src/traversal-relay/server.ts` in the candidate tree with a temp store
+and a loopback port. A fresh account was registered and logged in, then the
+authenticated requests below were issued.
+
+GET /api/machines -> HTTP 404
+{"ok":false,"message":"not found"}
+
+GET /api/directory -> HTTP 200
+{"ok":true,"user":{"id":"<account-id>","username":"machines-probe-...","createdAt":"..."},"directory":{"schemaVersion":1,"user":{"id":"<account-id>","username":"machines-probe-..."},"devices":[],"updatedAt":"..."}}
+
+## Source facts
+
+- `android/src/traversal-relay/store.ts` line 1049 has
+  `public listMachines(userId: string)`.
+- `android/src/traversal-relay/server.ts` has enroll/possession/revoke routes
+  and `/api/directory`, but no `GET /api/machines` route.
+- The V2 adapter surfaces the missing endpoint as `RELAY_SERVICE_ERROR` 502 with
+  `upstreamStatus: 404`; it does not create a fallback machine source.
+
+## Consequence
+
+The acceptance case "real non-empty host-directory -> enroll -> canonical list
+-> revoke -> inactive list" cannot run until a V1 relay owner adds the public
+`GET /api/machines` route. This is an integration dependency, not an accounts
+fallback. The relay process was stopped by its explicit PID and its temp store
+was removed.

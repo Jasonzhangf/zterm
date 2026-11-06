@@ -1,0 +1,67 @@
+{
+  "kind": "members-owner-self-check",
+  "publicEntry": "v2/modules/members/src/public/index.mjs",
+  "workspace": {
+    "branch": "zterm-v2-organization-1103",
+    "note": "LayerFS branch identity comes from sandbox list_workspaces; git inside may report main."
+  },
+  "realTmux": {
+    "first": {
+      "sessionId": "$0",
+      "paneId": "%0",
+      "name": "zterm-members-a-5217",
+      "created": null
+    },
+    "second": {
+      "sessionId": "$1",
+      "paneId": "%1",
+      "name": "zterm-members-b-5217",
+      "created": null
+    },
+    "remainingAfterCleanup": "server exited: Command failed: tmux -S /tmp/zterm-members-self-check-bezqFV/tmux/socket-5217 list-sessions -F #{session_name}"
+  },
+  "member": {
+    "memberId": "mbr_eb463ac8-428d-4761-bce7-0d2cae91f243",
+    "workspaceId": "ws_a6033c56-504e-4678-aaae-410367ed2e47"
+  },
+  "bound": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_eb463ac8-428d-4761-bce7-0d2cae91f243",
+      "sessionId": "$0",
+      "anchor": "%0",
+      "generation": 1
+    }
+  },
+  "advanced": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_eb463ac8-428d-4761-bce7-0d2cae91f243",
+      "sessionId": "$1",
+      "anchor": "%1",
+      "generation": 2
+    }
+  },
+  "stale": {
+    "ok": false,
+    "code": "BINDING_GENERATION_STALE",
+    "owningModule": "members",
+    "message": "binding generation 2 != expected 1"
+  },
+  "unauthenticated": {
+    "ok": false,
+    "code": "UNAUTHENTICATED",
+    "owningModule": "accounts",
+    "message": "unverified auth token"
+  },
+  "persisted": {
+    "ok": true,
+    "value": {
+      "memberId": "mbr_eb463ac8-428d-4761-bce7-0d2cae91f243",
+      "sessionId": "$1",
+      "anchor": "%1",
+      "generation": 2
+    }
+  },
+  "outcome": "PASS"
+}

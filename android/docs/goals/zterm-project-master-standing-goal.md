@@ -2,7 +2,7 @@
 
 Status: active
 Owner: Jenny, zterm project master
-Updated: 2026-11-02
+Updated: 2026-11-04
 
 ## Objective
 
@@ -12,7 +12,7 @@ publish only authorized artifacts, and close owned resources.
 
 ## Active Board Tasks
 
-All project board tasks are closed and merged to `main`:
+All project board tasks closed before 2026-11-04 are merged to `main`; open work is listed under "Current cycle (2026-11-04)":
 
 - `session-drawer-collab-roles-1028` (P0): merged `d0b0bf1e` (PR #178).
 - `session-drawer-ux-1028` (P1): master filter delegates to the Collab
@@ -100,6 +100,60 @@ Remaining gates (external resources, not code):
   one-shot execution or observation to an independent GCM worker when needed.
 - Preserve dirty, active, shared, or unknown resources.
 - Report only substantive project progress or verified blockers to the CEO.
+
+## Current cycle (2026-11-04) — zterm V2 first seam
+
+Open work (owner / reviewer / next_step in `collab board show`):
+
+- `zterm-v2-terminal-milestone-e2e-1103` (P1, Jenny, integration): env recovery
+  waits on r2 writer PID 49522 still running; then product seam — real V1
+  login, session/target discovery, V2 pane input echo. WebUI
+  `http://127.0.0.1:8801/` returns HTTP 200 but does not prove seam passed.
+  Next: after writer exit, GCM offline `pnpm install --offline --frozen-lockfile`
+  in `1:/workspaces/21`, verify `ws` + `esbuild`, then product seam.
+- `client-rotation-recovery-impl-1103` (P1, Alice): LayerFS candidate head
+  125168b3, container unit tests + type-check pass. Host GCM rebuilt
+  `0.1.5.3245` (APK sha256 `d4720a3b...`), ran an isolated HOME/port daemon
+  (3334) plus fake relay (19091) on `emulator-5560`. Old-token rejection and
+  unchanged-token no-reconnect are PASS. The clean rerun did not yet exercise
+  the intended picker path; the session-open retry loop still reconnects with
+  the stale token and never adopts the rotated directory token. Verifier is
+  rebuilding the harness to test the real picker `handleRefreshNow` path
+  before a final FAIL/PASS. Not delivered.
+- `zterm-v2-accounts-relay-wiring-1103-r1` (P1, Grace, David): accepted
+  candidate 1263bd42 on LayerFS main; pending merge/combination E2E + final
+  audit.
+- `zterm-v2-bootstrap-r6-followup-1103` (P1, Grace, David): accepted; integrate
+  onto main then record collab task integrated.
+- `zterm-v2-tickets-impl-1103` (P1, Jenny, David): accepted 127b81ff; awaits
+  merge onto main then record integrated.
+- `zterm-v2-webui-frontend-test` (P0, Iris): delivered contract. Iris
+  re-verified 127f6e57: all 8 blocking items closed PASS (U3b kept P2), plus
+  4 extra measured PASS items. Conclusion moved from FAIL to PASS for the
+  current candidate.
+- `zterm-v2-webui-impl-1103` (P1, Frank): 127f6e57 accepted (revision 9,
+  status accepted). UI rework (8 blockers) closed; evidence linked in the
+  task. Frontend publish still requires the tester verdict before release.
+
+Blocked:
+
+- `udp-baseline-15t-1031` (P1, Bob): blocked by changed premise — installed
+  build is already `0.1.4.3242` (the fix), not the required pre-fix
+  `0.1.4.3239`, and reinstalling 3239 is forbidden. 15T is now reported
+  online, but the task still needs a CEO disposition: close as obsolete or
+  re-scope the comparison. All baseline fields remain UNVERIFIED.
+
+Open defects: `public-release-blank-machine-audit-20261029`, `Implement zterm
+V2 accounts first increment`.
+
+Pending merges: `zterm-v2-accounts-relay-wiring-1103-r1`,
+`zterm-v2-bootstrap-r6-followup-1103`, `zterm-v2-tickets-impl-1103`.
+
+Worktree inventory (2026-11-04): 1 registered (`main`
+`/Volumes/extension/code/zterm`, dirty with in-flight and other-owner edits),
+no `.git/worktrees` entries, no orphan worktree dirs under
+`/Volumes/Intel/playground/zterm/`; 0 closed, 1 PROTECTED_HOLD. No new
+worktrees; new tasks use LayerFS task branches.
 
 ## Current cycle (2026-11-02)
 

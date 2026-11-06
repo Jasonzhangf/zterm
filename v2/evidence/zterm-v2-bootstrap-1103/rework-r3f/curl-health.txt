@@ -1,0 +1,11 @@
+GET /api/health -> 200
+{
+  "status": "ok",
+  "observation": {
+    "source": "daemon",
+    "observedAt": "2026-11-03T21:05:31.272Z",
+    "value": {
+      "livenessOnly": true
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@zterm/v2-tickets",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/contract/*.test.ts",
+    "test:contract": "node --test tests/contract/*.test.ts",
+    "test:integration": "node --test tests/integration/*.test.ts"
+  }
+}

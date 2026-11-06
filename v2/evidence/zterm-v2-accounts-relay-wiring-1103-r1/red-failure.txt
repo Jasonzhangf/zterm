@@ -1,0 +1,50 @@
+Red test against the task base
+================================
+
+Base commit: 3289b61b4a0ec8a4e4305dfd4d4567d349d0b62dffc51a5a9792578a53a0906e88
+
+The new acceptance contract runs on the base and fails because the base
+adapter/service has no relay logout, machine enrollment, possession verify, or
+owner revoke, and the public contract does not export those entry points.
+
+Base adapter source facts:
+- v1-relay.ts throws UNSUPPORTED 501 for enroll() and has no logout().
+- auth-service.ts logout() is synchronous local-only invalidation with a local
+  revoked-token set.
+- machine-service.ts has enrollMachine() only and no verifyMachinePossession()
+  or revokeMachine().
+- public/contracts.ts does not export VerifyMachinePossessionInput or
+  RevokeMachineInput.
+- public/errors.ts has no MACHINE_DEVICE_CONFLICT / MACHINE_NOT_FOUND /
+  MACHINE_NOT_OWNED / MACHINE_REVOKED / POSSESSION_INVALID codes.
+
+Expected red assertions on base:
+1. AuthService.logout must reject a local token with SESSION_REVOKED 403 and
+   never call the relay; the acceptance expects the relay logout call and a
+   later 401 AUTHENTICATION_REQUIRED from /me.
+2. MachineService.enrollMachine must return UNSUPPORTED 501 after directory
+   validation; the acceptance expects canonical enrollment to return a
+   machineId, a repeated proof to be idempotent, a different proof to be 409
+   machine_device_conflict, and cross-account proof reuse to be 409
+   machine_already_owned.
+3. MachineService.verifyMachinePossession does not exist; possession challenge
+   and verify have no implementation.
+4. MachineService.revokeMachine does not exist; owner-only revoke has no
+   implementation.
+5. The real isolated V1 relay integration cannot exercise the missing public
+   members and fails the new acceptance assertions.
+
+Red run captured by mounting this branch test set onto a fork of the base and
+running the contract/integration suite with Node type stripping. The suite
+exits non-zero with 38 passing and 12 failing tests. The observed red-run
+details are in red-run.txt:
+- The original base contract test expected UNSUPPORTED for enrollment and the
+  adapter returned RELAY_SERVICE_ERROR 404 instead (before the adapter was
+  wired to real endpoints).
+- The original base integration logout test expected local-only
+  SESSION_REVOKED, but the acceptance requires the relay logout and a
+  subsequent 401 from /me.
+
+After implementation, the same suite passes 49/49. This is the requested
+red-before-green proof: the acceptance is not satisfiable by the base code,
+and the new implementation is what makes it pass.

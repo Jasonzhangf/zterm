@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "V2_CREDENTIAL_INVALID",
+    "owningModule": "daemon",
+    "operationId": "auth",
+    "cause": null,
+    "message": "V2 credential is invalid."
+  }
+}

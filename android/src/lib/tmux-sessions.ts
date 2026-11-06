@@ -56,6 +56,32 @@ function normalizeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+// Admission errors can arrive before mux-ready, before the strict frame validator applies.
+function readPreNegotiationTmuxError(frame: unknown): Error | null {
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame)) {
+    return null;
+  }
+  const candidate = frame as { type?: unknown; payload?: unknown };
+  if (candidate.type !== 'error' && candidate.type !== 'mux-error') {
+    return null;
+  }
+  if (!candidate.payload || typeof candidate.payload !== 'object' || Array.isArray(candidate.payload)) {
+    return null;
+  }
+  const payload = candidate.payload as { code?: unknown; message?: unknown };
+  if (payload.code !== 'unauthorized' && payload.code !== 'daemon_multiplex_upgrade_required') {
+    return null;
+  }
+  const message = normalizeString(payload.message);
+  if (message) {
+    return new Error(message);
+  }
+  if (payload.code === 'unauthorized') {
+    return new Error('Unauthorized bridge token');
+  }
+  return new Error('Daemon upgrade required for terminal multiplex transport');
+}
+
 function normalizePort(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.floor(value)
@@ -182,6 +208,14 @@ function handleTmuxControlMessage(entry: TmuxControlTransportEntry, data: unknow
   } catch (error) {
     failTmuxControlTransport(entry, error instanceof Error ? error : new Error('Failed to parse tmux control response'), true);
     return;
+  }
+
+  if (!entry.negotiated) {
+    const admissionError = readPreNegotiationTmuxError(frame);
+    if (admissionError) {
+      failTmuxControlTransport(entry, admissionError, true);
+      return;
+    }
   }
 
   if (!isTerminalMuxServerFrame(frame)) {

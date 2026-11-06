@@ -1,0 +1,125 @@
+
+> @zterm/v2-connections@0.0.1 test /workspaces/1/v2/modules/connections
+> vitest run --config vitest.config.ts
+
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.0[39m [90m/workspaces/1/v2/modules/connections[39m
+
+ [33m❯[39m tests/contract/connection-manager.contract.test.ts [2m ([22m[2m16 tests[22m [2m|[22m [31m3 failed[39m[2m)[22m[90m 11[2mms[22m[39m
+[31m   [33m❯[31m tests/contract/connection-manager.contract.test.ts[2m > [22mconnections contract[2m > [22mrejects an unsupported channel kind explicitly[39m
+[31m     → transport.onMessage is not a function[39m
+[31m   [33m❯[31m tests/contract/connection-manager.contract.test.ts[2m > [22mconnections contract[2m > [22misolates channels: closing one channel does not close a sibling or the link[39m
+[31m     → transport.onMessage is not a function[39m
+[31m   [33m❯[31m tests/contract/connection-manager.contract.test.ts[2m > [22mconnections contract[2m > [22mdoes not let a failing older generation overwrite a newer connected link[39m
+[31m     → expected 'unreachable' to be 'connected' // Object.is equality[39m
+ [33m❯[39m tests/integration/real-entry.test.ts [2m ([22m[2m7 tests[22m [2m|[22m [31m3 failed[39m[2m)[22m[33m 60052[2mms[22m[39m
+[31m   [33m❯[31m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct)[2m > [22monly advertises channel kinds the mux handshake actually negotiated[39m
+[31m     → expected [ 'message', 'file', 'receipt', …(1) ] to deeply equal [ 'message' ][39m
+[31m   [33m❯[31m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct)[2m > [22maddresses and isolates real mux channels[39m
+[31m     → expected 'link:machine-lan-peer:message' not to be 'link:machine-lan-peer:message' // Object.is equality[39m
+[31m   [33m❯[31m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct)[2m > [22mreleases a socket after a bad handshake and leaves another link usable[39m
+[31m     → Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+
+[31m⎯⎯⎯⎯⎯⎯[1m[7m Failed Suites 1 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct)
+[31m[1mError[22m: Hook timed out in 30000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[1m[7m Failed Tests 6 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/contract/connection-manager.contract.test.ts[2m > [22mconnections contract[2m > [22mrejects an unsupported channel kind explicitly
+[31m[1mTypeError[22m: transport.onMessage is not a function[39m
+[36m [2m❯[22m ChannelDispatcher.open src/channels/dispatch.ts:[2m44:35[22m[39m
+    [90m 42| [39m      kind[33m,[39m
+    [90m 43| [39m    }[33m;[39m
+    [90m 44| [39m    [35mconst[39m unsubscribe [33m=[39m transport[33m.[39m[34monMessage[39m((data) [33m=>[39m {
+    [90m   | [39m                                  [31m^[39m
+    [90m 45| [39m      [35mconst[39m record [33m=[39m [35mthis[39m[33m.[39mchannels[33m.[39m[35mget[39m(ref[33m.[39mid)[33m;[39m
+    [90m 46| [39m      [35mif[39m ([33m![39mrecord) [35mreturn[39m[33m;[39m
+[90m [2m❯[22m ConnectionManager.openChannel src/application/connection-manager.ts:[2m170:28[22m[39m
+[90m [2m❯[22m tests/contract/connection-manager.contract.test.ts:[2m156:20[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/contract/connection-manager.contract.test.ts[2m > [22mconnections contract[2m > [22misolates channels: closing one channel does not close a sibling or the link
+[31m[1mTypeError[22m: transport.onMessage is not a function[39m
+[36m [2m❯[22m ChannelDispatcher.open src/channels/dispatch.ts:[2m44:35[22m[39m
+    [90m 42| [39m      kind[33m,[39m
+    [90m 43| [39m    }[33m;[39m
+    [90m 44| [39m    [35mconst[39m unsubscribe [33m=[39m transport[33m.[39m[34monMessage[39m((data) [33m=>[39m {
+    [90m   | [39m                                  [31m^[39m
+    [90m 45| [39m      [35mconst[39m record [33m=[39m [35mthis[39m[33m.[39mchannels[33m.[39m[35mget[39m(ref[33m.[39mid)[33m;[39m
+    [90m 46| [39m      [35mif[39m ([33m![39mrecord) [35mreturn[39m[33m;[39m
+[90m [2m❯[22m ConnectionManager.openChannel src/application/connection-manager.ts:[2m170:28[22m[39m
+[90m [2m❯[22m tests/contract/connection-manager.contract.test.ts:[2m166:29[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/contract/connection-manager.contract.test.ts[2m > [22mconnections contract[2m > [22mdoes not let a failing older generation overwrite a newer connected link
+[31m[1mAssertionError[22m: expected 'unreachable' to be 'connected' // Object.is equality[39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- connected[39m
+[31m+ unreachable[39m
+
+[36m [2m❯[22m tests/contract/connection-manager.contract.test.ts:[2m329:32[22m[39m
+    [90m327| [39m    [35mconst[39m observation [33m=[39m manager[33m.[39m[34mobserveLink[39m(second)[33m;[39m
+    [90m328| [39m    [34mexpect[39m(observation[33m.[39mgeneration)[33m.[39m[34mtoBe[39m([34m2[39m)[33m;[39m
+    [90m329| [39m    [34mexpect[39m(observation[33m.[39mstatus)[33m.[39m[34mtoBe[39m([32m"connected"[39m)[33m;[39m
+    [90m   | [39m                               [31m^[39m
+    [90m330| [39m    [34mexpect[39m(observation[33m.[39merrorCode)[33m.[39m[34mtoBeUndefined[39m()[33m;[39m
+    [90m331| [39m  })[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct)[2m > [22monly advertises channel kinds the mux handshake actually negotiated
+[31m[1mAssertionError[22m: expected [ 'message', 'file', 'receipt', …(1) ] to deeply equal [ 'message' ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[2m  Array [[22m
+[2m    "message",[22m
+[31m+   "file",[39m
+[31m+   "receipt",[39m
+[31m+   "status",[39m
+[2m  ][22m
+
+[36m [2m❯[22m tests/integration/real-entry.test.ts:[2m144:43[22m[39m
+    [90m142| [39m    [35mconst[39m obs [33m=[39m manager[33m.[39m[34mobserveLink[39m(link)[33m;[39m
+    [90m143| [39m    [90m// channelEnvelope carries the message channel; no bulkChannel mea[39m…
+    [90m144| [39m    [34mexpect[39m(obs[33m.[39mcapabilities[33m.[39mchannelKinds)[33m.[39m[34mtoEqual[39m([[32m"message"[39m])[33m;[39m
+    [90m   | [39m                                          [31m^[39m
+    [90m145| [39m    [34mexpect[39m(manager[33m.[39m[34mopenChannel[39m(link[33m,[39m [32m"message"[39m)[33m.[39mkind)[33m.[39m[34mtoBe[39m([32m"message"[39m)[33m;[39m
+    [90m146| [39m    [35mfor[39m ([35mconst[39m kind [35mof[39m [[32m"file"[39m[33m,[39m [32m"receipt"[39m[33m,[39m [32m"status"[39m] [35mas[39m [35mconst[39m) {
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct)[2m > [22maddresses and isolates real mux channels
+[31m[1mAssertionError[22m: expected 'link:machine-lan-peer:message' not to be 'link:machine-lan-peer:message' // Object.is equality[39m
+[36m [2m❯[22m tests/integration/real-entry.test.ts:[2m166:26[22m[39m
+    [90m164| [39m    [35mconst[39m first [33m=[39m manager[33m.[39m[34mopenChannel[39m(link[33m,[39m [32m"message"[39m)[33m;[39m
+    [90m165| [39m    [35mconst[39m second [33m=[39m manager[33m.[39m[34mopenChannel[39m(link[33m,[39m [32m"message"[39m)[33m;[39m
+    [90m166| [39m    [34mexpect[39m(first[33m.[39mid)[33m.[39mnot[33m.[39m[34mtoBe[39m(second[33m.[39mid)[33m;[39m
+    [90m   | [39m                         [31m^[39m
+    [90m167| [39m
+    [90m168| [39m    [35mconst[39m firstSeen[33m:[39m string[] [33m=[39m [][33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct)[2m > [22mreleases a socket after a bad handshake and leaves another link usable
+[31m[1mError[22m: Test timed out in 30000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯[22m[39m
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m6 failed[39m[22m[2m | [22m[1m[32m17 passed[39m[22m[90m (23)[39m
+[2m   Start at [22m 15:35:51
+[2m   Duration [22m 60.42s[2m (transform 170ms, setup 0ms, collect 343ms, tests 60.06s, environment 0ms, prepare 180ms)[22m
+
+ ELIFECYCLE  Test failed. See above for more details.

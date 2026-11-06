@@ -1,0 +1,9 @@
+# R6 changed paths (commit 1223f2a3e5ee on branch v2-bootstrap-1103-r1)
+v2/modules/terminal/src/terminal-port.mjs
+v2/modules/terminal/tests/repair-closure.test.mjs
+
+# R6 follow-up changed paths (commits 125e6868 -> 125c14a0 on branch v2-bootstrap-1103-r1)
+v2/modules/terminal/tests/terminal-late-close.test.mjs
+v2/evidence/zterm-v2-bootstrap-1103/rework-r6/public-import.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r6/unit-results.txt
+v2/evidence/zterm-v2-bootstrap-1103/rework-r6/changed-paths.txt

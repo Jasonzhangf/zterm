@@ -1,0 +1,116 @@
+{
+  "summary": {
+    "exactRepairRangeDispatched": true,
+    "dispatchedOnlyAfterWireWrite": true,
+    "oncePerRevision": true,
+    "failedWireWriteNotRecorded": true,
+    "committedFramePreserved": true
+  },
+  "events": [
+    {
+      "step": "commit-rev1",
+      "lastFrameRevision": 1,
+      "repairState": null,
+      "wireRequestCount": 0
+    },
+    {
+      "step": "conflict-wire-fail",
+      "lastFrameRevision": 1,
+      "repairState": {
+        "1": {
+          "repairRange": {
+            "startIndex": 0,
+            "endIndex": 2
+          },
+          "status": "failed"
+        }
+      },
+      "wireRequestCount": 0
+    },
+    {
+      "step": "conflict-dispatch",
+      "lastFrameRevision": 1,
+      "repairState": {
+        "1": {
+          "repairRange": {
+            "startIndex": 0,
+            "endIndex": 2
+          },
+          "status": "dispatched"
+        }
+      },
+      "wireRequestCount": 1,
+      "requestPayload": {
+        "knownRevision": 1,
+        "localStartIndex": 0,
+        "localEndIndex": 2,
+        "requestStartIndex": 0,
+        "requestEndIndex": 2,
+        "requestedAt": 1793740005799,
+        "cols": 2,
+        "rows": 2,
+        "lines": [
+          {
+            "index": 0,
+            "cells": [
+              {
+                "char": 97,
+                "fg": 256,
+                "bg": 256,
+                "flags": 0,
+                "width": 1
+              }
+            ]
+          },
+          {
+            "index": 1,
+            "cells": [
+              {
+                "char": 98,
+                "fg": 256,
+                "bg": 256,
+                "flags": 0,
+                "width": 1
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "step": "conflict-repeat-same-revision",
+      "lastFrameRevision": 1,
+      "repairState": {
+        "1": {
+          "repairRange": {
+            "startIndex": 0,
+            "endIndex": 2
+          },
+          "status": "dispatched"
+        }
+      },
+      "wireRequestCount": 1
+    },
+    {
+      "step": "rev2-new-dispatch",
+      "lastFrameRevision": 2,
+      "repairState": {
+        "1": {
+          "repairRange": {
+            "startIndex": 0,
+            "endIndex": 2
+          },
+          "status": "dispatched"
+        },
+        "2": {
+          "repairRange": {
+            "startIndex": 0,
+            "endIndex": 2
+          },
+          "status": "dispatched"
+        }
+      },
+      "wireRequestCount": 2
+    }
+  ]
+}

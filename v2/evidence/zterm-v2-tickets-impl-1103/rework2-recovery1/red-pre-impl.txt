@@ -1,0 +1,149 @@
+✖ two providers may own the same numeric comment id and each claim stays queryable (4.405917ms)
+✔ a single provider cannot hand the same numeric comment id to a second operation (59.808625ms)
+✖ reopening an existing candidate database drops the legacy global comment index (26.420125ms)
+✖ recovery leaves a pending write with a still-valid lease untouched (0.547084ms)
+✖ recovery turns an expired pending write into unknown without guessing success (0.105458ms)
+✖ recovery never rewrites an already succeeded operation (0.098041ms)
+✖ a stale pending create replays as unknown, never re-posts, and can then be manually confirmed (2.071834ms)
+✔ manual reconciliation cannot preempt a pending executor whose lease is still valid (48.699208ms)
+✖ a stale pending appendReport replays as unknown without re-posting the comment (0.570958ms)
+✔ a truly separate process recovers an unknown operation without re-POSTing it (183.718875ms)
+✖ a process that exits after issuing the remote POST leaves a durable pending that recovery turns unknown (160.06675ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 3
+ℹ fail 8
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 456.790083
+
+✖ failing tests:
+
+test at tests/contract/comment-provider-scope.test.ts:66:1
+✖ two providers may own the same numeric comment id and each claim stays queryable (4.405917ms)
+  Error [TicketError]: comment is already claimed by another operation
+      at TicketService.appendReport (file:///workspaces/31/v2/modules/tickets/src/application/ticket-service.ts:433:13)
+      at async file:///workspaces/31/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:73:20
+      at async withStores (file:///workspaces/31/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:55:3)
+      at async TestContext.<anonymous> (file:///workspaces/31/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:67:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    code: 'BINDING_CONFLICT',
+    owningModule: 'tickets',
+    operationRef: { workspaceId: 'ws-1', actorAccountId: 'acct-a', operationId: 'op-b' },
+    providerStatus: undefined,
+    retryDisposition: 'none',
+    details: undefined
+  }
+
+test at tests/contract/comment-provider-scope.test.ts:108:1
+✖ reopening an existing candidate database drops the legacy global comment index (26.420125ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + [Object: null prototype] {
+  +   name: 'operations_comment_unique'
+  + }
+  - undefined
+  
+      at TestContext.<anonymous> (file:///workspaces/31/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:127:14)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { name: 'operations_comment_unique' },
+    expected: undefined,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/contract/pending-recovery.test.ts:79:1
+✖ recovery leaves a pending write with a still-valid lease untouched (0.547084ms)
+  TypeError: store.recoverExpiredPending is not a function
+      at file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:82:35
+      at async withStores (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:68:3)
+      at async TestContext.<anonymous> (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:80:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/contract/pending-recovery.test.ts:88:1
+✖ recovery turns an expired pending write into unknown without guessing success (0.105458ms)
+  TypeError: store.recoverExpiredPending is not a function
+      at file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:91:35
+      at async withStores (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:68:3)
+      at async TestContext.<anonymous> (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:89:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at tests/contract/pending-recovery.test.ts:99:1
+✖ recovery never rewrites an already succeeded operation (0.098041ms)
+  TypeError: store.recoverExpiredPending is not a function
+      at file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:110:35
+      at async withStores (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:68:3)
+      at async TestContext.<anonymous> (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:100:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at tests/contract/pending-recovery.test.ts:115:1
+✖ a stale pending create replays as unknown, never re-posts, and can then be manually confirmed (2.071834ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'pending'
+  - 'unknown'
+  
+      at file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:127:12
+      at async withStores (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:68:3)
+      at async TestContext.<anonymous> (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:116:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'pending',
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/contract/pending-recovery.test.ts:167:1
+✖ a stale pending appendReport replays as unknown without re-posting the comment (0.570958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'pending'
+  - 'unknown'
+  
+      at file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:212:12
+      at async withStores (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:68:3)
+      at async TestContext.<anonymous> (file:///workspaces/31/v2/modules/tickets/tests/contract/pending-recovery.test.ts:168:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'pending',
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/contract/restart-new-process.test.ts:53:1
+✖ a process that exits after issuing the remote POST leaves a durable pending that recovery turns unknown (160.06675ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'pending'
+  - 'unknown'
+  
+      at TestContext.<anonymous> (file:///workspaces/31/v2/modules/tickets/tests/contract/restart-new-process.test.ts:73:12)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'pending',
+    expected: 'unknown',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+

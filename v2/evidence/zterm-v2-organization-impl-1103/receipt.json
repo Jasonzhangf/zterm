@@ -1,0 +1,110 @@
+{
+  "task": "zterm-v2-organization-impl-1103",
+  "project": "zterm",
+  "branch": "zterm-v2-organization-1103",
+  "branchHeadBeforeReceipt": "129e51f227ef533200a483c4aa785f3276cb3a8286004e3a6ce14ad872e5912e74",
+  "owner": "Frank",
+  "reviewer": "David",
+  "integrator": "Jenny",
+  "status": "candidate",
+  "scope": [
+    "v2/modules/organization/**",
+    "v2/evidence/zterm-v2-organization-impl-1103/**"
+  ],
+  "changedFiles": [
+    "v2/modules/organization/src/public/typed-error.mjs",
+    "v2/modules/organization/src/public/dev-auth.mjs",
+    "v2/modules/organization/src/adapters/organization-store.mjs",
+    "v2/modules/organization/src/application/organization-service.mjs",
+    "v2/modules/organization/tests/organization.test.mjs",
+    "v2/modules/organization/DESIGN.md",
+    "v2/evidence/zterm-v2-organization-impl-1103/README.md",
+    "v2/evidence/zterm-v2-organization-impl-1103/self-check.mjs",
+    "v2/evidence/zterm-v2-organization-impl-1103/receipt.json",
+    "v2/evidence/zterm-v2-organization-impl-1103/red-run.txt",
+    "v2/evidence/zterm-v2-organization-impl-1103/test-pass.txt",
+    "v2/evidence/zterm-v2-organization-impl-1103/self-check.txt",
+    "v2/evidence/zterm-v2-organization-impl-1103/persist-failure.txt"
+  ],
+  "publicApi": {
+    "reads": [
+      "queryTree({ token, workspaceId })",
+      "readWorkspace(workspaceId)",
+      "getMember(memberId)"
+    ],
+    "mutations": [
+      "createWorkspace({ token, name, rootGroupName? })",
+      "createGroup({ token, workspaceId, name, parentGroupId?, expectedRevision })",
+      "updateGroup({ token, workspaceId, groupId, name?, parentGroupId?, expectedRevision })",
+      "deleteGroup({ token, workspaceId, groupId, expectedRevision })",
+      "addMember({ token, workspaceId, groupId, name, expectedRevision })",
+      "updateMember({ token, workspaceId, memberId, name?, groupId?, expectedRevision })",
+      "deleteMember({ token, workspaceId, memberId, expectedRevision })",
+      "mountWorkspace({ token, workspaceId, parentGroupId, sourceWorkspaceId, name?, expectedRevision })",
+      "unmountWorkspace({ token, workspaceId, mountId, expectedRevision })"
+    ]
+  },
+  "verification": {
+    "focusedTests": {
+      "command": "node --test v2/modules/organization/tests/organization.test.mjs",
+      "result": "16 passed, 0 failed",
+      "evidence": "v2/evidence/zterm-v2-organization-impl-1103/test-pass.txt"
+    },
+    "selfCheck": {
+      "command": "node v2/evidence/zterm-v2-organization-impl-1103/self-check.mjs",
+      "result": "organization-receipt-ok",
+      "evidence": "v2/evidence/zterm-v2-organization-impl-1103/self-check.txt"
+    },
+    "persistFailure": {
+      "command": "public-entry createWorkspace with a store whose persist target is invalid",
+      "result": "STORE_PERSIST_FAILED retryable",
+      "evidence": "v2/evidence/zterm-v2-organization-impl-1103/persist-failure.txt"
+    }
+  },
+  "positiveEvidence": [
+    "structural workspace/group/member creation with one revision per mutation",
+    "same-group member duplicate rejection and different-group same name acceptance",
+    "group rename and move with descendant path preservation",
+    "empty non-root group deletion and root/non-empty protection",
+    "member rename, move, and delete with stable member id",
+    "stable ids across update, another delete, and store reopen",
+    "mount persistence after reopen without copying source members",
+    "unmount removes only the reference and increments target revision",
+    "member runtime fields absent from all organization outputs",
+    "concurrent A->B and B->A mounts on one authority settle to exactly one success and one MOUNT_CYCLE with an acyclic reopened graph"
+  ],
+  "rejectionEvidence": [
+    "MEMBER_NAME_CONFLICT for same-group duplicate name",
+    "ORGANIZATION_REVISION_STALE for missing and mismatched expectedRevision without mutation",
+    "ORGANIZATION_FORBIDDEN for scope, workspace, and member allowlist denial before store access",
+    "empty member allowlist denies every member and blocks member creation",
+    "source read denial blocks mount with no side effect",
+    "MOUNT_CYCLE for self, source-to-target reachability, and simultaneous A->B/B->A cycles",
+    "MOUNT_CONFLICT for duplicate exact source under the same parent",
+    "MOUNT_NAME_CONFLICT and GROUP_NAME_CONFLICT for same-parent node name conflicts",
+    "STORE_PERSIST_FAILED is a typed retryable error and the only failure exit for persist"
+  ],
+  "remainingDependencies": [
+    "routing must migrate from organization.member.machineId to members.getRuntimeBinding",
+    "members owns runtime configuration; organization keeps only structural member references",
+    "accounts relay remains a separate wait and does not block this module"
+  ],
+  "resourceCleanup": {
+    "layerfsSandbox": "3",
+    "workspacesUnmounted": [
+      "3:/workspaces/30",
+      "3:/workspaces/31",
+      "3:/workspaces/32",
+      "3:/workspaces/33",
+      "3:/workspaces/34",
+      "3:/workspaces/35",
+      "3:/workspaces/36",
+      "3:/workspaces/38",
+      "3:/workspaces/39",
+      "3:/workspaces/43"
+    ],
+    "preservedExistingWorkspace": "3:/workspaces/6",
+    "temporaryStoreFiles": "removed by self-check and persist probe finally blocks"
+  },
+  "deliveryBoundary": "No push, no merge, no integration, no review PASS, no task acceptance claimed in this worker run."
+}

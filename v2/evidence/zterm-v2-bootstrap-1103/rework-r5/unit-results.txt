@@ -1,0 +1,30 @@
+Bootstrap R5 green evidence (post-fix).
+Command: NODE_PATH=android/node_modules node --test v2/modules/daemon/tests/terminal-slice.test.mjs v2/modules/terminal/tests/terminal-port.test.mjs v2/modules/terminal/tests/terminal-late-close.test.mjs v2/modules/terminal/tests/repair-closure.test.mjs v2/modules/terminal/tests/v1-mux-client.test.mjs
+
+✔ daemon facade bridges V1 mux sessions, input, and subscribers without touching tmux (4259.257668ms)
+✔ V1 credential failure maps to an explicit connection error before any target access (16.509666ms)
+✔ cookie login gates input behind CSRF (28.137125ms)
+✔ frame repair keeps the committed frame, writes the exact range, and dispatches once per revision (2.033834ms)
+✔ interleaved rejection dispatches the runtime repair range (0.156542ms)
+✔ invalid-frame rejection dispatches its valid repair range (0.112833ms)
+✔ repair keeps the exact non-overlapping wire range outside the local cache (0.142ms)
+✔ stale-frame with a null repair range does not dispatch (0.107917ms)
+✔ real V1 mux rejection requests an exact range and commits one complete repair frame (100.938292ms)
+✔ late-open close failure reaches the TerminalPort observer and retries one channel only (238.998666ms)
+✔ lists real tmux sessions and streams committed V1 mux frames (250.745501ms)
+✔ reuses one channel for two subscribers and keeps tmux alive after close (273.582083ms)
+✔ assembles multi-chunk frames and emits only committed snapshots (20.500167ms)
+✔ rejects missing and wrong V1 credentials before target access (15.232875ms)
+✔ closeChannel rejects an unknown channel with a typed error (0.655708ms)
+✔ open timeout releases a late mux-channel-opened without affecting the transport (46.765959ms)
+✔ late opened close failure stays retryable and exposes a typed error (42.239958ms)
+✔ closeChannel send failure is typed, keeps the record, and does not leak to another subscriber (33.606833ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4435.189794
+exitCode: 0

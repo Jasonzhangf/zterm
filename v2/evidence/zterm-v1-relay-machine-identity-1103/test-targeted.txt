@@ -1,0 +1,10 @@
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.1[39m [90m/workspaces/10/android[39m
+
+ [32m✓[39m src/traversal-relay/machine-identity.test.ts [2m ([22m[2m3 tests[22m[2m)[22m[33m 756[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m   Start at [22m 21:36:17
+[2m   Duration [22m 976ms[2m (transform 31ms, setup 12ms, collect 23ms, tests 756ms, environment 0ms, prepare 77ms)[22m
+

@@ -1,0 +1,115 @@
+Bootstrap R3 rework R4F red evidence (pre-fix).
+Command: node --test v2/modules/terminal/tests/repair-closure.test.mjs v2/modules/terminal/tests/v1-mux-client.test.mjs
+
+exitCode: 1
+
+✔ frame repair keeps the committed frame, writes the exact range, and dispatches once per revision (1.850417ms)
+✖ interleaved rejection dispatches the runtime repair range (0.5455ms)
+✖ invalid-frame rejection dispatches its valid repair range (0.263584ms)
+✖ repair keeps the exact non-overlapping wire range outside the local cache (0.187166ms)
+✔ stale-frame with a null repair range does not dispatch (0.112ms)
+✖ real V1 mux rejection requests an exact range and commits one complete repair frame (6056.19442ms)
+✔ closeChannel rejects an unknown channel with a typed error (0.719875ms)
+✔ open timeout releases a late mux-channel-opened without affecting the transport (46.10975ms)
+✖ late opened close failure stays retryable and exposes a typed error (9.441666ms)
+✔ closeChannel send failure is typed, keeps the record, and does not leak to another subscriber (10.47025ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 5
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6157.464336
+
+✖ failing tests:
+
+test at v2/modules/terminal/tests/repair-closure.test.mjs:164:1
+✖ interleaved rejection dispatches the runtime repair range (0.5455ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///workspaces/4/v2/modules/terminal/tests/repair-closure.test.mjs:192:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at v2/modules/terminal/tests/repair-closure.test.mjs:199:1
+✖ invalid-frame rejection dispatches its valid repair range (0.263584ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///workspaces/4/v2/modules/terminal/tests/repair-closure.test.mjs:216:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at v2/modules/terminal/tests/repair-closure.test.mjs:223:1
+✖ repair keeps the exact non-overlapping wire range outside the local cache (0.187166ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  100 !== 90
+  
+      at TestContext.<anonymous> (file:///workspaces/4/v2/modules/terminal/tests/repair-closure.test.mjs:251:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1402:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+      at Test.postRun (node:internal/test_runner/test:1542:19)
+      at Test.run (node:internal/test_runner/test:1467:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 100,
+    expected: 90,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at v2/modules/terminal/tests/repair-closure.test.mjs:270:1
+✖ real V1 mux rejection requests an exact range and commits one complete repair frame (6056.19442ms)
+  Error: Timed out waiting for the expected terminal state.
+      at waitFor (file:///workspaces/4/v2/modules/terminal/tests/repair-closure.test.mjs:118:9)
+      at async TestContext.<anonymous> (file:///workspaces/4/v2/modules/terminal/tests/repair-closure.test.mjs:320:3)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7)
+
+test at v2/modules/terminal/tests/v1-mux-client.test.mjs:122:1
+✖ late opened close failure stays retryable and exposes a typed error (9.441666ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'undefined'
+  - 'function'
+  
+      at TestContext.<anonymous> (file:///workspaces/4/v2/modules/terminal/tests/v1-mux-client.test.mjs:127:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'undefined',
+    expected: 'function',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

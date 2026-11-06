@@ -1,0 +1,70 @@
+TAP version 13
+# (node:10547) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: two providers may own the same numeric comment id and each claim stays queryable
+ok 1 - two providers may own the same numeric comment id and each claim stays queryable
+  ---
+  duration_ms: 13.388041
+  type: 'test'
+  ...
+# Subtest: a single provider cannot hand the same numeric comment id to a second operation
+ok 2 - a single provider cannot hand the same numeric comment id to a second operation
+  ---
+  duration_ms: 8.139042
+  type: 'test'
+  ...
+# Subtest: manual reconciliation exposes the original provider-scoped claim attribution across SQLite readback
+not ok 3 - manual reconciliation exposes the original provider-scoped claim attribution across SQLite readback
+  ---
+  duration_ms: 2.545583
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/zterm-v2-tickets-claim-reconcile-fix-1106-20261106/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:110:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly deep-equal:
+    + actual - expected
+    
+      {
+        actorAccountId: 'acct-a',
+    +   operationId: 'op-b',
+    -   operationId: 'op-a',
+        workspaceId: 'ws-1'
+      }
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+    workspaceId: 'ws-1'
+    actorAccountId: 'acct-a'
+    operationId: 'op-a'
+  actual:
+    workspaceId: 'ws-1'
+    actorAccountId: 'acct-a'
+    operationId: 'op-b'
+  operator: 'deepStrictEqual'
+  stack: |-
+    Object.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/zterm-v2-tickets-claim-reconcile-fix-1106-20261106/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:144:16)
+    expectedException (node:assert:576:17)
+    expectsError (node:assert:701:21)
+    Function.rejects (node:assert:767:3)
+    async file:///Volumes/Intel/playground/zterm/worktrees/zterm-v2-tickets-claim-reconcile-fix-1106-20261106/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:136:5
+    async withStores (file:///Volumes/Intel/playground/zterm/worktrees/zterm-v2-tickets-claim-reconcile-fix-1106-20261106/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:57:3)
+    async TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/zterm-v2-tickets-claim-reconcile-fix-1106-20261106/v2/modules/tickets/tests/contract/comment-provider-scope.test.ts:111:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: reopening an existing candidate database drops the legacy global index and migrates legacy claim keys
+ok 4 - reopening an existing candidate database drops the legacy global index and migrates legacy claim keys
+  ---
+  duration_ms: 11.239208
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 3
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 152.142208

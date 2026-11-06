@@ -1,0 +1,114 @@
+✔ unique address returns member, runtime binding machine id, generation, session and anchor (7.555666ms)
+✔ unknown machine, group path, or member is rejected without a fuzzy fallback (3.854167ms)
+✔ co-located distinct members are ambiguous without a selector and each selector disambiguates (3.312208ms)
+✔ memberName matches the readable name only (3.086625ms)
+✔ same group path and member name in another workspace stays isolated (3.560667ms)
+✔ expectedGeneration mismatch is rejected with the current generation (2.158916ms)
+✔ wrong action scope is rejected before any read with no binding side effects (2.369833ms)
+✔ cross-account workspace target is rejected before any read with no binding side effects (4.424292ms)
+✔ member allowlist only accepts string[]: absent narrows nothing, empty rejects, wildcard rejects (3.638791ms)
+✖ machineId and runtime config come from the runtime binding, not the organization member (2.563958ms)
+✔ directed selection propagates runtime binding typed failures (2.349458ms)
+✔ machine+group scan records bindingFailures instead of treating failed members as matches (2.986125ms)
+✖ no-selector scan rejects an empty member grant before any binding read (3.91475ms)
+✖ no-selector scan narrow grant only admits authorized members (2.482625ms)
+✔ no-selector scan keeps ambiguity for multiple authorized targets (3.492833ms)
+✖ no-selector scan rejects when only an unauthorized member would match (2.774959ms)
+✖ resolve carries group reference, organization revision and binding runtime config (2.273209ms)
+✔ constructor requires a getRuntimeBinding reader and rejects the old getBinding port (0.38675ms)
+✔ missing or unknown token is rejected as UNAUTHENTICATED (1.93325ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 14
+ℹ fail 5
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 96.418084
+
+✖ failing tests:
+
+test at v2/modules/routing/tests/routing.test.mjs:524:1
+✖ machineId and runtime config come from the runtime binding, not the organization member (2.563958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  'tmux' !== 'vm'
+  
+      at TestContext.<anonymous> (file:///workspaces/41/v2/modules/routing/tests/routing.test.mjs:546:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'tmux',
+    expected: 'vm',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at v2/modules/routing/tests/routing.test.mjs:637:1
+✖ no-selector scan rejects an empty member grant before any binding read (3.91475ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(isCode(captured, ROUTE_FORBIDDEN))
+  
+      at TestContext.<anonymous> (file:///workspaces/41/v2/modules/routing/tests/routing.test.mjs:661:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at v2/modules/routing/tests/routing.test.mjs:666:1
+✖ no-selector scan narrow grant only admits authorized members (2.482625ms)
+  Error [TypedError]: 2 members match mac-1/Acme/team
+      at fail (file:///workspaces/41/v2/modules/organization/src/public/typed-error.mjs:61:9)
+      at Object.resolve (file:///workspaces/41/v2/modules/routing/src/application/member-resolver.mjs:232:7)
+      at async TestContext.<anonymous> (file:///workspaces/41/v2/modules/routing/tests/routing.test.mjs:692:17)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    code: 'ROUTE_AMBIGUOUS',
+    owningModule: 'routing',
+    operationId: null,
+    retryDisposition: 'terminal',
+    details: { matchCount: 2, memberIds: [ 'mbr_af1ca888-0dbf-443d-bf70-2cb4fba36554', 'mbr_e5b54e0d-3986-4793-86a4-7fc9dcf486ee' ], bindingFailures: [] }
+  }
+
+test at v2/modules/routing/tests/routing.test.mjs:747:1
+✖ no-selector scan rejects when only an unauthorized member would match (2.774959ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(isCode(captured, ERROR_CODES.ROUTE_NOT_FOUND))
+  
+      at TestContext.<anonymous> (file:///workspaces/41/v2/modules/routing/tests/routing.test.mjs:784:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at v2/modules/routing/tests/routing.test.mjs:795:1
+✖ resolve carries group reference, organization revision and binding runtime config (2.273209ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + undefined
+  - 'grp_349998d8-1a3c-4f9f-b29e-e5e17dbe4b3a'
+  
+      at TestContext.<anonymous> (file:///workspaces/41/v2/modules/routing/tests/routing.test.mjs:817:10)
+      at async Test.run (node:internal/test_runner/test:1409:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: 'grp_349998d8-1a3c-4f9f-b29e-e5e17dbe4b3a',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

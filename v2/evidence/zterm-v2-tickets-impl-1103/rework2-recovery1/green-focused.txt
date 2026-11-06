@@ -1,0 +1,19 @@
+✔ two providers may own the same numeric comment id and each claim stays queryable (44.703833ms)
+✔ a single provider cannot hand the same numeric comment id to a second operation (42.86675ms)
+✔ reopening an existing candidate database drops the legacy global comment index (43.899917ms)
+✔ recovery leaves a pending write with a still-valid lease untouched (28.009416ms)
+✔ recovery turns an expired pending write into unknown without guessing success (34.198542ms)
+✔ recovery never rewrites an already succeeded operation (27.403709ms)
+✔ a stale pending create replays as unknown, never re-posts, and can then be manually confirmed (35.618125ms)
+✔ manual reconciliation cannot preempt a pending executor whose lease is still valid (28.031583ms)
+✔ a stale pending appendReport replays as unknown without re-posting the comment (18.379209ms)
+✔ a truly separate process recovers an unknown operation without re-POSTing it (180.887625ms)
+✔ a process that exits after issuing the remote POST leaves a durable pending that recovery turns unknown (147.211708ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 448.771292

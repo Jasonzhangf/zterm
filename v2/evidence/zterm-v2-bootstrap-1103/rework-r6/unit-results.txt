@@ -1,0 +1,31 @@
+Bootstrap R6 follow-up green evidence (post-cleanup, branch v2-bootstrap-1103-r1@125e6868).
+Command: node --experimental-strip-types --test v2/modules/daemon/tests/terminal-slice.test.mjs v2/modules/terminal/tests/terminal-port.test.mjs v2/modules/terminal/tests/terminal-late-close.test.mjs v2/modules/terminal/tests/repair-closure.test.mjs v2/modules/terminal/tests/v1-mux-client.test.mjs
+Setup: temporary node_modules symlinks under v2/modules/terminal/node_modules/@zterm (module-test setup only; not formal package-consumer acceptance).
+
+✔ daemon facade bridges V1 mux sessions, input, and subscribers without touching tmux (4294.548458ms)
+✔ V1 credential failure maps to an explicit connection error before any target access (22.210291ms)
+✔ cookie login gates input behind CSRF (55.911458ms)
+✔ frame repair keeps the committed frame, writes the exact range, and dispatches once per revision (2.39425ms)
+✔ interleaved rejection dispatches the runtime repair range (0.147584ms)
+✔ invalid-frame rejection dispatches its valid repair range (0.22475ms)
+✔ repair keeps the exact non-overlapping wire range outside the local cache (0.117208ms)
+✔ stale-frame with a null repair range does not dispatch (0.1835ms)
+✔ real V1 mux rejection requests an exact range and commits one complete repair frame (116.507917ms)
+✔ late-open close failure reaches the TerminalPort observer and retries one channel only (444.571375ms)
+✔ lists real tmux sessions and streams committed V1 mux frames (268.907375ms)
+✔ reuses one channel for two subscribers and keeps tmux alive after close (290.916625ms)
+✔ assembles multi-chunk frames and emits only committed snapshots (41.09725ms)
+✔ rejects missing and wrong V1 credentials before target access (23.013125ms)
+✔ closeChannel rejects an unknown channel with a typed error (0.819625ms)
+✔ open timeout releases a late mux-channel-opened without affecting the transport (37.702084ms)
+✔ late opened close failure stays retryable and exposes a typed error (40.453375ms)
+✔ closeChannel send failure is typed, keeps the record, and does not leak to another subscriber (43.940625ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4531.601458
+exitCode: 0

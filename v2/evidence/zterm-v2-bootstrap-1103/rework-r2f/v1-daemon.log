@@ -1,0 +1,4 @@
+[server] DAGpipe all-phase operators compiled: native runtime active
+[2026-11-03 15:41:09.458 +00:00] zterm tmux bridge listening on ws://127.0.0.1:4438
+  - health: http://127.0.0.1:4438/health
+  - rtc signal: ws://127.0.0.1:4438/signal?token=<auth>

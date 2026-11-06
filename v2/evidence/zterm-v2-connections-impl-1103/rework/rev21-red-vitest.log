@@ -1,0 +1,69 @@
+
+> @zterm/v2-connections@0.0.1 test /workspaces/19/v2/modules/connections
+> vitest run --config vitest.config.ts
+
+
+[7m[1m[36m RUN [39m[22m[27m [36mv1.6.0[39m [90m/workspaces/19/v2/modules/connections[39m
+
+ [2m[90m↓[39m[22m tests/integration/real-daemon.test.ts [2m ([22m[2m3 tests[22m [2m|[22m [33m3 skipped[39m[2m)[22m
+ [32m✓[39m tests/contract/connection-manager.contract.test.ts [2m ([22m[2m22 tests[22m[2m)[22m[90m 13[2mms[22m[39m
+ [33m❯[39m tests/integration/real-entry.test.ts [2m ([22m[2m14 tests[22m [2m|[22m [31m3 failed[39m[2m)[22m[33m 46234[2mms[22m[39m
+[31m   [33m❯[31m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct, real mux wire)[2m > [22mconnects over a real LAN websocket and records direct path with terminal-only capability[39m
+[31m     → expected 'daemon-lan-peer' to be null[39m
+[31m   [33m❯[31m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct, real mux wire)[2m > [22mdoes not project the expected identity when mux-ready omits it[39m
+[31m     → expected 'expected-only' to be null[39m
+[31m   [33m❯[31m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct, real mux wire)[2m > [22mretains a late-open release after a close send failure and retries only that channel[39m
+[31m     → manager.onChannelCloseFailure is not a function[39m
+
+[31m⎯⎯⎯⎯⎯⎯[1m[7m Failed Suites 1 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct, real mux wire)
+[31m[1mError[22m: Hook timed out in 30000ms.
+If this is a long-running hook, pass a timeout value as the last argument or configure it globally with "hookTimeout".[39m
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯⎯[1m[7m Failed Tests 3 [27m[22m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct, real mux wire)[2m > [22mconnects over a real LAN websocket and records direct path with terminal-only capability
+[31m[1mAssertionError[22m: expected 'daemon-lan-peer' to be null[39m
+[36m [2m❯[22m tests/integration/real-entry.test.ts:[2m204:30[22m[39m
+    [90m202| [39m    [34mexpect[39m(obs[33m.[39mpath)[33m.[39m[34mtoBe[39m([32m"direct"[39m)[33m;[39m
+    [90m203| [39m    [90m// The mux omits daemonHostId on the wire, so no peer identity is [39m…
+    [90m204| [39m    [34mexpect[39m(obs[33m.[39mpeerIdentity)[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m   | [39m                             [31m^[39m
+    [90m205| [39m    [34mexpect[39m(obs[33m.[39mpeerIdentityVerified)[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m206| [39m    [90m// channelEnvelope is a terminal channel capability, NOT a message[39m…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct, real mux wire)[2m > [22mdoes not project the expected identity when mux-ready omits it
+[31m[1mAssertionError[22m: expected 'expected-only' to be null[39m
+[36m [2m❯[22m tests/integration/real-entry.test.ts:[2m340:30[22m[39m
+    [90m338| [39m    [35mconst[39m link [33m=[39m [35mawait[39m manager[33m.[39m[34mconnect[39m([33mMACHINE[39m)[33m;[39m
+    [90m339| [39m    [35mconst[39m obs [33m=[39m manager[33m.[39m[34mobserveLink[39m(link)[33m;[39m
+    [90m340| [39m    [34mexpect[39m(obs[33m.[39mpeerIdentity)[33m.[39m[34mtoBeNull[39m()[33m;[39m
+    [90m   | [39m                             [31m^[39m
+    [90m341| [39m    [34mexpect[39m(obs[33m.[39mpeerIdentityVerified)[33m.[39m[34mtoBe[39m([35mfalse[39m)[33m;[39m
+    [90m342| [39m    manager[33m.[39m[34mcloseOwnLink[39m(link)[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯[22m[39m
+
+[31m[1m[7m FAIL [27m[22m[39m tests/integration/real-entry.test.ts[2m > [22mconnections real-entry (LAN direct, real mux wire)[2m > [22mretains a late-open release after a close send failure and retries only that channel
+[31m[1mTypeError[22m: manager.onChannelCloseFailure is not a function[39m
+[36m [2m❯[22m tests/integration/real-entry.test.ts:[2m396:15[22m[39m
+    [90m394| [39m
+    [90m395| [39m    [35mconst[39m failureSeen [33m=[39m [35mnew[39m [33mPromise[39m[33m<[39m[33mError[39m [33m&[39m { code[33m?[39m[33m:[39m string[33m;[39m channelId…
+    [90m396| [39m      manager[33m.[39m[34monChannelCloseFailure[39m(link[33m,[39m resolve)[33m;[39m
+    [90m   | [39m              [31m^[39m
+    [90m397| [39m    })[33m;[39m
+    [90m398| [39m    holdChannelOpenAcks [33m=[39m [35mfalse[39m[33m;[39m
+[90m [2m❯[22m tests/integration/real-entry.test.ts:[2m395:25[22m[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯[22m[39m
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m1 passed[39m[22m[2m | [22m[33m1 skipped[39m[90m (3)[39m
+[2m      Tests [22m [1m[31m3 failed[39m[22m[2m | [22m[1m[32m33 passed[39m[22m[2m | [22m[33m3 skipped[39m[90m (39)[39m
+[2m   Start at [22m 00:51:26
+[2m   Duration [22m 46.70s[2m (transform 317ms, setup 0ms, collect 738ms, tests 46.25s, environment 0ms, prepare 302ms)[22m
+
+ ELIFECYCLE  Test failed. See above for more details.

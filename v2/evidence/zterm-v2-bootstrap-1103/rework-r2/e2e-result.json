@@ -1,0 +1,17 @@
+{
+  "status": "PASS",
+  "publicEntry": "http://127.0.0.1:64136",
+  "tmuxSocket": "zterm-v2-r2",
+  "sessionName": "r2demo",
+  "checks": {
+    "sessionListed": true,
+    "browserBufferMatchedCapture": true,
+    "inputReachedPane": true,
+    "refreshPreservedSessionIdAndCreated": true,
+    "typedTargetError": true,
+    "missingCredentialRejected": true,
+    "wrongCredentialRejected": true,
+    "desktopNoOverflow": true,
+    "mobileNoHorizontalOverflow": true
+  }
+}

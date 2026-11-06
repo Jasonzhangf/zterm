@@ -1,0 +1,42 @@
+Red run repro
+=============
+
+Base: 3289b61b4a0ec8a4e4305dfd4d4567d349d0b62dffc51a5a9792578a53a0906e88
+Method: mounted a one-shot fork of the base, copied the new contract and
+integration tests from the wiring branch, and ran the module suite with the
+same command used for green. The base source code was not modified.
+
+Command:
+  cd /workspaces/<id>/v2/modules/accounts
+  NODE_PATH=/workspaces/<id>/android/node_modules \
+    node --test tests/contract/*.test.ts tests/integration/*.test.ts
+
+Result: 38 pass / 12 fail.
+
+Failing tests:
+  logout revokes the relay bearer session
+  enrollMachine returns the canonical relay machine identity
+  verifyMachinePossession returns the owner machine or preserves rejection
+  verifyMachinePossession rejects missing machine or proof material
+  revokeMachine returns a revoked machine and preserves owner rejection
+  missing or invalid token is rejected before list, enroll, possession, or revoke work
+  machine relay 403 codes remain canonical typed rejections
+  machine relay canonical 409 codes remain typed conflicts
+  machine relay 404 machine_not_found remains a typed missing machine
+  machine relay unreadable 403 is a protocol error, not a revoked session
+  machine adapter forwards bearer authority and canonical request bodies
+  real V1 relay proves enrollment, possession, owner revoke, and logout
+
+Representative original errors:
+  - logout: assertion false !== true (no POST /api/auth/logout call)
+  - enroll: V1RelayAdapter.enroll threw UNSUPPORTED 501 with details
+    { accountId, deviceId } ("machine enrollment endpoint is not provided by
+    V1 relay")
+  - possession/revoke: MachineService.verifyMachinePossession /
+    revokeMachine are not functions
+  - machine relay: V1RelayAdapter.revokeMachine is not a function
+  - real chain: MachineService.enrollMachine rejected UNSUPPORTED 501 at
+    src/adapters/v1-relay.ts:118
+
+After the wiring implementation, the same tests on the wiring branch pass
+49/49 (see green-module-tests.txt).
