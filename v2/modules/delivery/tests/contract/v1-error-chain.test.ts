@@ -249,3 +249,99 @@ test("receiptStore rejections with undefined or null stay typed and isolated", a
     assert.equal(query.errorChain[0]?.source, "delivery-receipt-store");
   }
 });
+
+test("submission authorization exceptions become typed authorization unavailable", async () => {
+  const port = createDeliveryPort<AuthContext, string>({
+    authorization: {
+      async authorizeSubmission() {
+        throw new Error("auth down");
+      },
+      async authorizeReceiptQuery() {
+        return { kind: "allowed" };
+      },
+    },
+    routing,
+    receiptStore: storeWith({}),
+  });
+
+  const result = await port.submitMessage(
+    { actor: "session-a" },
+    "member-a",
+    "request-a",
+    { body: "body" },
+  );
+
+  assert.equal(result.kind, "rejected");
+  if (result.kind !== "rejected") {
+    assert.fail("authorization exception did not return a rejection");
+  }
+  assert.equal(result.code, "AUTHORIZATION_UNAVAILABLE");
+  assert.equal(result.errorRef, "delivery.authorization.submit-unavailable");
+});
+
+test("submission routing exceptions become typed routing unavailable", async () => {
+  const port = createDeliveryPort<AuthContext, string>({
+    authorization,
+    routing: {
+      async resolveTarget() {
+        throw new Error("routing down");
+      },
+    },
+    receiptStore: storeWith({}),
+  });
+
+  const result = await port.submitMessage(
+    { actor: "session-a" },
+    "member-a",
+    "request-a",
+    { body: "body" },
+  );
+
+  assert.equal(result.kind, "rejected");
+  if (result.kind !== "rejected") {
+    assert.fail("routing exception did not return a rejection");
+  }
+  assert.equal(result.code, "ROUTING_UNAVAILABLE");
+  assert.equal(result.errorRef, "delivery.routing.resolve-unavailable");
+});
+
+test("receipt query authorization exceptions become typed unavailable with an authorize chain", async () => {
+  const port = createDeliveryPort<AuthContext, string>({
+    authorization: {
+      async authorizeSubmission() {
+        return {
+          kind: "allowed",
+          identity: {
+            sourceMachineId: deliveryRef.sourceMachineId,
+            workspaceId: deliveryRef.workspaceId,
+            actorAccountId: deliveryRef.actorAccountId,
+          },
+        };
+      },
+      async authorizeReceiptQuery() {
+        throw new Error("auth query down", {
+          cause: new Error("auth socket down"),
+        });
+      },
+    },
+    routing,
+    receiptStore: storeWith({}),
+  });
+
+  const result = await port.queryReceipt(
+    { actor: "session-a" },
+    deliveryRef,
+  );
+
+  assert.equal(result.kind, "unavailable");
+  if (result.kind !== "unavailable") {
+    assert.fail("authorization exception did not return unavailable");
+  }
+  assert.equal(result.errorRef, "delivery.authorization.query-unavailable");
+  assert.ok(result.errorChain);
+  assert.ok(result.errorChain[0]?.code.startsWith("delivery.authorize."));
+  assert.equal(result.errorChain[0]?.source, "delivery-authorization");
+  assert.equal(result.errorChain[0]?.message, "auth query down");
+  assert.equal(result.errorChain[1]?.message, "auth socket down");
+  assert.equal(result.errorChain[1]?.source, "cause");
+});

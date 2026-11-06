@@ -174,6 +174,21 @@ test('V1 relay malformed directory maps to protocol error', async () => {
   assert.equal(accountError.status, 502)
 })
 
+test('V1 relay directory without updatedAt does not fabricate a local timestamp', async () => {
+  const adapter = createAdapter(async () =>
+    jsonResponse({
+      schemaVersion: 1,
+      user: { id: 'acct-1', username: 'alice' },
+      devices: [{ deviceId: 'device-1', deviceName: 'Laptop', platform: 'macos' }],
+    }),
+  )
+
+  const error = await rejection(adapter.getDirectory('token-1'))
+  assert.equal(error.code, 'RELAY_PROTOCOL_ERROR')
+  assert.equal(error.status, 502)
+  assert.equal(error.message, 'relay directory response is missing updatedAt')
+})
+
   test('V1 relay directory envelope maps the real server shape', async () => {
     const adapter = createAdapter(async () =>
       jsonResponse({
