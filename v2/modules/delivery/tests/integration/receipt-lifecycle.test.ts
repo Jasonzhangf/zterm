@@ -92,17 +92,10 @@ function weakEvidence(
   return { kind, deliveryRef: ref, target, observedAt: "2026-11-03T10:03:00.000Z" };
 }
 
-type TrustedEvidenceIngress = {
-  readonly applyTrusted: (
-    evidence: ReceiptEvidence,
-  ) => ReturnType<NonNullable<ReceiptStore["applyReceiptEvidence"]>>;
-};
-
 function createIntegration(
   appRootDir: string,
   options: {
     target?: DeliveryTarget;
-    trustedIngress?: TrustedEvidenceIngress;
   } = {},
 ) {
   const adapter = createV1ReceiptStore({ appRootDir });
@@ -121,9 +114,7 @@ function createIntegration(
     },
     async applyReceiptEvidence(evidence) {
       applyCalls += 1;
-      return options.trustedIngress
-        ? options.trustedIngress.applyTrusted(evidence)
-        : adapter.applyReceiptEvidence(evidence);
+      return adapter.applyReceiptEvidence(evidence);
     },
   };
 
@@ -218,7 +209,7 @@ if (process.argv[2] === "--apply-and-exit" || process.argv[2] === "--query-and-e
   process.exit(0);
 }
 
-test("strong evidence monotonic through trusted facade port", async () => {
+test("strong evidence monotonic through local persistence adapter", async () => {
   const { appRootDir } = await makeRoot();
   const ref = deliveryRef();
   const integration = await createAccepted(appRootDir, ref);
@@ -376,28 +367,22 @@ test("child query sees parent-committed stage through fresh process", async () =
   assert.equal(parsed.observation?.receipt?.durableStage, "host-delivered");
 });
 
-test("trusted ingress wrapper calls only through authorized apply port", async () => {
+test("public delivery port does not expose the local evidence primitive", async () => {
   const { appRootDir } = await makeRoot();
   const ref = deliveryRef();
-  const integration = createIntegration(appRootDir, {
-    trustedIngress: {
-      async applyTrusted(evidence) {
-        if (evidence.deliveryRef.actorAccountId !== "actor-a") {
-          return { kind: "identity-mismatch" };
-        }
-        return createV1ReceiptStore({ appRootDir }).applyReceiptEvidence(evidence);
-      },
-    },
-  });
+  const integration = createIntegration(appRootDir);
+
+  assert.equal("applyReceiptEvidence" in integration.port, false);
   const accepted = await integration.port.submitMessage(
     actorFor(ref),
     "member-a",
     ref.requestId,
-    { body: "trusted" },
+    { body: "accepted" },
   );
   assert.equal(accepted.kind, "accepted");
   const applied = await integration.port.queryReceipt(actorFor(ref), ref);
   assert.equal(applied.kind, "found");
+  assert.equal(applied.observation.receipt.durableStage, "accepted");
   assert.equal(integration.counts.applies(), 0);
 });
 

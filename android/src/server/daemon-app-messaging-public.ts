@@ -17,7 +17,6 @@ import {
   type AppDeliveryStage,
   type AppDeliveryTarget,
 } from './daemon-app-messaging-store.ts';
-import { applyReceiptEvidence } from '../../../v2/modules/delivery/src/domain/receipt.ts';
 
 export type DeliveryRef = AppDeliveryRef;
 export type DeliveryTarget = AppDeliveryTarget;
@@ -111,6 +110,16 @@ export type ApplyReceiptEvidenceResult =
       readonly errorRef: string;
       readonly errorChain: ControlErrorChain;
     };
+
+export type ReceiptEvidenceTransitionResult =
+  | { readonly kind: 'applied'; readonly receipt: Receipt }
+  | { readonly kind: 'ignored'; readonly receipt: Receipt }
+  | { readonly kind: 'identity-mismatch' };
+
+export type ReceiptEvidenceTransition = (
+  receipt: Receipt,
+  evidence: ReceiptEvidence,
+) => ReceiptEvidenceTransitionResult;
 
 export interface ReceiptStore {
   acceptMessage(command: AcceptMessageCommand): Promise<AcceptMessageResult>;
@@ -303,6 +312,7 @@ function errorChainOf(kind: AppMessagingErrorOperation, error: unknown): Control
 
 export function createAppMessagingPersistence(
   options: AppMessagingPersistenceOptions,
+  transitionReceiptEvidence: ReceiptEvidenceTransition,
 ): ReceiptStore {
   const store = new DaemonAppMessagingStore({
     appRootDir: options.appRootDir,
@@ -449,7 +459,7 @@ export function createAppMessagingPersistence(
           }
 
           const receipt = receiptOf(located);
-          const result = applyReceiptEvidence(receipt, {
+          const result = transitionReceiptEvidence(receipt, {
             ...evidence,
             deliveryRef: ref,
             target,

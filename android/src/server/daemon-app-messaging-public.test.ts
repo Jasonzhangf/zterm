@@ -2,11 +2,13 @@ import { mkdtemp, mkdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { applyReceiptEvidence } from '../../../v2/modules/delivery/src/domain/receipt.ts';
 import { DaemonAppMessagingStore } from './daemon-app-messaging-store';
 import {
   createAppMessagingPersistence,
   type AcceptMessageCommand,
   type ApplyReceiptEvidenceResult,
+  type AppMessagingPersistenceOptions,
   type DeliveryRef,
   type DeliveryTarget,
   type ReadReceiptResult,
@@ -73,6 +75,10 @@ async function makeRoot(): Promise<string> {
   return root;
 }
 
+function createPersistence(options: AppMessagingPersistenceOptions) {
+  return createAppMessagingPersistence(options, applyReceiptEvidence);
+}
+
 function applyKind(result: ApplyReceiptEvidenceResult) {
   return result.kind;
 }
@@ -85,7 +91,7 @@ describe('app messaging persistence facade', () => {
   it('created/replayed/conflict/stale/subject semantics', async () => {
     const root = await makeRoot();
     const { appRootDir } = { appRootDir: join(root, 'app') };
-    const store = createAppMessagingPersistence({ appRootDir });
+    const store = createPersistence({ appRootDir });
 
     const created = await store.acceptMessage(command({ subject: '', body: 'hello' }));
     expect(created.kind).toBe('created');
@@ -116,7 +122,7 @@ describe('app messaging persistence facade', () => {
   it('full DeliveryRef isolates all identifiers', async () => {
     const root = await makeRoot();
     const appRootDir = join(root, 'app');
-    const store = createAppMessagingPersistence({ appRootDir });
+    const store = createPersistence({ appRootDir });
     const variants = [
       ref({}, 'request-a'),
       ref({ actorAccountId: 'actor-b' }, 'request-a'),
@@ -134,7 +140,7 @@ describe('app messaging persistence facade', () => {
   it('rejects before write for invalid command; no record appears', async () => {
     const root = await makeRoot();
     const appRootDir = join(root, 'app');
-    const store = createAppMessagingPersistence({ appRootDir });
+    const store = createPersistence({ appRootDir });
     expect(
       (await store.acceptMessage(command({ target: { ...target, bindingGeneration: -1 } }))).kind,
     ).toBe('rejected-before-write');
@@ -146,7 +152,7 @@ describe('app messaging persistence facade', () => {
 
   it('read side-effect free: read before write creates no delivery directory', async () => {
     const root = await makeRoot();
-    const store = createAppMessagingPersistence({ appRootDir: join(root, 'app') });
+    const store = createPersistence({ appRootDir: join(root, 'app') });
     expect(readKind(await store.readReceipt(ref()))).toBe('not-found');
     await expect(stat(join(root, 'app', 'app-delivery'))).rejects.toMatchObject({ code: 'ENOENT' });
     const invalid = await store.readReceipt({ ...ref(), requestId: '' });
@@ -156,12 +162,12 @@ describe('app messaging persistence facade', () => {
   it('fresh restart reads persisted receipt and replays without second record', async () => {
     const root = await makeRoot();
     const appRootDir = join(root, 'app');
-    const first = createAppMessagingPersistence({ appRootDir });
+    const first = createPersistence({ appRootDir });
     const created = await first.acceptMessage(command({ subject: '', body: 'durable' }));
     expect(created.kind).toBe('created');
     if (created.kind !== 'created') throw new Error('unreachable');
 
-    const second = createAppMessagingPersistence({ appRootDir });
+    const second = createPersistence({ appRootDir });
     const read = await second.readReceipt(ref());
     expect(read.kind).toBe('found');
     if (read.kind !== 'found') throw new Error('unreachable');
@@ -171,7 +177,7 @@ describe('app messaging persistence facade', () => {
 
   it('concurrent same-ref accepts serialize to one created', async () => {
     const root = await makeRoot();
-    const store = createAppMessagingPersistence({ appRootDir: join(root, 'app') });
+    const store = createPersistence({ appRootDir: join(root, 'app') });
     const kinds = (await Promise.all([
       store.acceptMessage(command({ deliveryRef: ref({}, 'race') })),
       store.acceptMessage(command({ deliveryRef: ref({}, 'race') })),
@@ -186,7 +192,7 @@ describe('app messaging persistence facade', () => {
 
   it('strong evidence advances monotonically; repeats and older stages ignored', async () => {
     const root = await makeRoot();
-    const store = createAppMessagingPersistence({ appRootDir: join(root, 'app') });
+    const store = createPersistence({ appRootDir: join(root, 'app') });
     await store.acceptMessage(command());
 
     const remote = await store.applyReceiptEvidence(evidence('remote-stored'));
@@ -211,7 +217,7 @@ describe('app messaging persistence facade', () => {
 
   it('unknown/rejected/failed preserve durable stage', async () => {
     const root = await makeRoot();
-    const store = createAppMessagingPersistence({ appRootDir: join(root, 'app') });
+    const store = createPersistence({ appRootDir: join(root, 'app') });
     await store.acceptMessage(command());
     const host = await store.applyReceiptEvidence(evidence('host-delivered'));
     expect(host.kind).toBe('applied');
@@ -226,7 +232,7 @@ describe('app messaging persistence facade', () => {
 
   it('weak acknowledgements and unverified consumption do not promote stage', async () => {
     const root = await makeRoot();
-    const store = createAppMessagingPersistence({ appRootDir: join(root, 'app') });
+    const store = createPersistence({ appRootDir: join(root, 'app') });
     await store.acceptMessage(command());
     for (const kind of ['v1-delivered', 'app-ack', 'unverified-consumption'] as const) {
       expect(applyKind(await store.applyReceiptEvidence(evidence(kind)))).toBe('ignored');
@@ -238,7 +244,7 @@ describe('app messaging persistence facade', () => {
 
   it('identity mismatch on ref/target; not-found when record absent', async () => {
     const root = await makeRoot();
-    const store = createAppMessagingPersistence({ appRootDir: join(root, 'app') });
+    const store = createPersistence({ appRootDir: join(root, 'app') });
     await store.acceptMessage(command());
 
     expect(
@@ -259,11 +265,11 @@ describe('app messaging persistence facade', () => {
   it('fresh reopen sees applied stage and same-ref replay has no second record', async () => {
     const root = await makeRoot();
     const appRootDir = join(root, 'app');
-    const first = createAppMessagingPersistence({ appRootDir });
+    const first = createPersistence({ appRootDir });
     await first.acceptMessage(command());
     expect(applyKind(await first.applyReceiptEvidence(evidence('consumed')))).toBe('applied');
 
-    const second = createAppMessagingPersistence({ appRootDir });
+    const second = createPersistence({ appRootDir });
     const read = await second.readReceipt(ref());
     expect(read.kind).toBe('found');
     if (read.kind !== 'found') throw new Error('unreachable');
@@ -276,7 +282,7 @@ describe('app messaging persistence facade', () => {
 
   it('concurrent apply evidence for same ref serializes in one facade instance', async () => {
     const root = await makeRoot();
-    const store = createAppMessagingPersistence({ appRootDir: join(root, 'app') });
+    const store = createPersistence({ appRootDir: join(root, 'app') });
     await store.acceptMessage(command());
     const results = await Promise.all([
       store.applyReceiptEvidence(evidence('remote-stored', { observedAt: '2026-11-03T10:01:00.000Z' })),
@@ -291,7 +297,7 @@ describe('app messaging persistence facade', () => {
 
   it('rejects invalid evidence without writing', async () => {
     const root = await makeRoot();
-    const store = createAppMessagingPersistence({ appRootDir: join(root, 'app') });
+    const store = createPersistence({ appRootDir: join(root, 'app') });
     await store.acceptMessage(command());
     const invalid = {
       kind: 'host-delivered',
@@ -310,12 +316,12 @@ describe('facade store error boundary', () => {
   it('corrupt durable record yields unavailable for read and apply, acceptance-unknown for accept', async () => {
     const root = await makeRoot();
     const appRootDir = join(root, 'app');
-    const store = createAppMessagingPersistence({ appRootDir });
+    const store = createPersistence({ appRootDir });
     expect((await store.acceptMessage(command({ deliveryRef: ref({}, 'corrupt') }))).kind).toBe('created');
     const recordPath = new DaemonAppMessagingStore({ appRootDir }).deliveryRecordPath(ref({}, 'corrupt'));
     await mkdir(dirname(recordPath), { recursive: true });
     await writeFile(recordPath, '{not-json', 'utf8');
-    const reopened = createAppMessagingPersistence({ appRootDir });
+    const reopened = createPersistence({ appRootDir });
     expect(readKind(await reopened.readReceipt(ref({}, 'corrupt')))).toBe('unavailable');
     expect((await reopened.acceptMessage(command({ deliveryRef: ref({}, 'corrupt') }))).kind).toBe(
       'acceptance-unknown',

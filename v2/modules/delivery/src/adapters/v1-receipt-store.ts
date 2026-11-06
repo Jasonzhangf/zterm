@@ -10,6 +10,7 @@ import type {
   ReceiptEvidence,
   ReceiptEvidenceResult,
 } from "../domain/receipt.ts";
+import { applyReceiptEvidence } from "../domain/receipt.ts";
 import type {
   AcceptMessageCommand,
   AcceptMessageResult,
@@ -86,7 +87,7 @@ function mapEvidenceResult(
 export function createV1ReceiptStore(
   options: AppMessagingPersistenceOptions,
 ): ReceiptStore {
-  const store = createAppMessagingPersistence(options);
+  const store = createAppMessagingPersistence(options, applyReceiptEvidence);
   return {
     async acceptMessage(
       command: AcceptMessageCommand,

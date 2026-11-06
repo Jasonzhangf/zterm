@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { after, test } from "node:test";
 
+import { applyReceiptEvidence } from "../../src/domain/receipt.ts";
 import { createAppMessagingPersistence } from "@zterm/android/app-messaging-persistence";
 import type {
+  AppMessagingPersistenceOptions,
   DeliveryRef,
   DeliveryTarget,
   ReceiptEvidence,
@@ -52,6 +54,10 @@ function refEvidence(
   };
 }
 
+function createPersistence(options: AppMessagingPersistenceOptions) {
+  return createAppMessagingPersistence(options, applyReceiptEvidence);
+}
+
 function runChild(mode: "--write" | "--apply" | "--read", appRootDir: string, requestId: string) {
   const child = spawnSync(
     process.execPath,
@@ -70,7 +76,7 @@ if (process.argv[2] === "--write" || process.argv[2] === "--apply" || process.ar
   const mode = process.argv[2];
   const appRootDir = process.argv[3];
   const requestId = process.argv[4];
-  const store = createAppMessagingPersistence({ appRootDir });
+  const store = createPersistence({ appRootDir });
   const ref = deliveryRef({}, requestId);
 
   if (mode === "--write") {
@@ -105,7 +111,7 @@ test("real package specifier facade creates durable receipt and reopens in child
   const childRoot = join(root, "child");
   runChild("--write", childRoot, "request-child");
 
-  const reopened = createAppMessagingPersistence({ appRootDir: childRoot });
+  const reopened = createPersistence({ appRootDir: childRoot });
   const read = await reopened.readReceipt(deliveryRef({}, "request-child"));
   assert.equal(read.kind, "found");
   if (read.kind !== "found") assert.fail("child write was not found");
@@ -118,7 +124,7 @@ test("lifecycle evidence through package specifier persists across fresh process
   roots.push(root);
   const appRootDir = join(root, "app");
   const ref = deliveryRef({}, "request-lifecycle");
-  const store = createAppMessagingPersistence({ appRootDir });
+  const store = createPersistence({ appRootDir });
 
   const created = await store.acceptMessage({
     deliveryRef: ref,
@@ -149,7 +155,7 @@ test("fresh child applies evidence into parent-created record and parent observe
   roots.push(root);
   const appRootDir = join(root, "app");
   const ref = deliveryRef({}, "request-child-apply");
-  const parent = createAppMessagingPersistence({ appRootDir });
+  const parent = createPersistence({ appRootDir });
   const created = await parent.acceptMessage({
     deliveryRef: ref,
     target,
@@ -160,7 +166,7 @@ test("fresh child applies evidence into parent-created record and parent observe
 
   runChild("--apply", appRootDir, ref.requestId);
 
-  const read = await createAppMessagingPersistence({ appRootDir }).readReceipt(ref);
+  const read = await createPersistence({ appRootDir }).readReceipt(ref);
   assert.equal(read.kind, "found");
   if (read.kind !== "found") assert.fail("child apply was not found");
   assert.equal(read.observation.receipt.durableStage, "consumed");
@@ -170,7 +176,7 @@ test("conflicts and stale bindings do not overwrite accepted receipt", async () 
   const root = await mkdtemp(join(tmpdir(), "zterm-v2-specifier-conflict-"));
   roots.push(root);
   const appRootDir = join(root, "app");
-  const store = createAppMessagingPersistence({ appRootDir });
+  const store = createPersistence({ appRootDir });
   const ref = deliveryRef({}, "request-conflict");
   const first = await store.acceptMessage({
     deliveryRef: ref,
