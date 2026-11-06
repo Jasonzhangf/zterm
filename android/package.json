@@ -3,6 +3,9 @@
   "version": "0.1.5",
   "private": true,
   "type": "module",
+  "exports": {
+    "./app-messaging-persistence": "./src/server/daemon-app-messaging-public.ts"
+  },
   "scripts": {
     "predev": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\n' && exit 1)",
     "prebuild": "bash ./scripts/ensure-pnpm-install.sh; install_status=$?; chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; node ./scripts/run-prebuild-gates.mjs; gate_status=$?; if [ \"$install_status\" -ne 0 ]; then exit \"$install_status\"; fi; exit \"$gate_status\"",

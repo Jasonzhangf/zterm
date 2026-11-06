@@ -5,3 +5,4 @@ packages:
   - packages/*
   - packages/desktop-gateway
   - win
+  - v2/modules/delivery

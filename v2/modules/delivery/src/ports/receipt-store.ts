@@ -3,6 +3,8 @@ import type {
   DeliveryTarget,
   MessageContent,
   Receipt,
+  ReceiptEvidence,
+  ReceiptEvidenceResult,
   ReceiptObservation,
 } from "../domain/receipt.ts";
 
@@ -49,4 +51,15 @@ export type ReadReceiptResult =
 export interface ReceiptStore {
   acceptMessage(command: AcceptMessageCommand): Promise<AcceptMessageResult>;
   readReceipt(ref: DeliveryRef): Promise<ReadReceiptResult>;
+  applyReceiptEvidence(
+    evidence: ReceiptEvidence,
+  ): Promise<
+    | ReceiptEvidenceResult
+    | { readonly kind: "not-found" }
+    | {
+        readonly kind: "unavailable";
+        readonly errorRef: string;
+        readonly errorChain?: DeliveryErrorChain;
+      }
+  >;
 }

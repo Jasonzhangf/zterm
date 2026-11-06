@@ -77,6 +77,9 @@ function storeWith(result: {
       }
       return result.read;
     },
+    async applyReceiptEvidence(): Promise<{ kind: "not-found" }> {
+      throw new Error("unexpected evidence");
+    },
   };
 }
 
@@ -145,6 +148,11 @@ const throwingStore: ReceiptStore = {
       cause: new Error("socket hung up"),
     });
   },
+  async applyReceiptEvidence(): Promise<never> {
+    throw new Error("store unavailable", {
+      cause: new Error("socket hung up"),
+    });
+  },
 };
 
 test("unexpected acceptance exception preserves message and nested cause", async () => {
@@ -203,6 +211,9 @@ test("receiptStore rejections with undefined or null stay typed and isolated", a
           throw thrown;
         },
         async readReceipt() {
+          throw thrown;
+        },
+        async applyReceiptEvidence(): Promise<never> {
           throw thrown;
         },
       },

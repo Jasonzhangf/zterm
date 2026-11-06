@@ -28,7 +28,7 @@ type AuthContext = Readonly<{
 
 type ErrorReport = {
   readonly errorRef: string;
-  readonly operation: "accept" | "read";
+  readonly operation: "accept" | "read" | "apply-evidence";
   readonly chain: readonly {
     readonly code: string;
     readonly message: string;
@@ -120,6 +120,10 @@ function createIntegrationPort(
     async readReceipt(ref) {
       calls.push("read");
       return adapter.readReceipt(ref);
+    },
+    async applyReceiptEvidence(evidence) {
+      calls.push("apply-evidence");
+      return adapter.applyReceiptEvidence(evidence);
     },
   };
 

@@ -9,6 +9,8 @@ import type {
   DeliveryRef,
   DeliveryTarget,
   Receipt,
+  ReceiptEvidence,
+  ReceiptEvidenceResult,
 } from "../../src/domain/receipt.ts";
 import {
   createDeliveryPort,
@@ -86,6 +88,13 @@ class ScriptedStore implements ReceiptStore {
     this.calls.push("read");
     this.readCalls.push(ref);
     return this.read(ref);
+  }
+
+  async applyReceiptEvidence(
+    _evidence: ReceiptEvidence,
+  ): Promise<ReceiptEvidenceResult | { kind: "not-found" }> {
+    this.calls.push("apply-evidence");
+    return { kind: "not-found" };
   }
 }
 

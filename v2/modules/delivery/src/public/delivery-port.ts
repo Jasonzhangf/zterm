@@ -5,7 +5,6 @@ import type {
 } from "../ports/dependencies.ts";
 import type {
   DeliveryRef,
-  DeliveryTarget,
   MessageContent,
   Receipt,
   ReceiptObservation,

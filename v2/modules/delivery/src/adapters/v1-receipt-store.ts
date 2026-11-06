@@ -2,9 +2,14 @@ import {
   createAppMessagingPersistence,
   type AcceptMessageResult as PublicAcceptMessageResult,
   type AppMessagingPersistenceOptions,
+  type ApplyReceiptEvidenceResult as PublicApplyReceiptEvidenceResult,
   type ReadReceiptResult as PublicReadReceiptResult,
 } from "@zterm/android/app-messaging-persistence";
-import type { DeliveryRef } from "../domain/receipt.ts";
+import type {
+  DeliveryRef,
+  ReceiptEvidence,
+  ReceiptEvidenceResult,
+} from "../domain/receipt.ts";
 import type {
   AcceptMessageCommand,
   AcceptMessageResult,
@@ -56,6 +61,28 @@ function mapRead(result: PublicReadReceiptResult): ReadReceiptResult {
   }
 }
 
+function mapEvidenceResult(
+  result: PublicApplyReceiptEvidenceResult,
+): ReceiptEvidenceResult | { kind: "not-found" } | {
+  kind: "unavailable";
+  errorRef: string;
+  errorChain?: readonly { code: string; message: string; source?: string }[];
+} {
+  switch (result.kind) {
+    case "applied":
+    case "ignored":
+    case "identity-mismatch":
+    case "not-found":
+      return result;
+    case "unavailable":
+      return {
+        kind: "unavailable",
+        errorRef: result.errorRef,
+        errorChain: result.errorChain,
+      };
+  }
+}
+
 export function createV1ReceiptStore(
   options: AppMessagingPersistenceOptions,
 ): ReceiptStore {
@@ -69,6 +96,10 @@ export function createV1ReceiptStore(
 
     async readReceipt(ref: DeliveryRef): Promise<ReadReceiptResult> {
       return mapRead(await store.readReceipt(ref));
+    },
+
+    async applyReceiptEvidence(evidence: ReceiptEvidence) {
+      return mapEvidenceResult(await store.applyReceiptEvidence(evidence));
     },
   };
 }
