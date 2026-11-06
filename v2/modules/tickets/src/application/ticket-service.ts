@@ -571,7 +571,13 @@ export class TicketService {
       reconcile,
       states: ['unknown', 'pending', 'superseded'],
     })
-    return operations.map((operation) => ({ operation: this.#view(operation), canReconcile: reconcile }))
+    // A superseded intent stays in history but is never executable: it must not
+    // be offered as reconcilable, even to a caller that holds the reconcile
+    // action. All other states keep the existing caller-permission rule.
+    return operations.map((operation) => ({
+      operation: this.#view(operation),
+      canReconcile: reconcile && operation.state !== 'superseded',
+    }))
   }
 
   async listForGoalTopFive(actor: VerifiedAuthContext, workspaceId: string, goalId: string): Promise<GoalTicketTopFiveObservation> {

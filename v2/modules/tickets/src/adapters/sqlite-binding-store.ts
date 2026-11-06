@@ -220,12 +220,15 @@ export class SqliteBindingStore implements BindingStorePort {
       // Only older close/reopen state intents are superseded. create/appendReport
       // operations stay available for manual reconciliation.
       const candidates = this.#db
-        .prepare('SELECT ref_key, json FROM operations WHERE binding_id = ? AND ref_key <> ?')
-        .all(operation.bindingId, key) as Array<{ ref_key: string; json: string }>
+        .prepare('SELECT hex(ref_key) AS ref_key_hex, json FROM operations WHERE binding_id = ? AND ref_key <> ?')
+        .all(operation.bindingId, key) as Array<{ ref_key_hex: string; json: string }>
       for (const row of candidates) {
         const candidate = parseJson<WriteOperation>(row.json)
         if (candidate.kind !== 'close' && candidate.kind !== 'reopen') continue
         if (candidate.state !== 'pending' && candidate.state !== 'unknown') continue
+        // operationRefKey embeds NUL separators; node:sqlite truncates a TEXT
+        // value at the first NUL, so the UPDATE key must come from hex readback.
+        const refKey = Buffer.from(row.ref_key_hex, 'hex').toString('utf8')
         const superseded: WriteOperation = {
           ...candidate,
           state: 'superseded',
@@ -234,7 +237,7 @@ export class SqliteBindingStore implements BindingStorePort {
         }
         this.#db
           .prepare('UPDATE operations SET state = ?, json = ? WHERE ref_key = ?')
-          .run(superseded.state, JSON.stringify(superseded), row.ref_key)
+          .run(superseded.state, JSON.stringify(superseded), refKey)
       }
 
       const withLease: WriteOperation = {
