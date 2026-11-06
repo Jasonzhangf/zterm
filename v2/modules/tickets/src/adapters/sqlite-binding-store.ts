@@ -34,6 +34,32 @@ function commentKey(providerInstanceId: string, externalCommentId: number): stri
   return `${providerInstanceId}\u0000${externalCommentId}`
 }
 
+function claimRefKey(ref: OperationRef): string {
+  return JSON.stringify([ref.workspaceId, ref.actorAccountId, ref.operationId])
+}
+
+function operationKeyFromClaimRefKey(refKey: string, refKeyHex: string): string {
+  try {
+    const parts = JSON.parse(refKey) as unknown
+    if (
+      Array.isArray(parts) &&
+      parts.length === 3 &&
+      parts.every((part) => typeof part === 'string')
+    ) {
+      return operationRefKey({
+        workspaceId: parts[0],
+        actorAccountId: parts[1],
+        operationId: parts[2],
+      })
+    }
+  } catch {
+    // Fall through to the legacy key below.
+  }
+  // Legacy claim rows store operationRefKey directly. Read through hex so the
+  // SQLite C-string conversion cannot remove bytes after a NUL separator.
+  return Buffer.from(refKeyHex, 'hex').toString('utf8')
+}
+
 function parseJson<T>(text: string): T {
   return JSON.parse(text) as T
 }
@@ -105,6 +131,7 @@ export class SqliteBindingStore implements BindingStorePort {
       );
       INSERT OR IGNORE INTO binding_seq (id, next) VALUES (1, 1);
     `)
+    this.#transaction(() => this.#migrateLegacyCommentClaims())
   }
 
   close(): void {
@@ -268,10 +295,13 @@ export class SqliteBindingStore implements BindingStorePort {
     externalCommentId: number,
   ): Promise<WriteOperation | undefined> {
     const claim = this.#db
-      .prepare('SELECT ref_key FROM comment_claims WHERE provider_instance_id = ? AND external_comment_id = ?')
-      .get(providerInstanceId, externalCommentId) as { ref_key: string } | undefined
+      .prepare(
+        'SELECT ref_key, hex(ref_key) AS ref_key_hex FROM comment_claims WHERE provider_instance_id = ? AND external_comment_id = ?',
+      )
+      .get(providerInstanceId, externalCommentId) as { ref_key: string; ref_key_hex: string } | undefined
     if (!claim) return undefined
-    const row = this.#db.prepare('SELECT json FROM operations WHERE ref_key = ?').get(claim.ref_key) as
+    const refKey = operationKeyFromClaimRefKey(claim.ref_key, claim.ref_key_hex)
+    const row = this.#db.prepare('SELECT json FROM operations WHERE ref_key = ?').get(refKey) as
       | { json: string }
       | undefined
     return row ? parseJson<WriteOperation>(row.json) : undefined
@@ -448,14 +478,21 @@ export class SqliteBindingStore implements BindingStorePort {
       if (!bindingRow) return { ok: false, current, conflicting: ref }
       const binding = parseJson<TicketBinding>(bindingRow.json)
       const claim = this.#db
-        .prepare('SELECT ref_key FROM comment_claims WHERE provider_instance_id = ? AND external_comment_id = ?')
-        .get(binding.providerInstanceId, externalCommentId) as { ref_key: string } | undefined
-      if (claim && claim.ref_key !== key) {
-        const conflictingRow = this.#db.prepare('SELECT json FROM operations WHERE ref_key = ?').get(claim.ref_key) as
-          | { json: string }
-          | undefined
-        const conflicting = conflictingRow ? parseJson<WriteOperation>(conflictingRow.json).operationRef : ref
-        return { ok: false, current, conflicting }
+        .prepare(
+          'SELECT ref_key, hex(ref_key) AS ref_key_hex FROM comment_claims WHERE provider_instance_id = ? AND external_comment_id = ?',
+        )
+        .get(binding.providerInstanceId, externalCommentId) as
+        | { ref_key: string; ref_key_hex: string }
+        | undefined
+      if (claim) {
+        const claimedRefKey = operationKeyFromClaimRefKey(claim.ref_key, claim.ref_key_hex)
+        if (claimedRefKey !== key) {
+          const conflictingRow = this.#db.prepare('SELECT json FROM operations WHERE ref_key = ?').get(claimedRefKey) as
+            | { json: string }
+            | undefined
+          const conflicting = conflictingRow ? parseJson<WriteOperation>(conflictingRow.json).operationRef : ref
+          return { ok: false, current, conflicting }
+        }
       }
       // Claim uniqueness is provider-scoped via comment_claims(provider_instance_id,
       // external_comment_id); there is no global numeric-id claim across providers.
@@ -464,10 +501,36 @@ export class SqliteBindingStore implements BindingStorePort {
           `INSERT INTO comment_claims (provider_instance_id, external_comment_id, ref_key) VALUES (?, ?, ?)
            ON CONFLICT(provider_instance_id, external_comment_id) DO UPDATE SET ref_key = excluded.ref_key`,
         )
-        .run(binding.providerInstanceId, externalCommentId, key)
+        .run(binding.providerInstanceId, externalCommentId, claimRefKey(ref))
       this.#upsertOperation(next)
       return { ok: true, current: next }
     })
+  }
+
+  #migrateLegacyCommentClaims(): void {
+    const operations = this.#db
+      .prepare('SELECT hex(ref_key) AS ref_key_hex, json FROM operations')
+      .all() as Array<{ ref_key_hex: string; json: string }>
+    const encodedKeys = new Map<string, string>()
+    for (const row of operations) {
+      const operation = parseJson<WriteOperation>(row.json)
+      encodedKeys.set(row.ref_key_hex, claimRefKey(operation.operationRef))
+    }
+
+    const claims = this.#db
+      .prepare(
+        'SELECT provider_instance_id, external_comment_id, hex(ref_key) AS ref_key_hex FROM comment_claims',
+      )
+      .all() as Array<{ provider_instance_id: string; external_comment_id: number; ref_key_hex: string }>
+    for (const claim of claims) {
+      const encodedKey = encodedKeys.get(claim.ref_key_hex)
+      if (!encodedKey) continue
+      this.#db
+        .prepare(
+          'UPDATE comment_claims SET ref_key = ? WHERE provider_instance_id = ? AND external_comment_id = ?',
+        )
+        .run(encodedKey, claim.provider_instance_id, claim.external_comment_id)
+    }
   }
 
   #putOperation(operation: WriteOperation): void {

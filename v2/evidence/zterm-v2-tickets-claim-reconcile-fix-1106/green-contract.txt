@@ -1,0 +1,384 @@
+TAP version 13
+# (node:23814) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: two providers may own the same numeric comment id and each claim stays queryable
+ok 1 - two providers may own the same numeric comment id and each claim stays queryable
+  ---
+  duration_ms: 30.084375
+  type: 'test'
+  ...
+# Subtest: a single provider cannot hand the same numeric comment id to a second operation
+ok 2 - a single provider cannot hand the same numeric comment id to a second operation
+  ---
+  duration_ms: 13.9705
+  type: 'test'
+  ...
+# Subtest: reopening an existing candidate database drops the legacy global index and migrates legacy claim keys
+ok 3 - reopening an existing candidate database drops the legacy global index and migrates legacy claim keys
+  ---
+  duration_ms: 24.569583
+  type: 'test'
+  ...
+# (node:23815) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: list continues a top-five cursor through every remaining page
+ok 4 - list continues a top-five cursor through every remaining page
+  ---
+  duration_ms: 7.360667
+  type: 'test'
+  ...
+# (node:23820) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the same operationId is independent across different actor accounts
+ok 5 - the same operationId is independent across different actor accounts
+  ---
+  duration_ms: 1.498667
+  type: 'test'
+  ...
+# Subtest: the same account and operationId is independent across workspaces
+ok 6 - the same account and operationId is independent across workspaces
+  ---
+  duration_ms: 0.888167
+  type: 'test'
+  ...
+# Subtest: two services sharing one store allocate distinct binding ids and never overwrite
+ok 7 - two services sharing one store allocate distinct binding ids and never overwrite
+  ---
+  duration_ms: 0.356958
+  type: 'test'
+  ...
+# Subtest: two workspaces sharing one store do not overwrite each other bindings
+ok 8 - two workspaces sharing one store do not overwrite each other bindings
+  ---
+  duration_ms: 0.247459
+  type: 'test'
+  ...
+# Subtest: a sequential service rebuild over the same store keeps an unknown operation reconcilable
+ok 9 - a sequential service rebuild over the same store keeps an unknown operation reconcilable
+  ---
+  duration_ms: 0.550541
+  type: 'test'
+  ...
+# Subtest: the SQLite store continues its binding sequence after a real reload
+ok 10 - the SQLite store continues its binding sequence after a real reload
+  ---
+  duration_ms: 22.675375
+  type: 'test'
+  ...
+# (node:23821) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: recovery leaves a pending write with a still-valid lease untouched
+ok 11 - recovery leaves a pending write with a still-valid lease untouched
+  ---
+  duration_ms: 16.947375
+  type: 'test'
+  ...
+# Subtest: recovery turns an expired pending write into unknown without guessing success
+ok 12 - recovery turns an expired pending write into unknown without guessing success
+  ---
+  duration_ms: 10.14675
+  type: 'test'
+  ...
+# Subtest: recovery never rewrites an already succeeded operation
+ok 13 - recovery never rewrites an already succeeded operation
+  ---
+  duration_ms: 16.129791
+  type: 'test'
+  ...
+# Subtest: a stale pending create replays as unknown, never re-posts, and can then be manually confirmed
+ok 14 - a stale pending create replays as unknown, never re-posts, and can then be manually confirmed
+  ---
+  duration_ms: 15.568584
+  type: 'test'
+  ...
+# Subtest: manual reconciliation cannot preempt a pending executor whose lease is still valid
+ok 15 - manual reconciliation cannot preempt a pending executor whose lease is still valid
+  ---
+  duration_ms: 58.100958
+  type: 'test'
+  ...
+# Subtest: a stale pending appendReport replays as unknown without re-posting the comment
+ok 16 - a stale pending appendReport replays as unknown without re-posting the comment
+  ---
+  duration_ms: 7.466125
+  type: 'test'
+  ...
+# (node:23822) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a real new process does not re-POST a same-ref unknown create after response loss
+ok 17 - a real new process does not re-POST a same-ref unknown create after response loss
+  ---
+  duration_ms: 133.033875
+  type: 'test'
+  ...
+# Subtest: two services sharing one durable store allocate unique binding IDs across two workspaces
+ok 18 - two services sharing one durable store allocate unique binding IDs across two workspaces
+  ---
+  duration_ms: 16.621791
+  type: 'test'
+  ...
+# (node:23823) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: get/appendReport/state resolve the binding provider, not the current workspace mapping
+ok 19 - get/appendReport/state resolve the binding provider, not the current workspace mapping
+  ---
+  duration_ms: 1.739667
+  type: 'test'
+  ...
+# Subtest: two providers with the same task id stay isolated through their own bindings
+ok 20 - two providers with the same task id stay isolated through their own bindings
+  ---
+  duration_ms: 0.227416
+  type: 'test'
+  ...
+# Subtest: an unavailable fixed instance errors without falling back to a new instance
+ok 21 - an unavailable fixed instance errors without falling back to a new instance
+  ---
+  duration_ms: 0.739542
+  type: 'test'
+  ...
+# Subtest: a create pending operation keeps its fixed provider/project for manual reconciliation
+ok 22 - a create pending operation keeps its fixed provider/project for manual reconciliation
+  ---
+  duration_ms: 0.713458
+  type: 'test'
+  ...
+# (node:23824) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a truly separate process recovers an unknown operation without re-POSTing it
+ok 23 - a truly separate process recovers an unknown operation without re-POSTing it
+  ---
+  duration_ms: 253.365
+  type: 'test'
+  ...
+# Subtest: a process that exits after issuing the remote POST leaves a durable pending that recovery turns unknown
+ok 24 - a process that exits after issuing the remote POST leaves a durable pending that recovery turns unknown
+  ---
+  duration_ms: 225.86575
+  type: 'test'
+  ...
+# (node:23825) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: listPendingWrites denies without a current read scope before any store read
+ok 25 - listPendingWrites denies without a current read scope before any store read
+  ---
+  duration_ms: 1.596333
+  type: 'test'
+  ...
+# Subtest: listPendingWrites returns own unknown writes for a readable non-reconciler
+ok 26 - listPendingWrites returns own unknown writes for a readable non-reconciler
+  ---
+  duration_ms: 0.256875
+  type: 'test'
+  ...
+# Subtest: confirmRemoteResult refuses to re-bind a succeeded create
+ok 27 - confirmRemoteResult refuses to re-bind a succeeded create
+  ---
+  duration_ms: 0.453292
+  type: 'test'
+  ...
+# Subtest: a comment already claimed by another operation cannot be re-claimed
+ok 28 - a comment already claimed by another operation cannot be re-claimed
+  ---
+  duration_ms: 5.053375
+  type: 'test'
+  ...
+# (node:23830) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a late in-flight close cannot overwrite a newer reopen intent
+ok 29 - a late in-flight close cannot overwrite a newer reopen intent
+  ---
+  duration_ms: 1.487917
+  type: 'test'
+  ...
+# Subtest: supersede only marks close/reopen operations and leaves an unknown report reconcilable
+ok 30 - supersede only marks close/reopen operations and leaves an unknown report reconcilable
+  ---
+  duration_ms: 0.57425
+  type: 'test'
+  ...
+# (node:23831) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a newer reopen supersedes an older unknown close and does not re-PATCH it
+ok 31 - a newer reopen supersedes an older unknown close and does not re-PATCH it
+  ---
+  duration_ms: 1.731875
+  type: 'test'
+  ...
+# Subtest: a controllable-delay old close cannot overwrite a completed newer reopen
+ok 32 - a controllable-delay old close cannot overwrite a completed newer reopen
+  ---
+  duration_ms: 0.497208
+  type: 'test'
+  ...
+# Subtest: an unknown appendReport is not superseded by a newer state operation and stays reconcilable
+ok 33 - an unknown appendReport is not superseded by a newer state operation and stays reconcilable
+  ---
+  duration_ms: 1.524917
+  type: 'test'
+  ...
+# Subtest: a late provider state change is observable but the local adapter does not claim fencing
+ok 34 - a late provider state change is observable but the local adapter does not claim fencing
+  ---
+  duration_ms: 0.414166
+  type: 'test'
+  ...
+# (node:23832) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: create succeeds, binds workspace/goal/member, and writes provider exactly once
+ok 35 - create succeeds, binds workspace/goal/member, and writes provider exactly once
+  ---
+  duration_ms: 1.614166
+  type: 'test'
+  ...
+# Subtest: same OperationRef with same request replays without a second provider call
+ok 36 - same OperationRef with same request replays without a second provider call
+  ---
+  duration_ms: 0.840041
+  type: 'test'
+  ...
+# Subtest: same OperationRef with a different typed request is OPERATION_CONFLICT with no provider call
+ok 37 - same OperationRef with a different typed request is OPERATION_CONFLICT with no provider call
+  ---
+  duration_ms: 0.407083
+  type: 'test'
+  ...
+# Subtest: scope denial rejects before touching the store
+ok 38 - scope denial rejects before touching the store
+  ---
+  duration_ms: 0.155125
+  type: 'test'
+  ...
+# Subtest: rejecting a non-self owner member without delegation is delegation-forbidden with no store calls
+ok 39 - rejecting a non-self owner member without delegation is delegation-forbidden with no store calls
+  ---
+  duration_ms: 0.106666
+  type: 'test'
+  ...
+# Subtest: provider 201 without a stable task id stays unknown and is never re-POSTed
+ok 40 - provider 201 without a stable task id stays unknown and is never re-POSTed
+  ---
+  duration_ms: 0.322417
+  type: 'test'
+  ...
+# Subtest: transport failure maps create to unknown without retry
+ok 41 - transport failure maps create to unknown without retry
+  ---
+  duration_ms: 0.186542
+  type: 'test'
+  ...
+# Subtest: get returns a fresh observation and records lastObserved fields
+ok 42 - get returns a fresh observation and records lastObserved fields
+  ---
+  duration_ms: 0.201875
+  type: 'test'
+  ...
+# Subtest: get maps provider 401 to PROVIDER_UNAUTHORIZED and never returns stale cache
+ok 43 - get maps provider 401 to PROVIDER_UNAUTHORIZED and never returns stale cache
+  ---
+  duration_ms: 0.403125
+  type: 'test'
+  ...
+# Subtest: get with no projection and transport failure is unavailable, not empty
+ok 44 - get with no projection and transport failure is unavailable, not empty
+  ---
+  duration_ms: 0.437834
+  type: 'test'
+  ...
+# Subtest: list scope denial happens before any store read
+ok 45 - list scope denial happens before any store read
+  ---
+  duration_ms: 0.166917
+  type: 'test'
+  ...
+# Subtest: appendReport succeeds with a comment id and no auto retry
+ok 46 - appendReport succeeds with a comment id and no auto retry
+  ---
+  duration_ms: 0.289834
+  type: 'test'
+  ...
+# Subtest: appendReport provider 403 is failed PROVIDER_FORBIDDEN
+ok 47 - appendReport provider 403 is failed PROVIDER_FORBIDDEN
+  ---
+  duration_ms: 0.167834
+  type: 'test'
+  ...
+# Subtest: appendReport rejects a self-reported member mismatch before any provider call
+ok 48 - appendReport rejects a self-reported member mismatch before any provider call
+  ---
+  duration_ms: 0.091791
+  type: 'test'
+  ...
+# Subtest: close succeeds only after provider observation reaches the target state
+ok 49 - close succeeds only after provider observation reaches the target state
+  ---
+  duration_ms: 0.287541
+  type: 'test'
+  ...
+# Subtest: confirmRemoteResult requires reconcile permission and refuses before leaking operation content
+ok 50 - confirmRemoteResult requires reconcile permission and refuses before leaking operation content
+  ---
+  duration_ms: 0.178125
+  type: 'test'
+  ...
+# Subtest: confirmRemoteResult refuses without explicit attribution evidence
+ok 51 - confirmRemoteResult refuses without explicit attribution evidence
+  ---
+  duration_ms: 0.281209
+  type: 'test'
+  ...
+# Subtest: confirmRemoteResult records manual success and never claims a provider receipt
+ok 52 - confirmRemoteResult records manual success and never claims a provider receipt
+  ---
+  duration_ms: 0.400458
+  type: 'test'
+  ...
+# (node:23833) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: listForGoalTopFive keeps an expansion cursor beyond five items
+ok 53 - listForGoalTopFive keeps an expansion cursor beyond five items
+  ---
+  duration_ms: 2.052833
+  type: 'test'
+  ...
+# (node:23834) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: create maps explicit provider rejections to failed operations
+ok 54 - create maps explicit provider rejections to failed operations
+  ---
+  duration_ms: 1.60625
+  type: 'test'
+  ...
+# Subtest: create maps 5xx to unknown with manual reconciliation
+ok 55 - create maps 5xx to unknown with manual reconciliation
+  ---
+  duration_ms: 0.753125
+  type: 'test'
+  ...
+# Subtest: get maps 404 to PROVIDER_NOT_FOUND
+ok 56 - get maps 404 to PROVIDER_NOT_FOUND
+  ---
+  duration_ms: 0.437459
+  type: 'test'
+  ...
+# Subtest: appendReport maps 400 to failed and 500 to unknown
+ok 57 - appendReport maps 400 to failed and 500 to unknown
+  ---
+  duration_ms: 0.437792
+  type: 'test'
+  ...
+# Subtest: successful create parses the provider id and project from the task body
+ok 58 - successful create parses the provider id and project from the task body
+  ---
+  duration_ms: 0.368459
+  type: 'test'
+  ...
+1..58
+# tests 58
+# suites 0
+# pass 58
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 639.564125

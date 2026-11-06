@@ -531,7 +531,7 @@ export class TicketService {
       if (!found) throw new TicketError('BINDING_CONFLICT', 'candidate comment does not belong to the binding task', { operationRef: input.operationRef })
       const already = await this.#store.getOperationByExternalComment(binding.providerInstanceId, input.candidateExternalCommentId)
       if (already && (already.operationRef.workspaceId !== operation.operationRef.workspaceId || already.operationRef.actorAccountId !== operation.operationRef.actorAccountId || already.operationRef.operationId !== operation.operationRef.operationId)) {
-        throw new TicketError('BINDING_CONFLICT', 'candidate comment is already claimed by another operation', { operationRef: input.operationRef })
+        throw new TicketError('BINDING_CONFLICT', 'candidate comment is already claimed by another operation', { operationRef: already.operationRef })
       }
       const succeeded: WriteOperation = {
         ...operation,
