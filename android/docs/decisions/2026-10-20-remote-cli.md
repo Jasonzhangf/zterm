@@ -46,7 +46,7 @@ zterm daemon install | zterm daemon status | zterm daemon config
 | 查看本地终端 | `Ctrl+]` 后按 `k/j/u/d/h/l/f` | 翻行、翻页、横向平移或回到 follow。 |
 | 本地退出 | `Ctrl+]` 后按 `q` | 只断开本地连接，不删除或停止远端 session。 |
 | 登出 | `zterm logout` | 只清本地 CLI 登录态；不宣称撤销远端已经签发的 token。 |
-| 升级与管理 | `zterm upgrade`、`zterm daemon install/status/config` | upgrade 只升级 CLI；daemon install 不启动或重启服务。 |
+| 升级与管理 | `zterm upgrade`、`zterm daemon install/status/config` | upgrade 只升级 CLI；daemon install 在 macOS 默认通过正式 `install-service` 激活 autostart；Linux/Windows 无正式 service owner 时只完成安装并报告未支持；`--no-start` 在所有平台跳过激活。 |
 
 ## 2. 架构映射与十一图
 CLI 新增终端消费者，不复制 runtime 源码，不改变 daemon 的 tmux/mirror/transport 真源。
@@ -544,8 +544,8 @@ node android/scripts/prepare-daemon-npm-package.mjs \
 ```mermaid
 flowchart TD
   D0([daemon 管理请求]):::boundary --> D1{命令}:::decision
-  D1 -->|install| D2[检查正式产物平台并委托既有 installer]:::action
-  D2 --> D3[核对 shim、版本和实际写入]:::action
+  D1 -->|install| D2[检查正式产物并安装；macOS 激活 autostart，其他平台记录未支持]:::action
+  D2 --> D3[核对 shim、版本、服务激活结果和实际写入]:::action
   D1 -->|status| D4[委托既有 status owner 观察服务/PID/监听]:::action
   D4 --> D5[汇总状态和 stale PID 清理事实]:::action
   D1 -->|config| D6[共享 reader 读取文件、环境和默认来源]:::action
@@ -562,9 +562,14 @@ flowchart TD
   linkStyle default stroke:#475569
 ```
 
-`daemon install` 只安装本机全局命令和运行产物，不安装开机服务，不启动、停止或重启
-daemon，不写 `config.json`。安装使用受管理 staging，检查产物平台清单后再原子发布 shim；
-失败或取消保留已写文件、版本、命令可用性和旧入口状态，不假报零写入。
+`daemon install` 安装本机全局命令和运行产物。macOS 在入口验证后通过已安装的正式
+`zterm-daemon install-service` owner 激活 autostart 服务。Linux 和 Windows 当前没有
+已验收的正式 service owner，因此仍完成安装，但服务激活明确返回
+`skipped/platform_unsupported`，CLI 不得报告已启动。`--no-start` 在所有平台保留只安装、
+不激活服务的兼容路径。服务激活失败时命令返回非零并保留原始错误，不删除已安装产品。
+安装不停止或重启已运行 daemon，不写 `config.json`。安装使用受管理 staging，检查产物
+平台清单后再原子发布 shim；失败或取消保留已写文件、版本、命令可用性和旧入口状态，
+不假报零写入。
 上游 `@jsonstudio/zterm-daemon` 正式发布状态、公开下载和真实三平台全局安装仍待 CI 或
 目标主机验收。
 

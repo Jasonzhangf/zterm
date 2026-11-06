@@ -35,6 +35,7 @@ import {
   getDaemonConfig,
   getDaemonStatus,
   installDaemon,
+  type DaemonServiceActivation,
 } from './daemon-management.js';
 import { createNodePrompts, type PromptPort } from './prompts.js';
 import { createRendererWindow } from './renderer-window.js';
@@ -72,7 +73,7 @@ const HELP = `用法：
   zterm slot push --all
   zterm slot set <1..20> [--width-mode adaptive-phone|mirror-fixed]
   zterm upgrade [--registry <url>]
-  zterm daemon install [--version <version>] [--registry <url>]
+  zterm daemon install [--version <version>] [--registry <url>] [--no-start]
   zterm daemon status
   zterm daemon config
   zterm app stream|send|send-file|status|ack|consume
@@ -247,6 +248,18 @@ function commandExitCode(result: { kind: string; error?: CommandError }): number
   if (result.kind === 'cancelled') return 130;
   if (result.error?.code === 'invalid_slot') return 2;
   return 1;
+}
+
+function serviceActivationMessage(activation: DaemonServiceActivation | undefined): string {
+  if (activation?.state === 'started') return 'autostart 服务已启动';
+  if (activation?.state === 'skipped') {
+    if (activation.reason === 'platform_unsupported') {
+      return '当前平台未提供正式 autostart 服务，daemon 仅完成安装';
+    }
+    if (activation.reason === 'disabled') return '未启动 autostart 服务';
+    return 'autostart 服务未启动';
+  }
+  return 'autostart 服务状态未报告';
 }
 
 function mapUnknownError(error: unknown, fallback = '命令执行失败。') {
@@ -833,17 +846,25 @@ async function runDaemon(args: string[], context: MainContext): Promise<number> 
     const version = optionValue(args.slice(1), '--version');
     if (isUsageError(version)) return usage(context.stderr, version.usageMessage);
     const installArgs = args.slice(1);
+    const noStartCount = installArgs.filter((arg) => arg === '--no-start').length;
+    if (noStartCount > 1) {
+      return usage(context.stderr, '--no-start 不能重复。');
+    }
+    const noStart = noStartCount === 1;
     const expectedLength =
-      (registry === undefined ? 0 : 2) + (version === undefined ? 0 : 2);
+      (registry === undefined ? 0 : 2)
+      + (version === undefined ? 0 : 2)
+      + (noStart ? 1 : 0);
     if (installArgs.length !== expectedLength) {
       return usage(
         context.stderr,
-        'zterm daemon install [--version <version>] [--registry <url>]',
+        'zterm daemon install [--version <version>] [--registry <url>] [--no-start]',
       );
     }
     const result = await context.daemonInstall({
       ...(registry === undefined ? {} : { registry }),
       ...(version === undefined ? {} : { version }),
+      startService: !noStart,
       signal: context.signal,
     });
     if (result.error) {
@@ -853,6 +874,10 @@ async function runDaemon(args: string[], context: MainContext): Promise<number> 
     writeLine(
       context.stdout,
       `daemon 安装完成${result.installedVersion ? `：${result.installedVersion}` : ''}`,
+    );
+    writeLine(
+      context.stdout,
+      serviceActivationMessage(result.serviceActivation),
     );
     return 0;
   }

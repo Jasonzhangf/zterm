@@ -531,7 +531,10 @@ Node.js 22 daemon package with platform payloads for:
 
 Install the public package and run \`zterm-daemon --version\` to verify the local payload.
 \`zterm-daemon config\` reads the shared ZTerm configuration without migration.
-\`zterm-daemon install-service\` is a separate explicit lifecycle action.
+On macOS, \`zterm daemon install\` activates \`zterm-daemon install-service\` by default.
+Linux and Windows currently install without a verified service owner and report
+unsupported activation. Use \`zterm daemon install --no-start\` when the service
+must stay inactive on every platform.
 `,
   );
   return packageRoot;
