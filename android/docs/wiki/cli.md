@@ -38,7 +38,7 @@ Release ownership and next/latest policy: [CLI/daemon standard release process](
 | `zterm <1..20>` | CLI connection owner | connects the exact saved binding and renders the canonical mirror | installed blackbox path |
 | `zterm` | slot selector and CLI connection owner | selects one existing slot; it does not refresh the server catalog | no-slot and selection tests |
 | `zterm upgrade [--registry <url>]` | CLI release adapter | upgrades only `@jsonstudio/zterm-cli` in the detected npm prefix | npm isolation suite |
-| `zterm daemon install [--version <version>] [--registry <url>]` | daemon package adapter | installs the public launcher and matching payload; it does not start a service | daemon-management tests |
+| `zterm daemon install [--version <version>] [--registry <url>] [--no-start]` | daemon package adapter | installs the public launcher and matching payload; macOS activates the formal autostart service, Linux/Windows report unsupported and keep the install successful, and `--no-start` skips activation everywhere | daemon-management tests; daemon install blackbox |
 | `zterm daemon status` | existing daemon status owner | delegates the absolute installed daemon entry and preserves exit/status truth | daemon-management tests |
 | `zterm daemon config` | shared config projection owner | prints real path and redacted typed values; it does not migrate or write config | config tests |
 
