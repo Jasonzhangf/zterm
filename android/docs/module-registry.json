@@ -3624,6 +3624,7 @@
       "owned_paths": [
         "src/server/daemon-app-messaging-runtime.ts",
         "src/server/daemon-app-messaging-store.ts",
+        "src/server/daemon-app-messaging-public.ts",
         "src/server/daemon-app-messaging-test-harness.ts"
       ]
     },

@@ -5063,6 +5063,11 @@
       "from_module": "daemon.app_messaging",
       "to_module": "shared.app_protocol",
       "status": "active"
+    },
+    {
+      "from_module": "daemon.app_messaging",
+      "to_module": "shared.control_contract",
+      "status": "active"
     }
   ]
 }
