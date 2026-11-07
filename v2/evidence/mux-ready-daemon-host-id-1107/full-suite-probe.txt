@@ -1,0 +1,9 @@
+
+ RUN  v1.6.1 /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android
+
+filter:  src/server/terminal-message-runtime.test.ts
+include: **/*.{test,spec}.?(c|m)[jt]s?(x)
+exclude:  **/node_modules/**, **/dist/**, **/protected/**, **/generated/**, **/playground/**, src/server/terminal-message-runtime.test.ts
+watch exclude:  **/node_modules/**, **/dist/**
+
+No test files found, exiting with code 1

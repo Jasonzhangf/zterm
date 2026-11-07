@@ -76,6 +76,7 @@ function isTerminalFileTransferMessageType(
 }
 
 export interface TerminalMessageRuntimeDeps {
+  daemonHostId?: string;
   sessions: Map<string, TerminalTransportSubscriber>;
   sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
@@ -200,6 +201,7 @@ export function createTerminalMessageRuntime(
       })
     : undefined;
   const muxRuntime = createTerminalMuxChannelRuntime({
+    daemonHostId: deps.daemonHostId,
     sessions: deps.sessions,
     mirrors: deps.controlRuntimeDeps.mirrors,
     sendTransportMessage: deps.sendTransportMessage,

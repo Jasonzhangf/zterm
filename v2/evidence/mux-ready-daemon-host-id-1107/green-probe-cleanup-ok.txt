@@ -1,0 +1,23 @@
+{
+  "type": "mux-ready",
+  "payload": {
+    "version": 1,
+    "daemonHostId": "probe-6c4b29fb5361"
+  },
+  "expectedHostId": "probe-6c4b29fb5361",
+  "identitySource": "ZTERM_TRAVERSAL_HOST_ID (daemon config env)",
+  "homeOverride": false,
+  "cleanup": {
+    "pid": 69192,
+    "exited": true,
+    "exitCode": 0,
+    "signalCode": null,
+    "scratchRoot": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/zterm-mux-ready-probe-5OtH6g",
+    "scratchDirRemoved": true,
+    "ok": true,
+    "reason": null
+  },
+  "ok": true
+}
+
+EXIT_CODE=0

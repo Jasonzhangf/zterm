@@ -1,0 +1,17 @@
+{
+  "type": "mux-ready",
+  "payload": {
+    "version": 1,
+    "daemonHostId": null
+  },
+  "expectedHostId": "probe-f9e6a68d9f55",
+  "ok": false
+}
+file:///Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/v2/evidence/mux-ready-daemon-host-id-1107/probe.mjs:142
+  throw new Error(`mux-ready daemonHostId assertion failed: expected=${expectedHostId} received=${receivedHostId || '(missing)'}`);
+        ^
+
+Error: mux-ready daemonHostId assertion failed: expected=probe-f9e6a68d9f55 received=(missing)
+    at file:///Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/v2/evidence/mux-ready-daemon-host-id-1107/probe.mjs:142:9
+
+Node.js v22.22.2

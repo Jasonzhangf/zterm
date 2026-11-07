@@ -1,0 +1,13 @@
+{
+  "mode": "startup-failure-cleanup",
+  "forcedFailureObserved": true,
+  "failureMessage": "daemon did not come up: child exited before ready: code=78 signal=null (lastError=socket hang up)",
+  "cleanup": {
+    "childPid": 97563,
+    "childExited": true,
+    "exitCode": 78,
+    "signalCode": null,
+    "scratchDirRemoved": true
+  },
+  "ok": true
+}

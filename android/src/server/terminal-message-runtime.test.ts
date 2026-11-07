@@ -209,6 +209,7 @@ function createRuntime(options?: {
   failSessionActivityPublish?: boolean;
   failAttachTmux?: boolean;
   useRealChannelMux?: boolean;
+  daemonHostId?: string;
   sessionCatalog?: TerminalSessionCatalogEntry[];
   resolveExistingSession?: (
     stableId: string,
@@ -382,6 +383,7 @@ function createRuntime(options?: {
   );
 
   const runtime = createTerminalMessageRuntime({
+    daemonHostId: options?.daemonHostId,
     sessions,
     sendTransportMessage,
     sendMessage,
@@ -554,6 +556,30 @@ describe('terminal message runtime explicit error truth', () => {
       },
     });
     expect(sentFrames.every((frame) => frame.type.startsWith('mux-'))).toBe(true);
+  });
+
+  it('advertises the current daemon host identity in mux-ready', async () => {
+    const daemonHostId = 'daemon-wire-identity';
+    const { runtime } = createRuntime({
+      passThroughTransportSend: true,
+      daemonHostId,
+    });
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-identity',
+      },
+    })));
+
+    expect(sentTextFrames(connection)).toContainEqual({
+      type: 'mux-ready',
+      payload: expect.objectContaining({
+        daemonHostId,
+      }),
+    });
   });
 
   it('rejects an unwrapped snapshot request on a negotiated mux transport', async () => {

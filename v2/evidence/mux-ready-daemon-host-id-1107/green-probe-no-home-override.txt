@@ -1,0 +1,18 @@
+{
+  "type": "mux-ready",
+  "payload": {
+    "version": 1,
+    "daemonHostId": "probe-d7aa9104d30c"
+  },
+  "expectedHostId": "probe-d7aa9104d30c",
+  "identitySource": "ZTERM_TRAVERSAL_HOST_ID (daemon config env)",
+  "homeOverride": false,
+  "cleanup": {
+    "childPid": 50177,
+    "childExited": true,
+    "exitCode": 0,
+    "signalCode": null,
+    "scratchDirRemoved": true
+  },
+  "ok": true
+}
