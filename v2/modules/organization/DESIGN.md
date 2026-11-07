@@ -69,6 +69,9 @@ Organization 只保存结构化成员引用，不保存 `machineId`、`hostKind`
   - group node 包含 `members`、`children` 和 `mounts`。
   - `members` 按 AuthContext 的显式 allowlist 过滤。
   - `mounts` 是引用节点（`mountId`、`sourceWorkspaceId`、`name`），不展开 source。
+- `listWorkspaces({ token }) -> [{ workspaceId, name, revision }]`
+  - 需要 `org:read`；只返回当前账号 AuthContext 可读的 workspace 稳定引用。
+  - daemon 用本入口构建 `/api/workspaces` 导航目录，不自行枚举 store。
 
 修改：
 

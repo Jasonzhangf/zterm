@@ -23,14 +23,14 @@ function isCode(error, code) {
 }
 
 function bindingFor(memberId, machineId, {
-  generation = 1,
+  bindingGeneration = 1,
   sessionId = 'sess',
   anchor = 'pane:0',
   hostKind = 'tmux',
   agentKind = 'codex',
   launchProfileRef = 'lp',
 } = {}) {
-  return { memberId, machineId, hostKind, agentKind, launchProfileRef, generation, sessionId, anchor };
+  return { memberId, machineId, hostKind, agentKind, launchProfileRef, bindingGeneration, sessionId, anchor };
 }
 
 // Minimal members runtime-binding port fixture: an in-memory Map of memberId ->
@@ -129,7 +129,7 @@ test('unique address returns member, runtime binding machine id, generation, ses
   const { workspace, team, member } = await h.addWorkspace('a');
   const port = createBindingPort({
     [member.memberId]: bindingFor(member.memberId, 'mac-1', {
-      generation: 1,
+      bindingGeneration: 1,
       sessionId: 'sess-a',
       anchor: 'pane:0',
       launchProfileRef: 'lp-a',
@@ -314,7 +314,7 @@ test('same group path and member name in another workspace stays isolated', asyn
 test('expectedGeneration mismatch is rejected with the current generation', async () => {
   const h = await harness();
   const { workspace, member } = await h.addWorkspace('a');
-  const port = createBindingPort({ [member.memberId]: bindingFor(member.memberId, 'mac-1', { generation: 1 }) });
+  const port = createBindingPort({ [member.memberId]: bindingFor(member.memberId, 'mac-1', { bindingGeneration: 1 }) });
   const routing = routingWith(h.organization, port, {
     'a-token': { accountId: 'acct-a', ...accountFor(workspace.workspaceId) },
   });
@@ -808,7 +808,7 @@ test('resolve carries group reference, organization revision and binding runtime
       hostKind: 'vm',
       agentKind: 'other',
       launchProfileRef: 'lp-live',
-      generation: 2,
+      bindingGeneration: 2,
     }),
   });
   const routing = routingWith(h.organization, port, {

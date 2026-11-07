@@ -444,6 +444,24 @@ export function createOrganizationService({ store, auth }) {
     return buildTree(state, workspace, context.members);
   }
 
+  // Authorized workspace catalog for WebUI navigation. Accounts owns account
+  // identity and workspace grants; organization only lists the structural
+  // workspace records the verified AuthContext may read. The result is stable
+  // references plus display names, not a second organization model.
+  async function listWorkspaces({ token } = {}) {
+    const context = await authorize(token);
+    requireScope(context, 'org:read', 'listWorkspaces');
+    const state = await store.read();
+    return Object.values(state.workspaces)
+      .filter((workspace) => hasWorkspace(context, workspace.workspaceId))
+      .map((workspace) => ({
+        workspaceId: workspace.workspaceId,
+        name: workspace.name,
+        revision: workspace.revision,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name) || left.workspaceId.localeCompare(right.workspaceId));
+  }
+
   // Read ports for members and routing. They never mutate and never take auth; the
   // composing caller already authenticated the request.
   async function readWorkspace(workspaceId) {
@@ -478,6 +496,7 @@ export function createOrganizationService({ store, auth }) {
     mountWorkspace,
     unmountWorkspace,
     queryTree,
+    listWorkspaces,
     readWorkspace,
     getMember,
   });

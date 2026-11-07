@@ -6,8 +6,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { asTypedError, TypedError } from "../../errors/src/typed-error.mjs";
 import { observation } from "../../status/src/observation.mjs";
-import { TerminalPort } from "../../terminal/src/terminal-port.mjs";
 import { frameToAnsi, frameToText } from "../../terminal/src/terminal-ansi-serializer.mjs";
+import { isTypedError as isControlTypedError } from "../../organization/src/public/typed-error.mjs";
+import { MEMBER_ERROR_CODES } from "../../members/src/public/index.mjs";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultWebuiDir = path.resolve(moduleDir, "../../webui/src");
@@ -46,6 +47,38 @@ export function resolveV1WsUrl(baseUrl, token) {
   return url.toString();
 }
 
+// Map a TypedError from the v2 errors module or from a module still using the
+// organization typed-error contract to the shared HTTP error shape.
+function toHttpTypedError(error, operationId) {
+  if (isControlTypedError(error)) {
+    const cause = error.cause instanceof Error
+      ? error.cause.message
+      : (error.cause ?? null);
+    return {
+      code: error.code,
+      owningModule: error.owningModule,
+      operationId: error.operationId ?? operationId,
+      cause,
+      message: error.message,
+      retryDisposition: error.retryDisposition,
+      details: error.details,
+    };
+  }
+  return asTypedError(error, {
+    code: "DAEMON_CONTROL_FAILED",
+    owningModule: "daemon",
+    operationId,
+    message: "The daemon control-plane request failed.",
+  }).toJSON();
+}
+
+function validateNonEmptyString(value, field, operationId) {
+  if (typeof value !== "string" || !value.trim()) {
+    throw daemonError("CONTROL_INPUT_INVALID", operationId, `${field} must be a non-empty string.`, `${field} must be a non-empty string.`);
+  }
+  return value;
+}
+
 function redactWsUrl(value) {
   try {
     const url = new URL(value);
@@ -67,9 +100,15 @@ export function createDaemon({
   sessionTtlMs = DEFAULT_SESSION_TTL_MS,
   terminalPort,
   clientInstanceId,
+  workspaceAuth,
+  organization,
+  members,
+  routing,
+  memberHostObserver,
+  terminalCatalog,
 } = {}) {
   const resolvedV1WsUrl = resolveV1WsUrl(v1WsUrl, v1Token);
-  const terminal = terminalPort || new TerminalPort({
+  const terminal = terminalPort || createLazyTerminal({
     wsUrl: resolvedV1WsUrl,
     clientInstanceId,
     log,
@@ -83,6 +122,12 @@ export function createDaemon({
     sessionTtlMs,
     log,
     resolvedV1WsUrl,
+    workspaceAuth,
+    organization,
+    members,
+    routing,
+    memberHostObserver,
+    terminalCatalog,
   };
 
   const server = createServer((request, response) => {
@@ -107,6 +152,32 @@ export function createDaemon({
   });
 
   return { server, terminal, resolvedV1WsUrl: redactWsUrl(resolvedV1WsUrl) };
+}
+
+function createLazyTerminal({ wsUrl, clientInstanceId, log }) {
+  let terminal = null;
+  async function ensureTerminal() {
+    if (!terminal) {
+      const { TerminalPort } = await import("../../terminal/src/terminal-port.mjs");
+      terminal = new TerminalPort({ wsUrl, clientInstanceId, log });
+    }
+    return terminal;
+  }
+  return {
+    async listSessions() {
+      return (await ensureTerminal()).listSessions();
+    },
+    async subscribe(target, callbacks) {
+      return (await ensureTerminal()).subscribe(target, callbacks);
+    },
+    async input(target, data) {
+      return (await ensureTerminal()).input(target, data);
+    },
+    async close() {
+      if (!terminal) return;
+      return (await ensureTerminal()).close?.();
+    },
+  };
 }
 
 async function handleRequest({ request, response, context }) {
@@ -151,6 +222,15 @@ async function handleRequest({ request, response, context }) {
     return sendTerminalInput(request, response, context);
   }
 
+  if (request.method === "GET" && url.pathname === "/api/workspaces") {
+    return listWorkspaces(request, response, context);
+  }
+
+  const workspaceRoute = matchWorkspaceRoute(url.pathname);
+  if (workspaceRoute) {
+    return handleWorkspaceRoute({ request, response, context, route: workspaceRoute });
+  }
+
   if (request.method === "GET" && !url.pathname.startsWith("/api/")) {
     return serveStatic(response, context.webuiDir, url.pathname);
   }
@@ -164,6 +244,357 @@ async function handleRequest({ request, response, context }) {
   sendJson(response, 404, {
     error: daemonError("ROUTE_NOT_FOUND", "route", "Route was not found.", url.pathname).toJSON(),
   });
+}
+
+function matchWorkspaceRoute(pathname) {
+  const prefix = "/api/workspaces/";
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+  const parts = pathname.slice(prefix.length).split("/").filter(Boolean);
+  if (parts.length < 1 || !parts[0]) {
+    return null;
+  }
+  const workspaceId = decodeURIComponent(parts[0]);
+  if (parts.length === 2 && parts[1] === "tree") {
+    return { kind: "tree", workspaceId };
+  }
+  if (parts.length === 2 && parts[1] === "resolve") {
+    return { kind: "resolve", workspaceId };
+  }
+  if (parts.length === 4 && parts[1] === "members" && parts[3] === "runtime") {
+    return { kind: "member-runtime", workspaceId, memberId: decodeURIComponent(parts[2]) };
+  }
+  return null;
+}
+
+async function handleWorkspaceRoute({ request, response, context, route }) {
+  const { token } = await controlAuth(request, context);
+  requireControl(context, route.kind);
+
+  if (route.kind === "tree") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.tree", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const tree = await listWorkspaceTree(token, route.workspaceId, context);
+    return sendJson(response, 200, tree);
+  }
+
+  if (route.kind === "member-runtime") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.member-runtime", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const member = await queryMemberControl(token, route.workspaceId, route.memberId, context);
+    return sendJson(response, 200, member);
+  }
+
+  if (route.kind === "resolve") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.resolve", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const body = await readJson(request);
+    const address = buildResolveAddress(body);
+    let resolved;
+    try {
+      resolved = await context.routing.resolve({ token, workspaceId: route.workspaceId, address });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.resolve");
+    }
+    return sendJson(response, 200, {
+      resolved,
+      observation: observation("routing", { workspaceId: route.workspaceId, memberId: resolved.memberId }),
+    });
+  }
+
+  throw daemonError("ROUTE_NOT_FOUND", "workspace.route", "Route was not found.", request.url);
+}
+
+async function controlAuth(request, context) {
+  if (!requestOriginAllowed(request)) {
+    throw daemonError("ORIGIN_NOT_ALLOWED", "control.auth", "Cross-origin request is not allowed.");
+  }
+  if (!context.workspaceAuth || typeof context.workspaceAuth.verify !== "function") {
+    throw daemonError("CONTROL_AUTH_UNCONFIGURED", "control.auth", "The control-plane workspace authorization adapter is not configured.");
+  }
+  const token = controlToken(request);
+  if (!token) {
+    throw daemonError("CONTROL_CREDENTIAL_REQUIRED", "control.auth", "A control-plane credential is required.");
+  }
+  let account;
+  try {
+    account = await context.workspaceAuth.verify(token);
+  } catch (error) {
+    throw toControlTypedError(error, "control.auth");
+  }
+  if (!account || typeof account !== "object") {
+    throw daemonError("CONTROL_AUTH_INVALID", "control.auth", "The workspace authorization adapter returned an invalid account context.");
+  }
+  return { token, account };
+}
+
+function requireControl(context, operationId) {
+  if (operationId === "resolve") {
+    if (!context.routing || typeof context.routing.resolve !== "function") {
+      throw daemonError("CONTROL_ROUTING_UNCONFIGURED", operationId, "The routing port is not configured.");
+    }
+    return;
+  }
+  if (!context.organization || typeof context.organization.queryTree !== "function") {
+    throw daemonError("CONTROL_ORGANIZATION_UNCONFIGURED", operationId, "The organization tree port is not configured.");
+  }
+  if (!context.members || typeof context.members.queryRuntime !== "function" || typeof context.members.queryBinding !== "function") {
+    throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", operationId, "The members runtime/binding port is not configured.");
+  }
+}
+
+async function listWorkspaces(request, response, context) {
+  const { token } = await controlAuth(request, context);
+  if (!context.organization || typeof context.organization.listWorkspaces !== "function") {
+    throw daemonError("CONTROL_ORGANIZATION_UNCONFIGURED", "workspace.list", "The organization listWorkspaces port is not configured.");
+  }
+  let workspaces;
+  try {
+    workspaces = await context.organization.listWorkspaces({ token });
+  } catch (error) {
+    throw toControlTypedError(error, "workspace.list");
+  }
+  sendJson(response, 200, {
+    workspaces,
+    observation: observation("organization", { workspaces: workspaces.length }),
+  });
+}
+
+async function listWorkspaceTree(token, workspaceId, context) {
+  let tree;
+  try {
+    tree = await context.organization.queryTree({ token, workspaceId });
+  } catch (error) {
+    throw toControlTypedError(error, "workspace.tree");
+  }
+  const groups = collectGroups(tree.root);
+  const members = groups.flatMap((group) => group.members ?? []);
+  const controls = new Map();
+  for (const member of members) {
+    controls.set(member.memberId, await projectMemberControl(token, member, context, { preserveUnbound: true }));
+  }
+  for (const member of members) {
+    const control = controls.get(member.memberId);
+    Object.assign(member, {
+      availability: control.availability,
+      runtime: control.runtime,
+      binding: control.binding,
+    });
+  }
+  // Terminal catalog entries are never projected as organization members. The
+  // composed view reports any target that has no organization member as
+  // unassigned so detection is explicit rather than a silent drop.
+  const terminalCatalog = await observeTerminalCatalog(context);
+  const organizationTargets = new Set(
+    members.flatMap((member) => [member.memberId, member.name].filter(Boolean)),
+  );
+  const unassignedTerminalTargets = terminalCatalog.status === "observed"
+    ? terminalCatalog.sessions
+    .map((session) => session.name ?? session.id ?? session.target ?? null)
+    .filter((target) => target !== null && !organizationTargets.has(target))
+    : null;
+  return {
+    workspace: tree.workspace,
+    root: tree.root,
+    observation: observation("daemon-control-plane", {
+      workspaceId,
+      memberCount: members.length,
+      unassignedTerminalTargets,
+      terminalCatalog: {
+        status: terminalCatalog.status,
+        reason: terminalCatalog.reason ?? null,
+        ...(terminalCatalog.error ? { error: terminalCatalog.error } : {}),
+      },
+    }),
+  };
+}
+
+async function observeTerminalCatalog(context) {
+  if (!context.terminalCatalog || typeof context.terminalCatalog.listSessions !== "function") {
+    return { status: "unknown", reason: "terminal_catalog_unconfigured", sessions: null };
+  }
+  let sessions;
+  try {
+    sessions = await context.terminalCatalog.listSessions();
+  } catch (error) {
+    return {
+      status: "unknown",
+      reason: "terminal_catalog_unavailable",
+      sessions: null,
+      error: toControlErrorRecord(error, "workspace.tree.terminal-catalog"),
+    };
+  }
+  if (!Array.isArray(sessions)) {
+    return {
+      status: "unknown",
+      reason: "terminal_catalog_invalid",
+      sessions: null,
+      error: toControlErrorRecord(
+        daemonError(
+          "TERMINAL_CATALOG_INVALID",
+          "workspace.tree.terminal-catalog",
+          "The terminal catalog port returned an invalid observation.",
+        ),
+        "workspace.tree.terminal-catalog",
+      ),
+    };
+  }
+  return { status: "observed", reason: null, sessions };
+}
+
+function toControlErrorRecord(error, operationId) {
+  const payload = toHttpTypedError(error, operationId);
+  return {
+    code: payload.code,
+    owningModule: payload.owningModule,
+    operationId: payload.operationId ?? operationId,
+    cause: payload.cause ?? null,
+    message: payload.message,
+    retryDisposition: payload.retryDisposition ?? error?.retryDisposition ?? "terminal",
+    details: payload.details ?? null,
+  };
+}
+
+function collectGroups(node, result = []) {
+  if (!node) return result;
+  result.push(node);
+  for (const child of node.children ?? []) {
+    collectGroups(child, result);
+  }
+  return result;
+}
+
+async function queryMemberControl(token, workspaceId, memberId, context, options = {}) {
+  let tree;
+  try {
+    tree = await context.organization.queryTree({ token, workspaceId });
+  } catch (error) {
+    throw toControlTypedError(error, "workspace.member-runtime");
+  }
+  const member = collectGroups(tree.root)
+    .flatMap((group) => group.members ?? [])
+    .find((candidate) => candidate.memberId === memberId);
+  if (!member) {
+    throw daemonError("CONTROL_MEMBER_NOT_FOUND", "workspace.member-runtime", "The member is not in the requested workspace.", `${memberId} in ${workspaceId}`);
+  }
+  return projectMemberControl(token, member, context, options);
+}
+
+async function projectMemberControl(token, member, context, options = {}) {
+  let runtime = null;
+  let binding = null;
+  let availability = null;
+  const memberId = member.memberId;
+  try {
+    runtime = await context.members.queryRuntime({ token, memberId });
+  } catch (error) {
+    if (isControlTypedError(error) && error.code === MEMBER_ERROR_CODES.MEMBER_FORBIDDEN_MEMBER) {
+      throw toControlTypedError(error, "workspace.member-runtime");
+    }
+    if (!isControlTypedError(error) || error.code !== MEMBER_ERROR_CODES.MEMBER_RUNTIME_NOT_CONFIGURED) {
+      throw toControlTypedError(error, "workspace.member-runtime");
+    }
+  }
+  if (runtime) {
+    try {
+      binding = await context.members.queryBinding({ token, memberId });
+    } catch (error) {
+      if (isControlTypedError(error) && error.code === MEMBER_ERROR_CODES.MEMBER_FORBIDDEN_MEMBER) {
+        throw toControlTypedError(error, "workspace.member-runtime");
+      }
+      if (!isControlTypedError(error) || error.code !== MEMBER_ERROR_CODES.MEMBER_BINDING_NOT_FOUND) {
+        throw toControlTypedError(error, "workspace.member-runtime");
+      }
+    }
+  }
+  if (binding) {
+    availability = await observeMemberAvailability(context, { memberId, runtime, binding });
+  } else {
+    availability = {
+      status: "unavailable",
+      reason: "binding_not_found",
+      unbound: options.preserveUnbound === true,
+      observedAt: new Date().toISOString(),
+      bindingGeneration: null,
+      sessionId: null,
+      anchor: null,
+    };
+  }
+
+  return {
+    member: { ...member },
+    runtime,
+    binding,
+    availability,
+  };
+}
+
+async function observeMemberAvailability(context, { memberId, runtime, binding }) {
+  if (!context.memberHostObserver || typeof context.memberHostObserver.observe !== "function") {
+    return {
+      status: "unknown",
+      reason: "host_observation_unavailable",
+      observedAt: new Date().toISOString(),
+      bindingGeneration: binding.generation ?? binding.bindingGeneration ?? null,
+      sessionId: binding.sessionId ?? null,
+      anchor: binding.anchor ?? null,
+      machineId: runtime.machineId ?? null,
+    };
+  }
+  try {
+    const observation = await context.memberHostObserver.observe({ memberId, runtime, binding });
+    return {
+      status: observation.available === false ? "unavailable" : "bound",
+      reason: observation.available === false ? observation.reason ?? "host_unavailable" : "host_observed",
+      observedAt: observation.observedAt ?? new Date().toISOString(),
+      bindingGeneration: binding.generation ?? binding.bindingGeneration ?? null,
+      sessionId: observation.sessionId ?? binding.sessionId ?? null,
+      anchor: observation.anchor ?? binding.anchor ?? null,
+      machineId: observation.machineId ?? runtime.machineId ?? null,
+    };
+  } catch (error) {
+    return {
+      status: "unavailable",
+      reason: isControlTypedError(error) ? error.code : "host_observation_failed",
+      observedAt: new Date().toISOString(),
+      bindingGeneration: binding.generation ?? binding.bindingGeneration ?? null,
+      sessionId: binding.sessionId ?? null,
+      anchor: binding.anchor ?? null,
+      machineId: runtime.machineId ?? null,
+    };
+  }
+}
+
+function toControlTypedError(error, operationId) {
+  const payload = toHttpTypedError(error, operationId);
+  const typed = daemonError(payload.code, payload.operationId ?? operationId, payload.message, payload.cause);
+  typed.owningModule = payload.owningModule;
+  typed.retryDisposition = payload.retryDisposition;
+  typed.details = payload.details;
+  return typed;
+}
+
+function buildResolveAddress(body) {
+  const address = {};
+  address.machineId = validateNonEmptyString(body?.machineId, "machineId", "workspace.resolve");
+  address.groupPath = validateNonEmptyString(body?.groupPath, "groupPath", "workspace.resolve");
+  if (body.memberId !== undefined) {
+    address.memberId = validateNonEmptyString(body.memberId, "memberId", "workspace.resolve");
+  }
+  if (body.memberName !== undefined) {
+    address.memberName = validateNonEmptyString(body.memberName, "memberName", "workspace.resolve");
+  }
+  if (body.expectedGeneration !== undefined) {
+    if (!Number.isInteger(body.expectedGeneration) || body.expectedGeneration < 0) {
+      throw daemonError("CONTROL_INPUT_INVALID", "workspace.resolve", "expectedGeneration must be a non-negative integer.");
+    }
+    address.expectedGeneration = body.expectedGeneration;
+  }
+  return address;
 }
 
 function requestOriginAllowed(request) {
@@ -204,6 +635,14 @@ function credentialHeader(request) {
   const headerToken = request.headers["x-zterm-v2-token"];
   if (typeof headerToken === "string" && headerToken.trim()) {
     return headerToken.trim();
+  }
+  return "";
+}
+
+function controlToken(request) {
+  const bearer = request.headers.authorization;
+  if (typeof bearer === "string" && bearer.toLowerCase().startsWith("bearer ")) {
+    return bearer.slice(7).trim();
   }
   return "";
 }
@@ -516,6 +955,42 @@ function sendJson(response, status, payload) {
 
 function statusForError(error) {
   switch (error.code) {
+    case "CONTROL_CREDENTIAL_REQUIRED":
+    case "CONTROL_AUTH_INVALID":
+    case "UNAUTHENTICATED":
+      return 401;
+    case "CONTROL_AUTH_UNCONFIGURED":
+    case "CONTROL_ORGANIZATION_UNCONFIGURED":
+    case "CONTROL_MEMBERS_UNCONFIGURED":
+    case "CONTROL_ROUTING_UNCONFIGURED":
+      return 503;
+    case "CONTROL_INPUT_INVALID":
+    case "VALIDATION":
+      return 400;
+    case "ORGANIZATION_FORBIDDEN":
+    case "ROUTE_FORBIDDEN":
+    case "MEMBER_FORBIDDEN_SCOPE":
+    case "MEMBER_FORBIDDEN_WORKSPACE":
+    case "MEMBER_FORBIDDEN_MEMBER":
+      return 403;
+    case "WORKSPACE_NOT_FOUND":
+    case "GROUP_NOT_FOUND":
+    case "MEMBER_NOT_FOUND":
+    case "ROUTE_NOT_FOUND":
+    case "CONTROL_MEMBER_NOT_FOUND":
+      return 404;
+    case "ROUTE_AMBIGUOUS":
+    case "ORGANIZATION_REVISION_STALE":
+    case "BINDING_GENERATION_STALE":
+    case "MEMBER_BINDING_INVALID":
+    case "BINDING_HOST_MISMATCH":
+      return 409;
+    case "MEMBER_BINDING_NOT_FOUND":
+      return 404;
+    case "MEMBER_RUNTIME_NOT_CONFIGURED":
+    case "BINDING_HOST_UNAVAILABLE":
+    case "BINDING_HOST_IDENTITY_UNAVAILABLE":
+      return 503;
     case "V2_AUTH_UNCONFIGURED":
       return 503;
     case "V2_CREDENTIAL_REQUIRED":

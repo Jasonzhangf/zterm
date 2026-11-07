@@ -28,7 +28,7 @@ const TOKENS = {
 // not a production account store.
 const auth = createTrustedAuthDouble({
   accounts: {
-    [TOKENS.owner]: { accountId: 'acct-owner', scopes: ['members:read', 'members:write'], workspaces: '*' },
+    [TOKENS.owner]: { accountId: 'acct-owner', scopes: ['org:write', 'members:read', 'members:write'], workspaces: '*' },
     [TOKENS.reader]: { accountId: 'acct-reader', scopes: ['members:read'], workspaces: '*' },
     [TOKENS.noScope]: { accountId: 'acct-noscope', scopes: ['other:read'], workspaces: '*' },
     [TOKENS.otherWorkspace]: { accountId: 'acct-other', scopes: ['members:read', 'members:write'], workspaces: ['ws-unrelated'] },
@@ -75,6 +75,7 @@ async function fixture({ hostProbe = hostProbeDouble() } = {}) {
     workspaceId: workspace.workspaceId,
     groupId: workspace.rootGroupId,
     name: 'Worker',
+    expectedRevision: workspace.revision,
     machineId: 'mac-1',
     hostKind: 'tmux',
     agentKind: 'codex',
@@ -85,6 +86,7 @@ async function fixture({ hostProbe = hostProbeDouble() } = {}) {
     workspaceId: workspace.workspaceId,
     groupId: workspace.rootGroupId,
     name: 'Agent',
+    expectedRevision: first.revision,
     machineId: 'mac-2',
     hostKind: 'dsh',
     agentKind: 'claude',
