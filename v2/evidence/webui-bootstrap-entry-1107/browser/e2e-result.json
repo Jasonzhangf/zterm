@@ -1,0 +1,27 @@
+{
+  "status": "PASS",
+  "publicEntry": "http://127.0.0.1:64315/features/bootstrap/index.html#/setup",
+  "daemon": {
+    "port": 64315,
+    "credentialsConfigured": true
+  },
+  "checks": {
+    "setupRouteRendered": true,
+    "endpointSavedWithoutCredential": true,
+    "invalidLoginTypedError": "V2_CREDENTIAL_INVALID",
+    "validLoginAuthenticated": true,
+    "workspaceDirectoryTypedUnavailable": "METHOD_NOT_ALLOWED",
+    "machineEnrollmentDisabled": "MACHINE_ENROLLMENT_UNAVAILABLE",
+    "desktopNoHorizontalOverflow": {
+      "innerWidth": 1440,
+      "scrollWidth": 1440,
+      "bodyScrollWidth": 1440
+    },
+    "mobileNoHorizontalOverflow": {
+      "innerWidth": 390,
+      "scrollWidth": 390,
+      "bodyScrollWidth": 390
+    }
+  },
+  "note": "The base daemon at this commit exposes auth/session but not /api/workspaces; the UI reports typed unavailable instead of fabricating a workspace list."
+}

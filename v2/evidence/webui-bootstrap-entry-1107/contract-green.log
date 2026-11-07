@@ -1,0 +1,94 @@
+TAP version 13
+# Subtest: daemon-api login posts the daemon credential and keeps same-origin cookies
+ok 1 - daemon-api login posts the daemon credential and keeps same-origin cookies
+  ---
+  duration_ms: 1.276458
+  type: 'test'
+  ...
+# Subtest: daemon-api login failure preserves the typed daemon error and status
+ok 2 - daemon-api login failure preserves the typed daemon error and status
+  ---
+  duration_ms: 0.287042
+  type: 'test'
+  ...
+# Subtest: daemon-api lists only server-authorized workspaces with the control-plane bearer token
+ok 3 - daemon-api lists only server-authorized workspaces with the control-plane bearer token
+  ---
+  duration_ms: 0.087041
+  type: 'test'
+  ...
+# Subtest: daemon-api listWorkspaces rejects malformed workspace payloads
+ok 4 - daemon-api listWorkspaces rejects malformed workspace payloads
+  ---
+  duration_ms: 0.072334
+  type: 'test'
+  ...
+# Subtest: daemon-api reads the server workspace tree with the control-plane bearer token
+ok 5 - daemon-api reads the server workspace tree with the control-plane bearer token
+  ---
+  duration_ms: 0.133708
+  type: 'test'
+  ...
+# Subtest: bootstrap routes parse setup, login, and workspaces only
+ok 6 - bootstrap routes parse setup, login, and workspaces only
+  ---
+  duration_ms: 0.096
+  type: 'test'
+  ...
+# Subtest: bootstrap setup stores only the daemon endpoint, never credentials
+ok 7 - bootstrap setup stores only the daemon endpoint, never credentials
+  ---
+  duration_ms: 0.230167
+  type: 'test'
+  ...
+# Subtest: bootstrap setup rejects invalid daemon endpoints with a typed error
+ok 8 - bootstrap setup rejects invalid daemon endpoints with a typed error
+  ---
+  duration_ms: 0.08875
+  type: 'test'
+  ...
+# Subtest: bootstrap login success uses the daemon session and keeps no credential in storage
+ok 9 - bootstrap login success uses the daemon session and keeps no credential in storage
+  ---
+  duration_ms: 0.269959
+  type: 'test'
+  ...
+# Subtest: bootstrap login failure shows a typed error and never reports success
+ok 10 - bootstrap login failure shows a typed error and never reports success
+  ---
+  duration_ms: 0.322958
+  type: 'test'
+  ...
+# Subtest: bootstrap workspace directory renders only server-authorized workspaces
+ok 11 - bootstrap workspace directory renders only server-authorized workspaces
+  ---
+  duration_ms: 0.252875
+  type: 'test'
+  ...
+# Subtest: bootstrap workspace directory keeps unauthorized lists explicit
+ok 12 - bootstrap workspace directory keeps unauthorized lists explicit
+  ---
+  duration_ms: 0.131
+  type: 'test'
+  ...
+# Subtest: bootstrap workspace directory keeps unavailable endpoints explicit
+ok 13 - bootstrap workspace directory keeps unavailable endpoints explicit
+  ---
+  duration_ms: 0.069084
+  type: 'test'
+  ...
+# Subtest: bootstrap machine selection uses the server tree and enrollment stays disabled with a typed reason
+ok 14 - bootstrap machine selection uses the server tree and enrollment stays disabled with a typed reason
+  ---
+  duration_ms: 0.125958
+  type: 'test'
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 91.014208

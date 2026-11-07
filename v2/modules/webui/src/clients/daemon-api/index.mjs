@@ -92,5 +92,41 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
         body: JSON.stringify({ target, data }),
       });
     },
+
+    async listWorkspaces({ accountToken } = {}) {
+      const headers = {};
+      if (typeof accountToken === "string" && accountToken.trim()) {
+        headers.authorization = `Bearer ${accountToken.trim()}`;
+      }
+      const payload = await request("/api/workspaces", { headers });
+      if (!Array.isArray(payload.workspaces)) {
+        throw new DaemonError(
+          { code: "WORKSPACES_RESPONSE_INVALID", message: "Daemon returned a malformed workspace list." },
+          502,
+        );
+      }
+      return payload.workspaces;
+    },
+
+    async getWorkspaceTree({ workspaceId, accountToken } = {}) {
+      if (typeof workspaceId !== "string" || !workspaceId.trim()) {
+        throw new DaemonError({ code: "WORKSPACE_ID_REQUIRED", message: "A workspace id is required." }, 400);
+      }
+      const headers = {};
+      if (typeof accountToken === "string" && accountToken.trim()) {
+        headers.authorization = `Bearer ${accountToken.trim()}`;
+      }
+      const payload = await request(
+        `/api/workspaces/${encodeURIComponent(workspaceId.trim())}/tree`,
+        { headers },
+      );
+      if (!payload.root || typeof payload.root !== "object") {
+        throw new DaemonError(
+          { code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace tree." },
+          502,
+        );
+      }
+      return payload.root;
+    },
   };
 }
