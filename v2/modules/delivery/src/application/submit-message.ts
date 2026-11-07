@@ -6,16 +6,19 @@ import type {
 } from "../domain/receipt.ts";
 import type {
   DeliveryDependencies,
+  MessageDispatchResult,
   SubmissionAuthorizationResult,
   TargetResolutionResult,
 } from "../ports/dependencies.ts";
 import type {
   AcceptMessageCommand,
   AcceptMessageResult,
+  DeliveryErrorChain,
 } from "../ports/receipt-store.ts";
 import type {
   SubmissionResult,
 } from "../public/delivery-port.ts";
+import { recordRemoteStoredEvidence } from "./dispatch-evidence.ts";
 import { chainFromException } from "./error-chain.ts";
 
 const ACCEPTANCE_UNKNOWN_EXCEPTION =
@@ -24,6 +27,11 @@ const AUTHORIZATION_SUBMISSION_UNAVAILABLE_EXCEPTION =
   "delivery.authorization.submit-unavailable";
 const ROUTING_UNAVAILABLE_EXCEPTION =
   "delivery.routing.resolve-unavailable";
+const DISPATCH_UNAVAILABLE_EXCEPTION =
+  "delivery.dispatch.unavailable";
+const V1_MESSAGE_ID_UNAVAILABLE_EXCEPTION =
+  "delivery.dispatch.v1-message-id-unavailable";
+const SUBJECT_REQUIRED_REF = "SUBJECT_REQUIRED";
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
@@ -34,7 +42,8 @@ function isValidMessage(message: MessageContent): boolean {
     typeof message === "object" &&
     message !== null &&
     typeof message.body === "string" &&
-    (message.subject === undefined || typeof message.subject === "string")
+    (message.subject === undefined ||
+      (typeof message.subject === "string" && message.subject.length > 0))
   );
 }
 
@@ -82,6 +91,7 @@ function freezeReceipt(receipt: Receipt): Receipt {
     target: DeliveryTarget;
     durableStage: Receipt["durableStage"];
     outcome: Receipt["outcome"];
+    v1MessageId?: string;
     errorRef?: string;
     observedAt: string;
   } = {
@@ -91,6 +101,9 @@ function freezeReceipt(receipt: Receipt): Receipt {
     outcome: receipt.outcome,
     observedAt: receipt.observedAt,
   };
+  if (receipt.v1MessageId !== undefined) {
+    copy.v1MessageId = receipt.v1MessageId;
+  }
   if (receipt.errorRef !== undefined) {
     copy.errorRef = receipt.errorRef;
   }
@@ -125,6 +138,34 @@ function mapAcceptance(result: AcceptMessageResult): SubmissionResult {
       return {
         kind: "acceptance-unknown",
         errorRef: result.errorRef,
+        ...(result.errorChain === undefined
+          ? {}
+          : { errorChain: result.errorChain }),
+      };
+  }
+}
+
+function mapDispatch(
+  result: Exclude<MessageDispatchResult, { readonly kind: "remote-stored" }>,
+  receipt: Receipt,
+): SubmissionResult {
+  switch (result.kind) {
+    case "unknown":
+      return {
+        kind: "dispatch-unknown",
+        code: "DISPATCH_UNKNOWN",
+        errorRef: result.errorRef,
+        receipt,
+        ...(result.errorChain === undefined
+          ? {}
+          : { errorChain: result.errorChain }),
+      };
+    case "unavailable":
+      return {
+        kind: "dispatch-unavailable",
+        code: "DISPATCH_UNAVAILABLE",
+        errorRef: result.errorRef,
+        receipt,
         ...(result.errorChain === undefined
           ? {}
           : { errorChain: result.errorChain }),
@@ -189,7 +230,7 @@ export async function submitMessage<AuthContext, TargetAddress>(
     });
   } catch {
     return {
-      kind: "rejected",
+      kind: "routing-unavailable",
       code: "ROUTING_UNAVAILABLE",
       errorRef: ROUTING_UNAVAILABLE_EXCEPTION,
     };
@@ -210,7 +251,7 @@ export async function submitMessage<AuthContext, TargetAddress>(
   }
   if (resolution.kind === "unavailable") {
     return {
-      kind: "rejected",
+      kind: "routing-unavailable",
       code: "ROUTING_UNAVAILABLE",
       errorRef: resolution.errorRef,
     };
@@ -241,5 +282,74 @@ export async function submitMessage<AuthContext, TargetAddress>(
       errorChain: chainFromException("accept", error),
     };
   }
-  return mapAcceptance(result);
+
+  const accepted = mapAcceptance(result);
+  if (accepted.kind !== "accepted") {
+    return accepted;
+  }
+
+  if (accepted.disposition === "replayed") {
+    return accepted;
+  }
+
+  if (command.message.subject === undefined) {
+    return {
+      kind: "dispatch-unavailable",
+      code: "DISPATCH_UNAVAILABLE",
+      errorRef: SUBJECT_REQUIRED_REF,
+      receipt: accepted.receipt,
+    };
+  }
+
+  const v1MessageId = accepted.receipt.v1MessageId;
+  if (v1MessageId === undefined) {
+    return {
+      kind: "dispatch-unavailable",
+      code: "DISPATCH_UNAVAILABLE",
+      errorRef: V1_MESSAGE_ID_UNAVAILABLE_EXCEPTION,
+      receipt: accepted.receipt,
+    };
+  }
+
+  let dispatch: MessageDispatchResult;
+  try {
+    dispatch = await dependencies.dispatch.dispatchMessage({
+      deliveryRef: command.deliveryRef,
+      target: command.target,
+      message: command.message,
+      v1MessageId,
+    });
+  } catch (error) {
+    return {
+      kind: "dispatch-unavailable",
+      code: "DISPATCH_UNAVAILABLE",
+      errorRef: DISPATCH_UNAVAILABLE_EXCEPTION,
+      receipt: accepted.receipt,
+      errorChain: chainFromException("dispatch", error),
+    };
+  }
+  if (dispatch.kind === "remote-stored") {
+    const evidence = await recordRemoteStoredEvidence(
+      dependencies.receiptStore,
+      accepted.receipt,
+      dispatch,
+    );
+    if (evidence.kind === "stored") {
+      return {
+        kind: "accepted",
+        disposition: "created",
+        receipt: evidence.receipt,
+      };
+    }
+    return {
+      kind: "dispatch-unknown",
+      code: "DISPATCH_UNKNOWN",
+      errorRef: evidence.errorRef,
+      receipt: evidence.receipt,
+      ...(evidence.errorChain === undefined
+        ? {}
+        : { errorChain: evidence.errorChain }),
+    };
+  }
+  return mapDispatch(dispatch, accepted.receipt);
 }

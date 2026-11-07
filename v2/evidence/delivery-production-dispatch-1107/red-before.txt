@@ -1,0 +1,7 @@
+# Red-first: base commit f99a61a8 has no production dispatch in the public delivery path
+## submit-message.ts at base: dispatch/connection matches
+NO_MATCH (no production dispatch call)
+## delivery-port.ts at base: dispatch matches
+NO_MATCH (no dispatch dependency exposed)
+## dependencies.ts at base: dispatch matches
+NO_MATCH (no dispatch port required)

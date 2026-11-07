@@ -34,6 +34,11 @@ export interface Receipt {
   readonly target: DeliveryTarget;
   readonly durableStage: DurableStage;
   readonly outcome: ReceiptOutcome;
+  /**
+   * Persistence-owned V1 message identity used for stable wire correlation
+   * across retry/restart. Absent on old records; never derived from DeliveryRef.
+   */
+  readonly v1MessageId?: string;
   readonly errorRef?: string;
   readonly observedAt: string;
 }
@@ -121,6 +126,7 @@ function freezeReceipt(receipt: Receipt): Receipt {
     target: DeliveryTarget;
     durableStage: DurableStage;
     outcome: ReceiptOutcome;
+    v1MessageId?: string;
     errorRef?: string;
     observedAt: string;
   } = {
@@ -130,6 +136,9 @@ function freezeReceipt(receipt: Receipt): Receipt {
     outcome: receipt.outcome,
     observedAt: receipt.observedAt,
   };
+  if (receipt.v1MessageId !== undefined) {
+    copy.v1MessageId = receipt.v1MessageId;
+  }
   if (receipt.errorRef !== undefined) {
     copy.errorRef = receipt.errorRef;
   }
@@ -172,6 +181,7 @@ export function createAcceptedReceipt(
   deliveryRef: DeliveryRef,
   target: DeliveryTarget,
   observedAt: string,
+  v1MessageId?: string,
 ): Receipt {
   requireNonEmptyString(observedAt, "observedAt");
   return freezeReceipt({
@@ -180,6 +190,7 @@ export function createAcceptedReceipt(
     durableStage: "accepted",
     outcome: "pending",
     observedAt,
+    ...(v1MessageId === undefined ? {} : { v1MessageId }),
   });
 }
 
@@ -206,6 +217,9 @@ export function applyReceiptEvidence(
         durableStage: evidence.kind,
         outcome: "confirmed",
         observedAt: evidence.observedAt,
+        ...(receipt.v1MessageId === undefined
+          ? {}
+          : { v1MessageId: receipt.v1MessageId }),
       }),
     };
   }
@@ -224,6 +238,9 @@ export function applyReceiptEvidence(
         outcome: evidence.kind,
         errorRef: evidence.errorRef,
         observedAt: evidence.observedAt,
+        ...(receipt.v1MessageId === undefined
+          ? {}
+          : { v1MessageId: receipt.v1MessageId }),
       }),
     };
   }

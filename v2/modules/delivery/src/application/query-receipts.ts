@@ -45,6 +45,7 @@ function freezeReceipt(receipt: Receipt): Receipt {
     target: Receipt["target"];
     durableStage: Receipt["durableStage"];
     outcome: Receipt["outcome"];
+    v1MessageId?: string;
     errorRef?: string;
     observedAt: string;
   } = {
@@ -58,6 +59,9 @@ function freezeReceipt(receipt: Receipt): Receipt {
     outcome: receipt.outcome,
     observedAt: receipt.observedAt,
   };
+  if (receipt.v1MessageId !== undefined) {
+    copy.v1MessageId = receipt.v1MessageId;
+  }
   if (receipt.errorRef !== undefined) {
     copy.errorRef = receipt.errorRef;
   }

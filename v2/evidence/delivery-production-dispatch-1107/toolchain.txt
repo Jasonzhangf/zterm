@@ -1,0 +1,5 @@
+node: v22.22.2
+pnpm: 9.15.9
+dagpipe: dagpipe 0.1.1
+base: f99a61a8f39542afcb450a23ad55060dcbcdd697
+branch: delivery-production-dispatch-20261107

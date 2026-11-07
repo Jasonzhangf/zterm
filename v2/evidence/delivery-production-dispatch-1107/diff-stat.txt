@@ -1,0 +1,28 @@
+ v2/modules/delivery/src/application/error-chain.ts |   9 +-
+ .../delivery/src/application/query-receipts.ts     |   4 +
+ .../delivery/src/application/submit-message.ts     | 118 +++-
+ v2/modules/delivery/src/domain/receipt.ts          |  17 +
+ v2/modules/delivery/src/ports/dependencies.ts      |  64 +-
+ v2/modules/delivery/src/public/delivery-port.ts    |  77 ++-
+ .../delivery/tests/contract/delivery-port.test.ts  | 715 ++++++++++++++++++++-
+ .../delivery/tests/contract/v1-error-chain.test.ts |  24 +-
+ .../tests/integration/receipt-lifecycle.test.ts    |  34 +-
+ .../tests/integration/v1-receipt-store.test.ts     |  99 ++-
+ 10 files changed, 1096 insertions(+), 65 deletions(-)
+
+-- untracked --
+ M v2/modules/delivery/src/application/error-chain.ts
+ M v2/modules/delivery/src/application/query-receipts.ts
+ M v2/modules/delivery/src/application/submit-message.ts
+ M v2/modules/delivery/src/domain/receipt.ts
+ M v2/modules/delivery/src/ports/dependencies.ts
+ M v2/modules/delivery/src/public/delivery-port.ts
+ M v2/modules/delivery/tests/contract/delivery-port.test.ts
+ M v2/modules/delivery/tests/contract/v1-error-chain.test.ts
+ M v2/modules/delivery/tests/integration/receipt-lifecycle.test.ts
+ M v2/modules/delivery/tests/integration/v1-receipt-store.test.ts
+?? result.md
+?? v2/evidence/delivery-production-dispatch-1107/
+?? v2/modules/delivery/src/application/dispatch-evidence.ts
+?? v2/modules/delivery/src/application/resume-dispatch.ts
+?? v2/modules/delivery/src/ports/accepted-command-reader.ts

@@ -13,6 +13,7 @@ import type {
 import type {
   DeliveryAuthorizationPort,
   DeliveryRoutingPort,
+  MessageDispatchPort,
 } from "../../src/ports/dependencies.ts";
 
 type AuthContext = Readonly<{ actor: string }>;
@@ -60,6 +61,15 @@ const routing: DeliveryRoutingPort<string> = {
   },
 };
 
+const dispatch: MessageDispatchPort = {
+  async dispatchMessage() {
+    return {
+      kind: "remote-stored",
+      observedAt: "2026-11-03T10:01:00.000Z",
+    };
+  },
+};
+
 function storeWith(result: {
   accept?: AcceptMessageResult;
   read?: ReadReceiptResult;
@@ -87,6 +97,7 @@ test("acceptance-unknown preserves the public error chain", async () => {
   const port = createDeliveryPort<AuthContext, string>({
     authorization,
     routing,
+    dispatch,
     receiptStore: storeWith({
       accept: {
         kind: "acceptance-unknown",
@@ -115,6 +126,7 @@ test("unavailable query preserves the public error chain", async () => {
   const port = createDeliveryPort<AuthContext, string>({
     authorization,
     routing,
+    dispatch,
     receiptStore: storeWith({
       read: {
         kind: "unavailable",
@@ -159,6 +171,7 @@ test("unexpected acceptance exception preserves message and nested cause", async
   const port = createDeliveryPort<AuthContext, string>({
     authorization,
     routing,
+    dispatch,
     receiptStore: throwingStore,
   });
 
@@ -185,6 +198,7 @@ test("unexpected read exception preserves message and nested cause", async () =>
   const port = createDeliveryPort<AuthContext, string>({
     authorization,
     routing,
+    dispatch,
     receiptStore: throwingStore,
   });
 
@@ -206,6 +220,7 @@ test("receiptStore rejections with undefined or null stay typed and isolated", a
     const port = createDeliveryPort<AuthContext, string>({
       authorization,
       routing,
+      dispatch,
       receiptStore: {
         async acceptMessage() {
           throw thrown;
@@ -261,6 +276,7 @@ test("submission authorization exceptions become typed authorization unavailable
       },
     },
     routing,
+    dispatch,
     receiptStore: storeWith({}),
   });
 
@@ -287,6 +303,7 @@ test("submission routing exceptions become typed routing unavailable", async () 
         throw new Error("routing down");
       },
     },
+    dispatch,
     receiptStore: storeWith({}),
   });
 
@@ -297,9 +314,9 @@ test("submission routing exceptions become typed routing unavailable", async () 
     { body: "body" },
   );
 
-  assert.equal(result.kind, "rejected");
-  if (result.kind !== "rejected") {
-    assert.fail("routing exception did not return a rejection");
+  assert.equal(result.kind, "routing-unavailable");
+  if (result.kind !== "routing-unavailable") {
+    assert.fail("routing exception did not return routing unavailable");
   }
   assert.equal(result.code, "ROUTING_UNAVAILABLE");
   assert.equal(result.errorRef, "delivery.routing.resolve-unavailable");
@@ -325,6 +342,7 @@ test("receipt query authorization exceptions become typed unavailable with an au
       },
     },
     routing,
+    dispatch,
     receiptStore: storeWith({}),
   });
 
