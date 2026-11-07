@@ -1,0 +1,14 @@
+PASS: invalid ref returns invalid-input
+PASS: missing ref returns not-found
+PASS: read-only paths create no app-delivery directory
+PASS: acceptMessage returns created
+PASS: created receipt carries UUID v1MessageId
+PASS: readAcceptedCommand returns found
+PASS: read command is frozen
+PASS: read returns exact accepted command and v1MessageId
+PASS: fresh reopen returns found
+PASS: durable reopen preserves v1MessageId
+PASS: applyReceiptEvidence returns applied
+PASS: read after evidence update returns found
+PASS: evidence update preserves v1MessageId
+BLACKBOX PASS (13 checks)

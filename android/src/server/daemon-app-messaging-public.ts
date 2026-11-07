@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   APP_ACKED_RETENTION_MS,
   APP_MAX_MESSAGE_BYTES,
@@ -33,6 +34,7 @@ export type Receipt = {
   readonly target: DeliveryTarget;
   readonly durableStage: DurableStage;
   readonly outcome: ReceiptOutcome;
+  readonly v1MessageId?: string;
   readonly errorRef?: string;
   readonly observedAt: string;
 };
@@ -49,6 +51,20 @@ export type AcceptMessageCommand = {
   readonly kind: 'message';
   readonly message: MessageContent;
 };
+
+export type AcceptedCommand = AcceptMessageCommand & {
+  readonly v1MessageId: string;
+};
+
+export type ReadAcceptedCommandResult =
+  | { readonly kind: 'found'; readonly command: AcceptedCommand }
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'invalid-input'; readonly errorRef: string }
+  | {
+      readonly kind: 'unavailable';
+      readonly errorRef: string;
+      readonly errorChain: ControlErrorChain;
+    };
 
 export type AcceptMessageResult =
   | { readonly kind: 'created'; readonly receipt: Receipt }
@@ -124,6 +140,7 @@ export type ReceiptEvidenceTransition = (
 export interface ReceiptStore {
   acceptMessage(command: AcceptMessageCommand): Promise<AcceptMessageResult>;
   readReceipt(ref: DeliveryRef): Promise<ReadReceiptResult>;
+  readAcceptedCommand(ref: DeliveryRef): Promise<ReadAcceptedCommandResult>;
   applyReceiptEvidence(evidence: ReceiptEvidence): Promise<ApplyReceiptEvidenceResult>;
 }
 
@@ -225,6 +242,7 @@ function freezeReceipt(receipt: Receipt): Receipt {
     target: DeliveryTarget;
     durableStage: DurableStage;
     outcome: ReceiptOutcome;
+    v1MessageId?: string;
     errorRef?: string;
     observedAt: string;
   } = {
@@ -234,6 +252,7 @@ function freezeReceipt(receipt: Receipt): Receipt {
     outcome: receipt.outcome,
     observedAt: receipt.observedAt,
   };
+  if (receipt.v1MessageId !== undefined) copy.v1MessageId = receipt.v1MessageId;
   if (receipt.errorRef !== undefined) copy.errorRef = receipt.errorRef;
   return Object.freeze(copy);
 }
@@ -244,6 +263,7 @@ function receiptOf(record: AppDeliveryRecord): Receipt {
     target: record.target,
     durableStage: record.durableStage,
     outcome: record.outcome,
+    ...(record.v1MessageId === undefined ? {} : { v1MessageId: record.v1MessageId }),
     ...(record.errorRef === undefined ? {} : { errorRef: record.errorRef }),
     observedAt: record.observedAt,
   });
@@ -379,6 +399,7 @@ export function createAppMessagingPersistence(
             deliveryRef: ref,
             target,
             kind: 'message',
+            v1MessageId: randomUUID(),
             ...(subject.present ? { subject: subject.value } : {}),
             body: message.body,
             durableStage: 'accepted',
@@ -421,6 +442,39 @@ export function createAppMessagingPersistence(
             freshness: 'fresh',
             observedAt: nowIso(),
           },
+        };
+      } catch (error) {
+        const chain = errorChainOf('read', error);
+        return { kind: 'unavailable', errorRef: reportError('read', chain), errorChain: chain };
+      }
+    },
+
+    async readAcceptedCommand(ref) {
+      if (!isValidDeliveryRef(ref)) {
+        return { kind: 'invalid-input', errorRef: 'delivery.read.invalid-ref' };
+      }
+      try {
+        const record = await store.readDeliveryRecord(freezeDeliveryRef(ref));
+        if (record === null) return { kind: 'not-found' };
+        if (record.v1MessageId === undefined) {
+          const chain = errorChainOf(
+            'read',
+            new AppStoreError('storage_inconsistent', 'accepted command is missing v1MessageId'),
+          );
+          return { kind: 'unavailable', errorRef: reportError('read', chain), errorChain: chain };
+        }
+        return {
+          kind: 'found',
+          command: Object.freeze({
+            deliveryRef: freezeDeliveryRef(record.deliveryRef),
+            target: freezeDeliveryTarget(record.target),
+            kind: 'message',
+            message: Object.freeze({
+              ...(record.subject === undefined ? {} : { subject: record.subject }),
+              body: record.body,
+            }),
+            v1MessageId: record.v1MessageId,
+          }),
         };
       } catch (error) {
         const chain = errorChainOf('read', error);
@@ -474,6 +528,7 @@ export function createAppMessagingPersistence(
             deliveryRef: located.deliveryRef,
             target: located.target,
             kind: 'message',
+            ...(located.v1MessageId === undefined ? {} : { v1MessageId: located.v1MessageId }),
             ...(located.subject === undefined ? {} : { subject: located.subject }),
             body: located.body,
             durableStage: next.durableStage,

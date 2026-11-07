@@ -175,6 +175,54 @@ describe('app messaging persistence facade', () => {
     expect((await second.acceptMessage(command({ subject: '', body: 'durable' }))).kind).toBe('replayed');
   });
 
+  it('reads the accepted command with its persistence-owned V1 message identity', async () => {
+    const root = await makeRoot();
+    const appRootDir = join(root, 'app');
+    const first = createPersistence({ appRootDir });
+    const created = await first.acceptMessage(command());
+    expect(created.kind).toBe('created');
+    if (created.kind !== 'created') throw new Error('unreachable');
+    expect(created.receipt.v1MessageId).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+    );
+
+    const read = await first.readAcceptedCommand(ref());
+    expect(read.kind).toBe('found');
+    if (read.kind !== 'found') throw new Error('unreachable');
+    expect(read.command).toMatchObject({
+      deliveryRef: ref(),
+      target,
+      kind: 'message',
+      message: { subject: 'subject', body: 'hello' },
+      v1MessageId: created.receipt.v1MessageId,
+    });
+
+    const reopened = createPersistence({ appRootDir });
+    const durable = await reopened.readAcceptedCommand(ref());
+    expect(durable.kind).toBe('found');
+    if (durable.kind !== 'found') throw new Error('unreachable');
+    expect(durable.command.v1MessageId).toBe(created.receipt.v1MessageId);
+
+    const applied = await reopened.applyReceiptEvidence(evidence('remote-stored'));
+    expect(applied.kind).toBe('applied');
+    const afterEvidence = await reopened.readAcceptedCommand(ref());
+    expect(afterEvidence.kind).toBe('found');
+    if (afterEvidence.kind !== 'found') throw new Error('unreachable');
+    expect(afterEvidence.command.v1MessageId).toBe(created.receipt.v1MessageId);
+  });
+
+  it('read accepted command distinguishes invalid input and not-found without writing', async () => {
+    const root = await makeRoot();
+    const store = createPersistence({ appRootDir: join(root, 'app') });
+
+    const invalid = await store.readAcceptedCommand({ ...ref(), requestId: '' });
+    expect(invalid.kind).toBe('invalid-input');
+
+    const missing = await store.readAcceptedCommand(ref({}, 'missing'));
+    expect(missing.kind).toBe('not-found');
+    await expect(stat(join(root, 'app', 'app-delivery'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('concurrent same-ref accepts serialize to one created', async () => {
     const root = await makeRoot();
     const store = createPersistence({ appRootDir: join(root, 'app') });
