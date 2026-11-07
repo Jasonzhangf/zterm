@@ -261,6 +261,9 @@ export class TerminalPort {
       return;
     }
     if (message.type === "channel-closed" || message.type === "mux-channel-closed") {
+      if (entry.closed) {
+        return;
+      }
       entry.closed = true;
       const error = new Error(String(message.payload && message.payload.reason ? message.payload.reason : "channel closed"));
       error.code = "TERMINAL_CHANNEL_CLOSED";
@@ -269,7 +272,12 @@ export class TerminalPort {
           subscriber.onError?.(error);
         } catch {}
       }
-      this.targets.delete(entry.key);
+      if (this.targets.get(entry.key) === entry) {
+        this.targets.delete(entry.key);
+      }
+      return;
+    }
+    if (entry.closed) {
       return;
     }
     if (message.type === "buffer-head") {
@@ -386,10 +394,14 @@ export class TerminalPort {
       ? { onFrame: listener, onError: options.onError }
       : listener;
     entry.subscribers.add(subscriber);
-    if (entry.lastFrame) {
+    const cachedFrame = entry.lastFrame;
+    if (cachedFrame) {
       queueMicrotask(() => {
+        if (!entry.subscribers.has(subscriber) || entry.closed || this.targets.get(entry.key) !== entry) {
+          return;
+        }
         try {
-          subscriber.onFrame?.(entry.lastFrame, { target: entry.session.name, observedAt: nowIso(), cached: true });
+          subscriber.onFrame?.(cachedFrame, { target: entry.session.name, observedAt: nowIso(), cached: true });
         } catch {}
       });
     }
@@ -415,7 +427,9 @@ export class TerminalPort {
     if (entry.unsubscribe) {
       entry.unsubscribe();
     }
-    this.targets.delete(entry.key);
+    if (this.targets.get(entry.key) === entry) {
+      this.targets.delete(entry.key);
+    }
     this.client.closeChannel(entry.channel.channelId, "v2 last subscriber closed");
     this.log({ event: "terminal.target.closed", target: entry.session.name, channelId: entry.channel.channelId });
   }

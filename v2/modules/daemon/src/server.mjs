@@ -337,17 +337,38 @@ async function streamTerminal(request, response, context, url) {
   let closed = false;
   let subscription = null;
   let started = false;
+  let heartbeat = null;
   const pending = [];
   const send = (event, data) => {
-    if (closed || response.writableEnded || !started) {
-      if (!started && !closed) {
-        pending.push([event, data]);
-      }
+    if (closed || response.writableEnded || response.destroyed) {
+      return;
+    }
+    if (!started) {
+      pending.push([event, data]);
       return;
     }
     response.write(`event: ${event}\n`);
     response.write(`data: ${JSON.stringify(data)}\n\n`);
   };
+
+  function finish() {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    if (heartbeat) {
+      clearInterval(heartbeat);
+    }
+    try {
+      subscription?.close();
+    } catch {}
+    if (!response.writableEnded && !response.destroyed) {
+      response.end();
+    }
+  }
+
+  request.on("close", finish);
+  response.on("close", finish);
 
   try {
     subscription = await context.terminal.subscribe(target, {
@@ -374,7 +395,27 @@ async function streamTerminal(request, response, context, url) {
       },
     });
   } catch (error) {
+    if (closed) {
+      context.log({
+        event: "terminal.stream.subscriber_closed_before_ready",
+        target,
+        error: asTypedError(error, {
+          code: "TERMINAL_STREAM_FAILED",
+          owningModule: "daemon",
+          operationId: "terminal.stream",
+          message: "The terminal stream failed.",
+        }).toJSON(),
+      });
+      return;
+    }
     throw error;
+  }
+
+  if (closed) {
+    try {
+      subscription.close();
+    } catch {}
+    return;
   }
 
   response.writeHead(200, {
@@ -394,28 +435,11 @@ async function streamTerminal(request, response, context, url) {
     send(event, data);
   }
 
-  const heartbeat = setInterval(() => {
+  heartbeat = setInterval(() => {
     if (!closed && !response.writableEnded) {
       response.write(": keepalive\n\n");
     }
   }, 15000);
-
-  function finish() {
-    if (closed) {
-      return;
-    }
-    closed = true;
-    clearInterval(heartbeat);
-    try {
-      subscription?.close();
-    } catch {}
-    if (!response.writableEnded) {
-      response.end();
-    }
-  }
-
-  request.on("close", finish);
-  response.on("close", finish);
 }
 
 async function sendTerminalInput(request, response, context) {
@@ -423,7 +447,9 @@ async function sendTerminalInput(request, response, context) {
   if (typeof body.target !== "string" || typeof body.data !== "string") {
     throw daemonError("INPUT_INVALID", "terminal.input", "Terminal input is invalid.", "Expected string fields: target, data.");
   }
-  const data = body.data.endsWith("\r") ? body.data : `${body.data}\r`;
+  const data = body.raw === true
+    ? body.data
+    : (body.data.endsWith("\r") ? body.data : `${body.data}\r`);
   const receipt = await context.terminal.input(body.target, data);
   sendJson(response, 200, {
     accepted: true,
