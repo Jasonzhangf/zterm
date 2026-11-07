@@ -1,0 +1,7 @@
+# connections type-check - 2026-11-07T22:52:09Z
+$ pnpm type-check
+
+> @zterm/v2-connections@0.0.1 type-check /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+> node ../../../packages/cli/node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+
+exit=0

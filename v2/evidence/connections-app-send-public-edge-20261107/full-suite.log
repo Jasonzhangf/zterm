@@ -1,0 +1,19 @@
+# full connections suite - 2026-11-07T22:51:38Z
+$ pnpm test
+
+> @zterm/v2-connections@0.0.1 test /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+> vitest run --config vitest.config.ts
+
+
+ RUN  v1.6.0 /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+
+ ↓ tests/integration/real-daemon.test.ts  (2 tests | 2 skipped)
+ ✓ tests/contract/connection-manager.contract.test.ts  (31 tests) 8ms
+ ✓ tests/integration/app-send-entry.test.ts  (8 tests) 153ms
+ ✓ tests/integration/real-entry.test.ts  (24 tests) 24282ms
+
+ Test Files  3 passed | 1 skipped (4)
+      Tests  63 passed | 2 skipped (65)
+   Start at  14:51:38
+   Duration  24.71s (transform 311ms, setup 0ms, collect 857ms, tests 24.44s, environment 0ms, prepare 332ms)
+

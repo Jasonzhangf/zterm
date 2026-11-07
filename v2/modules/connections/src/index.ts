@@ -19,8 +19,11 @@ export type {
   SessionCatalogEntry,
   ChannelMessage,
   ChannelEventHandler,
+  AppMessageRequest,
+  AppMessageResult,
 } from "./public/types.ts";
 export type { AuthorizedMachineLink, AccountsAuthorizationPort } from "./ports/accounts-authorization.ts";
 export type { TransportHandle, TransportPort } from "./ports/transport.ts";
 export { V1TraversalTransport } from "./adapters/v1-traversal.ts";
-export { createAppCodec } from "./adapters/app-websocket.ts";
+export { createAppCodec, AppWebSocketTransport, buildAppGatewayUrl } from "./adapters/app-websocket.ts";
+export type { AppFrameTransportHandle } from "./adapters/app-websocket.ts";

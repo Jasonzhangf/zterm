@@ -1,0 +1,137 @@
+
+> @zterm/v2-connections@0.0.1 test /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+> vitest run --config vitest.config.ts app-send-entry
+
+
+ RUN  v1.6.0 /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+
+ ❯ tests/integration/app-send-entry.test.ts  (8 tests | 8 failed) 8ms
+   ❯ tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > sends an authorized message through the source gateway and returns the correlated result
+     → AppWebSocketTransport is not a constructor
+   ❯ tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > refuses a source gateway that does not prove the authorized daemon identity
+     → AppWebSocketTransport is not a constructor
+   ❯ tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > does not write a frame when the target machine is not authorized
+     → AppWebSocketTransport is not a constructor
+   ❯ tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > returns a typed rejection when the gateway answers app-error
+     → AppWebSocketTransport is not a constructor
+   ❯ tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > returns unknown, never a fabricated success, when the gateway closes after the write
+     → AppWebSocketTransport is not a constructor
+   ❯ tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > ignores stray or mismatched frames and settles only on the exact correlation
+     → AppWebSocketTransport is not a constructor
+   ❯ tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > rejects a duplicate pending v1MessageId without a second send
+     → AppWebSocketTransport is not a constructor
+   ❯ tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > rejects a request on a closed link before any frame is written
+     → AppWebSocketTransport is not a constructor
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 8 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > sends an authorized message through the source gateway and returns the correlated result
+TypeError: AppWebSocketTransport is not a constructor
+ ❯ managerFor tests/integration/app-send-entry.test.ts:114:16
+    112|   return createConnectionManager({
+    113|     authorizationPort: { authorizeMachine },
+    114|     transport: new AppWebSocketTransport(),
+       |                ^
+    115|   });
+    116| }
+ ❯ tests/integration/app-send-entry.test.ts:210:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+ FAIL  tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > refuses a source gateway that does not prove the authorized daemon identity
+TypeError: AppWebSocketTransport is not a constructor
+ ❯ managerFor tests/integration/app-send-entry.test.ts:114:16
+    112|   return createConnectionManager({
+    113|     authorizationPort: { authorizeMachine },
+    114|     transport: new AppWebSocketTransport(),
+       |                ^
+    115|   });
+    116| }
+ ❯ tests/integration/app-send-entry.test.ts:252:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > does not write a frame when the target machine is not authorized
+TypeError: AppWebSocketTransport is not a constructor
+ ❯ managerFor tests/integration/app-send-entry.test.ts:114:16
+    112|   return createConnectionManager({
+    113|     authorizationPort: { authorizeMachine },
+    114|     transport: new AppWebSocketTransport(),
+       |                ^
+    115|   });
+    116| }
+ ❯ tests/integration/app-send-entry.test.ts:258:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > returns a typed rejection when the gateway answers app-error
+TypeError: AppWebSocketTransport is not a constructor
+ ❯ managerFor tests/integration/app-send-entry.test.ts:114:16
+    112|   return createConnectionManager({
+    113|     authorizationPort: { authorizeMachine },
+    114|     transport: new AppWebSocketTransport(),
+       |                ^
+    115|   });
+    116| }
+ ❯ tests/integration/app-send-entry.test.ts:280:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > returns unknown, never a fabricated success, when the gateway closes after the write
+TypeError: AppWebSocketTransport is not a constructor
+ ❯ managerFor tests/integration/app-send-entry.test.ts:114:16
+    112|   return createConnectionManager({
+    113|     authorizationPort: { authorizeMachine },
+    114|     transport: new AppWebSocketTransport(),
+       |                ^
+    115|   });
+    116| }
+ ❯ tests/integration/app-send-entry.test.ts:295:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > ignores stray or mismatched frames and settles only on the exact correlation
+TypeError: AppWebSocketTransport is not a constructor
+ ❯ managerFor tests/integration/app-send-entry.test.ts:114:16
+    112|   return createConnectionManager({
+    113|     authorizationPort: { authorizeMachine },
+    114|     transport: new AppWebSocketTransport(),
+       |                ^
+    115|   });
+    116| }
+ ❯ tests/integration/app-send-entry.test.ts:314:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > rejects a duplicate pending v1MessageId without a second send
+TypeError: AppWebSocketTransport is not a constructor
+ ❯ managerFor tests/integration/app-send-entry.test.ts:114:16
+    112|   return createConnectionManager({
+    113|     authorizationPort: { authorizeMachine },
+    114|     transport: new AppWebSocketTransport(),
+       |                ^
+    115|   });
+    116| }
+ ❯ tests/integration/app-send-entry.test.ts:329:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+ FAIL  tests/integration/app-send-entry.test.ts > connections public /app message-send edge (real ws gateway) > rejects a request on a closed link before any frame is written
+TypeError: AppWebSocketTransport is not a constructor
+ ❯ managerFor tests/integration/app-send-entry.test.ts:114:16
+    112|   return createConnectionManager({
+    113|     authorizationPort: { authorizeMachine },
+    114|     transport: new AppWebSocketTransport(),
+       |                ^
+    115|   });
+    116| }
+ ❯ tests/integration/app-send-entry.test.ts:352:21
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/8]⎯
+
+ Test Files  1 failed (1)
+      Tests  8 failed (8)
+   Start at  14:42:33
+   Duration  711ms (transform 172ms, setup 0ms, collect 265ms, tests 8ms, environment 0ms, prepare 263ms)
+
+ ELIFECYCLE  Test failed. See above for more details.

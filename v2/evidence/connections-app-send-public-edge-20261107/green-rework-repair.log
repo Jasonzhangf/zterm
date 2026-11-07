@@ -1,0 +1,16 @@
+# focused app-send-entry after rework repair - 2026-11-07T23:04:46Z
+$ pnpm test tests/integration/app-send-entry.test.ts
+
+> @zterm/v2-connections@0.0.1 test /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+> vitest run --config vitest.config.ts tests/integration/app-send-entry.test.ts
+
+
+ RUN  v1.6.0 /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+
+ ✓ tests/integration/app-send-entry.test.ts  (11 tests) 259ms
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  15:04:46
+   Duration  624ms (transform 160ms, setup 0ms, collect 205ms, tests 259ms, environment 0ms, prepare 40ms)
+
