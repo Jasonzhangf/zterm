@@ -1,0 +1,410 @@
+
+> @zterm/v2-accounts@ test /Volumes/Intel/playground/zterm/worktrees/accounts-workspace-auth-adapters-20261106/v2/modules/accounts
+> node --test tests/contract/*.test.ts tests/integration/*.test.ts
+
+TAP version 13
+# Subtest: workspace authorization verifies an active session and persists explicit stable-ID grants
+ok 1 - workspace authorization verifies an active session and persists explicit stable-ID grants
+  ---
+  duration_ms: 8.5505
+  type: 'test'
+  ...
+# Subtest: workspace authorization rejects logout, unknown sessions, and accounts without a grant
+ok 2 - workspace authorization rejects logout, unknown sessions, and accounts without a grant
+  ---
+  duration_ms: 2.418459
+  type: 'test'
+  ...
+# Subtest: authorization store persists policy without session secrets and deletion revokes access
+ok 3 - authorization store persists policy without session secrets and deletion revokes access
+  ---
+  duration_ms: 2.751791
+  type: 'test'
+  ...
+# Subtest: workspace authorization preserves expired and revoked session rejection
+ok 4 - workspace authorization preserves expired and revoked session rejection
+  ---
+  duration_ms: 0.717583
+  type: 'test'
+  ...
+# Subtest: workspace binding records the created workspace only for an explicit all-workspaces org writer
+ok 5 - workspace binding records the created workspace only for an explicit all-workspaces org writer
+  ---
+  duration_ms: 7.942
+  type: 'test'
+  ...
+# Subtest: machine authorization returns a canonical active link from typed route evidence
+ok 6 - machine authorization returns a canonical active link from typed route evidence
+  ---
+  duration_ms: 0.506291
+  type: 'test'
+  ...
+# Subtest: machine authorization separates revoked, unknown, cross-account, and missing identity proof
+ok 7 - machine authorization separates revoked, unknown, cross-account, and missing identity proof
+  ---
+  duration_ms: 0.407916
+  type: 'test'
+  ...
+# Subtest: machine authorization rejects a revoked caller and keeps connection material out of error details
+ok 8 - machine authorization rejects a revoked caller and keeps connection material out of error details
+  ---
+  duration_ms: 0.1285
+  type: 'test'
+  ...
+# Subtest: register creates a relay account without issuing or consuming a session token
+ok 9 - register creates a relay account without issuing or consuming a session token
+  ---
+  duration_ms: 22.349416
+  type: 'test'
+  ...
+# Subtest: register duplicate username maps to ACCOUNT_EXISTS 409
+ok 10 - register duplicate username maps to ACCOUNT_EXISTS 409
+  ---
+  duration_ms: 0.555
+  type: 'test'
+  ...
+# Subtest: register missing password maps to INVALID_REQUEST 400
+ok 11 - register missing password maps to INVALID_REQUEST 400
+  ---
+  duration_ms: 0.9205
+  type: 'test'
+  ...
+# Subtest: register missing username maps to INVALID_REQUEST 400
+ok 12 - register missing username maps to INVALID_REQUEST 400
+  ---
+  duration_ms: 0.260542
+  type: 'test'
+  ...
+# Subtest: register upstream 401 maps to AUTHENTICATION_REQUIRED 401
+ok 13 - register upstream 401 maps to AUTHENTICATION_REQUIRED 401
+  ---
+  duration_ms: 0.179625
+  type: 'test'
+  ...
+# Subtest: register upstream unknown 403 maps to typed permission denial
+ok 14 - register upstream unknown 403 maps to typed permission denial
+  ---
+  duration_ms: 0.226459
+  type: 'test'
+  ...
+# Subtest: register upstream 429 maps to RELAY_SERVICE_ERROR 429
+ok 15 - register upstream 429 maps to RELAY_SERVICE_ERROR 429
+  ---
+  duration_ms: 0.180042
+  type: 'test'
+  ...
+# Subtest: register upstream 500 maps to RELAY_SERVICE_ERROR 502 with upstream status
+ok 16 - register upstream 500 maps to RELAY_SERVICE_ERROR 502 with upstream status
+  ---
+  duration_ms: 0.215167
+  type: 'test'
+  ...
+# Subtest: register bad JSON maps to RELAY_PROTOCOL_ERROR 502
+ok 17 - register bad JSON maps to RELAY_PROTOCOL_ERROR 502
+  ---
+  duration_ms: 0.334084
+  type: 'test'
+  ...
+# Subtest: verifySession revalidates through /me and backfills the caller token as accessToken
+ok 18 - verifySession revalidates through /me and backfills the caller token as accessToken
+  ---
+  duration_ms: 1.003125
+  type: 'test'
+  ...
+# Subtest: login success issues a relay token and an active auth context
+ok 19 - login success issues a relay token and an active auth context
+  ---
+  duration_ms: 0.216166
+  type: 'test'
+  ...
+# Subtest: invalid credentials propagate authority rejection as 401
+ok 20 - invalid credentials propagate authority rejection as 401
+  ---
+  duration_ms: 0.237542
+  type: 'test'
+  ...
+# Subtest: missing, empty, and unknown tokens are rejected as authentication required
+ok 21 - missing, empty, and unknown tokens are rejected as authentication required
+  ---
+  duration_ms: 0.132625
+  type: 'test'
+  ...
+# Subtest: logout revokes the relay bearer session
+ok 22 - logout revokes the relay bearer session
+  ---
+  duration_ms: 0.561833
+  type: 'test'
+  ...
+# Subtest: listAuthorizedMachines maps canonical machines and keeps legacy device refs separate
+ok 23 - listAuthorizedMachines maps canonical machines and keeps legacy device refs separate
+  ---
+  duration_ms: 3.352875
+  type: 'test'
+  ...
+# Subtest: listAuthorizedMachines stays account-scoped and never projects legacy ids as machine ids
+ok 24 - listAuthorizedMachines stays account-scoped and never projects legacy ids as machine ids
+  ---
+  duration_ms: 0.221208
+  type: 'test'
+  ...
+# Subtest: listAuthorizedMachines returns an empty canonical list without consulting a legacy directory
+ok 25 - listAuthorizedMachines returns an empty canonical list without consulting a legacy directory
+  ---
+  duration_ms: 0.068417
+  type: 'test'
+  ...
+# Subtest: enrollMachine rejects an empty device id before any registration
+ok 26 - enrollMachine rejects an empty device id before any registration
+  ---
+  duration_ms: 0.271959
+  type: 'test'
+  ...
+# Subtest: enrollMachine requires proof-of-possession material
+ok 27 - enrollMachine requires proof-of-possession material
+  ---
+  duration_ms: 0.123167
+  type: 'test'
+  ...
+# Subtest: enrollMachine calls relay directly and does not reject from a legacy device directory
+ok 28 - enrollMachine calls relay directly and does not reject from a legacy device directory
+  ---
+  duration_ms: 3.803333
+  type: 'test'
+  ...
+# Subtest: enrollMachine returns the canonical relay machine identity
+ok 29 - enrollMachine returns the canonical relay machine identity
+  ---
+  duration_ms: 0.552541
+  type: 'test'
+  ...
+# Subtest: enrollMachine preserves a cross-account canonical proof conflict
+ok 30 - enrollMachine preserves a cross-account canonical proof conflict
+  ---
+  duration_ms: 0.28425
+  type: 'test'
+  ...
+# Subtest: verifyMachinePossession returns the owner machine or preserves rejection
+ok 31 - verifyMachinePossession returns the owner machine or preserves rejection
+  ---
+  duration_ms: 0.405417
+  type: 'test'
+  ...
+# Subtest: verifyMachinePossession rejects missing machine or proof material
+ok 32 - verifyMachinePossession rejects missing machine or proof material
+  ---
+  duration_ms: 0.311084
+  type: 'test'
+  ...
+# Subtest: revokeMachine returns a revoked machine and preserves owner rejection
+ok 33 - revokeMachine returns a revoked machine and preserves owner rejection
+  ---
+  duration_ms: 0.172833
+  type: 'test'
+  ...
+# Subtest: missing or invalid token is rejected before list, enroll, possession, or revoke work
+ok 34 - missing or invalid token is rejected before list, enroll, possession, or revoke work
+  ---
+  duration_ms: 0.225042
+  type: 'test'
+  ...
+# Subtest: cross-account grant and revoke are disabled, but the token is verified first
+ok 35 - cross-account grant and revoke are disabled, but the token is verified first
+  ---
+  duration_ms: 0.094625
+  type: 'test'
+  ...
+# Subtest: V1 relay valid login maps 200 to a session
+ok 36 - V1 relay valid login maps 200 to a session
+  ---
+  duration_ms: 22.153958
+  type: 'test'
+  ...
+# Subtest: V1 relay login 401 remains authentication required
+ok 37 - V1 relay login 401 remains authentication required
+  ---
+  duration_ms: 0.350875
+  type: 'test'
+  ...
+# Subtest: V1 relay /me explicit session_revoked 403 remains session revoked
+ok 38 - V1 relay /me explicit session_revoked 403 remains session revoked
+  ---
+  duration_ms: 0.834875
+  type: 'test'
+  ...
+# Subtest: V1 relay unknown 403 preserves typed permission denial with upstream details
+ok 39 - V1 relay unknown 403 preserves typed permission denial with upstream details
+  ---
+  duration_ms: 0.39925
+  type: 'test'
+  ...
+# Subtest: V1 relay bare unknown 403 is typed permission denial, not a revoked session
+ok 40 - V1 relay bare unknown 403 is typed permission denial, not a revoked session
+  ---
+  duration_ms: 0.231333
+  type: 'test'
+  ...
+# Subtest: V1 relay fetch failure maps to transport error and preserves cause
+ok 41 - V1 relay fetch failure maps to transport error and preserves cause
+  ---
+  duration_ms: 0.0915
+  type: 'test'
+  ...
+# Subtest: V1 relay upstream 500 maps to service error with upstream status
+ok 42 - V1 relay upstream 500 maps to service error with upstream status
+  ---
+  duration_ms: 0.215542
+  type: 'test'
+  ...
+# Subtest: V1 relay upstream 429 maps to service error with upstream status
+ok 43 - V1 relay upstream 429 maps to service error with upstream status
+  ---
+  duration_ms: 0.090042
+  type: 'test'
+  ...
+# Subtest: V1 relay bad JSON maps to protocol error and preserves parse cause
+ok 44 - V1 relay bad JSON maps to protocol error and preserves parse cause
+  ---
+  duration_ms: 0.290917
+  type: 'test'
+  ...
+# Subtest: V1 relay 200 missing required session fields maps to protocol error
+ok 45 - V1 relay 200 missing required session fields maps to protocol error
+  ---
+  duration_ms: 0.815375
+  type: 'test'
+  ...
+# Subtest: V1 relay malformed directory maps to protocol error
+ok 46 - V1 relay malformed directory maps to protocol error
+  ---
+  duration_ms: 0.604166
+  type: 'test'
+  ...
+# Subtest: V1 relay directory without updatedAt does not fabricate a local timestamp
+ok 47 - V1 relay directory without updatedAt does not fabricate a local timestamp
+  ---
+  duration_ms: 0.195917
+  type: 'test'
+  ...
+# Subtest: V1 relay directory envelope maps the real server shape
+ok 48 - V1 relay directory envelope maps the real server shape
+  ---
+  duration_ms: 0.125083
+  type: 'test'
+  ...
+# Subtest: V1 relay register maps 201 to account info without a session
+ok 49 - V1 relay register maps 201 to account info without a session
+  ---
+  duration_ms: 0.161292
+  type: 'test'
+  ...
+# Subtest: V1 relay register duplicate maps 400 to account exists
+ok 50 - V1 relay register duplicate maps 400 to account exists
+  ---
+  duration_ms: 0.156417
+  type: 'test'
+  ...
+# Subtest: V1 relay register required field maps 400 to invalid request
+ok 51 - V1 relay register required field maps 400 to invalid request
+  ---
+  duration_ms: 0.184916
+  type: 'test'
+  ...
+# Subtest: V1 relay register keeps 401 and 403 authorization classifications
+ok 52 - V1 relay register keeps 401 and 403 authorization classifications
+  ---
+  duration_ms: 0.135916
+  type: 'test'
+  ...
+# Subtest: V1 relay register keeps 429 and 500 service classifications
+ok 53 - V1 relay register keeps 429 and 500 service classifications
+  ---
+  duration_ms: 0.120416
+  type: 'test'
+  ...
+# Subtest: V1 relay register bad JSON maps to protocol error
+ok 54 - V1 relay register bad JSON maps to protocol error
+  ---
+  duration_ms: 0.125458
+  type: 'test'
+  ...
+# Subtest: V1 relay /me without accessToken backfills the caller token
+ok 55 - V1 relay /me without accessToken backfills the caller token
+  ---
+  duration_ms: 0.110416
+  type: 'test'
+  ...
+# Subtest: machine relay 403 codes remain canonical typed rejections
+ok 56 - machine relay 403 codes remain canonical typed rejections
+  ---
+  duration_ms: 24.388917
+  type: 'test'
+  ...
+# Subtest: machine relay canonical 409 codes remain typed conflicts
+ok 57 - machine relay canonical 409 codes remain typed conflicts
+  ---
+  duration_ms: 0.55775
+  type: 'test'
+  ...
+# Subtest: machine relay 404 machine_not_found remains a typed missing machine
+ok 58 - machine relay 404 machine_not_found remains a typed missing machine
+  ---
+  duration_ms: 1.096625
+  type: 'test'
+  ...
+# Subtest: machine relay unreadable 403 is a protocol error, not a revoked session
+ok 59 - machine relay unreadable 403 is a protocol error, not a revoked session
+  ---
+  duration_ms: 0.221708
+  type: 'test'
+  ...
+# Subtest: machine list reads canonical summaries and keeps legacy device refs separate
+ok 60 - machine list reads canonical summaries and keeps legacy device refs separate
+  ---
+  duration_ms: 1.043708
+  type: 'test'
+  ...
+# Subtest: machine list preserves unknown 403 as typed permission denial
+ok 61 - machine list preserves unknown 403 as typed permission denial
+  ---
+  duration_ms: 0.239875
+  type: 'test'
+  ...
+# Subtest: machine list missing endpoint preserves upstream status as service error
+ok 62 - machine list missing endpoint preserves upstream status as service error
+  ---
+  duration_ms: 0.678666
+  type: 'test'
+  ...
+# Subtest: machine list invalid response shape is a protocol error
+ok 63 - machine list invalid response shape is a protocol error
+  ---
+  duration_ms: 0.217167
+  type: 'test'
+  ...
+# Subtest: machine adapter forwards bearer authority and canonical request bodies
+ok 64 - machine adapter forwards bearer authority and canonical request bodies
+  ---
+  duration_ms: 0.827125
+  type: 'test'
+  ...
+# Subtest: real V1 relay proves enrollment, possession, owner revoke, and logout
+ok 65 - real V1 relay proves enrollment, possession, owner revoke, and logout
+  ---
+  duration_ms: 966.738125
+  type: 'test'
+  ...
+# Subtest: real V1 relay drives workspace and machine authorization adapters end to end
+ok 66 - real V1 relay drives workspace and machine authorization adapters end to end
+  ---
+  duration_ms: 488.659875
+  type: 'test'
+  ...
+1..66
+# tests 66
+# suites 0
+# pass 66
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1637.745417
