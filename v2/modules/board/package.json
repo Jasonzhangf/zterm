@@ -1,0 +1,12 @@
+{
+  "name": "@zterm/v2-board",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/contract/*.test.ts",
+    "test:contract": "node --test tests/contract/*.test.ts",
+    "test:public-consumer": "node --test tests/integration/*.test.mjs",
+    "type-check": "tsc -p tsconfig.json"
+  }
+}
+
