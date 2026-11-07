@@ -62,6 +62,30 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       return request("/api/sessions");
     },
 
+    async listWorkspaces() {
+      const payload = await request("/api/workspaces");
+      if (!Array.isArray(payload.workspaces)) {
+        throw new DaemonError({ code: "WORKSPACES_RESPONSE_INVALID", message: "Daemon returned a malformed workspace list." }, 502);
+      }
+      return payload.workspaces;
+    },
+
+    async getWorkspace({ workspaceId } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}`);
+      if (!payload.workspace || typeof payload.workspace !== "object") {
+        throw new DaemonError({ code: "WORKSPACE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace." }, 502);
+      }
+      return payload.workspace;
+    },
+
+    async listWorkspaceMembers({ workspaceId } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/members`);
+      if (!Array.isArray(payload.members)) {
+        throw new DaemonError({ code: "MEMBERS_RESPONSE_INVALID", message: "Daemon returned a malformed member list." }, 502);
+      }
+      return payload.members;
+    },
+
     openTerminalStream(target, { onReady, onBuffer, onError } = {}) {
       const query = new URLSearchParams({ target });
       const source = new EventSource(`${baseUrl}/api/terminal/stream?${query.toString()}`);
@@ -82,14 +106,14 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       return source;
     },
 
-    async sendInput(target, data) {
+    async sendInput(target, data, options = {}) {
       return request("/api/terminal/input", {
         method: "POST",
         headers: {
           "content-type": "application/json",
           ...(csrfToken ? { "x-zterm-csrf": csrfToken } : {}),
         },
-        body: JSON.stringify({ target, data }),
+        body: JSON.stringify({ target, data, ...(options.raw === true ? { raw: true } : {}) }),
       });
     },
   };
