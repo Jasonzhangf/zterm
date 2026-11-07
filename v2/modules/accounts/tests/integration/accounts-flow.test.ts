@@ -11,6 +11,14 @@ import {
   AuthService,
   MachineService,
   V1RelayAdapter,
+  createAccountsAuthorizationPort,
+  createFileAccountAuthorizationStore,
+  createWorkspaceAuthorization,
+} from '../../src/public/contracts.ts'
+import type {
+  AccountAuthorizationGrant,
+  MachineAuthorizationRoute,
+  MachineRouteSource,
 } from '../../src/public/contracts.ts'
 
 interface RelayServer {
@@ -277,4 +285,128 @@ test('real V1 relay proves enrollment, possession, owner revoke, and logout', as
     'AUTHENTICATION_REQUIRED',
     401,
   )
+})
+
+test('real V1 relay drives workspace and machine authorization adapters end to end', async () => {
+  assert.ok(relay, 'real relay is unavailable')
+  const alice = await createAccount(relay.baseUrl, 'authz-alice')
+  const bob = await createAccount(relay.baseUrl, 'authz-bob')
+
+  const enrolled = await alice.machines.enrollMachine(alice.token, {
+    deviceId: 'alice-authz-laptop',
+    deviceToken: 'alice-authz-device-proof',
+    displayName: 'Alice Authz Laptop',
+  })
+  const machineId = enrolled.machineId
+  assert.match(machineId, /^mach_/)
+
+  const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-v2-accounts-authz-'))
+  try {
+    const store = createFileAccountAuthorizationStore(join(tempRoot, 'authorization.json'))
+    const grant: AccountAuthorizationGrant = {
+      accountId: alice.accountId,
+      scopes: ['org:read', 'org:write'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      memberIds: ['mbr-a'],
+      updatedAt: '2026-11-07T00:00:00.000Z',
+    }
+    await store.putGrant(grant)
+    const workspaceAuthz = createWorkspaceAuthorization({ authService: alice.auth, store })
+
+    const context = await workspaceAuthz.verify(alice.token)
+    assert.equal(context.accountId, alice.accountId)
+    assert.deepEqual(context.workspaces, ['ws-a'])
+    assert.deepEqual(context.members, ['mbr-a'])
+
+    await expectError(
+      workspaceAuthz.verify(bob.token),
+      'WORKSPACE_AUTHORIZATION_REQUIRED',
+      403,
+    )
+
+    const canonicalRoute: MachineAuthorizationRoute = {
+      machineId,
+      daemonHostId: 'daemon-alice',
+      capabilities: { transportKind: 'websocket', channelKinds: ['terminal'] },
+      target: {
+        bridgeHost: '127.0.0.1',
+        bridgePort: 47821,
+        daemonHostId: 'daemon-alice',
+        transportMode: 'websocket',
+      },
+      settings: { transportMode: 'websocket' },
+    }
+    const routes: MachineRouteSource = {
+      async get(requested) {
+        return requested === machineId ? canonicalRoute : undefined
+      },
+    }
+    const alicePort = createAccountsAuthorizationPort({
+      token: alice.token,
+      authService: alice.auth,
+      machineService: alice.machines,
+      routes,
+    })
+
+    const link = await alicePort.authorizeMachine(machineId)
+    assert.equal(link.machineId, machineId)
+    assert.equal(link.accountId, alice.accountId)
+    assert.equal(link.daemonHostId, 'daemon-alice')
+    assert.match(link.authorizationId, /^authz_/)
+    assert.notEqual(link.authorizationId, alice.token)
+
+    await expectError(alicePort.authorizeMachine('mach_missing'), 'MACHINE_NOT_FOUND', 404)
+
+    const bobPort = createAccountsAuthorizationPort({
+      token: bob.token,
+      authService: bob.auth,
+      machineService: bob.machines,
+      routes,
+    })
+    await expectError(bobPort.authorizeMachine(machineId), 'MACHINE_NOT_FOUND', 404)
+
+    const noProofPort = createAccountsAuthorizationPort({
+      token: alice.token,
+      authService: alice.auth,
+      machineService: alice.machines,
+      routes: {
+        async get() {
+          return {
+            machineId,
+            daemonHostId: '',
+            capabilities: { transportKind: 'websocket', channelKinds: ['terminal'] },
+            target: { bridgeHost: '127.0.0.1', bridgePort: 47822, transportMode: 'websocket' },
+            settings: { transportMode: 'websocket' },
+          }
+        },
+      },
+    })
+    await expectError(
+      noProofPort.authorizeMachine(machineId),
+      'MACHINE_IDENTITY_UNVERIFIED',
+      403,
+    )
+
+    await alice.machines.revokeMachine(alice.token, { machineId })
+    await expectError(
+      alicePort.authorizeMachine(machineId),
+      'MACHINE_REVOKED',
+      403,
+    )
+
+    await alice.auth.logout(alice.token)
+    await expectError(
+      workspaceAuthz.verify(alice.token),
+      'AUTHENTICATION_REQUIRED',
+      401,
+    )
+    await expectError(
+      alicePort.authorizeMachine(machineId),
+      'AUTHENTICATION_REQUIRED',
+      401,
+    )
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true })
+  }
 })
