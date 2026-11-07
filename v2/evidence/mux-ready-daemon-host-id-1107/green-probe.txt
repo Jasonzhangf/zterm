@@ -1,0 +1,9 @@
+{
+  "type": "mux-ready",
+  "payload": {
+    "version": 1,
+    "daemonHostId": "probe-0cb9fbdcdf72"
+  },
+  "expectedHostId": "probe-0cb9fbdcdf72",
+  "ok": true
+}

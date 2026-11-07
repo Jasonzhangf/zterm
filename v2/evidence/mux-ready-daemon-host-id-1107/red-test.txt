@@ -1,0 +1,184 @@
+
+ RUN  v1.6.1 /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android
+
+stderr | src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > reports attach failure only through the mux-channel-closed control error path
+[server] mux channel attach failed: forced attach failure (channelId=channel-attach-failed session=alpha)
+
+stdout | src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > does not echo legacy clientSessionId in session-ticket because daemon owns no client state
+[server] session-open transport=transport-1 openRequestId=n/a session=demo
+
+stderr | src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > surfaces a disconnect cleanup failure instead of swallowing it, awaiting the same stop owner
+[rw-close] disconnect surfaced cleanup failure: stream stream-1 stop not released after disconnect: status=cleanup_failed remaining=input:stream-1
+
+ ❯ src/server/terminal-message-runtime.test.ts  (68 tests | 7 failed) 77ms
+   ❯ src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > advertises the current daemon host identity in mux-ready
+     → expected [ { type: 'mux-ready', …(1) } ] to deep equally contain { type: 'mux-ready', …(1) }
+   ❯ src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > binds multiple mux channels on one connection and routes input only to the owning subscriber
+     → zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+   ❯ src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > writes string input payloads to the attached session
+     → zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+   ❯ src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > writes reliable input payloads once and acks the accepted seq
+     → zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+   ❯ src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > acks duplicate reliable input seq without writing it to tmux twice
+     → zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+   ❯ src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > accepts input payloads at the daemon frame byte limit
+     → zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+   ❯ src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > drops queued input when transport/session becomes stale before async tmux write drains
+     → zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > advertises the current daemon host identity in mux-ready
+AssertionError: expected [ { type: 'mux-ready', …(1) } ] to deep equally contain { type: 'mux-ready', …(1) }
+
+- Expected: 
+Object {
+  "payload": ObjectContaining {
+    "daemonHostId": "daemon-wire-identity",
+  },
+  "type": "mux-ready",
+}
+
++ Received: 
+Array [
+  Object {
+    "payload": Object {
+      "capabilities": Object {
+        "boundedBodyScheduler": true,
+        "bulkChannel": Object {
+          "label": "zterm-bulk",
+          "version": 1,
+        },
+        "channelEnvelope": true,
+        "reliableInput": Object {
+          "version": 1,
+        },
+        "targetMessages": true,
+        "version": 1,
+      },
+      "version": 1,
+    },
+    "type": "mux-ready",
+  },
+]
+
+ ❯ src/server/terminal-message-runtime.test.ts:577:40
+    575|     })));
+    576| 
+    577|     expect(sentTextFrames(connection)).toContainEqual({
+       |                                        ^
+    578|       type: 'mux-ready',
+    579|       payload: expect.objectContaining({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > binds multiple mux channels on one connection and routes input only to the owning subscriber
+Error: zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+ ❯ loadDagpipeNative src/server/dagpipe-bridge.ts:89:11
+     87|   const selected = candidates.find((candidate) => existsSync(candidate…
+     88|   if (!selected) {
+     89|     throw new Error(
+       |           ^
+     90|       `zterm-dagpipe native module missing; expected one of: ${candida…
+     91|     );
+ ❯ Module.runPhase3InputSchedule src/server/dagpipe-bridge.ts:119:5
+ ❯ handleTransportInput src/server/daemon-input-queue-runtime.ts:249:18
+ ❯ Object.handleInputMessage src/server/daemon-input-queue-runtime.ts:325:13
+ ❯ handleMessage src/server/terminal-message-runtime.ts:676:37
+ ❯ Object.handleMessage src/server/terminal-message-runtime.ts:214:51
+ ❯ handleMuxFrame src/server/terminal-mux-channel-runtime.ts:389:20
+ ❯ Object.handleMessage src/server/terminal-message-runtime.ts:350:13
+ ❯ src/server/terminal-message-runtime.test.ts:1271:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > writes string input payloads to the attached session
+Error: zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+ ❯ loadDagpipeNative src/server/dagpipe-bridge.ts:89:11
+     87|   const selected = candidates.find((candidate) => existsSync(candidate…
+     88|   if (!selected) {
+     89|     throw new Error(
+       |           ^
+     90|       `zterm-dagpipe native module missing; expected one of: ${candida…
+     91|     );
+ ❯ Module.runPhase3InputSchedule src/server/dagpipe-bridge.ts:119:5
+ ❯ handleTransportInput src/server/daemon-input-queue-runtime.ts:249:18
+ ❯ Object.handleInputMessage src/server/daemon-input-queue-runtime.ts:325:13
+ ❯ Object.handleMessage src/server/terminal-message-runtime.ts:676:37
+ ❯ src/server/terminal-message-runtime.test.ts:1896:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > writes reliable input payloads once and acks the accepted seq
+Error: zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+ ❯ loadDagpipeNative src/server/dagpipe-bridge.ts:89:11
+     87|   const selected = candidates.find((candidate) => existsSync(candidate…
+     88|   if (!selected) {
+     89|     throw new Error(
+       |           ^
+     90|       `zterm-dagpipe native module missing; expected one of: ${candida…
+     91|     );
+ ❯ Module.runPhase3InputSchedule src/server/dagpipe-bridge.ts:119:5
+ ❯ handleTransportInput src/server/daemon-input-queue-runtime.ts:249:18
+ ❯ Object.handleInputMessage src/server/daemon-input-queue-runtime.ts:330:13
+ ❯ Object.handleMessage src/server/terminal-message-runtime.ts:676:37
+ ❯ src/server/terminal-message-runtime.test.ts:1929:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > acks duplicate reliable input seq without writing it to tmux twice
+Error: zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+ ❯ loadDagpipeNative src/server/dagpipe-bridge.ts:89:11
+     87|   const selected = candidates.find((candidate) => existsSync(candidate…
+     88|   if (!selected) {
+     89|     throw new Error(
+       |           ^
+     90|       `zterm-dagpipe native module missing; expected one of: ${candida…
+     91|     );
+ ❯ Module.runPhase3InputSchedule src/server/dagpipe-bridge.ts:119:5
+ ❯ handleTransportInput src/server/daemon-input-queue-runtime.ts:249:18
+ ❯ Object.handleInputMessage src/server/daemon-input-queue-runtime.ts:330:13
+ ❯ Object.handleMessage src/server/terminal-message-runtime.ts:676:37
+ ❯ src/server/terminal-message-runtime.test.ts:1969:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > accepts input payloads at the daemon frame byte limit
+Error: zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+ ❯ loadDagpipeNative src/server/dagpipe-bridge.ts:89:11
+     87|   const selected = candidates.find((candidate) => existsSync(candidate…
+     88|   if (!selected) {
+     89|     throw new Error(
+       |           ^
+     90|       `zterm-dagpipe native module missing; expected one of: ${candida…
+     91|     );
+ ❯ Module.runPhase3InputSchedule src/server/dagpipe-bridge.ts:119:5
+ ❯ handleTransportInput src/server/daemon-input-queue-runtime.ts:249:18
+ ❯ Object.handleInputMessage src/server/daemon-input-queue-runtime.ts:325:13
+ ❯ Object.handleMessage src/server/terminal-message-runtime.ts:676:37
+ ❯ src/server/terminal-message-runtime.test.ts:2001:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > drops queued input when transport/session becomes stale before async tmux write drains
+Error: zterm-dagpipe native module missing; expected one of: /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/native/dagpipe/index.node, /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android/dagpipe.node
+ ❯ loadDagpipeNative src/server/dagpipe-bridge.ts:89:11
+     87|   const selected = candidates.find((candidate) => existsSync(candidate…
+     88|   if (!selected) {
+     89|     throw new Error(
+       |           ^
+     90|       `zterm-dagpipe native module missing; expected one of: ${candida…
+     91|     );
+ ❯ Module.runPhase3InputSchedule src/server/dagpipe-bridge.ts:119:5
+ ❯ handleTransportInput src/server/daemon-input-queue-runtime.ts:249:18
+ ❯ Object.handleInputMessage src/server/daemon-input-queue-runtime.ts:325:13
+ ❯ Object.handleMessage src/server/terminal-message-runtime.ts:676:37
+ ❯ src/server/terminal-message-runtime.test.ts:2186:29
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 61 passed (68)
+   Start at  01:21:20
+   Duration  557ms (transform 218ms, setup 10ms, collect 246ms, tests 77ms, environment 0ms, prepare 71ms)
+

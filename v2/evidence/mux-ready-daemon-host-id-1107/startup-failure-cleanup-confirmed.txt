@@ -1,0 +1,18 @@
+{
+  "mode": "startup-failure-cleanup",
+  "forcedFailureObserved": true,
+  "failureMessage": "daemon did not come up: child exited before ready: code=78 signal=null (lastError=socket hang up)",
+  "cleanup": {
+    "pid": 79040,
+    "exited": true,
+    "exitCode": 78,
+    "signalCode": null,
+    "scratchRoot": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/zterm-mux-ready-probe-Wb2aej",
+    "scratchDirRemoved": true,
+    "ok": true,
+    "reason": null
+  },
+  "ok": true
+}
+
+EXIT_CODE=0
