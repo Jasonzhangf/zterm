@@ -11,6 +11,8 @@ export type ConnectionErrorCode =
   | "link_not_found"
   | "link_closed"
   | "stale_generation"
+  | "invalid_response"
+  | "list_sessions_failed"
   | "unknown";
 
 export class ConnectionError extends Error {

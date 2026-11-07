@@ -1,13 +1,13 @@
 /** Channel negotiation and isolation over one physical link. */
-import { ConnectionError } from "../public/errors";
+import { ConnectionError } from "../public/errors.ts";
 import type {
   ChannelEventHandler,
   ChannelMessage,
   ChannelRef,
   LinkKind,
   TerminalChannelTarget,
-} from "../public/types";
-import type { TransportHandle } from "../ports/transport";
+} from "../public/types.ts";
+import type { TransportHandle } from "../ports/transport.ts";
 
 export interface ChannelRecord {
   readonly ref: ChannelRef;

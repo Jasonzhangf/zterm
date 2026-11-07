@@ -16,6 +16,17 @@ export type LinkKind = "terminal" | "message" | "file" | "receipt" | "status";
 
 export type TerminalBackendKind = "tmux" | "herdr";
 
+/**
+ * One machine-scoped terminal session the peer proved in its catalog.
+ * `stableId` is the daemon-issued identity used for exact-existing channel
+ * targets; it is never synthesized from `name`.
+ */
+export interface SessionCatalogEntry {
+  readonly name: string;
+  readonly backend: TerminalBackendKind;
+  readonly stableId: string;
+}
+
 export interface TerminalChannelTarget {
   readonly sessionName: string;
   readonly backend?: TerminalBackendKind;

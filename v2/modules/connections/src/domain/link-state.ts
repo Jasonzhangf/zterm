@@ -4,8 +4,8 @@ import type {
   LinkCapabilities,
   LinkPath,
   LinkState,
-} from "../public/types";
-import type { TransportHandle } from "../ports/transport";
+} from "../public/types.ts";
+import type { TransportHandle } from "../ports/transport.ts";
 
 export interface LinkRecord {
   readonly id: string;

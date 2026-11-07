@@ -6,6 +6,7 @@ import type {
   ChannelOpenRequest,
   LinkKind,
   LinkPath,
+  SessionCatalogEntry,
 } from "../../src/public/types";
 import type { AuthorizedMachineLink } from "../../src/ports/accounts-authorization";
 import type { TransportHandle, TransportPort } from "../../src/ports/transport";
@@ -37,9 +38,15 @@ interface FakeTransport {
   closed: string[];
   emittedClose: { code?: number; reason?: string } | null;
   emitChannelClosed(channelId: string): void;
+  catalogRequests: number;
 }
 
-function fakeTransport(path: LinkPath, peerIdentity: string, channelKinds: LinkKind[]): FakeTransport {
+function fakeTransport(
+  path: LinkPath,
+  peerIdentity: string | null,
+  channelKinds: LinkKind[],
+  options: { closeFails?: boolean } = {},
+): FakeTransport {
   const handlers = new Set<(channelId: string, data: string | ArrayBuffer) => void>();
   const channelCloseHandlers = new Set<(channelId: string, info?: { reason?: string; code?: string }) => void>();
   let closeHandler: ((i: { code?: number; reason?: string }) => void) | null = null;
@@ -48,14 +55,19 @@ function fakeTransport(path: LinkPath, peerIdentity: string, channelKinds: LinkK
     sent: [] as Array<{ channelId: string; data: string | ArrayBuffer }>,
     opened: [] as ChannelOpenRequest[],
     closed: [] as string[],
+    catalogRequests: 0,
   };
   const handle: TransportHandle = {
     path,
     transportKind: `ws-${path}`,
     peerIdentity,
-    peerIdentityVerified: peerIdentity.length > 0,
+    peerIdentityVerified: peerIdentity !== null && peerIdentity.length > 0,
     peerChannelKinds: channelKinds,
     bufferedBytes: 0,
+    listSessions: async (): Promise<readonly SessionCatalogEntry[]> => {
+      state.catalogRequests += 1;
+      return [{ name: "session-1", backend: "tmux", stableId: "stable-1" }];
+    },
     openChannel: async (request) => {
       state.opened.push(request);
       return request.kind === "terminal" ? { sessionName: request.target?.sessionName ?? "session-1" } : {};
@@ -63,6 +75,7 @@ function fakeTransport(path: LinkPath, peerIdentity: string, channelKinds: LinkK
     sendChannel: (channelId, data) => { state.sent.push({ channelId, data }); },
     closeChannel: (channelId) => { state.closed.push(channelId); },
     close: (code, reason) => {
+      if (options.closeFails) throw new Error("socket close failed");
       state.emittedClose = { code, reason };
       closeHandler?.({ code, reason });
     },
@@ -88,6 +101,7 @@ function fakeTransport(path: LinkPath, peerIdentity: string, channelKinds: LinkK
     get opened() { return state.opened; },
     get closed() { return state.closed; },
     get emittedClose() { return state.emittedClose; },
+    get catalogRequests() { return state.catalogRequests; },
   };
 }
 
@@ -315,6 +329,7 @@ describe("connections contract", () => {
       peerIdentityVerified: true,
       peerChannelKinds: ["terminal"],
       get bufferedBytes() { return buffered; },
+      listSessions: async () => [],
       openChannel: async () => ({}),
       sendChannel: () => undefined,
       closeChannel: () => undefined,
@@ -488,5 +503,161 @@ describe("connections contract", () => {
       kind: "terminal",
     }, "zombie")).toThrow(expect.objectContaining({ code: "link_closed" }));
     expect(manager.observeLink(currentLink).status).toBe("connected");
+  });
+
+  it("rejects a transport whose peer identity does not match the authorized daemon and closes it", async () => {
+    const fake = fakeTransport("direct", "other-daemon", ["terminal"]);
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a", "expected-daemon") },
+      transport: { open: async () => fake.handle },
+    });
+
+    await expect(manager.connect("machine-a")).rejects.toMatchObject({ code: "peer_identity_mismatch" });
+    expect(fake.emittedClose?.code).toBe(1000);
+    expect(manager.observeLink({ id: "link:machine-a", machineId: "machine-a", generation: 1 }).status).toBe("rejected");
+  });
+
+  it("rejects a missing peer identity instead of reporting connected or fresh", async () => {
+    const fake = fakeTransport("direct", null, ["terminal"]);
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a", "expected-daemon") },
+      transport: { open: async () => fake.handle },
+    });
+
+    await expect(manager.connect("machine-a")).rejects.toMatchObject({ code: "peer_identity_mismatch" });
+    expect(fake.emittedClose?.code).toBe(1000);
+    const obs = manager.observeLink({ id: "link:machine-a", machineId: "machine-a", generation: 1 });
+    expect(obs.status).toBe("rejected");
+    expect(obs.freshness).toBe("stale");
+    expect(obs.peerIdentity).toBeNull();
+    expect(obs.peerIdentityVerified).toBe(false);
+  });
+
+  it("rejects a matching peer identity string when the transport did not verify it", async () => {
+    const fake = fakeTransport("direct", "expected-daemon", ["terminal"]);
+    const unverified = { ...fake.handle, peerIdentityVerified: false };
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a", "expected-daemon") },
+      transport: { open: async () => unverified },
+    });
+
+    await expect(manager.connect("machine-a")).rejects.toMatchObject({ code: "peer_identity_mismatch" });
+    expect(fake.emittedClose?.code).toBe(1000);
+    const obs = manager.observeLink({ id: "link:machine-a", machineId: "machine-a", generation: 1 });
+    expect(obs.status).toBe("rejected");
+    expect(obs.freshness).toBe("stale");
+  });
+
+  it("preserves a transport close failure on the identity rejection", async () => {
+    const fake = fakeTransport("direct", "other-daemon", ["terminal"], { closeFails: true });
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a", "expected-daemon") },
+      transport: { open: async () => fake.handle },
+    });
+
+    let failure: unknown;
+    try {
+      await manager.connect("machine-a");
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect(failure).toMatchObject({ code: "peer_identity_mismatch" });
+    expect(((failure as Error).cause as Error).message).toBe("socket close failed");
+    expect(fake.emittedClose).toBeNull();
+    const obs = manager.observeLink({ id: "link:machine-a", machineId: "machine-a", generation: 1 });
+    expect(obs.status).toBe("rejected");
+    expect(obs.freshness).toBe("stale");
+  });
+
+  it("streams terminal payloads only on the accepted channel and keeps file service explicitly unavailable", async () => {
+    const fake = fakeTransport("direct", "daemon-machine-a", ["terminal"]);
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a") },
+      transport: { open: async () => fake.handle },
+    });
+    const link = await manager.connect("machine-a", authFor("machine-a"));
+    const channel = await manager.openChannel(link, "terminal", { sessionName: "s1" });
+    const received: string[] = [];
+    manager.onChannelMessage(channel, (message) => received.push(String(message.data)));
+
+    manager.sendChannel(channel, "body-1");
+    manager.sendChannel(channel, "body-2");
+    fake.feedChannel("reply-1", channel.id);
+    fake.feedChannel("reply-2", channel.id);
+
+    expect(fake.sent).toEqual([
+      { channelId: channel.id, data: "body-1" },
+      { channelId: channel.id, data: "body-2" },
+    ]);
+    expect(received).toEqual(["reply-1", "reply-2"]);
+    await expect(manager.openChannel(link, "file")).rejects.toMatchObject({ code: "unsupported_channel" });
+    expect(manager.observeLink(link).status).toBe("connected");
+  });
+
+  it("lists sessions through the connected link without opening a channel", async () => {
+    const fake = fakeTransport("direct", "daemon-machine-a", ["terminal"]);
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a") },
+      transport: { open: async () => fake.handle },
+    });
+    const link = await manager.connect("machine-a", authFor("machine-a"));
+
+    const sessions = await manager.listSessions(link);
+
+    expect(sessions).toEqual([{ name: "session-1", backend: "tmux", stableId: "stable-1" }]);
+    expect(fake.catalogRequests).toBe(1);
+    expect(fake.opened).toEqual([]);
+    expect(manager.observeLink(link).status).toBe("connected");
+  });
+
+  it("rejects a catalog read on a link that is not connected", async () => {
+    const fake = fakeTransport("direct", "daemon-machine-a", ["terminal"]);
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a") },
+      transport: { open: async () => fake.handle },
+    });
+    const link = await manager.connect("machine-a", authFor("machine-a"));
+    manager.closeOwnLink(link);
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({ code: "link_closed" });
+    expect(fake.catalogRequests).toBe(0);
+  });
+
+  it("fences a stale generation so a late catalog response cannot settle a new link", async () => {
+    let resolveCatalog!: (entries: readonly SessionCatalogEntry[]) => void;
+    const first = fakeTransport("direct", "daemon-machine-a", ["terminal"]);
+    first.handle.listSessions = () => new Promise((resolve) => { resolveCatalog = resolve; });
+    const second = fakeTransport("direct", "daemon-machine-a", ["terminal"]);
+    const handles = [first.handle, second.handle];
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a") },
+      transport: { open: async () => handles.shift()! },
+    });
+
+    const firstLink = await manager.connect("machine-a");
+    const listing = manager.listSessions(firstLink);
+    const currentLink = await manager.connect("machine-a");
+    resolveCatalog([{ name: "late", backend: "tmux", stableId: "late-stable" }]);
+
+    await expect(listing).rejects.toMatchObject({ code: "stale_generation" });
+    expect(manager.observeLink(currentLink).status).toBe("connected");
+    expect(manager.observeLink(currentLink).generation).toBe(2);
+  });
+
+  it("keeps the link usable after a catalog read rejects", async () => {
+    const fake = fakeTransport("direct", "daemon-machine-a", ["terminal"]);
+    fake.handle.listSessions = async () => {
+      throw new ConnectionError("invalid_response", "catalog response is malformed", { machineId: "machine-a" });
+    };
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor("machine-a") },
+      transport: { open: async () => fake.handle },
+    });
+    const link = await manager.connect("machine-a", authFor("machine-a"));
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({ code: "invalid_response" });
+    expect(manager.observeLink(link).status).toBe("connected");
+    expect((await manager.openChannel(link, "terminal", { sessionName: "s1" })).kind).toBe("terminal");
   });
 });

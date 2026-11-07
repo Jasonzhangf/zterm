@@ -1,5 +1,5 @@
 /** Public entry to the connections module (first increment). */
-import { ConnectionManager, type ConnectionManagerOptions } from "../application/connection-manager";
+import { ConnectionManager, type ConnectionManagerOptions } from "../application/connection-manager.ts";
 
 export type { ConnectionManagerOptions };
 

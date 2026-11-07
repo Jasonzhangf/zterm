@@ -7,7 +7,7 @@
  * dispatcher. Credentials stay in the accounts-produced target URL; this module
  * never reads a credential store.
  */
-import { validateAppClientFrame, validateAppServerFrame } from "@zterm/shared/connection/app-protocol";
+import { validateAppClientFrame, validateAppServerFrame } from "../../../../../packages/shared/src/connection/app-protocol.ts";
 
 export interface AppSocketLike {
   send(data: string): void;
