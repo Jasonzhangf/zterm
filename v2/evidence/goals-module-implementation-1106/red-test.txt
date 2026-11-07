@@ -1,0 +1,38 @@
+$ node --test v2/modules/goals/tests/contract/goals.test.mjs
+exit 1
+
+TAP version 13
+# Subtest: creates, reads back, updates, lists, and reopens a stable goal from the public port
+ok 1 - creates, reads back, updates, lists, and reopens a stable goal from the public port
+# Subtest: rejects cross-workspace goal actions before returning target data
+ok 2 - rejects cross-workspace goal actions before returning target data
+# Subtest: rejects duplicate names under one parent and invalid owner or hierarchy references
+ok 3 - rejects duplicate names under one parent and invalid owner or hierarchy references
+# Subtest: updateGoal rejects explicit null or empty name without changing the stored goal
+not ok 4 - updateGoal rejects explicit null or empty name without changing the stored goal
+  ---
+  duration_ms: 5.781583
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/goals-module-implementation-20261106/v2/modules/goals/tests/contract/goals.test.mjs:276:1'
+  failureType: 'testCodeFailure'
+  error: 'Missing expected rejection.'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  stack: |-
+    async TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/goals-module-implementation-20261106/v2/modules/goals/tests/contract/goals.test.mjs:281:3)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: deletion is allowed only for an unreferenced leaf and never creates orphan tickets
+ok 5 - deletion is allowed only for an unreferenced leaf and never creates orphan tickets
+# Subtest: typed authorization failures do not echo the supplied bearer token
+ok 6 - typed authorization failures do not echo the supplied bearer token
+1..6
+# tests 6
+# suites 0
+# pass 5
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 131.401125
