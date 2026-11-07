@@ -390,14 +390,21 @@ test("public delivery port does not expose the local evidence primitive", async 
     ref.requestId,
     { subject: "subject", body: "accepted" },
   );
-  assert.equal(accepted.kind, "dispatch-unavailable");
-  assert.equal(accepted.code, "DISPATCH_UNAVAILABLE");
-  assert.equal(accepted.errorRef, "delivery.dispatch.v1-message-id-unavailable");
-  assert.equal(accepted.receipt.durableStage, "accepted");
+  // The persistence read-back edge now supplies v1MessageId at accept time,
+  // so the first submission can dispatch instead of stopping at accepted.
+  assert.equal(accepted.kind, "accepted");
+  if (accepted.kind !== "accepted") assert.fail("first submission was not accepted");
+  assert.match(
+    accepted.receipt.v1MessageId ?? "",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  assert.equal(accepted.receipt.durableStage, "remote-stored");
   const applied = await integration.port.queryReceipt(actorFor(ref), ref);
   assert.equal(applied.kind, "found");
-  assert.equal(applied.observation.receipt.durableStage, "accepted");
-  assert.equal(integration.counts.applies(), 0);
+  assert.equal(applied.observation.receipt.durableStage, "remote-stored");
+  // The dispatch writes remote-stored evidence, so exactly one apply happens
+  // through the injected store; the port still exposes no evidence primitive.
+  assert.equal(integration.counts.applies(), 1);
 });
 
 test("real delivery record path exists in temp root and does not touch production", async () => {

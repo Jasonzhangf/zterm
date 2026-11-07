@@ -1,0 +1,18 @@
+PASS: persistence accepts the message
+PASS: accepted receipt carries a v1MessageId
+PASS: accepted receipt is at the accepted stage
+PASS: readAcceptedCommand returns the persisted command
+PASS: persisted command v1MessageId matches the receipt
+PASS: resumeDispatch returns resumed
+PASS: resumed receipt is remote-stored
+PASS: exactly one app-send-message reached the gateway
+PASS: wire frame is app-send-message
+PASS: wire correlation uses the persisted v1MessageId
+PASS: non-secret selector never reaches the wire
+PASS: second resumeDispatch returns already-dispatched
+PASS: replay sends no second frame
+PASS: fresh reopen finds the receipt
+PASS: durable receipt is remote-stored
+PASS: reopen preserves the accepted command
+PASS: reopen preserves v1MessageId
+BLACKBOX PASS (17 checks)

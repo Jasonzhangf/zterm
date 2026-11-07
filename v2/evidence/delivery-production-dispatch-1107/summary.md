@@ -54,18 +54,49 @@
 
 ## Open gaps (INCOMPLETE)
 
-- The public V1 persistence facade does not yet expose
-  `readAcceptedCommand(ref)` or a persisted `v1MessageId` adapter. Current V1
-  receipts therefore produce typed `dispatch-unavailable` rather than a
-  production dispatch.
-- `connections.requestMessage` / source gateway / target selector resolution
-  and the public runtime entry are not implemented in this scope. The
-  connections public-runtime import task remains an upstream dependency.
-- Real two-machine evidence is absent for source-gateway identity match, target
-  authorization, remote storage, identity refusal, correlation isolation,
-  same-ID recovery, and send-authorized resume.
-- No consumed, host-delivered, or production remote-stored claim is made.
-  Trusted consumed ingress and file chunking remain out of scope.
+- The public V1 persistence facade read-back edge now exposes
+  `readAcceptedCommand(ref)` and a persisted UUID `v1MessageId`
+  (`app-messaging-readback-public-edge`, integrated in local main 46582eef).
+  Closed for the facade scope.
+- `connections.requestMessage` / source-gateway resolution (and the
+  `app-send-message` wire edge) are now integrated in local main 32584a72
+  (`connections-app-send-public-edge-20261107`). Delivery now composes against
+  them (see the composition receipt below).
+- Real two-machine evidence is still absent. The composition receipt below is a
+  real public-consumer wire exercise against a local V1 `/app` gateway, not a
+  two-machine proof of source-gateway identity match, identity refusal,
+  correlation isolation, or consumed/host-delivered ingress.
+- No consumed or host-delivered claim is made. Trusted consumed ingress and file
+  chunking remain out of scope.
+
+## Real public consumer composition receipt (rebase onto 32584a72)
+
+After master integrated the three accepted upstream candidates into local main
+32584a72, this branch was resumed on that tip (HEAD af9ac54a). The remaining
+delivery gap was composition: nothing real drove `resumeDispatch` through the
+now-integrated persistence read-back and connections `requestMessage` edges.
+
+- `blackbox-delivery-consumer.mts` imports only the three public entries
+  (`createAppMessagingPersistence` from the V1 facade, `createConnectionManager`
+  + `AppWebSocketTransport` from connections, `createDeliveryPort` from
+  delivery), wires a consumer-owned `MessageDispatchPort` onto `requestMessage`,
+  and drives `DeliveryPort.resumeDispatch` against a local V1 `/app` websocket
+  gateway.
+- Receipt `blackbox-delivery-consumer.log` — 17/17 checks:
+  `acceptMessage` persists an immutable command with a UUID `v1MessageId`;
+  `resumeDispatch` returns `resumed` with a `remote-stored` receipt; exactly one
+  `app-send-message` reaches the gateway, correlated by the persisted
+  `v1MessageId`; the non-secret `targetMachineId` never reaches the wire; a
+  second `resumeDispatch` returns `already-dispatched` and sends no frame; a
+  fresh reopen reads back `remote-stored` and preserves `v1MessageId`.
+- Rebase regression receipts: `test-contract-rebase.txt` 43/43,
+  `test-integration-rebase.txt` 20/20.
+- Two integration tests asserted the pre-readback behavior (accept returns no
+  `v1MessageId` -> typed `dispatch-unavailable`). Rebase made accept supply
+  `v1MessageId`, so those expectations were updated to the integrated contract
+  (first submit dispatches, receipt outcome `confirmed`). The guard itself stays
+  covered by the contract test
+  `submit refuses to dispatch without the persisted v1MessageId`.
 
 ## Scope
 

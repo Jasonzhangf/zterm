@@ -279,17 +279,22 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
     ref.requestId,
     { subject: "hello subject", body: "hello" },
   );
-  assert.equal(first.kind, "dispatch-unavailable");
-  if (first.kind !== "dispatch-unavailable") {
-    assert.fail("first submission without persisted v1MessageId was not unavailable");
+  // Persistence read-back supplies v1MessageId on accept, so the first
+  // submission dispatches immediately instead of stopping at accepted.
+  assert.equal(first.kind, "accepted");
+  if (first.kind !== "accepted") {
+    assert.fail("first submission with persisted v1MessageId was not accepted");
   }
-  assert.equal(first.errorRef, "delivery.dispatch.v1-message-id-unavailable");
-  assert.equal(first.receipt.durableStage, "accepted");
-  assert.equal(first.receipt.outcome, "pending");
+  assert.match(
+    first.receipt.v1MessageId ?? "",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  assert.equal(first.receipt.durableStage, "remote-stored");
+  assert.equal(first.receipt.outcome, "confirmed");
   assert.deepEqual(first.receipt.deliveryRef, ref);
   assert.deepEqual(first.receipt.target, target);
-  assert.deepEqual(calls, ["accept"]);
-  assert.deepEqual(dispatchCalls, []);
+  assert.deepEqual(calls, ["accept", "apply-evidence"]);
+  assert.deepEqual(dispatchCalls, [ref.requestId]);
 
   const replay = await port.submitMessage(
     actor,
@@ -301,7 +306,7 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
   if (replay.kind !== "accepted") assert.fail("replay was not accepted");
   assert.equal(replay.disposition, "replayed");
   assert.deepEqual(replay.receipt, first.receipt);
-  assert.deepEqual(dispatchCalls, [], "replay must not dispatch again");
+  assert.deepEqual(dispatchCalls, [ref.requestId], "replay must not dispatch again");
 
   const conflict = await port.submitMessage(
     actor,
@@ -312,7 +317,7 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
   assert.equal(conflict.kind, "rejected");
   if (conflict.kind !== "rejected") assert.fail("content conflict was not rejected");
   assert.equal(conflict.code, "DELIVERY_CONFLICT");
-  assert.deepEqual(dispatchCalls, [], "conflict must not dispatch");
+  assert.deepEqual(dispatchCalls, [ref.requestId], "conflict must not dispatch");
 
   const missingSubject = await port.submitMessage(
     actor,
@@ -325,7 +330,7 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
     assert.fail("missing subject did not conflict with an empty subject");
   }
   assert.equal(missingSubject.code, "DELIVERY_CONFLICT");
-  assert.deepEqual(dispatchCalls, [], "missing subject must not dispatch");
+  assert.deepEqual(dispatchCalls, [ref.requestId], "missing subject must not dispatch");
 
   const separateRef = deliveryRef({}, "request-missing-subject");
   const separate = await port.submitMessage(
@@ -338,7 +343,7 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
   if (separate.kind !== "dispatch-unavailable") {
     assert.fail("missing subject was not durably unavailable");
   }
-  assert.deepEqual(dispatchCalls, []);
+  assert.deepEqual(dispatchCalls, [ref.requestId]);
 
   const stale = createIntegrationPort(appRootDir, {
     target: { ...target, bindingGeneration: target.bindingGeneration + 1 },
