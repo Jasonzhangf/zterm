@@ -17,6 +17,12 @@ export interface AuthorizedMachineLink {
   readonly machineId: string;
   /** Actual peer daemon identity that the target must prove during handshake. */
   readonly daemonHostId: string;
+  /**
+   * Accounts-owned device identity for the connected daemon. The source /app
+   * handshake must prove this exact deviceId; a missing value means the source
+   * device identity is not proven and the link must be refused.
+   */
+  readonly deviceId?: string;
   readonly accountId: string;
   /** Opaque verified authorization handle. Never a secret, never a ticket payload. */
   readonly authorizationId: string;

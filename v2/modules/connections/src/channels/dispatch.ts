@@ -141,6 +141,11 @@ export class ChannelDispatcher {
     return this.channels.has(ref.id);
   }
 
+  /** The transport that owns an open channel, or undefined if it is not open. */
+  transportOf(ref: ChannelRef): TransportHandle | undefined {
+    return this.channels.get(ref.id)?.transport;
+  }
+
   /**
    * Forward a remote peer close into the single channel registry so an open
    * ChannelRef stops being usable and send/close can no longer reach the peer.
