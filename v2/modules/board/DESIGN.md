@@ -11,6 +11,8 @@ board/
 ├── DESIGN.md
 ├── src/
 │   ├── public/board-query
+│   ├── adapters/goals-public-adapter
+│   ├── adapters/organization-public-adapter
 │   ├── application/manager-board-reader
 │   ├── domain/priority-order
 │   ├── ports/goal-reader
@@ -28,6 +30,16 @@ board/
 ## 公开接口、数据及错误
 
 queryManagerBoard(managerId,scope) → goals及各目标前五票/直属成员Observation；分页和同优先级次序明确。
+
+读数适配边界：
+
+- goals：board 适配器调用真实公开 `listGoals({ token, workspaceId, parentGoalId })`，
+  仅以 `ownerMemberId === managerId` 选择直属目标；`parentGoalId` 不用于推导 manager 关系。
+- organization：board 适配器调用真实公开
+  `listDirectReports({ token, workspaceId, managerMemberId })`，只在 organization
+  明确维护的 `member.managerMemberId` 关系上取直属成员；`parentGroupId` 与 group
+  层级不代表管理关系，board 不自行推断。
+- tickets 与 member status 继续通过声明端口注入，不新增第二业务真源。
 
 ticket失联可显示stale，不能用空数组声称无任务；状态局部失败不隐藏已知任务。
 
