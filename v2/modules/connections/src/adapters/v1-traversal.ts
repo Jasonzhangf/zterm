@@ -14,32 +14,36 @@
  * that accept. Generic message/file belong to the separate V1 /app service and
  * are not advertised here.
  */
+import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import {
   buildTerminalMuxChannelBinary,
   buildTerminalMuxChannelOpen,
   buildTerminalMuxHello,
+  buildTerminalMuxTargetMessage,
   isTerminalMuxServerFrame,
   TERMINAL_MUX_PROTOCOL_VERSION,
   type TerminalMuxCapabilities,
-} from "@zterm/shared/connection/protocol";
+} from "../../../../../packages/shared/src/connection/protocol.ts";
 import {
   TraversalRouteHealthCache,
   TraversalSocket,
   type TraversalResolvedPath,
-} from "@zterm/shared/connection/traversal";
-import { ConnectionError } from "../public/errors";
+} from "../../../../../packages/shared/src/connection/traversal/index.ts";
+import { ConnectionError } from "../public/errors.ts";
 import type {
   ChannelOpenRequest,
   ChannelOpenResult,
   LinkKind,
+  SessionCatalogEntry,
   TerminalChannelTarget,
-} from "../public/types";
-import type { AuthorizedMachineLink } from "../ports/accounts-authorization";
-import type { TransportHandle, TransportPort } from "../ports/transport";
+} from "../public/types.ts";
+import type { AuthorizedMachineLink } from "../ports/accounts-authorization.ts";
+import type { TransportHandle, TransportPort } from "../ports/transport.ts";
 
 const MUX_READY_TIMEOUT_MS = 8000;
 const CHANNEL_OPEN_TIMEOUT_MS = 8000;
+const CATALOG_TIMEOUT_MS = 8000;
 const OPEN_STATE = 1;
 
 interface NodeTraversalDependencies {
@@ -89,8 +93,18 @@ interface PendingChannelOpen {
   timer: ReturnType<typeof setTimeout>;
 }
 
+interface PendingCatalogRequest {
+  resolve: (entries: readonly SessionCatalogEntry[]) => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 export class V1TraversalTransport implements TransportPort {
-  constructor(private readonly dependencies: { WebSocket?: new (url: string) => unknown } = {}) {}
+  private readonly dependencies: { WebSocket?: new (url: string) => unknown };
+
+  constructor(dependencies: { WebSocket?: new (url: string) => unknown } = {}) {
+    this.dependencies = dependencies;
+  }
 
   private factory: ReturnType<typeof this.buildFactory> | null = null;
 
@@ -163,6 +177,9 @@ export class V1TraversalTransport implements TransportPort {
 
     const channelHandlers = new Set<(channelId: string, data: string | ArrayBuffer) => void>();
     const pendingOpens = new Map<string, PendingChannelOpen>();
+    // Catalog reads are target control requests correlated by the requestId we
+    // generated; they never open or write a terminal channel.
+    const pendingCatalogs = new Map<string, PendingCatalogRequest>();
     // A channel may carry payload only after the peer accepted it.
     const acceptedChannels = new Set<string>();
     // An open that timed out may still receive a late ack; we answer it with a
@@ -186,6 +203,14 @@ export class V1TraversalTransport implements TransportPort {
       pendingOpens.clear();
     };
 
+    const rejectAllPendingCatalogs = (error: Error) => {
+      for (const pending of pendingCatalogs.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(error);
+      }
+      pendingCatalogs.clear();
+    };
+
     const sendLateOpenClose = (channelId: string) => {
       try {
         socket.send(JSON.stringify({
@@ -202,14 +227,16 @@ export class V1TraversalTransport implements TransportPort {
       }
     };
 
-    // Post-handshake data phase. Only real mux frames are interpreted, and
+    // Post-handshake data phase. Only real mux frames are interpreted: target
+    // control frames are matched to pending catalog requests by requestId, and
     // channel payload is delivered only to the addressed channel id.
-    const routeChannelFrame = (frame: unknown) => {
+    const routeMuxFrame = (frame: unknown) => {
       if (!frame || typeof frame !== "object" || Array.isArray(frame)) return;
       const candidate = frame as { type?: unknown; payload?: unknown };
       if (!candidate.payload || typeof candidate.payload !== "object" || Array.isArray(candidate.payload)) return;
       const payload = candidate.payload as {
         channelId?: unknown;
+        requestId?: unknown;
         sessionName?: unknown;
         stableId?: unknown;
         reason?: unknown;
@@ -217,6 +244,85 @@ export class V1TraversalTransport implements TransportPort {
         dataBase64?: unknown;
         message?: unknown;
       };
+      if (candidate.type === "mux-target-message") {
+        const requestId = typeof payload.requestId === "string" ? payload.requestId : "";
+        // Only the exact request id this socket generated may settle a read;
+        // unrelated target frames stay ignored instead of being guessed at.
+        const pending = requestId ? pendingCatalogs.get(requestId) : undefined;
+        if (!pending) return;
+        pendingCatalogs.delete(requestId);
+        clearTimeout(pending.timer);
+        const message = payload.message;
+        if (!message || typeof message !== "object" || Array.isArray(message)) {
+          pending.reject(new ConnectionError("invalid_response", "catalog response message is missing", {
+            machineId: auth.machineId,
+          }));
+          return;
+        }
+        const inner = message as { type?: unknown; payload?: unknown };
+        if (inner.type === "error") {
+          // Remote catalog failures are typed by the V1 error code. Keep that
+          // code and the original detail instead of collapsing them to unknown.
+          const errorPayload = inner.payload as { message?: unknown; code?: unknown } | undefined;
+          const remoteCode = typeof errorPayload?.code === "string" ? errorPayload.code : "";
+          const detail = typeof errorPayload?.message === "string" ? errorPayload.message : "remote catalog request failed";
+          pending.reject(new ConnectionError(
+            remoteCode === "list_sessions_failed" ? "list_sessions_failed" : "unknown",
+            remoteCode ? `catalog request failed (${remoteCode}): ${detail}` : `catalog request failed: ${detail}`,
+            { machineId: auth.machineId },
+          ));
+          return;
+        }
+        if (inner.type !== "sessions") {
+          pending.reject(new ConnectionError("invalid_response", `catalog response has unexpected type ${String(inner.type)}`, {
+            machineId: auth.machineId,
+          }));
+          return;
+        }
+        const innerPayload = inner.payload;
+        if (!innerPayload || typeof innerPayload !== "object" || Array.isArray(innerPayload)) {
+          pending.reject(new ConnectionError("invalid_response", "catalog response payload is missing", {
+            machineId: auth.machineId,
+          }));
+          return;
+        }
+        const body = innerPayload as { sessions?: unknown; sessionCatalog?: unknown };
+        // `sessions` is required in the V1 response payload. Reject missing or
+        // malformed shapes instead of accepting a catalog next to bad input.
+        if (!Array.isArray(body.sessions) || !body.sessions.every((entry) => typeof entry === "string")) {
+          pending.reject(new ConnectionError("invalid_response", "catalog response is missing a valid sessions list", {
+            machineId: auth.machineId,
+          }));
+          return;
+        }
+        if (!Array.isArray(body.sessionCatalog)) {
+          pending.reject(new ConnectionError("invalid_response", "catalog response is missing sessionCatalog", {
+            machineId: auth.machineId,
+          }));
+          return;
+        }
+        const entries: SessionCatalogEntry[] = [];
+        for (const raw of body.sessionCatalog) {
+          if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+            pending.reject(new ConnectionError("invalid_response", "catalog entry is not an object", {
+              machineId: auth.machineId,
+            }));
+            return;
+          }
+          const entry = raw as { name?: unknown; backend?: unknown; stableId?: unknown };
+          const name = typeof entry.name === "string" ? entry.name.trim() : "";
+          const stableId = typeof entry.stableId === "string" ? entry.stableId.trim() : "";
+          if (!name || !stableId || (entry.backend !== "tmux" && entry.backend !== "herdr")) {
+            pending.reject(new ConnectionError("invalid_response", "catalog entry is missing name/backend/stableId", {
+              machineId: auth.machineId,
+            }));
+            return;
+          }
+          entries.push({ name, backend: entry.backend, stableId });
+        }
+        pending.resolve(entries);
+        return;
+      }
       const channelId = typeof payload.channelId === "string" ? payload.channelId : "";
       if (candidate.type === "mux-channel-opened") {
         if (!channelId) return;
@@ -305,10 +411,13 @@ export class V1TraversalTransport implements TransportPort {
         } catch {
           return;
         }
-        routeChannelFrame(parsed);
+        routeMuxFrame(parsed);
       };
       socket.onclose = (event) => {
         rejectAllPending(new ConnectionError("link_closed", "transport closed before channel open completed", {
+          machineId: auth.machineId,
+        }));
+        rejectAllPendingCatalogs(new ConnectionError("link_closed", "transport closed before catalog read completed", {
           machineId: auth.machineId,
         }));
         pendingRelease.clear();
@@ -455,6 +564,35 @@ export class V1TraversalTransport implements TransportPort {
       peerChannelKinds,
       get bufferedBytes() {
         return socket.bufferedAmount || 0;
+      },
+      listSessions: () => {
+        if (socket.readyState !== OPEN_STATE) {
+          return Promise.reject(new ConnectionError("link_closed", "transport is not open", { machineId: auth.machineId }));
+        }
+        const requestId = randomUUID();
+        return new Promise<readonly SessionCatalogEntry[]>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingCatalogs.delete(requestId);
+            reject(new ConnectionError("unreachable", "catalog request timed out", { machineId: auth.machineId }));
+          }, CATALOG_TIMEOUT_MS);
+          timer.unref?.();
+          pendingCatalogs.set(requestId, { resolve, reject, timer });
+          try {
+            socket.send(JSON.stringify(buildTerminalMuxTargetMessage({
+              type: "list-sessions",
+              payload: { terminalBackend: "tmux" },
+            }, requestId)));
+          } catch (error) {
+            pendingCatalogs.delete(requestId);
+            clearTimeout(timer);
+            reject(error instanceof ConnectionError
+              ? error
+              : new ConnectionError("link_closed", "catalog request send failed", {
+                machineId: auth.machineId,
+                cause: error,
+              }));
+          }
+        });
       },
       openChannel: (request: ChannelOpenRequest) => {
         if (request.kind !== "terminal") {

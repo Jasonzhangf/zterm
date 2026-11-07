@@ -1,12 +1,13 @@
 /** Platform transport contract for a machine link (implemented by adapters). */
-import type { AuthorizedMachineLink } from "./accounts-authorization";
-import type { ConnectionError } from "../public/errors";
+import type { AuthorizedMachineLink } from "./accounts-authorization.ts";
+import type { ConnectionError } from "../public/errors.ts";
 import type {
   ChannelOpenRequest,
   ChannelOpenResult,
   LinkKind,
   LinkPath,
-} from "../public/types";
+  SessionCatalogEntry,
+} from "../public/types.ts";
 
 export interface TransportCloseInfo {
   readonly code?: number;
@@ -25,6 +26,11 @@ export interface TransportHandle {
   /** Channel kinds the peer declared during handshake. */
   readonly peerChannelKinds: readonly LinkKind[];
   readonly bufferedBytes: number;
+  /**
+   * Read the peer's machine-scoped terminal session catalog through a target
+   * control message. This never opens or writes a terminal channel.
+   */
+  listSessions(): Promise<readonly SessionCatalogEntry[]>;
   /**
    * Ask the peer to open a real channel and wait for its accept/reject. A
    * channel is addressable only after this resolves; callers must not invent an

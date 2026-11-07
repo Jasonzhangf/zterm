@@ -66,6 +66,49 @@ David R3 指出三项未关闭：deriveChannelKinds 把 terminal mux 的 channel
 
 - 真实事实：`android/src/server/terminal-mux-channel-runtime.ts` 的 `mux-channel-open` 必须携带真实 `sessionName`（exact-existing 还需 `expectedSessionIdentity`+`backend`），服务端才回 `mux-channel-opened`；`mux-ready.capabilities` 只声明 `channelEnvelope/targetMessages/boundedBodyScheduler`，没有 generic message/file 服务声明。真实 daemon 的 `mux-ready` 还省略 `daemonHostId`。
 - 修正：`deriveChannelKinds` 只把 `channelEnvelope` 映射为 `terminal` 会话 channel；`openChannel` 改为 async，terminal open 必须带 target，先发 `mux-channel-open` 等 `mux-channel-opened`；只有 ack 之后才注册 channel 与允许 send；message/file/receipt/status 在 terminal mux 上显式 `unsupported_channel`（它们的真实服务是独立 `/app`，下一增量接入）。
-- 身份：`mux-ready.daemonHostId` 存在时不一致则 `peer_identity_mismatch`；缺失时使用 accounts 已验证的授权身份，因为 token 保护端点刚完成 mux 握手。
+- 身份：`mux-ready.daemonHostId` 必须存在、已验证并等于 accounts 的 `auth.daemonHostId`；缺失、未验证或不一致都返回 `peer_identity_mismatch`，不得把 `null` 标为 `connected/fresh`。
 - 保留 1224316f 的旧代失败栅栏与坏握手资源释放修正。
 - 真实反例发现：错误 token 时真实 bridge 先发 `{type:"error",payload:{code:"unauthorized"}}` 再 4001 关闭；适配器已按真实帧分类为 `unauthorized`。
+
+## Catalog 边（connections-catalog-edge-20261107）
+
+任务：connections-catalog-edge-20261107（owner Kate，reviewer David）。目标是在已接受
+public runtime 上补 `ConnectionManager.listSessions(link)`。
+
+### 受影响协议事实（只读核对，不改 shared）
+
+- V1 `TerminalMuxClientFrame`：`{ type: 'mux-target-message'; payload: { requestId?; message: TerminalMuxTargetClientMessage } }`。
+- `list-sessions` 属于 `TerminalMuxTargetClientMessageType`，payload 可带
+  `terminalBackend: 'tmux' | 'herdr'`。
+- V1 `TerminalMuxServerFrame` 目标响应：
+  `{ type: 'mux-target-message'; payload: { requestId?; message: { type: 'sessions'; payload: { sessions: string[]; sessionCatalog?: TerminalSessionCatalogEntry[] } } } }`。
+- daemon `createMuxTargetMessageConnection` 在响应时回填同一 `requestId`；
+  `list-sessions` 失败走 `{ type: 'error', payload: { message, code: 'list_sessions_failed' } }`。
+- `TerminalSessionCatalogEntry` 的 `stableId` 在协议上可选；真实 daemon 只有存在
+  daemon-owned catalog owner 时才产生 stableId，否则退化为仅 `{ name, backend }`。
+- daemon `machine-terminal-consumer` 用 `entry.stableId` 作 map key 并以
+  `expectedSessionIdentity: entry.stableId` 打开 exact-existing channel，因此不能合成
+  stableId，也不能把缺失 stableId 的条目当作可用目标。
+
+### 当前缺口
+
+- `ConnectionManager` 无 `listSessions`；Emma 真实探针为
+  `manager.listSessions=undefined`，typed `connections-catalog-missing`。
+- `TransportHandle` 无 catalog 方法；`V1TraversalTransport` 的数据期只路由
+  `mux-channel-*`，直接忽略 `mux-target-message`。
+- 不在本任务范围：daemon `machine-terminal-consumer` 的产品组合与 terminal admission。
+
+### 本增量选择
+
+- 公开契约：`SessionCatalogEntry = { name, backend, stableId }`；
+  `ConnectionManager.listSessions(LinkRef)`；`TransportHandle.listSessions()`。
+- 适配器用 `buildTerminalMuxTargetMessage` 发 `list-sessions`，携带
+  `{ terminalBackend: 'tmux' }`，按 `requestId` 关联响应；以 `sessionCatalog` 为条目
+  来源，缺 `sessions` 或 `sessionCatalog`、条目缺 `stableId` 报 `invalid_response`，
+  不合成 stableId。
+- 失败语义：shared mux-ready 强制 `targetMessages: true` 且握手校验拒绝缺失该能力的
+  帧，因此不存在可达的 `unsupported_catalog` 分支；物理连接关闭 → `link_closed`；
+  超时 → `unreachable`；响应形状非法 → `invalid_response`；远端 catalog 失败 →
+  typed `list_sessions_failed` 并保留原始 message/code。
+- generation fencing：`ConnectionManager` 在 await 后复核 generation、status 与
+  transport identity，旧 generation 不得用旧 transport 的回包结算新 link。

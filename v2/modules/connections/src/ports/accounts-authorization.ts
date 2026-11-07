@@ -9,8 +9,8 @@
 import type {
   TraversalSettingsSource,
   TraversalTargetSource,
-} from "@zterm/shared/connection/traversal";
-import type { LinkCapabilities } from "../public/types";
+} from "../../../../../packages/shared/src/connection/traversal/index.ts";
+import type { LinkCapabilities } from "../public/types.ts";
 
 export interface AuthorizedMachineLink {
   /** Stable target machine identity requested by the caller. */

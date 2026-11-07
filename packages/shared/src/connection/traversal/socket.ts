@@ -24,14 +24,14 @@ import type {
   TraversalTimerHandle,
   TraversalWebSocketLike,
 } from './types';
-import { buildTraversalPlanCached } from './config';
+import { buildTraversalPlanCached } from './config.ts';
 import type { TraversalSettingsSource, TraversalTargetSource } from './types';
-import { selectBestTraversalRoute } from './route-selector';
+import { selectBestTraversalRoute } from './route-selector.ts';
 import {
   defaultTraversalRouteHealthCache,
   TraversalRouteHealthCache,
   type TraversalRouteHealthScope,
-} from './route-health-cache';
+} from './route-health-cache.ts';
 
 const CONNECTING = 0;
 const OPEN = 1;
@@ -211,14 +211,17 @@ function resolveCandidateTimeoutMs(candidate: TraversalPlanCandidate, health: Tr
 }
 
 class WebSocketBackend implements Backend {
+  private readonly candidate: Extract<TraversalPlanCandidate, { kind: 'ws' }>;
+
   public socket: TraversalWebSocketLike;
 
   private failed = false;
 
   public constructor(
-    private readonly candidate: Extract<TraversalPlanCandidate, { kind: 'ws' }>,
+    candidate: Extract<TraversalPlanCandidate, { kind: 'ws' }>,
     platform: TraversalPlatform,
   ) {
+    this.candidate = candidate;
     this.socket = platform.createWebSocket(candidate.url);
     this.socket.binaryType = 'arraybuffer';
   }
@@ -303,6 +306,10 @@ class WebSocketBackend implements Backend {
 class WebRtcBackend implements Backend {
   private static readonly MAX_PENDING_REMOTE_ICE_CANDIDATES = 64;
 
+  private readonly candidate: Extract<TraversalPlanCandidate, { kind: 'rtc' }>;
+
+  private readonly platform: TraversalPlatform;
+
   private signalSocket: TraversalWebSocketLike | null = null;
 
   private peerConnection: TraversalPeerConnectionLike | null = null;
@@ -335,9 +342,11 @@ class WebRtcBackend implements Backend {
   private currentResolvedRelayTransport: TraversalResolvedRelayTransport | undefined;
 
   public constructor(
-    private readonly candidate: Extract<TraversalPlanCandidate, { kind: 'rtc' }>,
-    private readonly platform: TraversalPlatform,
+    candidate: Extract<TraversalPlanCandidate, { kind: 'rtc' }>,
+    platform: TraversalPlatform,
   ) {
+    this.candidate = candidate;
+    this.platform = platform;
     this.currentResolvedPath = candidate.path;
   }
 

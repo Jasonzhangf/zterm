@@ -64,3 +64,37 @@
 
 - `pnpm test`：27 passed（contract 18 + real-entry 9）；real-daemon 3 passed；`tsc --noEmit` exit 0。
 - 真实两机 LAN 仍为下一增量；本 R3 用同一真实 V1 daemon 的 mux 握手/open/ack 与 unsupported 证据，不是回环 echo。两机独立机器贯通仍未验收，交 Jenny 集成时明确。
+
+## Catalog 边增量（connections-catalog-edge-20261107）
+
+合同：`/Volumes/Intel/playground/zterm/.worker-runs/connections-catalog-edge-20261107/task.md`。
+目标：补 `ConnectionManager.listSessions(link)`，经 `mux-target-message` 承载 V1
+`list-sessions`，按 `requestId` 关联 `sessions`，不开 terminal channel。
+
+### 改动
+
+1. `public/types.ts`：新增 `SessionCatalogEntry = { name, backend, stableId }`。
+2. `ports/transport.ts`：`TransportHandle` 新增 `listSessions(): Promise<readonly SessionCatalogEntry[]>`。
+3. `adapters/v1-traversal.ts`：`listSessions()` 用 `buildTerminalMuxTargetMessage` 发
+   `{ type: 'list-sessions', payload: { terminalBackend: 'tmux' } }`，按 `requestId` 关联
+   `mux-target-message` 内的 `sessions` 响应；socket 关闭时拒绝所有 pending catalog 请求。
+4. `application/connection-manager.ts`：`listSessions(link)` 校验当前 connected link，
+   await 后复核 generation/status/transport identity，旧 generation 不得结算。
+5. `public/errors.ts`：新增 `invalid_response` 与 `list_sessions_failed` 码；
+   `unsupported_catalog` 不落地（shared mux-ready 强制 `targetMessages: true`，缺失能力
+   在握手期拒绝，无可达公开分支，见 DESIGN）。
+
+### 红测优先
+
+- contract：`listSessions` 解析出规范化条目；未连接/已关闭 link 抛 `link_closed`；
+  旧 generation 抛 `stale_generation` 且不结算。
+- real-entry（真实 ws mux）：服务器对 `mux-target-message` `list-sessions` 回同 requestId
+  的 `sessions`；断言返回条目与该次请求期间 `mux-channel-open`/`mux-channel-binary` 计数为 0；
+  错误 requestId 被忽略、错误类型/缺 `sessionCatalog`/缺 `stableId` 抛 `invalid_response`。
+- 先在未实现时运行，取得红测失败原始输出，再改代码。
+
+### 验收
+
+- `pnpm --dir v2/modules/connections test`、`type-check`、`git diff --check` 通过。
+- `.mjs` 入口探针仍 GREEN（依赖 shared 前置时用 detached 组合）。
+- 不宣称 terminal admission 组合完成；daemon consumer 组合与真实双机贯通仍属后续任务。

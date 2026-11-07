@@ -1,6 +1,6 @@
 /** Candidate-to-connection orchestration for the connections module. */
 import { randomUUID } from "node:crypto";
-import { ConnectionError } from "../public/errors";
+import { ConnectionError } from "../public/errors.ts";
 import type {
   ChannelEventHandler,
   ChannelRef,
@@ -12,15 +12,16 @@ import type {
   LinkPath,
   LinkRef,
   LinkState,
+  SessionCatalogEntry,
   TerminalChannelTarget,
-} from "../public/types";
-import { ChannelDispatcher } from "../channels/dispatch";
-import { LinkStore, isCurrentGeneration, type LinkRecord } from "../domain/link-state";
+} from "../public/types.ts";
+import { ChannelDispatcher } from "../channels/dispatch.ts";
+import { LinkStore, isCurrentGeneration, type LinkRecord } from "../domain/link-state.ts";
 import type {
   AccountsAuthorizationPort,
   AuthorizedMachineLink,
-} from "../ports/accounts-authorization";
-import type { TransportCloseInfo, TransportHandle, TransportPort } from "../ports/transport";
+} from "../ports/accounts-authorization.ts";
+import type { TransportCloseInfo, TransportHandle, TransportPort } from "../ports/transport.ts";
 
 export interface ConnectionManagerOptions {
   readonly authorizationPort: AccountsAuthorizationPort;
@@ -54,6 +55,12 @@ function stateForError(code: string): LinkState {
     default:
       return "unreachable";
   }
+}
+
+function peerIdentityMatches(auth: AuthorizedMachineLink, transport: TransportHandle): boolean {
+  return transport.peerIdentity !== null
+    && transport.peerIdentityVerified
+    && transport.peerIdentity === auth.daemonHostId;
 }
 
 export class ConnectionManager {
@@ -146,6 +153,27 @@ export class ConnectionManager {
     if (!active || !isCurrentGeneration(active, generation)) {
       try { transport.close(1000, "superseded"); } catch { /* ignore */ }
       throw new ConnectionError("stale_generation", "link superseded during open", { machineId });
+    }
+
+    if (!peerIdentityMatches(auth, transport)) {
+      let closeCause: unknown;
+      try {
+        transport.close(1000, "peer-identity-mismatch");
+      } catch (error) {
+        closeCause = error;
+      }
+      this.store.update(id, {
+        status: "rejected",
+        path: transport.path,
+        transportKind: transport.transportKind,
+        observedAt: this.now(),
+        errorCode: "peer_identity_mismatch",
+      });
+      throw new ConnectionError(
+        "peer_identity_mismatch",
+        `peer daemon identity ${transport.peerIdentity} does not match ${auth.daemonHostId}`,
+        { machineId, cause: closeCause },
+      );
     }
 
     active.transport = transport;
@@ -268,6 +296,28 @@ export class ConnectionManager {
       throw new ConnectionError("link_closed", `link ${link.id} is not connected`, { machineId: link.machineId });
     }
     record.transport.retryLateOpenClose(channelId);
+  }
+
+  async listSessions(link: LinkRef): Promise<readonly SessionCatalogEntry[]> {
+    const record = this.requireCurrent(link);
+    if (record.status !== "connected" || !record.transport) {
+      throw new ConnectionError("link_closed", `link ${link.id} is not connected`, { machineId: link.machineId });
+    }
+    const sessions = await record.transport.listSessions();
+    // Fence the async read: a superseded or closed link must not hand a stale
+    // transport's catalog to the caller as if it were current truth.
+    const current = this.store.get(link.id);
+    if (
+      !current ||
+      !isCurrentGeneration(current, link.generation) ||
+      current.status !== "connected" ||
+      current.transport !== record.transport
+    ) {
+      throw new ConnectionError("stale_generation", `link ${link.id} changed while reading sessions`, {
+        machineId: link.machineId,
+      });
+    }
+    return sessions;
   }
 
   observeLink(link: LinkRef): LinkObservation {

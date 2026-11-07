@@ -1,9 +1,9 @@
 import type { BridgeSettings } from '../bridge-settings';
-import { resolveBridgeEndpoint } from '../bridge-endpoint';
-import { buildBridgeUrlFromTarget } from '../bridge-url';
-import { isLikelyTailscaleHost } from '../network-target';
-import { isPrivateLanIpv4Host, parseEndpointHost } from './endpoint-host';
-import { DEFAULT_TRAVERSAL_PATH_PRIORITY, normalizeTraversalPathPriority } from './policy';
+import { resolveBridgeEndpoint } from '../bridge-endpoint.ts';
+import { buildBridgeUrlFromTarget } from '../bridge-url.ts';
+import { isLikelyTailscaleHost } from '../network-target.ts';
+import { isPrivateLanIpv4Host, parseEndpointHost } from './endpoint-host.ts';
+import { DEFAULT_TRAVERSAL_PATH_PRIORITY, normalizeTraversalPathPriority } from './policy.ts';
 import type { Host } from '../types';
 import type { RelayEndpointCandidate } from '../relay-directory';
 import type {
