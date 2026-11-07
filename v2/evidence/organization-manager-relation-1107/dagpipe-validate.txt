@@ -1,0 +1,44 @@
+valid DAG: organization.member_manager_assignment@0.1 (5 nodes, 4 edges, 5 waves)
+operator bindings are syntactically present; project compile() remains the authoritative registry/schema/effect gate
+Graph organization.member_manager_assignment@0.1
+Operator bindings:
+  extract.request -> organization.request.extract@0.1
+  authenticate -> accounts.session.verify@0.1
+  authorize_write -> organization.access.authorize_write@0.1
+  validate_relation -> organization.relation.validate@0.1
+  commit_assignment -> organization.store.commit_assignment@0.1
+DAG execution waves:
+  1: extract.request
+  2: authenticate
+  3: authorize_write
+  4: validate_relation
+  5: commit_assignment
+Edges:
+  extract.request --arc.manager_assignment_command--> authenticate
+  authenticate --arc.authenticated_assignment--> authorize_write
+  authorize_write --arc.authorized_assignment--> validate_relation
+  validate_relation --arc.validated_assignment--> commit_assignment
+Note: inspect checks DAG shape only; compile() resolves registered Operators and contracts.
+valid DAG: organization.manager_direct_reports@0.1 (5 nodes, 4 edges, 5 waves)
+operator bindings are syntactically present; project compile() remains the authoritative registry/schema/effect gate
+Graph organization.manager_direct_reports@0.1
+Operator bindings:
+  extract.request -> organization.request.extract@0.1
+  authenticate -> accounts.session.verify@0.1
+  authorize_read -> organization.access.authorize_read@0.1
+  select_direct_reports -> organization.relation.select_direct_reports@0.1
+  project_public_result -> organization.relation.project_result@0.1
+DAG execution waves:
+  1: extract.request
+  2: authenticate
+  3: authorize_read
+  4: select_direct_reports
+  5: project_public_result
+Edges:
+  extract.request --arc.manager_reports_command--> authenticate
+  authenticate --arc.authenticated_manager_query--> authorize_read
+  authorize_read --arc.authorized_manager_query--> select_direct_reports
+  select_direct_reports --arc.visible_direct_reports--> project_public_result
+Note: inspect checks DAG shape only; compile() resolves registered Operators and contracts.
+
+EXIT_CODES=0,0,0,0

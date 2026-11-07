@@ -1,7 +1,30 @@
 # organization 模块设计与执行卡
 
-状态：2026-11-03 V2 organization rework 实现候选。源码、公开 self-check 和
+状态：2026-11-07 manager-memberId 最小实现候选。源码、公开 self-check 和
 聚焦测试已在本任务分支通过；未做最终 review、集成或远端交付。
+
+## 直属管理关系（2026-11-07 David 裁定）
+
+唯一真源与写路径沿组织记录本身，不新增第二关系库、关系框架或 Board 状态。
+`managerMemberId` 是 organization member 记录上的可选可空字段，organization
+拥有该字段。Board 不再从 group 层级猜测管理关系，只能调用组织的公开
+`listDirectReports` 端口。
+
+- 一个成员在同一 workspace 内最多有一个直属 manager（零或一）；没有隐式推导。
+- `addMember`/`updateMember` 接收 `managerMemberId`；`updateMember` 省略该字段
+  保留原值，`null` 清除关系，字符串设置关系。
+- 设置关系必须校验两个端点：manager 与被管理人都是同一 workspace 的现有
+  成员；self 与沿 manager 指针形成的环都拒绝；allowlist 存在时，被管理人和
+  manager 都必须对该调用方可见才允许写。清除或改派已有关系时，旧 manager
+  也必须在授权范围内，否则 typed 拒绝且 relation/revision 不变。省略
+  `managerMemberId` 的 name/group 更新不要求旧 manager 可见。
+- 删除仍持有直属下属的 manager 返回显式 `MANAGER_HAS_DIRECT_REPORTS`
+  conflict，不静默级联；先改派或清除下属关系才能删除。
+- group 移动、mount 都不改写该关系；跨 workspace mount 不隐式创建管理边。
+- `queryTree` 只按既有 member allowlist 可见性暴露 `managerMemberId`；不可见
+  manager 对调用方投影为 `null`，不泄漏 memberId。
+- `updateMember` 的成功 receipt 也按同一可见性投影 `managerMemberId`；不可见
+  manager 投影为 `null`，但持久关系保持不变。
 
 ## 闭合 SESE 图
 
@@ -34,6 +57,15 @@ RESULT -> typed 成功 receipt（含最新 revision）
        -> typed 失败（UNAUTHENTICATED / ORGANIZATION_FORBIDDEN / VALIDATION /
           *_NOT_FOUND / 冲突 / MOUNT_CYCLE / ORGANIZATION_REVISION_STALE /
           STORE_PERSIST_FAILED）
+
+直属管理关系新增两张 SESE 图（`docs/dagpipe/graphs/`，`dagpipe graph validate`
+通过）：
+
+- `member-manager-assignment.graph.json`：写路径
+  提取请求 -> 验证会话 -> 授权写 -> 校验关系（端点/self/环）-> 原子提交。
+- `manager-direct-reports.graph.json`：读路径
+  提取请求 -> 验证会话 -> 授权读与 manager 可见性 -> 选择直属可见成员 ->
+  组装公开结果。
 ```
 
 授权检查在第一次 store access 之前。校验、CAS、冲突或环失败不写入 store，也不返回
@@ -76,11 +108,20 @@ Organization 只保存结构化成员引用，不保存 `machineId`、`hostKind`
 - `createGroup({ token, workspaceId, name, parentGroupId?, expectedRevision })`
 - `updateGroup({ token, workspaceId, groupId, name?, parentGroupId?, expectedRevision })`
 - `deleteGroup({ token, workspaceId, groupId, expectedRevision })`
-- `addMember({ token, workspaceId, groupId, name, expectedRevision })`
-- `updateMember({ token, workspaceId, memberId, name?, groupId?, expectedRevision })`
+- `addMember({ token, workspaceId, groupId, name, managerMemberId?, expectedRevision })`
+- `updateMember({ token, workspaceId, memberId, name?, groupId?, managerMemberId?, expectedRevision })`
 - `deleteMember({ token, workspaceId, memberId, expectedRevision })`
 - `mountWorkspace({ token, workspaceId, parentGroupId, sourceWorkspaceId, name?, expectedRevision })`
 - `unmountWorkspace({ token, workspaceId, mountId, expectedRevision })`
+
+读取（直属管理关系）：
+
+- `listDirectReports({ token, workspaceId, managerMemberId }) -> { workspaceId, managerMemberId, directMemberIds, revision }`
+  - 需要 `org:read` 和 workspace access。
+  - manager 必须在 workspace 中存在，且按调用方 member allowlist 可见。
+  - 只返回 `managerMemberId` 等于给定 manager 且对调用方可见的直属成员 ID；
+    无关系返回空数组，不泄漏不可见成员 ID。
+  - `revision` 与当前 workspace 结构 revision 一致。
 
 成功 mutation receipt：
 
@@ -104,7 +145,7 @@ Organization 只保存结构化成员引用，不保存 `machineId`、`hostKind`
 ```text
 workspace = { workspaceId, name, rootGroupId, revision }
 group = { groupId, workspaceId, parentGroupId, name, path }
-member = { memberId, workspaceId, groupId, name }
+member = { memberId, workspaceId, groupId, name, managerMemberId }
 mount = { mountId, workspaceId, groupId, sourceWorkspaceId, name }
 ```
 
@@ -142,6 +183,8 @@ Store 只在单个 organization authority 中持久化上述数据。写入先�
 - mount source 必须是已存在 workspace；self 和 source-to-target 可达环都拒绝。
 - 同父完全相同的 mount source 拒绝为 `MOUNT_CONFLICT`。
 - `unmountWorkspace` 只删除 mount reference。
+- `managerMemberId` 指向同一 workspace 的成员；self 和沿 manager 指针的环拒绝。
+- 删除仍有直属下属的 manager 拒绝为 `MANAGER_HAS_DIRECT_REPORTS`。
 
 ## 错误码
 
@@ -157,6 +200,7 @@ Store 只在单个 organization authority 中持久化上述数据。写入先�
 - `MOUNT_CONFLICT`
 - `MOUNT_CYCLE`
 - `STORE_PERSIST_FAILED`
+- `MANAGER_HAS_DIRECT_REPORTS`
 
 ## 文件结构
 
@@ -177,6 +221,7 @@ organization/
 
 ```sh
 node --test v2/modules/organization/tests/organization.test.mjs
+node --test v2/modules/organization/tests/manager-relation.test.mjs
 node v2/evidence/zterm-v2-organization-impl-1103/self-check.mjs
 ```
 
