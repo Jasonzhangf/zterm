@@ -31,7 +31,7 @@ stderr | src/server/terminal-message-runtime.test.ts > terminal message runtime 
  FAIL  src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > advertises the current daemon host identity in mux-ready
 AssertionError: expected [ { type: 'mux-ready', …(1) } ] to deep equally contain { type: 'mux-ready', …(1) }
 
-- Expected: 
+- Expected:
 Object {
   "payload": ObjectContaining {
     "daemonHostId": "daemon-wire-identity",
@@ -39,7 +39,7 @@ Object {
   "type": "mux-ready",
 }
 
-+ Received: 
++ Received:
 Array [
   Object {
     "payload": Object {
@@ -64,7 +64,7 @@ Array [
 
  ❯ src/server/terminal-message-runtime.test.ts:577:40
     575|     })));
-    576| 
+    576|
     577|     expect(sentTextFrames(connection)).toContainEqual({
        |                                        ^
     578|       type: 'mux-ready',
@@ -181,4 +181,3 @@ Error: zterm-dagpipe native module missing; expected one of: /Volumes/Intel/play
       Tests  7 failed | 61 passed (68)
    Start at  01:21:20
    Duration  557ms (transform 218ms, setup 10ms, collect 246ms, tests 77ms, environment 0ms, prepare 71ms)
-

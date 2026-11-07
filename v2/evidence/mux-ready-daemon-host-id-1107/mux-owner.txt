@@ -7,4 +7,3 @@
       Tests  6 passed (6)
    Start at  01:29:09
    Duration  470ms (transform 140ms, setup 9ms, collect 160ms, tests 4ms, environment 0ms, prepare 54ms)
-
