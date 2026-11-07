@@ -1,7 +1,7 @@
-import { DEFAULT_TERMINAL_CACHE_LINES, WTERM_CONFIG_DISPLAY_PATH } from './mobile-config';
-import { isLikelyTailscaleHost } from './network-target';
-import { DEFAULT_BRIDGE_PORT } from './mobile-config';
-import { DEFAULT_TERMINAL_THEME_ID, normalizeTerminalThemeId, type TerminalThemeId } from '../terminal/theme';
+import { DEFAULT_TERMINAL_CACHE_LINES, WTERM_CONFIG_DISPLAY_PATH } from './mobile-config.ts';
+import { isLikelyTailscaleHost } from './network-target.ts';
+import { DEFAULT_BRIDGE_PORT } from './mobile-config.ts';
+import { DEFAULT_TERMINAL_THEME_ID, normalizeTerminalThemeId, type TerminalThemeId } from '../terminal/theme.ts';
 import {
   buildBridgeEndpointKey,
   formatBridgeEndpointLabel,

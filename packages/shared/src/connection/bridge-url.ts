@@ -1,6 +1,6 @@
 import type { Host } from './types';
-import { DEFAULT_BRIDGE_PORT } from './mobile-config';
-import { resolveBridgeEndpoint } from './bridge-endpoint';
+import { DEFAULT_BRIDGE_PORT } from './mobile-config.ts';
+import { resolveBridgeEndpoint } from './bridge-endpoint.ts';
 
 interface BridgeTargetLike {
   bridgeHost: string;

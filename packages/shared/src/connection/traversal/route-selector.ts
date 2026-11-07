@@ -1,4 +1,4 @@
-import { DEFAULT_TRAVERSAL_PATH_PRIORITY, normalizeTraversalPathPriority } from './policy';
+import { DEFAULT_TRAVERSAL_PATH_PRIORITY, normalizeTraversalPathPriority } from './policy.ts';
 import type {
   TraversalPlanCandidate,
   TraversalResolvedPath,

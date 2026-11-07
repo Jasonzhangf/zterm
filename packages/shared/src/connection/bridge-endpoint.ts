@@ -1,4 +1,4 @@
-import { DEFAULT_BRIDGE_PORT } from './mobile-config';
+import { DEFAULT_BRIDGE_PORT } from './mobile-config.ts';
 
 export interface BridgeEndpointLike {
   bridgeHost: string;
