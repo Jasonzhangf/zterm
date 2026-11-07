@@ -1,0 +1,25 @@
+$ node --test v2/modules/goals/tests/contract/goals.test.mjs
+exit 0
+
+TAP version 13
+# Subtest: creates, reads back, updates, lists, and reopens a stable goal from the public port
+ok 1 - creates, reads back, updates, lists, and reopens a stable goal from the public port
+# Subtest: rejects cross-workspace goal actions before returning target data
+ok 2 - rejects cross-workspace goal actions before returning target data
+# Subtest: rejects duplicate names under one parent and invalid owner or hierarchy references
+ok 3 - rejects duplicate names under one parent and invalid owner or hierarchy references
+# Subtest: updateGoal rejects explicit null or empty name without changing the stored goal
+ok 4 - updateGoal rejects explicit null or empty name without changing the stored goal
+# Subtest: deletion is allowed only for an unreferenced leaf and never creates orphan tickets
+ok 5 - deletion is allowed only for an unreferenced leaf and never creates orphan tickets
+# Subtest: typed authorization failures do not echo the supplied bearer token
+ok 6 - typed authorization failures do not echo the supplied bearer token
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 169.192833

@@ -1,0 +1,14 @@
+$ node --check v2/modules/goals/src/adapters/file-goal-store.mjs
+exit 0
+$ node --check v2/modules/goals/src/application/goal-service.mjs
+exit 0
+$ node --check v2/modules/goals/src/domain/goal.mjs
+exit 0
+$ node --check v2/modules/goals/src/ports/goal-store.mjs
+exit 0
+$ node --check v2/modules/goals/src/public/errors.mjs
+exit 0
+$ node --check v2/modules/goals/src/public/index.mjs
+exit 0
+$ node --check v2/modules/goals/tests/contract/goals.test.mjs
+exit 0
