@@ -449,6 +449,33 @@ test("closing one of two pending subscribers keeps the shared open until the las
   assert.equal(entryFor(terminal), undefined);
 });
 
+test("attach holds a temporary lease while the shared subscriber leaves", async (t) => {
+  const { mux, terminal } = makeHarness({ deferredOpen: true });
+  t.after(() => terminal.close());
+
+  const subscription = await terminal.subscribe(TARGET, () => {});
+  const entry = entryFor(terminal);
+  const channelId = entry.channelId;
+  const attachPromise = terminal.attach(TARGET);
+  await flushMicrotasks();
+
+  subscription.close();
+  assert.deepEqual(
+    mux.cancelOpenCalls,
+    [],
+    "attach must keep the shared pending open alive after the subscriber leaves",
+  );
+  assert.equal(entryFor(terminal), entry);
+
+  mux.resolveOpen(channelId);
+  await flushMicrotasks();
+  const attachment = await attachPromise;
+
+  assert.equal(attachment.value.channelId, channelId, "attach must settle on the shared open");
+  assert.equal(mux.channel(channelId).closed, true, "attach must release its last temporary lease");
+  assert.equal(entry.closed, true);
+});
+
 test("a late open after cancellation closes the channel and cannot revive the target", async (t) => {
   const { mux, terminal } = makeHarness({ deferredOpen: true });
   t.after(() => terminal.close());

@@ -254,13 +254,40 @@ test("one pending HTTP subscriber disconnect keeps the shared open for the other
   await new Promise((resolve) => setTimeout(resolve, 30));
   assert.deepEqual(mux.cancelOpenCalls, []);
   assert.equal(terminal.targets.get("tmux:v1:target"), entry);
-
-  second.close();
-  await waitFor(() => mux.cancelOpenCalls.length === 1);
-  assert.deepEqual(mux.cancelOpenCalls, [channelId]);
-  assert.equal(terminal.targets.get("tmux:v1:target"), undefined);
   assert.doesNotMatch(first.text(), /event: ready/u);
   assert.doesNotMatch(second.text(), /event: ready/u);
+
+  mux.resolveOpen(channelId);
+  await waitFor(() => second.text().includes("event: ready"));
+  mux.emit(channelId, {
+    type: "buffer-sync",
+    payload: {
+      revision: 1,
+      startIndex: 0,
+      endIndex: 1,
+      frameStartIndex: 0,
+      frameEndIndex: 1,
+      frameChunkIndex: 0,
+      frameChunkCount: 1,
+      cols: 8,
+      rows: 1,
+      cursor: { rowIndex: 0, col: 0, visible: true },
+      lines: [
+        {
+          index: 0,
+          cells: [{ char: "s".codePointAt(0), fg: 256, bg: 256, flags: 0, width: 1 }],
+        },
+      ],
+    },
+  });
+  await waitFor(() => second.text().includes('"revision":1'));
+  assert.doesNotMatch(first.text(), /event: ready/u, "the disconnected subscriber must stay closed");
+  assert.equal(mux.cancelOpenCalls.length, 0, "the shared open must not be cancelled");
+
+  second.close();
+  await waitFor(() => mux.closedChannelIds.includes(channelId));
+  assert.deepEqual(mux.cancelOpenCalls, []);
+  assert.equal(terminal.targets.get("tmux:v1:target"), undefined);
 });
 
 test("an established stream closes its subscription exactly once", async (t) => {

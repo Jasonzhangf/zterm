@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createV1MuxClient } from "../src/v1-mux-client.mjs";
+import { TerminalPort } from "../src/terminal-port.mjs";
 
 const OPEN = 1;
 
 class FakeWebSocket {
-  constructor(url, { openDelayMs = 0, handshakeDelayMs = 0 } = {}) {
+  constructor(url, { openDelayMs = 0, handshakeDelayMs = 0, sessions = ["late-open"] } = {}) {
     this.url = url;
+    this.sessions = sessions;
     this.readyState = 0;
     this.sent = [];
     this.failSend = null;
@@ -57,6 +59,27 @@ class FakeWebSocket {
           },
         });
       }, this.openDelayMs);
+    } else if (frame.type === "mux-target-message") {
+      const requestId = frame.payload.requestId;
+      queueMicrotask(() => {
+        this.emit({
+          type: "mux-target-message",
+          payload: {
+            requestId,
+            message: {
+              type: "list-sessions",
+              payload: {
+                sessions: this.sessions,
+                sessionCatalog: this.sessions.map((name) => ({
+                  name,
+                  backend: "tmux",
+                  stableId: `tmux:v1:${name}`,
+                })),
+              },
+            },
+          },
+        });
+      });
     }
   }
 
@@ -67,6 +90,9 @@ class FakeWebSocket {
   }
 
   close(code = 1000) {
+    if (this.readyState === 3) {
+      return;
+    }
     this.readyState = 3;
     if (this.onclose) {
       this.onclose({ code });
@@ -133,6 +159,22 @@ function openChannel(client, ws, sessionName = "s", options = {}) {
     channelId: frame.payload.channelId,
     frame,
   };
+}
+
+function makePort(ws, options = {}) {
+  function BoundSocket() {
+    return ws;
+  }
+  BoundSocket.OPEN = OPEN;
+  const client = createV1MuxClient({
+    wsUrl: ws.url,
+    WebSocketImpl: BoundSocket,
+    requestTimeoutMs: options.requestTimeoutMs ?? 30,
+    handshakeTimeoutMs: options.handshakeTimeoutMs ?? 50,
+    log: () => {},
+  });
+  const port = new TerminalPort({ muxClient: client, log: () => {} });
+  return { port, client };
 }
 
 test("default bounded open still rejects on timeout and releases via late close", async (t) => {
@@ -245,6 +287,14 @@ test("persistent open can be cancelled by user and late open is ignored", async 
     payload: { channelId, sessionName: "late-after-cancel", stableId: "tmux:v1:stale" },
   });
   await sleep(0);
+  const lateReleaseFrames = ws.sent.filter(
+    (frame) => frame.type === "mux-channel-close" && frame.payload.channelId === channelId,
+  );
+  assert.equal(
+    lateReleaseFrames.length,
+    2,
+    "a late mux-channel-opened after cancel must be released again through the late-open close path",
+  );
   assert.throws(
     () => client.subscribeChannel(channelId, () => {}),
     (error) => error && error.code === "V1_CHANNEL_CLOSED",
@@ -390,4 +440,68 @@ test("late callbacks from an old socket cannot shutdown or mutate a new socket g
   firstWs.onclose({ code: 1006 });
   await sleep(0);
   assert.equal(client.getState(), "ready", "late old socket close must not shutdown the new socket");
+});
+
+test("TerminalPort cancels a pending open and releases a real late mux-channel-opened", async (t) => {
+  const ws = new FakeWebSocket("ws://test", { openDelayMs: -1, sessions: ["late-open"] });
+  const { port, client } = makePort(ws);
+  t.after(() => client.close());
+  await client.connect();
+
+  const frames = [];
+  const subscription = await port.subscribe("late-open", (frame) => frames.push(frame));
+  const entry = port.targets.get("tmux:v1:late-open");
+  const channelId = entry.channelId;
+
+  subscription.close();
+  await sleep(0);
+  ws.emit({
+    type: "mux-channel-opened",
+    payload: { channelId, sessionName: "late-open", stableId: "tmux:v1:late-open" },
+  });
+  await sleep(0);
+
+  assert.deepEqual(port.targets.get("tmux:v1:late-open"), undefined, "late open must not revive the target");
+  assert.equal(frames.length, 0, "a cancelled target must not commit frames");
+  const releaseFrames = ws.sent.filter(
+    (frame) => frame.type === "mux-channel-close" && frame.payload.channelId === channelId,
+  );
+  assert.equal(
+    releaseFrames.length,
+    2,
+    "cancel and the real late open must both be released on the wire",
+  );
+
+  ws.openDelayMs = 0;
+  const next = await port.subscribe("late-open", () => {});
+  t.after(() => next.close());
+  const nextEntry = port.targets.get("tmux:v1:late-open");
+  assert.notEqual(nextEntry.channelId, channelId, "a new generation must use a new channel");
+  assert.equal(client.getState(), "ready");
+});
+
+test("a real late-open close send failure after cancel is observable", async (t) => {
+  const ws = new FakeWebSocket("ws://test", { openDelayMs: -1, sessions: ["late-close-fail"] });
+  const { port, client } = makePort(ws);
+  t.after(() => client.close());
+  await client.connect();
+
+  const failures = [];
+  port.onChannelCloseFailure((error) => failures.push(error));
+
+  const subscription = await port.subscribe("late-close-fail", () => {});
+  const channelId = port.targets.get("tmux:v1:late-close-fail").channelId;
+  subscription.close();
+  await sleep(0);
+
+  ws.failSend = new Error("injected late-close failure");
+  ws.emit({
+    type: "mux-channel-opened",
+    payload: { channelId, sessionName: "late-close-fail", stableId: "tmux:v1:late-close-fail" },
+  });
+  await sleep(0);
+
+  assert.equal(failures.length, 1, "late-open close failure must be observable");
+  assert.equal(failures[0].channelId, channelId);
+  assert.equal(failures[0].code, "V1_CHANNEL_CLOSE_FAILED");
 });

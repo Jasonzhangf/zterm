@@ -452,8 +452,14 @@ export class TerminalPort {
   async attach(target) {
     const session = await this.resolveSession(target);
     const entry = await this.ensureTarget(session);
-    const channel = await this.awaitChannel(entry);
-    return observation("v1-mux", { target: entry.session.name, channelId: channel.channelId, stableId: entry.session.stableId || null });
+    entry.leases += 1;
+    try {
+      const channel = await this.awaitChannel(entry);
+      return observation("v1-mux", { target: entry.session.name, channelId: channel.channelId, stableId: entry.session.stableId || null });
+    } finally {
+      entry.leases -= 1;
+      this.maybeCloseTarget(entry);
+    }
   }
 
   async subscribe(target, listener, options = {}) {

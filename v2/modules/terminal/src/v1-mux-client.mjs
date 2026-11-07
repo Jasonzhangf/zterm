@@ -633,6 +633,11 @@ export function createV1MuxClient(options = {}) {
       return false;
     }
     pendingOpens.delete(channelId);
+    // A cancelled open can still complete on the wire. Keep the exact identity
+    // so a late mux-channel-opened is released through the existing late-open
+    // close path instead of being silently discarded while the remote keeps an
+    // open channel.
+    lateOpenChannelIds.add(channelId);
     clearTimer(pending.timer);
     pending.timer = null;
     const cancelError = muxError("V1_CHANNEL_OPEN_CANCELLED", "V1 mux channel open was cancelled by the client.");
