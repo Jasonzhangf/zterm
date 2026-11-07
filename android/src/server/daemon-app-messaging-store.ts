@@ -97,6 +97,7 @@ export type AppDeliveryRecord = {
   deliveryRef: AppDeliveryRef;
   target: AppDeliveryTarget;
   kind: 'message';
+  v1MessageId?: string;
   subject?: string;
   body: string;
   durableStage: AppDeliveryStage;

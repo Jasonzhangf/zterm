@@ -1,0 +1,10 @@
+
+ RUN  v1.6.1 /Volumes/Intel/playground/zterm/worktrees/app-messaging-readback-public-edge-20261107/android
+
+ ✓ src/server/daemon-app-messaging-public.test.ts  (16 tests) 371ms
+
+ Test Files  1 passed (1)
+      Tests  16 passed (16)
+   Start at  14:20:37
+   Duration  978ms (transform 82ms, setup 13ms, collect 78ms, tests 371ms, environment 0ms, prepare 327ms)
+

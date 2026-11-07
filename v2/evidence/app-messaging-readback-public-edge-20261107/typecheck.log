@@ -1,0 +1,9 @@
+
+> @zterm/android@0.1.5 type-check /Volumes/Intel/playground/zterm/worktrees/app-messaging-readback-public-edge-20261107/android
+> pnpm run check:no-source-js-pollution && tsc --noEmit
+
+
+> @zterm/android@0.1.5 check:no-source-js-pollution /Volumes/Intel/playground/zterm/worktrees/app-messaging-readback-public-edge-20261107/android
+> node ./scripts/check-no-source-js-pollution.mjs
+
+[source-js-pollution] clean
