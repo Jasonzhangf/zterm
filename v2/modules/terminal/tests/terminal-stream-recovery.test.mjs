@@ -42,19 +42,41 @@ function channelClosed(reason = "server closed") {
   return { type: "mux-channel-closed", payload: { reason } };
 }
 
-function createFakeMux() {
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+function createFakeMux(options = {}) {
   const sessions = [
     { name: TARGET, backend: "tmux", stableId: "tmux:v1:unit" },
     { name: OTHER_TARGET, backend: "tmux", stableId: "tmux:v1:other" },
   ];
   const channels = new Map();
+  const pendingOpens = new Map();
   const wire = [];
   const closeListeners = new Set();
   const channelCloseFailureListeners = new Set();
+  const cancelOpenCalls = [];
+  const closedChannelIds = [];
   let nextChannel = 0;
+  let lastOpenChannelId = null;
 
   return {
     wire,
+    cancelOpenCalls,
+    closedChannelIds,
+    get pendingOpenCount() {
+      return pendingOpens.size;
+    },
+    get lastOpenChannelId() {
+      return lastOpenChannelId;
+    },
     opens: 0,
     closes: 0,
     failNextSend: null,
@@ -70,8 +92,9 @@ function createFakeMux() {
         },
       };
     },
-    async openChannel(input) {
+    openChannel(input) {
       const channelId = `channel-${++nextChannel}`;
+      lastOpenChannelId = channelId;
       const channel = {
         channelId,
         sessionName: input.sessionName,
@@ -84,7 +107,27 @@ function createFakeMux() {
       };
       channels.set(channelId, channel);
       this.opens += 1;
-      return { ...channel };
+      if (!options.deferredOpen) {
+        const opened = Promise.resolve({ ...channel });
+        opened.channelId = channelId;
+        return opened;
+      }
+      const open = deferred();
+      open.promise.channelId = channelId;
+      pendingOpens.set(channelId, { channel, open });
+      return open.promise;
+    },
+    resolveOpen(channelId) {
+      const pending = pendingOpens.get(channelId);
+      if (!pending) {
+        throw new Error(`unknown pending open ${channelId}`);
+      }
+      pendingOpens.delete(channelId);
+      pending.open.resolve({ ...pending.channel });
+    },
+    cancelOpenChannel(channelId) {
+      cancelOpenCalls.push(channelId);
+      return pendingOpens.has(channelId);
     },
     subscribeChannel(channelId, listener) {
       const channel = channels.get(channelId);
@@ -110,6 +153,7 @@ function createFakeMux() {
     closeChannel(channelId, reason) {
       const channel = channels.get(channelId);
       this.closes += 1;
+      closedChannelIds.push(channelId);
       if (channel) {
         channel.closed = true;
         channel.closeReason = reason;
@@ -140,8 +184,8 @@ function createFakeMux() {
   };
 }
 
-function makeHarness() {
-  const mux = createFakeMux();
+function makeHarness(options = {}) {
+  const mux = createFakeMux(options);
   const terminal = new TerminalPort({ muxClient: mux, log: () => {} });
   return { mux, terminal };
 }
@@ -368,4 +412,84 @@ test("closing one target does not release another target channel", async (t) => 
   await flushMicrotasks();
   assert.equal(otherFrames.length, 2, "another target must keep its channel and subscriber");
   assert.equal(terminal.targets.get("tmux:v1:other").closed, false);
+});
+
+test("closing the last subscriber cancels its pending open exactly once", async (t) => {
+  const { mux, terminal } = makeHarness({ deferredOpen: true });
+  t.after(() => terminal.close());
+
+  const subscription = await terminal.subscribe(TARGET, () => {});
+  const entry = entryFor(terminal);
+  const channelId = entry.channelId;
+  assert.equal(entry.channel, null);
+
+  subscription.close();
+
+  assert.deepEqual(mux.cancelOpenCalls, [channelId]);
+  assert.equal(entryFor(terminal), undefined, "the cancelled pending target must leave the registry");
+  assert.equal(entry.closed, true);
+  assert.equal(entry.openCancelled, true);
+});
+
+test("closing one of two pending subscribers keeps the shared open until the last subscriber leaves", async (t) => {
+  const { mux, terminal } = makeHarness({ deferredOpen: true });
+  t.after(() => terminal.close());
+
+  const first = await terminal.subscribe(TARGET, () => {});
+  const second = await terminal.subscribe(TARGET, () => {});
+  const entry = entryFor(terminal);
+  const channelId = entry.channelId;
+
+  first.close();
+  assert.deepEqual(mux.cancelOpenCalls, []);
+  assert.equal(entryFor(terminal), entry, "the remaining subscriber must keep the pending target alive");
+
+  second.close();
+  assert.deepEqual(mux.cancelOpenCalls, [channelId]);
+  assert.equal(entryFor(terminal), undefined);
+});
+
+test("a late open after cancellation closes the channel and cannot revive the target", async (t) => {
+  const { mux, terminal } = makeHarness({ deferredOpen: true });
+  t.after(() => terminal.close());
+
+  const frames = [];
+  const subscription = await terminal.subscribe(TARGET, (frame) => frames.push(frame));
+  const entry = entryFor(terminal);
+  const channelId = entry.channelId;
+
+  subscription.close();
+  mux.resolveOpen(channelId);
+  await flushMicrotasks();
+
+  assert.equal(entryFor(terminal), undefined, "a late open must not reinsert the cancelled target");
+  assert.equal(entry.channel, null);
+  assert.equal(entry.closed, true);
+  assert.equal(mux.channel(channelId).closed, true, "the late channel must be released");
+  assert.equal(frames.length, 0);
+});
+
+test("cancelling one pending target open does not affect another target", async (t) => {
+  const { mux, terminal } = makeHarness({ deferredOpen: true });
+  t.after(() => terminal.close());
+
+  const otherFrames = [];
+  const targetSub = await terminal.subscribe(TARGET, () => {});
+  const otherSub = await terminal.subscribe(OTHER_TARGET, (frame) => otherFrames.push(frame));
+  const targetEntry = entryFor(terminal);
+  const otherEntry = terminal.targets.get("tmux:v1:other");
+
+  mux.resolveOpen(otherEntry.channelId);
+  await flushMicrotasks();
+
+  targetSub.close();
+  assert.deepEqual(mux.cancelOpenCalls, [targetEntry.channelId]);
+  assert.equal(terminal.targets.get("tmux:v1:other"), otherEntry);
+  assert.equal(otherEntry.closed, false);
+
+  mux.emit(otherEntry.channelId, bufferSync(framePayload({ revision: 1, textLines: ["oo", "pp"] })));
+  await flushMicrotasks();
+  assert.equal(otherFrames.length, 1, "the other target must keep its open channel and frames");
+
+  otherSub.close();
 });

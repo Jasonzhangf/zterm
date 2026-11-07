@@ -209,51 +209,119 @@ export class TerminalPort {
     return match;
   }
 
-  async ensureTarget(session) {
+  ensureTarget(session) {
     const key = targetKey(session);
     const existing = this.targets.get(key);
-    if (existing && existing.channel) {
+    if (existing) {
       return existing;
     }
-    if (existing && existing.opening) {
-      return existing.opening;
+    const runtime = createTerminalBufferRenderRuntime();
+    const entry = {
+      key,
+      session,
+      channel: null,
+      runtime,
+      subscribers: new Set(),
+      leases: 0,
+      lastFrame: null,
+      lastHead: null,
+      closed: false,
+      unsubscribe: null,
+      openCancelled: false,
+    };
+    const openPromise = this.client.openChannel({
+      sessionName: session.name,
+      backend: session.backend,
+      stableId: session.stableId,
+      bodySubscribed: true,
+      widthMode: "mirror-fixed",
+      waitMode: "persistent",
+    });
+    entry.channelId = openPromise.channelId;
+    entry.openPromise = openPromise;
+    entry.openWaiters = [];
+    this.targets.set(key, entry);
+    entry.openPromise.then((channel) => {
+      this.handleChannelOpened(entry, channel);
+    }, (error) => {
+      this.failTargetOpen(entry, error);
+    });
+    return entry;
+  }
+
+  handleChannelOpened(entry, channel) {
+    if (entry.closed || entry.openCancelled || this.targets.get(entry.key) !== entry) {
+      try {
+        this.client.closeChannel(channel.channelId, "v2 target released before open");
+      } catch {}
+      return;
     }
-    const openPromise = (async () => {
-      const runtime = createTerminalBufferRenderRuntime();
-      const channel = await this.client.openChannel({
-        sessionName: session.name,
-        backend: session.backend,
-        stableId: session.stableId,
-        bodySubscribed: true,
-        widthMode: "mirror-fixed",
-      });
-      const entry = {
-        key,
-        session,
-        channel,
-        runtime,
-        subscribers: new Set(),
-        leases: 0,
-        lastFrame: null,
-        lastHead: null,
-        closed: false,
-        unsubscribe: null,
-      };
-      entry.unsubscribe = this.client.subscribeChannel(channel.channelId, (message) => {
-        this.handleChannelMessage(entry, message);
-      });
-      this.log({ event: "terminal.target.opened", target: session.name, channelId: channel.channelId, stableId: session.stableId || null });
-      return entry;
-    })();
-    this.targets.set(key, { opening: openPromise });
-    try {
-      const entry = await openPromise;
-      this.targets.set(key, entry);
-      return entry;
-    } catch (error) {
-      this.targets.delete(key);
-      throw error;
+    entry.channel = channel;
+    entry.unsubscribe = this.client.subscribeChannel(channel.channelId, (message) => {
+      this.handleChannelMessage(entry, message);
+    });
+    for (const waiter of entry.openWaiters.splice(0, entry.openWaiters.length)) {
+      waiter.resolve(entry);
     }
+    this.log({
+      event: "terminal.target.opened",
+      target: entry.session.name,
+      channelId: channel.channelId,
+      stableId: entry.session.stableId || null,
+    });
+  }
+
+  failTargetOpen(entry, error) {
+    if (entry.openFailed) {
+      return;
+    }
+    entry.openFailed = true;
+    if (this.targets.get(entry.key) === entry) {
+      this.targets.delete(entry.key);
+    }
+    for (const subscriber of entry.subscribers) {
+      try {
+        subscriber.onError?.(error);
+      } catch {}
+    }
+    for (const waiter of entry.openWaiters.splice(0, entry.openWaiters.length)) {
+      waiter.reject(error);
+    }
+  }
+
+  awaitTargetOpen(entry) {
+    if (entry.channel) {
+      return Promise.resolve(entry);
+    }
+    return new Promise((resolve, reject) => {
+      entry.openWaiters.push({ resolve, reject });
+    });
+  }
+
+  async awaitChannel(entry) {
+    if (entry.channel) {
+      return entry.channel;
+    }
+    if (entry.openCancelled) {
+      throw new TypedError({
+        code: "TERMINAL_CHANNEL_CLOSED",
+        owningModule: "terminal",
+        operationId: "awaitChannel",
+        cause: "The channel open was cancelled.",
+        message: "The terminal channel is closed.",
+      });
+    }
+    await this.awaitTargetOpen(entry);
+    if (!entry.channel || entry.openCancelled || entry.closed) {
+      throw new TypedError({
+        code: "TERMINAL_CHANNEL_CLOSED",
+        owningModule: "terminal",
+        operationId: "awaitChannel",
+        cause: "The channel open was cancelled.",
+        message: "The terminal channel is closed.",
+      });
+    }
+    return entry.channel;
   }
 
   handleChannelMessage(entry, message) {
@@ -384,7 +452,8 @@ export class TerminalPort {
   async attach(target) {
     const session = await this.resolveSession(target);
     const entry = await this.ensureTarget(session);
-    return observation("v1-mux", { target: entry.session.name, channelId: entry.channel.channelId, stableId: entry.session.stableId || null });
+    const channel = await this.awaitChannel(entry);
+    return observation("v1-mux", { target: entry.session.name, channelId: channel.channelId, stableId: entry.session.stableId || null });
   }
 
   async subscribe(target, listener, options = {}) {
@@ -405,7 +474,10 @@ export class TerminalPort {
         } catch {}
       });
     }
+    const ready = this.awaitTargetOpen(entry);
+    ready.catch(() => {});
     return {
+      ready,
       close: () => {
         this.releaseSubscriber(entry, subscriber);
       },
@@ -420,18 +492,42 @@ export class TerminalPort {
   }
 
   maybeCloseTarget(entry) {
+    if (this.targets.get(entry.key) !== entry) {
+      return;
+    }
     if (entry.subscribers.size > 0 || entry.leases > 0 || entry.closed) {
       return;
     }
+
     entry.closed = true;
+    entry.openCancelled = !entry.channel;
+    if (entry.openCancelled) {
+      const error = new TypedError({
+        code: "TERMINAL_CHANNEL_CLOSED",
+        owningModule: "terminal",
+        operationId: "subscribe",
+        cause: "The channel open was cancelled.",
+        message: "The terminal channel is closed.",
+      });
+      for (const waiter of entry.openWaiters.splice(0, entry.openWaiters.length)) {
+        waiter.reject(error);
+      }
+    }
     if (entry.unsubscribe) {
       entry.unsubscribe();
     }
     if (this.targets.get(entry.key) === entry) {
       this.targets.delete(entry.key);
     }
-    this.client.closeChannel(entry.channel.channelId, "v2 last subscriber closed");
-    this.log({ event: "terminal.target.closed", target: entry.session.name, channelId: entry.channel.channelId });
+    if (entry.channel) {
+      this.client.closeChannel(entry.channel.channelId, "v2 last subscriber closed");
+      this.log({ event: "terminal.target.closed", target: entry.session.name, channelId: entry.channel.channelId });
+    } else if (entry.channelId) {
+      try {
+        this.client.cancelOpenChannel(entry.channelId);
+      } catch {}
+      this.log({ event: "terminal.target.open.cancelled", target: entry.session.name, channelId: entry.channelId });
+    }
   }
 
   async input(target, data) {
@@ -448,10 +544,11 @@ export class TerminalPort {
     const entry = await this.ensureTarget(session);
     entry.leases += 1;
     try {
-      this.client.sendChannelMessage(entry.channel.channelId, { type: "input", payload: data });
+      const channel = await this.awaitChannel(entry);
+      this.client.sendChannelMessage(channel.channelId, { type: "input", payload: data });
       return {
         target: entry.session.name,
-        channelId: entry.channel.channelId,
+        channelId: channel.channelId,
         source: "v1-mux",
         deliveredAt: nowIso(),
       };
@@ -487,12 +584,20 @@ export class TerminalPort {
 
   async close() {
     for (const entry of Array.from(this.targets.values())) {
-      if (entry && entry.channel) {
-        entry.closed = true;
-        if (entry.unsubscribe) {
-          entry.unsubscribe();
-        }
+      if (!entry) {
+        continue;
+      }
+      entry.closed = true;
+      entry.openCancelled = !entry.channel;
+      if (entry.unsubscribe) {
+        entry.unsubscribe();
+      }
+      if (entry.channel) {
         this.client.closeChannel(entry.channel.channelId, "v2 daemon closing");
+      } else if (entry.channelId) {
+        try {
+          this.client.cancelOpenChannel(entry.channelId);
+        } catch {}
       }
     }
     this.targets.clear();

@@ -394,6 +394,9 @@ async function streamTerminal(request, response, context, url) {
         finish();
       },
     });
+    if (!closed && subscription?.ready) {
+      await subscription.ready;
+    }
   } catch (error) {
     if (closed) {
       context.log({

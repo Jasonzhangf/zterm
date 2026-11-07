@@ -480,7 +480,7 @@ export function createV1MuxClient(options = {}) {
       return Promise.reject(muxError("V1_INVALID_OPEN_WAIT_MODE", `Unsupported V1 mux open wait mode: ${waitMode}.`));
     }
     const channelId = `${++channelSeq}:${clientInstanceId}`;
-    return new Promise((resolve, reject) => {
+    const openPromise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         if (waitMode === "persistent") {
           clearTimer(timer);
@@ -536,6 +536,8 @@ export function createV1MuxClient(options = {}) {
         reject(error);
       }
     });
+    openPromise.channelId = channelId;
+    return openPromise;
   }
 
   function closeChannel(channelId, reason = "client close") {
