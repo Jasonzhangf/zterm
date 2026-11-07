@@ -21,3 +21,18 @@ Sequence: record red evidence, implement the smallest public read-back edge, run
 - Remaining gap: none for the public facade scope. Delivery-side adapter wiring
   and wire consumers are out of scope and remain with the delivery worktree.
 - Next: commit the scoped changes and evidence on this branch; no push/merge/PR.
+
+## Review pre-delivery fixes
+
+- Jenny's `git diff --check` whitespace findings (trailing whitespace in
+  red-readback.log, EOF blank lines in green-readback.log and focused-suite.log)
+  are fixed. Log contents are unchanged apart from whitespace; no test was
+  rerun because the original receipts remain valid.
+- David's evidence-path finding: result.md now lists the absolute evidence
+  directory, every referenced log/script, and the exact reproduction commands
+  (blackbox read-back, repo-level public package-specifier consumer test,
+  focused suites, type-check).
+- Added public-consumer-integration.log: the existing committed
+  `v2/modules/delivery/tests/integration/app-messaging-persistence-consumer.test.ts`
+  passes 4/4 with no edits, proving no regression on the real
+  `@zterm/android/app-messaging-persistence` package-specifier consumer.

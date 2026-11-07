@@ -9,3 +9,5 @@ v2/evidence/app-messaging-readback-public-edge-20261107/green-readback.log
 v2/evidence/app-messaging-readback-public-edge-20261107/focused-suite.log
 v2/evidence/app-messaging-readback-public-edge-20261107/typecheck.log
 v2/evidence/app-messaging-readback-public-edge-20261107/blackbox-readback.log
+v2/evidence/app-messaging-readback-public-edge-20261107/public-consumer-integration.log
+v2/evidence/app-messaging-readback-public-edge-20261107/blackbox-readback.mts
