@@ -31,6 +31,30 @@ HTTP/WS 暴露业务端口；同一鉴权上下文到达业务 owner；版本/ca
 
 返回原 owner 错误及 operationId；不统一吞错重试；开发实例与生产实例隔离。
 
+### 控制面组合端口（2026-11-06）
+
+`createDaemon()` 接受显式组合依赖：`workspaceAuth`、`organization`、`members`、`routing`、
+可选 `memberHostObserver` 与 `terminalCatalog`。daemon 只调用公开端口，不保存第二棵组织树或
+第二份绑定。缺依赖时对应控制面路由返回显式配置错误，不回退到共享 token、fixture workspace 或裸
+session 列表。
+
+- `GET /api/workspaces` -> `organization.listWorkspaces({ token })`
+- `GET /api/workspaces/:workspaceId/tree` -> `organization.queryTree`，按成员组合
+  `members.queryRuntime` / `members.queryBinding` 与真实宿主观测；无绑定或失败成员保留并标
+  `availability.status=unavailable`，终端目录未归属 target 只在 observation 报告；目录端口
+  缺失时显式返回 `unknown`，目录失败时授权组织树仍保持可读，目录返回 `unknown` 并保留原
+  typed error（`code`/`owningModule`/`operationId`/`cause`/`retryDisposition`），
+  `unassignedTerminalTargets=null`；只有真正成功返回空数组时才报告 `observed` + `[]`
+- `GET /api/workspaces/:workspaceId/members/:memberId/runtime` -> 先用带 token 的
+  `organization.queryTree` 校验工作区与成员可见性并取得组织成员引用，再组合 members
+  runtime/binding 与真实可用性；不调用无授权上下文的 organization 结构读取绕过组织授权
+- `POST /api/workspaces/:workspaceId/resolve` -> `routing.resolve`
+
+稳定 `memberId` 来自 organization，不随 `sessionId` 变化。账号身份与 workspace 授权由注入的
+`workspaceAuth` 对 Bearer credential 提供服务端验证后的 AuthContext；生产 accounts-backed
+授权 adapter 与账号登录 cookie 链未提供时，该配置缺口必须显式保留为 UNVERIFIED，不能用 dev
+auth 冒充生产。
+
 ## 依赖与联调
 
 - [accounts](../accounts/DESIGN.md) 的公开端口。

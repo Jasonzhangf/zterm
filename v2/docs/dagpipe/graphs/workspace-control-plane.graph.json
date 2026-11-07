@@ -1,0 +1,220 @@
+{
+  "id": "workspace.control_plane",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.control_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "校验账号与工作区授权",
+      "operator": "daemon.control_plane.authorize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.control_request"
+      ],
+      "output": {
+        "id": "arc.authorized_context",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "读取工作区目录",
+      "operator": "organization.workspace.list",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authorized_context"
+      ],
+      "output": {
+        "id": "arc.workspace_catalog",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "读取组织树",
+      "operator": "organization.workspace.tree",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authorized_context"
+      ],
+      "output": {
+        "id": "arc.workspace_tree",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "读取成员运行配置",
+      "operator": "members.runtime.read",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.workspace_tree"
+      ],
+      "output": {
+        "id": "arc.member_runtime",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "读取成员绑定",
+      "operator": "members.binding.read",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.member_runtime"
+      ],
+      "output": {
+        "id": "arc.member_binding",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "观测成员宿主状态",
+      "operator": "status.member.observe",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.member_binding"
+      ],
+      "output": {
+        "id": "arc.member_observation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "组合控制面投影",
+      "operator": "daemon.workspace.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.workspace_catalog",
+        "arc.workspace_tree",
+        "arc.member_observation"
+      ],
+      "output": {
+        "id": "arc.control_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "校验账号与工作区授权",
+      "to": "读取工作区目录",
+      "arc_id": "arc.authorized_context"
+    },
+    {
+      "from": "校验账号与工作区授权",
+      "to": "读取组织树",
+      "arc_id": "arc.authorized_context"
+    },
+    {
+      "from": "读取组织树",
+      "to": "读取成员运行配置",
+      "arc_id": "arc.workspace_tree"
+    },
+    {
+      "from": "读取成员运行配置",
+      "to": "读取成员绑定",
+      "arc_id": "arc.member_runtime"
+    },
+    {
+      "from": "读取成员绑定",
+      "to": "观测成员宿主状态",
+      "arc_id": "arc.member_binding"
+    },
+    {
+      "from": "读取工作区目录",
+      "to": "组合控制面投影",
+      "arc_id": "arc.workspace_catalog"
+    },
+    {
+      "from": "读取组织树",
+      "to": "组合控制面投影",
+      "arc_id": "arc.workspace_tree"
+    },
+    {
+      "from": "观测成员宿主状态",
+      "to": "组合控制面投影",
+      "arc_id": "arc.member_observation"
+    }
+  ],
+  "outputs": [
+    "arc.control_projection"
+  ]
+}

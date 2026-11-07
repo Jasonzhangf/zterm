@@ -90,7 +90,9 @@ export function createRoutingService({ organization, members, auth }) {
   }
 
   function routeResult({ member, binding, group, organizationRevision, expectedGeneration }) {
-    const bindingGeneration = binding.generation;
+    // members.getRuntimeBinding publishes the field as `bindingGeneration`;
+    // routing must read that public name so a real members reader composes.
+    const bindingGeneration = binding.bindingGeneration;
     if (expectedGeneration !== undefined && expectedGeneration !== bindingGeneration) {
       fail(ERROR_CODES.BINDING_GENERATION_STALE, `binding generation ${bindingGeneration} != expected ${expectedGeneration}`, {
         owningModule: MODULE,
