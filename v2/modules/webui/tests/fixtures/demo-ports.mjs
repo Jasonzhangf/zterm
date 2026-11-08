@@ -339,16 +339,7 @@ export function createDemoPorts() {
 
   const terminalClient = {
     async attachSession(member) {
-      if (terminalHandles.has(member.memberId)) {
-        const existing = terminalHandles.get(member.memberId)
-        if (existing.status !== 'attached') {
-          existing.status = 'attached'
-          existing.bodyActive = true
-          existing.lastError = null
-          existing.createCalls += 1
-        }
-        return existing
-      }
+      if (terminalHandles.has(member.memberId)) return terminalHandles.get(member.memberId)
       const handle = {
         handleId: `handle-${member.memberId}`,
         memberId: member.memberId,
@@ -356,9 +347,6 @@ export function createDemoPorts() {
         status: 'attached',
         disconnectCalls: 0,
         createCalls: 1,
-        bodyActive: true,
-        suspendCalls: 0,
-        resumeCalls: 0,
         writes: 0,
         resizeCalls: 0,
         renderViewportHtml(targetMember) {
@@ -372,23 +360,9 @@ export function createDemoPorts() {
             status: this.status,
             disconnectCalls: this.disconnectCalls,
             createCalls: this.createCalls,
-            bodyActive: this.bodyActive,
             writes: this.writes,
             resizeCalls: this.resizeCalls,
           }
-        },
-        isBodyActive() {
-          return this.bodyActive
-        },
-        suspend() {
-          this.bodyActive = false
-          this.suspendCalls += 1
-          return { ok: true }
-        },
-        resume() {
-          this.bodyActive = true
-          this.resumeCalls += 1
-          return { ok: true }
         },
         writeInput(data) {
           this.writes += 1
@@ -412,12 +386,6 @@ export function createDemoPorts() {
     },
     async disconnect(handle) {
       return handle.disconnect()
-    },
-    async suspend(handle) {
-      return handle.suspend()
-    },
-    async resume(handle) {
-      return handle.resume()
     },
   }
 

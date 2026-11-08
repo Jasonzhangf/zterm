@@ -15,6 +15,7 @@ function loadWTerm() {
   }
   return wtermModulePromise
 }
+
 function typedError(code, message, details) {
   const error = new Error(message)
   error.code = code
@@ -25,6 +26,7 @@ function typedError(code, message, details) {
   }
   return error
 }
+
 export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT_MS } = {}) {
   const handlesByMemberId = new Map()
 
@@ -33,8 +35,6 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
     const sessionId = member.sessionId || member.name
     let source = null
     let openPromise = null
-    let openPromiseGeneration = -1
-    let resolveOpen = null
     let terminal = null
     let terminalElement = null
     let terminalReady = false
@@ -45,7 +45,6 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
     let attachTimer = null
     const backlog = []
     const frameListeners = new Set()
-    let streamGeneration = 0
     // Keystrokes arrive one keydown at a time. Each POST must finish before the
     // next starts, or the daemon/tmux receive characters out of order.
     let writeQueue = Promise.resolve()
@@ -55,17 +54,6 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
         clearTimeout(attachTimer)
         attachTimer = null
       }
-    }
-
-    // Drop the failed stream bookkeeping so a later attach/resume opens exactly
-    // one fresh stream. The generation bump keeps late ready/buffer/error
-    // callbacks from the dead stream out of the live handle, and stops open()
-    // from reusing a promise that already settled for the failed stream.
-    function releaseFailedStream() {
-      streamGeneration += 1
-      source = null
-      openPromise = null
-      resolveOpen = null
     }
 
     function enqueueInput(data) {
@@ -125,40 +113,19 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
 
       suspend() {
         bodyActive = false
-        clearAttachTimer()
-        // Invalidate callbacks from the stream that is being closed. A late
-        // ready/buffer/error event must not reactivate a hidden pane.
-        streamGeneration += 1
-        // Suspending stops the body fetch: close the SSE so hidden panes do
-        // not keep receiving frames. The handle, renderer, and session stay
-        // alive for reuse; resume() reopens the stream on demand.
-        try {
-          source?.close()
-        } catch {}
-        source = null
-        const settle = resolveOpen
-        openPromise = null
-        resolveOpen = null
-        settle?.(handle)
       },
 
-      async resume() {
+      resume() {
         bodyActive = true
-        if (!source && handle.status !== "disconnected") {
-          await handle.open()
-        }
       },
 
       open() {
-        if (openPromise && openPromiseGeneration === streamGeneration) {
+        if (openPromise) {
           return openPromise
         }
-        openPromiseGeneration = streamGeneration
         openPromise = new Promise((resolve) => {
-          resolveOpen = resolve
           let settled = false
           let attachSettled = false
-          const openGeneration = streamGeneration
 
           const resolveHandle = () => {
             if (!settled) {
@@ -168,7 +135,7 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
           }
 
           const finishAttach = (status, error) => {
-            if (openGeneration !== streamGeneration || attachSettled || handle.status === "disconnected") {
+            if (attachSettled || handle.status === "disconnected") {
               return
             }
             attachSettled = true
@@ -178,14 +145,11 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
             }
             handle.status = status
             handle.lastError = error || null
-            if (status === "unavailable") {
-              releaseFailedStream()
-            }
             resolveHandle()
           }
 
           const settleError = (error) => {
-            if (openGeneration !== streamGeneration || handle.status === "disconnected") {
+            if (handle.status === "disconnected") {
               return
             }
             attachSettled = true
@@ -193,12 +157,11 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
             bodyActive = false
             handle.status = "unavailable"
             handle.lastError = error || null
-            releaseFailedStream()
             resolveHandle()
           }
 
           const startPending = () => {
-            if (openGeneration !== streamGeneration || attachSettled || handle.status === "disconnected") {
+            if (attachSettled || handle.status === "disconnected") {
               return
             }
             attachTimer = null
@@ -210,12 +173,8 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
           attachTimer = setTimeout(startPending, attachTimeoutMs)
           try {
             source = api.openTerminalStream(sessionId, {
-              onReady: () => {
-                if (openGeneration !== streamGeneration) return
-                finishAttach("attached")
-              },
+              onReady: () => finishAttach("attached"),
               onBuffer: (payload) => {
-                if (openGeneration !== streamGeneration) return
                 // A real frame is the first observable body and proves attach.
                 if (!attachSettled) {
                   finishAttach("attached")
@@ -298,7 +257,6 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
 
       disconnect() {
         clearAttachTimer()
-        streamGeneration += 1
         try {
           source?.close()
         } catch {}
@@ -364,3 +322,4 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
     getHandle: (memberId) => handlesByMemberId.get(memberId) || null,
   }
 }
+

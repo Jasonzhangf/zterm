@@ -1,5 +1,7 @@
 import { renderDefaultWindowFrame } from './split-layout.mjs';
 
+export const DESKTOP_PEER_SLOTS = 4;
+
 const MAIN_GUTTER_PX = 8;
 const PEER_GUTTER_PX = 6;
 const GRID_GAP_PX = 8;
@@ -28,6 +30,10 @@ function memberStatus(memberId, membersById) {
 
 function clamp(value, minimum, maximum) {
   return Math.min(maximum, Math.max(minimum, value));
+}
+
+export function selectVisiblePeerIds(peerMemberIds = [], slotCount = DESKTOP_PEER_SLOTS) {
+  return [...peerMemberIds].slice(0, Math.max(1, slotCount));
 }
 
 export function renderSessionWorkbench({
@@ -74,8 +80,8 @@ export function renderSessionWorkbench({
     propertyOpen: layout.openPropertyByWindow?.[primaryWindowId] === true,
   });
 
-  const visiblePeerIds = [...peerMemberIds];
-  const hiddenPeerIds = [];
+  const visiblePeerIds = selectVisiblePeerIds(peerMemberIds);
+  const hiddenPeerIds = peerMemberIds.slice(visiblePeerIds.length);
   const peerWindows = [];
   const peerCells = visiblePeerIds.map((memberId, index) => {
     const colIndex = index % 2;
@@ -129,7 +135,7 @@ export function renderSessionWorkbench({
     `  <div class="v2-split-gutter v2-split-gutter-vertical" data-splitter="vertical-main" data-edge="e" role="separator" aria-orientation="vertical" style="width:${MAIN_GUTTER_PX}px;flex:0 0 ${MAIN_GUTTER_PX}px;height:100%"></div>`,
     `  <div class="v2-split-pane v2-split-pane-peer-area" data-role="peer-area" style="flex:1 1 auto;height:100%;min-width:0;min-height:0;display:flex;flex-direction:column">`,
     `    ${switcherHtml}`,
-    `    <div class="v2-peer-window-grid" data-role="peer-scroll-grid" data-visible-peer-count="${visiblePeerIds.length}" data-peer-row-height="${peerRowHeightPx}" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-auto-rows:${peerRowHeightPx}px;gap:${GRID_GAP_PX}px;align-content:start;flex:1 1 auto;min-height:0;min-width:0;overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain">${peerCells}</div>`,
+    `    <div class="v2-peer-window-grid" data-role="peer-scroll-grid" data-visible-peer-count="${visiblePeerIds.length}" style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:${GRID_GAP_PX}px;flex:1 1 auto;min-height:0;min-width:0;overflow:hidden">${peerCells}</div>`,
     `  </div>`,
     `  <div class="v2-split-gutter v2-split-gutter-peer-col" data-splitter="vertical-peer-col" data-edge="e" role="separator" aria-orientation="vertical" style="width:${PEER_GUTTER_PX}px;flex:0 0 ${PEER_GUTTER_PX}px;height:100%"></div>`,
     `</div>`,
@@ -144,7 +150,7 @@ export function renderSessionWorkbench({
       visiblePeerIds,
       hiddenPeerIds,
       totalMemberCount: 1 + peerMemberIds.length,
-      rightGridScrollable: true,
+      rightGridScrollable: false,
       primaryRatio,
       peerColumnSplitRatio: peerColRatio,
       primaryWidthPx,

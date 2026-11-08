@@ -31,6 +31,7 @@ test('formal production entry resolves a real daemon API client without injected
   }
   assert.equal(ports.terminalViewportFactory, null)
 })
+
 test('formal production entry reuses an injected daemon API and does not fabricate ports', async () => {
   const injected = createDaemonApi({ baseUrl: '' })
   const ports = await resolveProductionPorts({ daemonApi: injected })
@@ -334,7 +335,7 @@ test('production createWebUIApp with daemonApi but missing terminalClient surfac
   assert.ok(!page.html.includes('data-terminal-status="attached"'))
 })
 
-test('configured terminal client attaches only the viewport-visible panes and keeps the rest reachable in the scrolling grid', async () => {
+test('configured terminal client attaches every visible 1+4 pane and keeps the hidden sixth out of the workbench', async () => {
   const ports = createDemoPorts()
   const app = createWebUIApp({
     daemonApi: ports.daemonApi,
@@ -347,24 +348,18 @@ test('configured terminal client attaches only the viewport-visible panes and ke
   await app.navigate('sessions')
 
   const page = app.renderPage()
-  // Desktop default: the primary plus the four peers that intersect the viewport
-  // hold streams. The sixth peer stays in the continuous grid, reachable by
-  // scrolling, and holds no stream until it enters the viewport.
   const attachedOrStarting = (page.html.match(/data-terminal-status="(?:attached|starting)"/g) || []).length
   assert.equal(attachedOrStarting, 5)
-  const attachedBodyCount = (page.html.match(/data-terminal-body="true" data-terminal-status="(?:attached|starting)" data-member-id=/g) || []).length
-  assert.equal(attachedBodyCount, 5)
-  assert.ok(page.html.includes('data-terminal-status="detached"'))
   assert.ok(!page.html.includes('data-terminal-status="not-loaded"'))
   assert.ok(!page.html.includes('TERMINAL_NOT_LOADED'))
+  const attachedBodyCount = (page.html.match(/data-terminal-body="true" data-terminal-status="(?:attached|starting)" data-member-id=/g) || []).length
+  assert.equal(attachedBodyCount, 5)
   for (const memberId of ['m-1', 'm-2', 'm-3', 'm-4', 'm-5']) {
     assert.equal(Boolean(app.sessionController.getTerminalHandle(memberId)), true, `${memberId} must own a stream`)
   }
   assert.equal(app.sessionController.getTerminalHandle('m-6'), null)
-  assert.ok(page.html.includes('data-member-id="m-6"'))
   assert.ok(page.html.includes('data-role="peer-scroll-grid"'))
-  assert.match(page.html, /grid-auto-rows:\d+px/)
-  assert.ok(page.html.includes('overflow-y:auto'))
+  assert.ok(page.html.includes('grid-template-rows:minmax(0,1fr) minmax(0,1fr)'))
   assert.ok(!page.html.includes('TERMINAL_CLIENT_UNAVAILABLE'))
   assert.ok(!page.html.includes('Terminal client port is not configured.'))
 })
@@ -388,7 +383,6 @@ test('visible terminal bodies show typed pending before the first frame and neve
   assert.equal(visibleBodyCount, 5)
   assert.equal(pendingCount, 5)
   assert.ok(page.html.includes('TERMINAL_FRAME_PENDING'))
-  assert.ok(page.html.includes('data-terminal-status="detached"'))
   assert.ok(!page.html.includes('data-terminal-status="not-loaded"'))
 })
 
@@ -409,8 +403,8 @@ test('per-window work headers resolve member-scoped Board/Tickets counts and ter
     [...page.html.matchAll(/<span class="v2-window-work-status[^>]*data-member-id="([^"]+)"[^>]*>/g)]
       .map((match) => [match[1], match[0]])
   )
-  assert.equal(workStatusByMember.size, 6)
-  for (const memberId of ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6']) {
+  assert.equal(workStatusByMember.size, 5)
+  for (const memberId of ['m-1', 'm-2', 'm-3', 'm-4', 'm-5']) {
     assert.equal(Boolean(workStatusByMember.get(memberId)), true, `${memberId} must render work chips`)
   }
   assert.equal(workStatusByMember.get('m-1').includes('data-board-count="1"'), true)
@@ -427,12 +421,11 @@ test('per-window work headers resolve member-scoped Board/Tickets counts and ter
         return [match[1], statusMatch?.[1] ?? null]
       })
   )
-  assert.equal(headerByMember.size, 6)
+  assert.equal(headerByMember.size, 5)
   for (const memberId of ['m-1', 'm-2', 'm-3', 'm-4', 'm-5']) {
-    assert.equal(headerByMember.get(memberId), 'busy', `${memberId} header must not report online before its first frame arrives`)
+    assert.equal(headerByMember.get(memberId), 'online', `${memberId} header must report the attached terminal state`)
   }
-  // The offscreen sixth peer holds no stream, so it must not claim liveness.
-  assert.equal(headerByMember.get('m-6'), 'detached')
+  assert.equal(headerByMember.has('m-6'), false)
 })
 
 test('webui public entry with explicit demo ports renders all pages and six workspace members', async () => {
@@ -487,29 +480,6 @@ test('mobile preview and focus preserve the same 2D viewport', async () => {
   await app.dispatchAction('return-to-preview')
   assert.equal(app.state.layout.mobileMode, 'preview')
   assert.deepEqual(app.state.layout.previewViewport, viewport)
-})
-
-test('viewport collapse to mobile focus stops hidden terminal streams and desktop restores them', async () => {
-  const app = createDemoWebUIApp({ viewportWidth: 1440, viewportHeight: 900 })
-  await app.ready
-  await app.navigate('sessions')
-
-  await app.dispatchAction('enter-member-focus', { memberId: 'm-3' })
-  await app.setViewport({ width: 390, height: 844, userAgent: 'Mozilla/5.0 iPhone Mobile' })
-
-  assert.equal(app.state.viewportMode, 'mobile')
-  assert.equal(app.state.layout.mobileMode, 'focus')
-  assert.equal(app.sessionController.getTerminalHandle('m-3').isBodyActive(), true)
-  for (const memberId of ['m-1', 'm-2', 'm-4', 'm-5']) {
-    assert.equal(app.sessionController.getTerminalHandle(memberId).isBodyActive(), false, `${memberId} must stop fetching while hidden`)
-  }
-  assert.equal(app.sessionController.getTerminalHandle('m-1').disconnectCalls, 0)
-
-  await app.setViewport({ width: 1440, height: 900, userAgent: 'Mozilla/5.0 Macintosh' })
-  for (const memberId of ['m-1', 'm-2', 'm-3', 'm-4', 'm-5']) {
-    assert.equal(app.sessionController.getTerminalHandle(memberId).isBodyActive(), true, `${memberId} must resume when the workbench returns`)
-  }
-  assert.equal(app.sessionController.getTerminalHandle('m-1').disconnectCalls, 0)
 })
 
 test('per-window property drawers stay scoped across member switches', async () => {
@@ -745,3 +715,4 @@ test('DeliveryStatus is absent from global page footers and rendered inside open
   assert.ok(sessionsWithDrawer.html.includes('data-component="delivery-status"'))
   assert.ok(sessionsWithDrawer.html.includes(receipt.receiptId))
 })
+
