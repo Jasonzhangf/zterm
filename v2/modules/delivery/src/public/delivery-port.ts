@@ -5,9 +5,6 @@ export { createConnectionsDispatchPort } from "../adapters/connections-dispatch.
 export type {
   ConnectionsDispatchOptions,
   MessageSendChannel,
-  MessageSendObservation,
-  MessageSendStage,
-  MessageSendStatus,
 } from "../adapters/connections-dispatch.ts";
 import type {
   DeliveryDependencies,

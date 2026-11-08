@@ -4,64 +4,28 @@ import type {
   MessageDispatchResult,
 } from "../ports/dependencies.ts";
 import type { DeliveryErrorChain } from "../ports/receipt-store.ts";
+import type {
+  AppMessageRequest,
+  AppMessageResult,
+} from "../../../connections/src/index.ts";
 
 /**
- * V1 app-send result status vocabulary. Mirrored from the shared wire contract
- * so delivery keeps no build-time dependency on connections.
+ * Delivery-owned view of the connections public awaited-send edge. The
+ * consumer delegates to `ConnectionManager.requestMessage` and returns its
+ * `AppMessageResult` unchanged; delivery owns only the mapping to
+ * `MessageDispatchResult` and keeps no second copy of the wire vocabulary.
  */
-export type MessageSendStatus =
-  | "received"
-  | "delivered"
-  | "consumed"
-  | "rejected"
-  | "resultUnknown"
-  | "unreachable"
-  | "receiving";
-
-/** V1 app-send stage vocabulary (`AppSendResultPayload['stage']`). */
-export type MessageSendStage =
-  | "prepared"
-  | "sent"
-  | "received"
-  | "result_unknown";
-
-/**
- * Delivery-owned compatibility view of one connections awaited send. The
- * consumer supplies it by delegating to the connections public awaited-send
- * edge (`ConnectionManager.requestMessage`); delivery never imports
- * connections internals.
- */
-export type MessageSendObservation =
-  | {
-      readonly kind: "result";
-      readonly status: MessageSendStatus;
-      readonly stage: MessageSendStage;
-    }
-  | { readonly kind: "unknown"; readonly errorRef: string; readonly cause?: string }
-  | {
-      readonly kind: "rejected";
-      readonly code: string;
-      readonly stage?: string;
-      readonly errorRef?: string;
-      readonly cause?: string;
-    };
-
 export interface MessageSendChannel {
-  sendMessage(request: {
-    readonly v1MessageId: string;
-    readonly targetMachineId: string;
-    readonly subject: string;
-    readonly body: string;
-  }): Promise<MessageSendObservation>;
+  sendMessage(request: AppMessageRequest): Promise<AppMessageResult>;
 }
 
 export interface ConnectionsDispatchOptions {
   /**
-   * Actual proven source-link machine identity. When present it must equal
-   * `command.deliveryRef.sourceMachineId`, so a caller can never dispatch a ref
-   * accepted for one source machine over another machine's link.
+   * Machine identity proven by the authorized source link. It is required and
+   * must equal `command.deliveryRef.sourceMachineId`. There is no unbound
+   * default, so an omitted or unproven source can never dispatch.
    */
-  readonly sourceMachineId?: string;
+  readonly sourceMachineId: string;
   readonly now?: () => string;
 }
 
@@ -79,14 +43,15 @@ function frame(
 }
 
 /**
- * Approved dispatch mapping. Only `received` + `received` proves the target
- * gateway stored the message. Every other combination keeps the prior durable
- * stage, preserves the observed `status`/`stage`/`cause`, and never invents a
- * confirmation. A definitive protocol rejection is a failure; `storage_error`
- * and an inconclusive possible write stay unknown.
+ * Approved dispatch mapping (delivery-app-transition-tables-20261107.md). Only
+ * `received` + `received` proves the target gateway stored the message. Every
+ * other combination keeps the prior durable stage, preserves the observed
+ * `status`/`stage`/`cause`, and never invents a confirmation. A definitive
+ * protocol rejection is a failure; `storage_error` and an inconclusive
+ * possible write stay unknown.
  */
 function mapObservation(
-  observation: MessageSendObservation,
+  observation: AppMessageResult,
   now: () => string,
 ): MessageDispatchResult {
   if (observation.kind === "result") {
@@ -147,16 +112,18 @@ function mapObservation(
  */
 export function createConnectionsDispatchPort(
   channel: MessageSendChannel,
-  options: ConnectionsDispatchOptions = {},
+  options: ConnectionsDispatchOptions,
 ): MessageDispatchPort {
   const now = options.now ?? (() => new Date().toISOString());
+  const sourceMachineId = options.sourceMachineId;
   return {
     async dispatchMessage(
       command: MessageDispatchCommand,
     ): Promise<MessageDispatchResult> {
       if (
-        options.sourceMachineId !== undefined
-        && options.sourceMachineId !== command.deliveryRef.sourceMachineId
+        typeof sourceMachineId !== "string"
+        || sourceMachineId.length === 0
+        || sourceMachineId !== command.deliveryRef.sourceMachineId
       ) {
         return { kind: "unavailable", errorRef: SOURCE_MISMATCH_REF };
       }

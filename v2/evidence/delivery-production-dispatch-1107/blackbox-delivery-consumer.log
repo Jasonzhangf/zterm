@@ -3,6 +3,7 @@ PASS: adapter keeps delivered/received unconfirmed as unknown
 PASS: adapter keeps consumed/received unconfirmed as unknown
 PASS: adapter keeps received/sent unconfirmed as unknown
 PASS: adapter maps a definitive protocol rejection to failed with stage
+PASS: adapter maps a result-status rejected to failed per the approved table
 PASS: adapter keeps storage_error unknown with typed code/stage/cause
 PASS: adapter keeps a post-write transport loss unknown
 PASS: normal submit is accepted and created
@@ -31,4 +32,7 @@ PASS: wrong workspace is refused before dispatch
 PASS: refusals write no send
 PASS: adapter refuses a mismatched source machine
 PASS: source mismatch guard writes no send
-BLACKBOX PASS (33 checks)
+PASS: adapter refuses an omitted source identity
+PASS: adapter refuses an empty source identity
+PASS: unbound source guard writes no send
+BLACKBOX PASS (37 checks)

@@ -1,12 +1,12 @@
-# delivery-production-dispatch-1107 rev5 evidence
+# delivery-production-dispatch-1107 rev7 evidence
 
 ## Source revision
 
 - Worktree: `/Volumes/Intel/playground/zterm/worktrees/delivery-production-dispatch-20261107`
 - Branch: `delivery-production-dispatch-20261107`
-- Candidate: branch tip (rev5 commit on top of `41018f0c`); exact candidate
-  SHA is captured by `collab task deliver`.
-- Rev5 edits are committed on the candidate. No push, merge, publish,
+- Candidate: branch tip (rev6 reviewed `b610b072` plus the scoped rev7
+  rework); exact candidate SHA is captured by `collab task deliver`.
+- Rev7 edits are committed on the candidate. No push, merge, publish,
   PR or global install was performed.
 - Toolchain: node v22.22.2, tsx from `android/node_modules/.bin`.
 
@@ -37,7 +37,14 @@ it from the delivery public surface; no inline or test-only mapping remains.
 | `rejected` + `storage_error` | `unknown` with code/stage/cause |
 | `rejected` + other code | `failed` with code/stage/cause |
 | `unknown` (post-write loss/uncorrelated) | `unknown` with errorRef/cause |
-| capability failure (source mismatch) | `unavailable` |
+| capability failure (omitted/empty/mismatched source) | `unavailable` |
+
+The adapter now requires the authorized source-link machine identity from the
+caller and has no unbound default. The consumer passes the real
+`sourceLink.machineId`; omitted and empty identities are checked as typed
+`unavailable` paths with no send. The adapter reuses the exported connections
+`AppMessageRequest`/`AppMessageResult` types, so delivery owns only the mapping
+and keeps no duplicate wire status/stage/error vocabulary.
 
 ## Real public consumer
 
@@ -55,18 +62,23 @@ two real isolated V1 daemon runtimes:
 No always-allowed authorization or fixed-target stub is used for the production
 proof. Members/routing supplies `machineId`/`bindingGeneration`; `authorizeResume`
 rechecks the ref scope and current generation; `DeliveryRef.sourceMachineId` is
-asserted equal to the real source link.
+asserted equal to the real source link. The accounts adapters are real, but
+their authority/session validator and machine registry are still test
+implementations; this does not claim real account login, real machine
+enrollment, or two-device product readiness.
 
 ## Receipts
 
-- `blackbox-delivery-consumer.log`: 33/33 checks.
+- `blackbox-delivery-consumer.log`: 37/37 checks.
   Run: `./android/node_modules/.bin/tsx v2/evidence/delivery-production-dispatch-1107/blackbox-delivery-consumer.mts`.
   tsx is required because the V1 runtime imports extensionless `.ts` specifiers;
   plain `node` cannot resolve them.
 - `test-contract.txt`: 43/43 pass.
 - `test-integration.txt`: 20/20 pass.
-- `dagpipe-validate.txt`, `diff-check.txt`, `toolchain.txt`: candidate guard
-  receipts, unchanged by this rev5 edit.
+- `dagpipe-validate.txt`, `toolchain.txt`: candidate guard receipts unchanged
+  by this rev7 edit.
+- `diff-check.txt`: exit 0 for the rev7 delta.
+- `diff-stat.txt`: regenerated for the rev7 delta.
 
 ## Covered contract items
 
@@ -75,6 +87,10 @@ asserted equal to the real source link.
 - `storage_error` and inconclusive possible-write results stay unknown with
   typed code/stage/cause.
 - Definitive protocol rejection maps to failure per the approved table.
+- Result-status `rejected` maps to failure with the observed stage and no
+  invented error fields.
+- Omitted, empty and mismatched source identities return
+  `delivery.dispatch.source-mismatch` and write no send.
 - Missing subject stays accepted and returns `DISPATCH_UNAVAILABLE` with
   `SUBJECT_REQUIRED` and no send.
 - Real source/target V1 daemons and real target storage replace `startGateway`.

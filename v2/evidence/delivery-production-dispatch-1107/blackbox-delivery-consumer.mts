@@ -31,16 +31,18 @@ import {
   createDeliveryPort,
 } from "../../../v2/modules/delivery/src/public/delivery-port.ts";
 import type {
+  ConnectionsDispatchOptions,
   DeliveryAuthorizationPort,
   DeliveryRef,
   DeliveryRoutingPort,
   DeliveryTarget,
+  MessageSendChannel,
 } from "../../../v2/modules/delivery/src/public/delivery-port.ts";
 import {
   AppWebSocketTransport,
-  ConnectionError,
   createConnectionManager,
 } from "../../../v2/modules/connections/src/index.ts";
+import type { AppMessageResult } from "../../../v2/modules/connections/src/index.ts";
 import {
   AccountsError,
   AuthService,
@@ -343,40 +345,14 @@ const sourceLink = await manager.connect(SOURCE_MACHINE);
 const messageChannel = await manager.openChannel(sourceLink, "message");
 
 let channelSendCount = 0;
-const sendChannel = {
-  async sendMessage(request: {
-    v1MessageId: string;
-    targetMachineId: string;
-    subject: string;
-    body: string;
-  }) {
+const sendChannel: MessageSendChannel = {
+  async sendMessage(request) {
     channelSendCount += 1;
-    try {
-      const result = await manager.requestMessage(messageChannel, request);
-      if (result.kind === "result") {
-        return { kind: "result" as const, status: result.status, stage: result.stage };
-      }
-      if (result.kind === "unknown") {
-        return {
-          kind: "unknown" as const,
-          errorRef: result.errorRef,
-          ...(result.cause === undefined ? {} : { cause: result.cause }),
-        };
-      }
-      return {
-        kind: "rejected" as const,
-        code: result.code,
-        ...(result.stage === undefined ? {} : { stage: result.stage }),
-        ...(result.errorRef === undefined ? {} : { errorRef: result.errorRef }),
-        ...(result.cause === undefined ? {} : { cause: result.cause }),
-      };
-    } catch (error) {
-      if (error instanceof ConnectionError) {
-        // requestMessage only throws before any payload write.
-        return { kind: "rejected" as const, code: error.code, cause: error.message };
-      }
-      throw error;
-    }
+    // Thin pass-through: the connections public awaited-send edge already
+    // returns the typed `AppMessageResult`. A pre-write `ConnectionError`
+    // propagates and the delivery application layer maps it to
+    // `dispatch-unavailable`; delivery never re-declares the wire vocabulary.
+    return manager.requestMessage(messageChannel, request);
   },
 };
 
@@ -461,7 +437,7 @@ const routing: DeliveryRoutingPort<string> = {
   },
 };
 const dispatch = createConnectionsDispatchPort(sendChannel, {
-  sourceMachineId: SOURCE_MACHINE,
+  sourceMachineId: sourceLink.machineId,
 });
 const port = createDeliveryPort<Actor, string>({
   authorization,
@@ -472,10 +448,10 @@ const port = createDeliveryPort<Actor, string>({
 });
 
 // --- 0. Production adapter mapping tiers (definitive vs unknown vs stored).
-async function mappingCheck(observation: unknown) {
+async function mappingCheck(observation: AppMessageResult) {
   const adapter = createConnectionsDispatchPort(
-    { async sendMessage() { return observation as never; } },
-    { sourceMachineId: SOURCE_MACHINE },
+    { async sendMessage() { return observation; } },
+    { sourceMachineId: sourceLink.machineId },
   );
   return adapter.dispatchMessage({
     deliveryRef: {
@@ -491,18 +467,42 @@ async function mappingCheck(observation: unknown) {
 }
 check(
   "adapter maps received/received to remote-stored",
-  (await mappingCheck({ kind: "result", status: "received", stage: "received" })).kind
+  (await mappingCheck({
+    kind: "result",
+    requestId: "mapping",
+    messageId: "mapping",
+    status: "received",
+    stage: "received",
+  })).kind
     === "remote-stored",
 );
 {
-  const delivered = await mappingCheck({ kind: "result", status: "delivered", stage: "received" });
+  const delivered = await mappingCheck({
+    kind: "result",
+    requestId: "mapping",
+    messageId: "mapping",
+    status: "delivered",
+    stage: "received",
+  });
   check(
     "adapter keeps delivered/received unconfirmed as unknown",
     delivered.kind === "unknown",
   );
-  const consumed = await mappingCheck({ kind: "result", status: "consumed", stage: "received" });
+  const consumed = await mappingCheck({
+    kind: "result",
+    requestId: "mapping",
+    messageId: "mapping",
+    status: "consumed",
+    stage: "received",
+  });
   check("adapter keeps consumed/received unconfirmed as unknown", consumed.kind === "unknown");
-  const partial = await mappingCheck({ kind: "result", status: "received", stage: "sent" });
+  const partial = await mappingCheck({
+    kind: "result",
+    requestId: "mapping",
+    messageId: "mapping",
+    status: "received",
+    stage: "sent",
+  });
   check("adapter keeps received/sent unconfirmed as unknown", partial.kind === "unknown");
   const rejected = await mappingCheck({
     kind: "rejected",
@@ -515,6 +515,19 @@ check(
     rejected.kind === "failed"
       && rejected.errorChain?.[0]?.code === "forbidden_role"
       && rejected.errorChain?.[0]?.stage === "admission",
+  );
+  const resultRejected = await mappingCheck({
+    kind: "result",
+    requestId: "mapping",
+    messageId: "mapping",
+    status: "rejected",
+    stage: "received",
+  });
+  check(
+    "adapter maps a result-status rejected to failed per the approved table",
+    resultRejected.kind === "failed"
+      && resultRejected.errorChain?.[0]?.code === "rejected"
+      && resultRejected.errorChain?.[0]?.stage === "received",
   );
   const storageError = await mappingCheck({
     kind: "rejected",
@@ -529,7 +542,13 @@ check(
       && storageError.errorChain?.[0]?.stage === "admission"
       && storageError.errorChain?.[0]?.message === "disk full",
   );
-  const lost = await mappingCheck({ kind: "unknown", errorRef: "app-send:x:transport", cause: "closed" });
+  const lost = await mappingCheck({
+    kind: "unknown",
+    requestId: "mapping",
+    messageId: "mapping",
+    errorRef: "app-send:x:transport",
+    cause: "closed",
+  });
   check("adapter keeps a post-write transport loss unknown", lost.kind === "unknown");
 }
 
@@ -654,10 +673,10 @@ check(
 );
 check("refusals write no send", channelSendCount === beforeDenied);
 
-// --- 5. Production adapter refuses a ref from a different source machine.
+// --- 5. Production adapter refuses an unbound or mismatched source machine.
 {
   const guard = createConnectionsDispatchPort(sendChannel, {
-    sourceMachineId: SOURCE_MACHINE,
+    sourceMachineId: sourceLink.machineId,
   });
   const beforeGuard = channelSendCount;
   const mismatch = await guard.dispatchMessage({
@@ -677,6 +696,46 @@ check("refusals write no send", channelSendCount === beforeDenied);
       && mismatch.errorRef === "delivery.dispatch.source-mismatch",
   );
   check("source mismatch guard writes no send", channelSendCount === beforeGuard);
+
+  const unbound = createConnectionsDispatchPort(
+    sendChannel,
+    {} as ConnectionsDispatchOptions,
+  );
+  const omitted = await unbound.dispatchMessage({
+    deliveryRef: {
+      sourceMachineId: SOURCE_MACHINE,
+      workspaceId: WORKSPACE_ID,
+      actorAccountId: ACCOUNT_ID,
+      requestId: "guard-omitted",
+    },
+    target: { memberId: MEMBER_ID, machineId: TARGET_MACHINE, bindingGeneration: 1 },
+    message: { subject: "s", body: "b" },
+    v1MessageId: "guard-omitted-id",
+  });
+  check(
+    "adapter refuses an omitted source identity",
+    omitted.kind === "unavailable"
+      && omitted.errorRef === "delivery.dispatch.source-mismatch",
+  );
+
+  const blank = createConnectionsDispatchPort(sendChannel, { sourceMachineId: "" });
+  const empty = await blank.dispatchMessage({
+    deliveryRef: {
+      sourceMachineId: SOURCE_MACHINE,
+      workspaceId: WORKSPACE_ID,
+      actorAccountId: ACCOUNT_ID,
+      requestId: "guard-empty",
+    },
+    target: { memberId: MEMBER_ID, machineId: TARGET_MACHINE, bindingGeneration: 1 },
+    message: { subject: "s", body: "b" },
+    v1MessageId: "guard-empty-id",
+  });
+  check(
+    "adapter refuses an empty source identity",
+    empty.kind === "unavailable"
+      && empty.errorRef === "delivery.dispatch.source-mismatch",
+  );
+  check("unbound source guard writes no send", channelSendCount === beforeGuard);
 }
 
 // --- Teardown (no process kill: only explicit owned resources).
