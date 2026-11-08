@@ -134,6 +134,13 @@ async function handleRequest(request, response) {
 
   if (request.method === "POST" && url.pathname === "/api/auth/logout") {
     const session = currentSession(request);
+    const csrf = request.headers["x-zterm-csrf"];
+    if (!session || !csrf || csrf !== session.csrf) {
+      sendJson(response, 403, {
+        error: { code: "CSRF_TOKEN_INVALID", message: "A valid session CSRF token is required." },
+      });
+      return;
+    }
     if (session?.forceLogoutFailure) {
       sendJson(response, 503, {
         error: { code: "ACCOUNT_REVOCATION_FAILED", message: "Account revocation failed." },
@@ -291,6 +298,12 @@ try {
   assert.equal(await page.locator('[data-role="session-badge"]').textContent().then((text) => text.trim()), "Authenticated");
   await screenshot(page, "desktop-logout-error.png");
 
+  current.forceLogoutFailure = false;
+  await page.getByTestId("logout-button").click();
+  await page.locator('[data-page="login"]').waitFor();
+  assert.equal(await page.locator('[data-role="session-badge"]').textContent().then((text) => text.trim()), "Not authenticated");
+  assert.equal(await page.locator('[data-role="logout-error"]').count(), 0);
+
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${entry}#/setup`, { waitUntil: "domcontentloaded" });
   await page.locator('[data-page="setup"]').waitFor();
@@ -317,6 +330,8 @@ try {
       machineSelectionUnavailable: "MACHINE_SELECTION_UNAVAILABLE",
       machineEnrollmentDisabled: "MACHINE_ENROLLMENT_UNAVAILABLE",
       logoutFailurePreservedSession: "ACCOUNT_REVOCATION_FAILED",
+      logoutRequiresSessionCsrf: "CSRF_TOKEN_INVALID",
+      logoutRetryAfterFailureSucceeds: true,
       desktopNoHorizontalOverflow: desktopOverflow,
       mobileNoHorizontalOverflow: mobileOverflow,
     },

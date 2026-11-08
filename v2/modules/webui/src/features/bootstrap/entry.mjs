@@ -1,4 +1,4 @@
-import { createDaemonApi } from "../../clients/daemon-api/index.mjs";
+import { createBootstrapDaemonApi } from "./daemon-client.mjs";
 import { createBootstrapApp, bootstrapRouteUrl, parseBootstrapRoute } from "./bootstrap-app.mjs";
 
 function field(root, name) {
@@ -9,7 +9,7 @@ export function mountBootstrapApp(root) {
   if (!root) {
     return null;
   }
-  const daemonApi = createDaemonApi({ baseUrl: "" });
+  const daemonApi = createBootstrapDaemonApi({ baseUrl: "" });
   const app = createBootstrapApp({ daemonApi, initialHash: globalThis.location?.hash ?? "" });
 
   function render() {

@@ -18,11 +18,10 @@ function safeJson(value) {
 }
 
 export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
-  let currentBaseUrl = String(baseUrl ?? "").replace(/\/+$/, "");
   let csrfToken = "";
 
   async function request(path, options = {}) {
-    const response = await fetchImpl(`${currentBaseUrl}${path}`, {
+    const response = await fetchImpl(`${baseUrl}${path}`, {
       cache: "no-store",
       credentials: "same-origin",
       ...options,
@@ -35,67 +34,61 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
   }
 
   return {
-    setBaseUrl(value) {
-      currentBaseUrl = String(value ?? "").replace(/\/+$/, "");
-      csrfToken = "";
-      return currentBaseUrl;
-    },
-
     async sessionState() {
       const payload = await request("/api/auth/session");
-      if (
-        !payload ||
-        typeof payload !== "object" ||
-        !Object.prototype.hasOwnProperty.call(payload, "account")
-      ) {
-        throw new DaemonError(
-          {
-            code: "ACCOUNT_SESSION_UNAVAILABLE",
-            message: "The daemon does not expose the browser account-session contract.",
-          },
-          501,
-        );
-      }
       csrfToken = typeof payload.csrf === "string" ? payload.csrf : csrfToken;
       return payload;
     },
 
-    async login({ loginName, credential } = {}) {
+    async login(token) {
       const payload = await request("/api/auth/login", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ loginName, credential }),
+        body: JSON.stringify({ token }),
       });
-      if (!payload || !payload.account || typeof payload.account !== "object") {
-        throw new DaemonError(
-          {
-            code: "ACCOUNT_SESSION_UNAVAILABLE",
-            message: "The daemon did not return a verified browser account session.",
-          },
-          501,
-        );
-      }
-      csrfToken =
-        typeof payload.csrf === "string"
-          ? payload.csrf
-          : typeof payload.csrfToken === "string"
-            ? payload.csrfToken
-            : "";
+      csrfToken = typeof payload.csrfToken === "string" ? payload.csrfToken : "";
       return payload;
     },
 
     async logout() {
-      await request("/api/auth/logout", { method: "POST" });
-      csrfToken = "";
+      try {
+        await request("/api/auth/logout", { method: "POST" });
+      } finally {
+        csrfToken = "";
+      }
     },
 
     async listSessions() {
       return request("/api/sessions");
     },
 
+    async listWorkspaces() {
+      const payload = await request("/api/workspaces");
+      if (!Array.isArray(payload.workspaces)) {
+        throw new DaemonError({ code: "WORKSPACES_RESPONSE_INVALID", message: "Daemon returned a malformed workspace list." }, 502);
+      }
+      return payload.workspaces;
+    },
+
+    async getWorkspace({ workspaceId } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}`);
+      if (!payload.workspace || typeof payload.workspace !== "object") {
+        throw new DaemonError({ code: "WORKSPACE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace." }, 502);
+      }
+      return payload.workspace;
+    },
+
+    async listWorkspaceMembers({ workspaceId } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/members`);
+      if (!Array.isArray(payload.members)) {
+        throw new DaemonError({ code: "MEMBERS_RESPONSE_INVALID", message: "Daemon returned a malformed member list." }, 502);
+      }
+      return payload.members;
+    },
+
     openTerminalStream(target, { onReady, onBuffer, onError } = {}) {
       const query = new URLSearchParams({ target });
-      const source = new EventSource(`${currentBaseUrl}/api/terminal/stream?${query.toString()}`);
+      const source = new EventSource(`${baseUrl}/api/terminal/stream?${query.toString()}`);
       source.addEventListener("ready", (event) => {
         onReady?.(safeJson(event.data));
       });
@@ -113,42 +106,15 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       return source;
     },
 
-    async sendInput(target, data) {
+    async sendInput(target, data, options = {}) {
       return request("/api/terminal/input", {
         method: "POST",
         headers: {
           "content-type": "application/json",
           ...(csrfToken ? { "x-zterm-csrf": csrfToken } : {}),
         },
-        body: JSON.stringify({ target, data }),
+        body: JSON.stringify({ target, data, ...(options.raw === true ? { raw: true } : {}) }),
       });
-    },
-
-    async listWorkspaces() {
-      const payload = await request("/api/workspaces");
-      if (!Array.isArray(payload.workspaces)) {
-        throw new DaemonError(
-          { code: "WORKSPACES_RESPONSE_INVALID", message: "Daemon returned a malformed workspace list." },
-          502,
-        );
-      }
-      return payload.workspaces;
-    },
-
-    async getWorkspaceTree({ workspaceId } = {}) {
-      if (typeof workspaceId !== "string" || !workspaceId.trim()) {
-        throw new DaemonError({ code: "WORKSPACE_ID_REQUIRED", message: "A workspace id is required." }, 400);
-      }
-      const payload = await request(
-        `/api/workspaces/${encodeURIComponent(workspaceId.trim())}/tree`,
-      );
-      if (!payload.root || typeof payload.root !== "object") {
-        throw new DaemonError(
-          { code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace tree." },
-          502,
-        );
-      }
-      return payload.root;
     },
   };
 }

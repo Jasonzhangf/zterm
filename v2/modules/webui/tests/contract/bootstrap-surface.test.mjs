@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createDaemonApi, DaemonError } from "../../src/clients/daemon-api/index.mjs";
+import { createDaemonApi } from "../../src/clients/daemon-api/index.mjs";
+import {
+  createBootstrapDaemonApi,
+  DaemonError as BootstrapDaemonError,
+} from "../../src/features/bootstrap/daemon-client.mjs";
 import {
   BOOTSTRAP_ROUTES,
   createBootstrapApp,
@@ -57,13 +61,13 @@ function deferredResponse(status, body) {
 
 function createApp({ fetchImpl, storage = memoryStorage(), initialRoute = "setup" } = {}) {
   return createBootstrapApp({
-    daemonApi: createDaemonApi({ fetchImpl }),
+    daemonApi: createBootstrapDaemonApi({ fetchImpl }),
     storage,
     initialRoute,
   });
 }
 
-test("daemon-api login posts the account contract and accepts a verified account session", async () => {
+test("bootstrap daemon client login posts the account contract and accepts a verified account session", async () => {
   const { fetchImpl, calls } = recordedFetch([
     jsonResponse(200, {
       authenticated: true,
@@ -71,7 +75,7 @@ test("daemon-api login posts the account contract and accepts a verified account
       csrf: "csrf-1",
     }),
   ]);
-  const api = createDaemonApi({ baseUrl: "http://127.0.0.1:9999", fetchImpl });
+  const api = createBootstrapDaemonApi({ baseUrl: "http://127.0.0.1:9999", fetchImpl });
 
   const payload = await api.login({ loginName: " alice ", credential: "secret" });
 
@@ -83,25 +87,25 @@ test("daemon-api login posts the account contract and accepts a verified account
   assert.deepEqual(calls[0].body, { loginName: " alice ", credential: "secret" });
 });
 
-test("daemon-api rejects legacy daemon-token success without a verified account session", async () => {
+test("bootstrap daemon client rejects legacy daemon-token success without a verified account session", async () => {
   const { fetchImpl } = recordedFetch([
     jsonResponse(200, { ok: true, csrfToken: "legacy-csrf", expiresAt: "2026-11-07T00:00:00.000Z" }),
   ]);
-  const api = createDaemonApi({ baseUrl: "", fetchImpl });
+  const api = createBootstrapDaemonApi({ baseUrl: "", fetchImpl });
 
   await assert.rejects(api.login({ loginName: "alice", credential: "secret" }), (error) => {
-    assert.ok(error instanceof DaemonError);
+    assert.ok(error instanceof BootstrapDaemonError);
     assert.equal(error.code, "ACCOUNT_SESSION_UNAVAILABLE");
     assert.equal(error.status, 501);
     return true;
   });
 });
 
-test("daemon-api sessionState requires the account view", async () => {
+test("bootstrap daemon client sessionState requires the account view", async () => {
   const { fetchImpl } = recordedFetch([
     jsonResponse(200, { authenticated: true, configured: true, csrf: "legacy-csrf" }),
   ]);
-  const api = createDaemonApi({ baseUrl: "", fetchImpl });
+  const api = createBootstrapDaemonApi({ baseUrl: "", fetchImpl });
 
   await assert.rejects(api.sessionState(), (error) => {
     assert.equal(error.code, "ACCOUNT_SESSION_UNAVAILABLE");
@@ -110,13 +114,13 @@ test("daemon-api sessionState requires the account view", async () => {
   });
 });
 
-test("daemon-api workspace calls use the verified same-origin session and no bearer token", async () => {
+test("bootstrap daemon client workspace calls use the verified same-origin session and no bearer token", async () => {
   const root = { groupId: "g1", name: "root", members: [{ memberId: "m1", name: "mac" }] };
   const { fetchImpl, calls } = recordedFetch([
     jsonResponse(200, { workspaces: [{ workspaceId: "ws-1", name: "Primary" }] }),
     jsonResponse(200, { workspace: { workspaceId: "ws 1" }, root }),
   ]);
-  const api = createDaemonApi({ baseUrl: "http://127.0.0.1:9999", fetchImpl });
+  const api = createBootstrapDaemonApi({ baseUrl: "http://127.0.0.1:9999", fetchImpl });
 
   assert.deepEqual(await api.listWorkspaces(), [{ workspaceId: "ws-1", name: "Primary" }]);
   assert.deepEqual(await api.getWorkspaceTree({ workspaceId: "ws 1" }), root);
@@ -126,6 +130,89 @@ test("daemon-api workspace calls use the verified same-origin session and no bea
   assert.equal(calls[0].options.credentials, "same-origin");
   assert.equal(calls[1].options.credentials, "same-origin");
   assert.equal(calls[0].options.headers, undefined);
+  assert.equal(calls[1].options.headers, undefined);
+});
+
+test("shared daemon client still accepts the terminal legacy token login call shape", async () => {
+  const { fetchImpl, calls } = recordedFetch([
+    jsonResponse(200, { ok: true, csrfToken: "legacy-csrf", expiresAt: "2026-11-08T00:00:00.000Z" }),
+  ]);
+  const api = createDaemonApi({ baseUrl: "http://127.0.0.1:9999", fetchImpl });
+  const token = " terminal-token ";
+
+  const payload = await api.login(token.trim());
+
+  assert.equal(payload.ok, true);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "http://127.0.0.1:9999/api/auth/login");
+  assert.deepEqual(calls[0].body, { token: "terminal-token" });
+});
+
+test("shared daemon client keeps the main workspace and member surface", async () => {
+  const { fetchImpl, calls } = recordedFetch([
+    jsonResponse(200, { workspace: { workspaceId: "ws 1", name: "Primary" } }),
+    jsonResponse(200, { members: [{ memberId: "m1", name: "Desk Mac" }] }),
+  ]);
+  const api = createDaemonApi({ baseUrl: "http://127.0.0.1:9999", fetchImpl });
+
+  assert.deepEqual(await api.getWorkspace({ workspaceId: "ws 1" }), {
+    workspaceId: "ws 1",
+    name: "Primary",
+  });
+  assert.deepEqual(await api.listWorkspaceMembers({ workspaceId: "ws 1" }), [
+    { memberId: "m1", name: "Desk Mac" },
+  ]);
+  assert.equal(calls[0].url, "http://127.0.0.1:9999/api/workspaces/ws%201");
+  assert.equal(calls[1].url, "http://127.0.0.1:9999/api/workspaces/ws%201/members");
+});
+
+test("bootstrap daemon client logout retries with the session CSRF after a server failure", async () => {
+  const { fetchImpl, calls } = recordedFetch([
+    jsonResponse(200, {
+      authenticated: true,
+      account: { accountId: "acct-1", loginName: "alice" },
+      csrf: "csrf-1",
+    }),
+    jsonResponse(503, { error: { code: "ACCOUNT_REVOCATION_FAILED", message: "Relay revocation failed." } }),
+    jsonResponse(200, { ok: true }),
+  ]);
+  const api = createBootstrapDaemonApi({ baseUrl: "http://127.0.0.1:9999", fetchImpl });
+
+  await api.login({ loginName: "alice", credential: "secret" });
+  api.setBaseUrl("http://127.0.0.1:9999/");
+  await assert.rejects(api.logout(), (error) => {
+    assert.ok(error instanceof BootstrapDaemonError);
+    assert.equal(error.code, "ACCOUNT_REVOCATION_FAILED");
+    return true;
+  });
+  await api.logout();
+
+  assert.equal(calls.length, 3);
+  assert.equal(calls[1].url, "http://127.0.0.1:9999/api/auth/logout");
+  assert.equal(calls[1].options.headers["x-zterm-csrf"], "csrf-1");
+  assert.equal(calls[2].url, "http://127.0.0.1:9999/api/auth/logout");
+  assert.equal(calls[2].options.headers["x-zterm-csrf"], "csrf-1");
+});
+
+test("bootstrap daemon client clears the session CSRF only when the endpoint changes", async () => {
+  const { fetchImpl, calls } = recordedFetch([
+    jsonResponse(200, {
+      authenticated: true,
+      account: { accountId: "acct-1", loginName: "alice" },
+      csrf: "csrf-1",
+    }),
+    jsonResponse(503, { error: { code: "ACCOUNT_REVOCATION_FAILED", message: "Relay revocation failed." } }),
+  ]);
+  const api = createBootstrapDaemonApi({ baseUrl: "http://127.0.0.1:9999", fetchImpl });
+
+  await api.login({ loginName: "alice", credential: "secret" });
+  api.setBaseUrl("http://127.0.0.1:9998");
+  await assert.rejects(api.logout(), (error) => {
+    assert.equal(error.code, "ACCOUNT_REVOCATION_FAILED");
+    return true;
+  });
+
+  assert.equal(calls[1].url, "http://127.0.0.1:9998/api/auth/logout");
   assert.equal(calls[1].options.headers, undefined);
 });
 
