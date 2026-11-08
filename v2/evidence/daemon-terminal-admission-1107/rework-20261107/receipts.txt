@@ -1,0 +1,33 @@
+$ git rev-parse HEAD
+f99a61a8f39542afcb450a23ad55060dcbcdd697
+$ git branch --show-current
+daemon-terminal-admission-20261107
+
+$ node --test v2/modules/daemon/tests/terminal-admission.test.mjs
+exit 1
+# tests 13
+# pass 12
+# fail 1
+-> not ok 8 - admission rejects an authorized member targeting an unrelated terminal
+-> expected 424, actual 200
+-> raw output: red-target-binding.txt
+
+$ node --test v2/modules/daemon/tests/terminal-admission.test.mjs
+exit 0
+# tests 13
+# pass 13
+# fail 0
+-> raw output: terminal-admission-test.txt
+
+$ node --test v2/modules/daemon/tests/terminal-slice.test.mjs
+exit 0
+# tests 3
+# pass 3
+# fail 0
+-> raw output: terminal-slice-test.txt
+
+$ dagpipe graph validate android/docs/dagpipe/daemon-connection-channel-catalog.graph.json
+valid DAG: daemon.connection_channel_catalog@0.1 (19 nodes, 24 edges, 10 waves)
+
+$ dagpipe graph validate android/docs/dagpipe/daemon-input-schedule.graph.json
+valid DAG: daemon.input_schedule@0.1 (11 nodes, 14 edges, 5 waves)

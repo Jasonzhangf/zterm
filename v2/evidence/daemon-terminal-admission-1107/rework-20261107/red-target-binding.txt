@@ -1,0 +1,105 @@
+TAP version 13
+# Subtest: routing-configured daemon rejects a legacy terminal input that bypasses admission
+ok 1 - routing-configured daemon rejects a legacy terminal input that bypasses admission
+  ---
+  duration_ms: 48.435625
+  type: 'test'
+  ...
+# Subtest: admission rejects missing and invalid credentials before target access
+ok 2 - admission rejects missing and invalid credentials before target access
+  ---
+  duration_ms: 47.383458
+  type: 'test'
+  ...
+# Subtest: admission rejects an unauthorized workspace
+ok 3 - admission rejects an unauthorized workspace
+  ---
+  duration_ms: 45.597917
+  type: 'test'
+  ...
+# Subtest: admission rejects an unknown member
+ok 4 - admission rejects an unknown member
+  ---
+  duration_ms: 46.949583
+  type: 'test'
+  ...
+# Subtest: admission rejects an unbound member
+ok 5 - admission rejects an unbound member
+  ---
+  duration_ms: 45.027166
+  type: 'test'
+  ...
+# Subtest: admission rejects a stale binding generation
+ok 6 - admission rejects a stale binding generation
+  ---
+  duration_ms: 39.630667
+  type: 'test'
+  ...
+# Subtest: admission rejects a missing or wrong terminal target identity
+ok 7 - admission rejects a missing or wrong terminal target identity
+  ---
+  duration_ms: 46.66825
+  type: 'test'
+  ...
+# Subtest: admission rejects an authorized member targeting an unrelated terminal
+not ok 8 - admission rejects an authorized member targeting an unrelated terminal
+  ---
+  duration_ms: 75.887917
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:421:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    200 !== 424
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 424
+  actual: 200
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:441:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: admission opens the exact existingOnly target and forwards typed input
+ok 9 - admission opens the exact existingOnly target and forwards typed input
+  ---
+  duration_ms: 74.229167
+  type: 'test'
+  ...
+# Subtest: admission forwards nonempty raw input without appending an Enter
+ok 10 - admission forwards nonempty raw input without appending an Enter
+  ---
+  duration_ms: 60.534708
+  type: 'test'
+  ...
+# Subtest: admission forwards one Enter as exactly one CR
+ok 11 - admission forwards one Enter as exactly one CR
+  ---
+  duration_ms: 58.116625
+  type: 'test'
+  ...
+# Subtest: admission stream exposes the exact admitted session
+ok 12 - admission stream exposes the exact admitted session
+  ---
+  duration_ms: 4058.99925
+  type: 'test'
+  ...
+# Subtest: startDaemon forwards admission to the public input route
+ok 13 - startDaemon forwards admission to the public input route
+  ---
+  duration_ms: 33.245458
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 12
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4830.865333

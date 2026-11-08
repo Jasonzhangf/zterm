@@ -1,0 +1,106 @@
+Post-rebase recovery verification
+Date: 2026-11-08
+Worktree: /Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107
+Branch: daemon-terminal-admission-20261107
+HEAD: 8df73dd4 (rebased onto local main 32584a72)
+
+Commands and results
+
+1. Shared runtime build
+
+   Command:
+   pnpm --filter @zterm/shared build
+
+   Result: exit 0. This fixed the isolated fixture root cause
+   ERR_MODULE_NOT_FOUND for
+   @zterm/shared/dist/terminal/tmux-socket-path.js: packages/shared had no
+   built dist in this worktree.
+
+2. Real isolated V1 fixture
+
+   Command:
+   ZTERM_CANDIDATE_ROOT=/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107 node run.mjs run
+   Workdir:
+   /Volumes/Intel/playground/zterm/.worker-runs/isolated-v1-stream-fixture-1105
+
+   Result: PASS, exit 0.
+   runId: isolated-v1-40211-mw742min
+   host: 127.0.0.1
+   port: 49762
+   realV1Daemon: true
+   gates:
+     initialFrame=true
+     inputEcho=true
+     secondTargetIsolation=true
+     recoverableInterruption=true
+
+   Copied summary:
+   isolated-v1-40211-mw742min-run-summary.json
+   Raw run directory:
+   /Volumes/Intel/playground/zterm/.worker-runs/isolated-v1-stream-fixture-1105/runs/isolated-v1-40211-mw742min/
+
+3. Changed-module regression suite
+
+   Command:
+   node --test v2/modules/terminal/tests/*.test.mjs v2/modules/daemon/tests/*.test.mjs v2/modules/errors/tests/*.test.mjs v2/modules/status/tests/*.test.mjs
+
+   Result: 88 tests, 88 passed, 0 failed, exit 0.
+   Terminal subset: 34/34.
+   Daemon subset: 51/51.
+   Errors subset: 2/2.
+   Status subset: 1/1.
+
+4. Syntax checks
+
+   Command:
+   node --check on every changed source or test file listed below
+
+   Files checked:
+   v2/modules/daemon/src/machine-terminal-consumer.mjs
+   v2/modules/daemon/src/server.mjs
+   v2/modules/daemon/tests/control-plane-composition.test.mjs
+   v2/modules/daemon/tests/server-pending-close.test.mjs
+   v2/modules/daemon/tests/terminal-admission.test.mjs
+   v2/modules/errors/DESIGN.md
+   v2/modules/status/DESIGN.md
+   v2/modules/terminal/DESIGN.md
+   v2/modules/terminal/src/terminal-port.mjs
+   v2/modules/terminal/src/v1-mux-client.mjs
+   v2/modules/terminal/tests/repair-closure.test.mjs
+   v2/modules/terminal/tests/terminal-late-close.test.mjs
+   v2/modules/terminal/tests/v1-mux-fixture.mjs
+
+   Result: SYNTAX_OK, exit 0.
+
+5. Public imports
+
+   Command:
+   import ./v2/modules/terminal/src/public/index.mjs
+   import ./v2/modules/errors/src/public/index.mjs
+   import ./v2/modules/status/src/public/index.mjs
+
+   Result: exit 0.
+   terminal=TerminalPort,frameToAnsi,frameToText,snapshotToFrame,toFrameChunk
+   errors=TypedError,asTypedError
+   status=observation
+
+6. DAG validation
+
+   Command:
+   dagpipe graph validate android/docs/dagpipe/daemon-connection-channel-catalog.graph.json
+   dagpipe graph validate android/docs/dagpipe/daemon-input-schedule.graph.json
+
+   Result: exit 0.
+   daemon.connection_channel_catalog@0.1: 19 nodes, 24 edges, 10 waves
+   daemon.input_schedule@0.1: 11 nodes, 14 edges, 5 waves
+
+Boundary
+
+The isolated V1 fixture run is real V1 daemon behavior, but it is still a
+disposable fixture. It does not prove production startup/config assembly, a
+real members/host binding producer, real accounts login/grant/revocation, a
+real committed product body frame, or real input execution output.
+
+Task status remains working/INCOMPLETE. No push, merge, publish, PR, shared
+daemon restart, tmux server/global service action, or device action was
+performed.

@@ -15,7 +15,7 @@ export class TmuxAdapter {
       const { stdout } = await this.run([
         "list-sessions",
         "-F",
-        "#{session_id}|#{session_name}|#{session_created}|#{session_attached}|#{session_windows}",
+        "#{session_id}|#{session_name}|#{session_created}|#{session_attached}|#{session_windows}|#{pid}|#{socket_path}",
       ]);
 
       return stdout
@@ -23,14 +23,16 @@ export class TmuxAdapter {
         .filter(Boolean)
         .map((line) => {
           const fields = line.split("|");
-          if (fields.length < 5) {
+          if (fields.length < 7) {
             throw new Error(`Unexpected tmux session record: ${line}`);
           }
           const id = fields[0];
-          const name = fields.slice(1, -3).join("|");
-          const createdAt = fields.at(-3);
-          const attached = fields.at(-2);
-          const windows = fields.at(-1);
+          const name = fields.slice(1, -5).join("|");
+          const createdAt = fields.at(-5);
+          const attached = fields.at(-4);
+          const windows = fields.at(-3);
+          const serverPid = fields.at(-2);
+          const socketPath = fields.at(-1);
           return {
             id,
             name,
@@ -38,6 +40,8 @@ export class TmuxAdapter {
             createdIso: new Date(Number(createdAt) * 1000).toISOString(),
             attached: attached === "1",
             windows: Number(windows),
+            serverPid,
+            socketPath,
           };
         });
     } catch (error) {

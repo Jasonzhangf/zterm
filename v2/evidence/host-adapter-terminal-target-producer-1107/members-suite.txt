@@ -1,0 +1,200 @@
+TAP version 13
+# Subtest: runtime config is owned by members, keyed by memberId, and survives reopen
+ok 1 - runtime config is owned by members, keyed by memberId, and survives reopen
+  ---
+  duration_ms: 10.740709
+  type: 'test'
+  ...
+# Subtest: bindings are independent per member and CAS update advances generation
+ok 2 - bindings are independent per member and CAS update advances generation
+  ---
+  duration_ms: 5.971917
+  type: 'test'
+  ...
+# Subtest: stale expected generation is rejected with BINDING_GENERATION_STALE
+ok 3 - stale expected generation is rejected with BINDING_GENERATION_STALE
+  ---
+  duration_ms: 4.145041
+  type: 'test'
+  ...
+# Subtest: binding and runtime persist across a reopened store instance
+ok 4 - binding and runtime persist across a reopened store instance
+  ---
+  duration_ms: 3.114125
+  type: 'test'
+  ...
+# Subtest: missing or wrong token is rejected before any members store write
+ok 5 - missing or wrong token is rejected before any members store write
+  ---
+  duration_ms: 2.046958
+  type: 'test'
+  ...
+# Subtest: missing scope is rejected with MEMBER_FORBIDDEN_SCOPE and no side effect
+ok 6 - missing scope is rejected with MEMBER_FORBIDDEN_SCOPE and no side effect
+  ---
+  duration_ms: 2.225292
+  type: 'test'
+  ...
+# Subtest: cross workspace and cross account targets are rejected with no side effect
+ok 7 - cross workspace and cross account targets are rejected with no side effect
+  ---
+  duration_ms: 3.458
+  type: 'test'
+  ...
+# Subtest: verifyHost confirms the host machine identity and rejects mismatch
+ok 8 - verifyHost confirms the host machine identity and rejects mismatch
+  ---
+  duration_ms: 6.056625
+  type: 'test'
+  ...
+# Subtest: restoreBinding re-verifies the host and returns typed BINDING_HOST_UNAVAILABLE
+ok 9 - restoreBinding re-verifies the host and returns typed BINDING_HOST_UNAVAILABLE
+  ---
+  duration_ms: 13.925375
+  type: 'test'
+  ...
+# Subtest: verifyHost and restoreBinding reject missing authoritative machine identity
+ok 10 - verifyHost and restoreBinding reject missing authoritative machine identity
+  ---
+  duration_ms: 2.305583
+  type: 'test'
+  ...
+# Subtest: verifyHost and restoreBinding reject missing authoritative machine identity on an existing binding
+ok 11 - verifyHost and restoreBinding reject missing authoritative machine identity on an existing binding
+  ---
+  duration_ms: 2.394125
+  type: 'test'
+  ...
+# Subtest: bindSession refuses a wrong-machine host observation with no binding or generation write
+ok 12 - bindSession refuses a wrong-machine host observation with no binding or generation write
+  ---
+  duration_ms: 2.110916
+  type: 'test'
+  ...
+# Subtest: bindSession refuses a missing anchor observation with no binding or generation write
+ok 13 - bindSession refuses a missing anchor observation with no binding or generation write
+  ---
+  duration_ms: 1.834708
+  type: 'test'
+  ...
+# Subtest: bindSession requires a runtime configuration before writing a binding
+ok 14 - bindSession requires a runtime configuration before writing a binding
+  ---
+  duration_ms: 1.417083
+  type: 'test'
+  ...
+# Subtest: configureRuntime to a different machine invalidates the old binding atomically
+ok 15 - configureRuntime to a different machine invalidates the old binding atomically
+  ---
+  duration_ms: 2.922667
+  type: 'test'
+  ...
+# Subtest: getRuntimeBinding returns machineId and bindingGeneration for the same generation
+ok 16 - getRuntimeBinding returns machineId and bindingGeneration for the same generation
+  ---
+  duration_ms: 2.245959
+  type: 'test'
+  ...
+# Subtest: getRuntimeBinding rejects missing runtime configuration
+ok 17 - getRuntimeBinding rejects missing runtime configuration
+  ---
+  duration_ms: 1.184667
+  type: 'test'
+  ...
+# Subtest: getRuntimeBinding rejects an invalid binding with a typed error
+ok 18 - getRuntimeBinding rejects an invalid binding with a typed error
+  ---
+  duration_ms: 2.246375
+  type: 'test'
+  ...
+# Subtest: bindSession persists the observed terminalTarget, replaces it on rebind, and an observed null clears it
+ok 19 - bindSession persists the observed terminalTarget, replaces it on rebind, and an observed null clears it
+  ---
+  duration_ms: 4.694334
+  type: 'test'
+  ...
+# Subtest: bindSession rejects a malformed terminalTarget before writing a binding
+ok 20 - bindSession rejects a malformed terminalTarget before writing a binding
+  ---
+  duration_ms: 2.024583
+  type: 'test'
+  ...
+# Subtest: resolveBindingTarget returns a copy only on an exact catalog match
+ok 21 - resolveBindingTarget returns a copy only on an exact catalog match
+  ---
+  duration_ms: 0.243209
+  type: 'test'
+  ...
+# Subtest: binding generation stays monotonic across invalidation and never reissues an old tuple
+ok 22 - binding generation stays monotonic across invalidation and never reissues an old tuple
+  ---
+  duration_ms: 4.188958
+  type: 'test'
+  ...
+# Subtest: configureRuntime invalidates the binding when hostKind, agentKind, or launchProfileRef changes
+ok 23 - configureRuntime invalidates the binding when hostKind, agentKind, or launchProfileRef changes
+  ---
+  duration_ms: 5.262875
+  type: 'test'
+  ...
+# Subtest: AuthContext.members allowlist gates every public action before store or probe side effects
+ok 24 - AuthContext.members allowlist gates every public action before store or probe side effects
+  ---
+  duration_ms: 3.962958
+  type: 'test'
+  ...
+# Subtest: legacy version-1 store backfills the binding generation before any rebind
+ok 25 - legacy version-1 store backfills the binding generation before any rebind
+  ---
+  duration_ms: 4.48275
+  type: 'test'
+  ...
+# Subtest: bindSession refuses a caller assertion that disagrees with the host observation
+ok 26 - bindSession refuses a caller assertion that disagrees with the host observation
+  ---
+  duration_ms: 2.243042
+  type: 'test'
+  ...
+# Subtest: verifyHost and restoreBinding refuse when the persisted target no longer matches the host observation
+ok 27 - verifyHost and restoreBinding refuse when the persisted target no longer matches the host observation
+  ---
+  duration_ms: 3.183167
+  type: 'test'
+  ...
+# Subtest: the same target text on a different machine cannot pass verification
+ok 28 - the same target text on a different machine cannot pass verification
+  ---
+  duration_ms: 2.844958
+  type: 'test'
+  ...
+# Subtest: host-adapters public probe is the real producer consumed by members bind and verify
+not ok 29 - host-adapters public probe is the real producer consumed by members bind and verify
+  ---
+  duration_ms: 34.320584
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/host-adapter-terminal-target-producer-20261107/v2/modules/members/tests/members.test.mjs:1237:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    The input did not match the regular expression /^\$[0-9]+$/. Input:
+    
+    'tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22socketPath%22%3A%22%2FUsers%2Ffanzhang%2F.tmux%2Frun%2Ftmux-501%2Fzterm-v2-members-real-60575%22%2C%22serverPid%22%3A%2260655%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794117604%7D'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected:
+  actual: 'tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22socketPath%22%3A%22%2FUsers%2Ffanzhang%2F.tmux%2Frun%2Ftmux-501%2Fzterm-v2-members-real-60575%22%2C%22serverPid%22%3A%2260655%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794117604%7D'
+  operator: 'match'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/host-adapter-terminal-target-producer-20261107/v2/modules/members/tests/members.test.mjs:1279:10)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+1..29
+# tests 29
+# suites 0
+# pass 28
+# fail 1
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 226.362583

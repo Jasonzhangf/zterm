@@ -1,0 +1,20 @@
+{
+  "fixture": {
+    "session": "composition-protocol-30754",
+    "bridgePort": 58004
+  },
+  "connect": {
+    "ok": true
+  },
+  "observation": {
+    "status": "connected",
+    "freshness": "fresh",
+    "peerIdentity": "daemon-composition-protocol",
+    "peerIdentityVerified": true
+  },
+  "checks": {
+    "connected": true,
+    "peerIdentityVerified": true,
+    "peerIdentityMatches": true
+  }
+}

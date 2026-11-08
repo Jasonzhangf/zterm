@@ -31,6 +31,8 @@ host-adapters/
 
 deliver(Binding, request) → HostReceipt；observe 返回宿主事实及来源；terminal 的阅读渲染通过独立 terminal 端口。
 
+`createTmuxHostProbe.probe()` 的 `terminalTarget` 继续使用 `{backend, stableId}`。tmux 的 `stableId` 必须使用 V1 权威身份域 `tmux:v1:<encoded JSON>`：JSON 键序为 `backend`、可选真实 `socketPath`、`serverPid`、`sessionId`、`createdAt`；`serverPid` 来自 tmux `#{pid}`，`sessionId` 来自 `#{session_id}`，`createdAt` 来自 `#{session_created}`，`socketPath` 仅来自真实 `#{socket_path}`。探针自身公开的 `sessionId` 保留原始 `$N`，不得把原始 `$N` 当作 `stableId`，也不得合成缺失字段。该 probe 的 `backend` 恒为 `tmux`：`createTmuxHostProbe` 对非 `tmux` 的 backend 入参在创建时显式类型拒绝，保证返回目标的 backend 与 `tmux:v1:` stableId 同域。
+
 unsupported、目标不存在、身份不匹配显式。禁止任何 tmux server 生命周期动作，测试仅释放自有具名 session。
 
 ## 依赖与联调

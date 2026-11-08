@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: lists real tmux sessions and streams committed V1 mux frames
+ok 1 - lists real tmux sessions and streams committed V1 mux frames
+  ---
+  duration_ms: 269.8995
+  type: 'test'
+  ...
+# Subtest: reuses one channel for two subscribers and keeps tmux alive after close
+ok 2 - reuses one channel for two subscribers and keeps tmux alive after close
+  ---
+  duration_ms: 300.855375
+  type: 'test'
+  ...
+# Subtest: assembles multi-chunk frames and emits only committed snapshots
+ok 3 - assembles multi-chunk frames and emits only committed snapshots
+  ---
+  duration_ms: 51.868292
+  type: 'test'
+  ...
+# Subtest: rejects missing and wrong V1 credentials before target access
+ok 4 - rejects missing and wrong V1 credentials before target access
+  ---
+  duration_ms: 23.977917
+  type: 'test'
+  ...
+# Subtest: closeChannel rejects an unknown channel with a typed error
+ok 5 - closeChannel rejects an unknown channel with a typed error
+  ---
+  duration_ms: 0.816416
+  type: 'test'
+  ...
+# Subtest: open timeout releases a late mux-channel-opened without affecting the transport
+ok 6 - open timeout releases a late mux-channel-opened without affecting the transport
+  ---
+  duration_ms: 38.87725
+  type: 'test'
+  ...
+# Subtest: late opened close failure stays retryable and exposes a typed error
+ok 7 - late opened close failure stays retryable and exposes a typed error
+  ---
+  duration_ms: 40.198458
+  type: 'test'
+  ...
+# Subtest: closeChannel send failure is typed, keeps the record, and does not leak to another subscriber
+ok 8 - closeChannel send failure is typed, keeps the record, and does not leak to another subscriber
+  ---
+  duration_ms: 44.254917
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 817.878667

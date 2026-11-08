@@ -1,0 +1,25 @@
+{
+  "fixture": {
+    "session": "composition-ready-frame-30975"
+  },
+  "readyFrame": {
+    "type": "mux-ready",
+    "payload": {
+      "version": 1,
+      "daemonHostId": "daemon-composition-ready-frame",
+      "capabilities": {
+        "version": 1,
+        "channelEnvelope": true,
+        "targetMessages": true,
+        "boundedBodyScheduler": true,
+        "bulkChannel": {
+          "version": 1,
+          "label": "zterm-bulk"
+        },
+        "reliableInput": {
+          "version": 1
+        }
+      }
+    }
+  }
+}

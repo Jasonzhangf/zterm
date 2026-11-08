@@ -1,0 +1,70 @@
+2026-11-08 decision and current-main composition verification
+
+Task:
+terminal-admission-composition-1107
+
+Decision message:
+m1794102837521-9090
+
+Required action:
+Update the inherited terminal-input-raw test to the admission contract without
+retiring it or restoring the legacy token-only route. Keep raw-input
+byte-exactness coverage. Compose the candidate onto local main 2bc9bab5.
+
+Test update:
+v2/modules/daemon/tests/terminal-input-raw.test.mjs
+
+Before rebase, test-only verification:
+node --test v2/modules/daemon/tests/terminal-input-raw.test.mjs
+5 tests, 5 passed, 0 failed
+
+Before rebase, four-file composition suite:
+node --test v2/modules/members/tests/members.test.mjs v2/modules/daemon/tests/terminal-admission.test.mjs v2/modules/daemon/tests/terminal-slice.test.mjs v2/modules/daemon/tests/terminal-input-raw.test.mjs
+50 tests, 50 passed, 0 failed
+
+node --check v2/modules/daemon/tests/terminal-input-raw.test.mjs
+exit 0
+
+Composition command:
+git rebase 2bc9bab5e98d7cf73780ec3efdbb8403e0e59844
+Result:
+Successfully rebased and updated refs/heads/daemon-terminal-admission-20261107.
+No conflict occurred.
+
+Rebased HEAD before evidence-only commit:
+13d9e0a4d9babefcbe41461bd7490b6c8e27a651
+
+Observed ancestry and branch state:
+git merge-base --is-ancestor 2bc9bab5e98d7cf73780ec3efdbb8403e0e59844 HEAD
+exit 0
+
+git rev-list --count 2bc9bab5e98d7cf73780ec3efdbb8403e0e59844..HEAD
+4
+
+git log --oneline --decorate -7
+13d9e0a4 (HEAD -> daemon-terminal-admission-20261107) test(v2): align raw input with terminal admission
+68873a6e daemon-terminal-admission: log idle patrol wait state
+6b77e89f terminal-admission: add post-rebase recovery evidence
+b923ed23 feat(v2): compose members terminal binding with daemon admission
+2bc9bab5 (main) chore(evidence): record delivery rev7 integration re-verify
+fa32914f merge: integrate Delivery dispatch rev7 candidate into zterm v2
+1945175b feat(v2): bind source identity and reuse connections public types (rev7)
+
+After rebase, four-file composition suite:
+node --test v2/modules/members/tests/members.test.mjs v2/modules/daemon/tests/terminal-admission.test.mjs v2/modules/daemon/tests/terminal-slice.test.mjs v2/modules/daemon/tests/terminal-input-raw.test.mjs
+50 tests, 50 passed, 0 failed
+
+After rebase, syntax check:
+node --check v2/modules/daemon/tests/terminal-input-raw.test.mjs
+exit 0
+
+Worktree status before evidence updates:
+## daemon-terminal-admission-20261107
+
+Conclusion:
+The inherited test is updated to the admission contract, the legacy token-only
+route remains disabled, raw-input exactness remains covered, and the candidate
+is composed on 2bc9bab5 with no conflict.
+
+No push, PR, publish, merge to main, shared daemon restart, tmux/global service
+action, or device action was performed.
