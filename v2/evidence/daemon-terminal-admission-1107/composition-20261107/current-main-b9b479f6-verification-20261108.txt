@@ -1,0 +1,62 @@
+2026-11-08 current-main composition verification
+
+Worktree:
+/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107
+
+Branch:
+daemon-terminal-admission-20261107
+
+Observed commands and results:
+
+git status --short --branch
+-> ## daemon-terminal-admission-20261107
+
+git rev-parse HEAD
+-> aebe82d2e8917afcaaf97a0c4c0a967177aa7aeb
+
+git merge-base --is-ancestor b9b479f65a7ac9ef71177068d43fcee468b50145 HEAD
+-> exit 0
+
+git rev-list --count b9b479f65a7ac9ef71177068d43fcee468b50145..HEAD
+-> 3
+
+git log --oneline --decorate -8
+-> aebe82d2 (HEAD -> daemon-terminal-admission-20261107) daemon-terminal-admission: log idle patrol wait state
+-> 878bde70 terminal-admission: add post-rebase recovery evidence
+-> c92dab11 feat(v2): compose members terminal binding with daemon admission
+-> b9b479f6 (main) Merge commit 'c1e9df3b'
+
+Focused integration test command:
+
+node --test v2/modules/members/tests/members.test.mjs v2/modules/daemon/tests/terminal-admission.test.mjs v2/modules/daemon/tests/terminal-slice.test.mjs v2/modules/daemon/tests/terminal-input-raw.test.mjs
+
+Focused integration result:
+50 tests
+45 passed
+5 failed
+
+All failures are in v2/modules/daemon/tests/terminal-input-raw.test.mjs.
+
+Baseline control on local main b9b479f6:
+
+node --test v2/modules/daemon/tests/terminal-input-raw.test.mjs
+5 tests
+5 passed
+0 failed
+
+Observed failure:
+Expected HTTP 200 or 400 from the legacy token-only input route.
+Actual HTTP 503 TERMINAL_ADMISSION_REQUIRED.
+
+Conclusion:
+The branch is already based on b9b479f6. No rebase is needed. The remaining
+failure is an inherited test contract conflict: the test constructs a daemon
+without admission and expects the legacy token-only input path, while this
+composition branch requires admission and exact byte forwarding. Owner routing
+is required before that inherited test is changed or retired.
+
+Jenny received the evidence and decision request as m1794102792261-9084.
+The board task was updated to revision 25 with the same facts.
+
+No push, PR, publish, merge to main, shared daemon restart, tmux/global service
+action, or device action was performed.

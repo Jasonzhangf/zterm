@@ -228,3 +228,33 @@ members/host binding producer, real accounts login/grant/revocation evidence,
 real committed body-frame delivery, and real input execution output. The task
 stays `working/INCOMPLETE`; no merge, push, publish, PR, shared daemon
 restart, tmux/global service action, or device action was performed.
+
+## 2026-11-08 current-main correction and integration finding
+
+Jenny's correction `m1794101422131-8937` moved the required local main base to
+`b9b479f6`. Git ancestry verification shows that this worktree is already
+composed on that base:
+
+- `git merge-base --is-ancestor b9b479f6 HEAD` exits 0.
+- `git rev-list --count b9b479f6..HEAD` returns 3.
+- The local candidate commits are `c92dab11`, `878bde70`, and `aebe82d2`.
+- The worktree is clean.
+
+No rebase or merge was required. A focused run of the members, admission,
+terminal-slice, and inherited raw-input tests produced 45 passes and 5
+failures. All failures are in `terminal-input-raw.test.mjs`; that file passes
+on main `b9b479f6`.
+
+The failure is a contract conflict. The inherited test starts `createDaemon`
+without admission and expects the legacy token-only input route. This branch
+returns `503 TERMINAL_ADMISSION_REQUIRED` for that setup and requires exact
+byte forwarding through an admitted route. Restoring the legacy path would
+violate the composition contract. The inherited test needs an owner decision
+to update it to the admission contract or retire it as superseded.
+
+Jenny received the evidence and decision request as `m1794102792261-9084`.
+The board task was updated to revision 25 with the same facts.
+
+The task remains `working/INCOMPLETE`. No push, PR, publish, merge to main,
+shared daemon restart, tmux/global service action, or device action was
+performed.

@@ -473,3 +473,56 @@ members/host binding producer, real accounts login/grant/revocation evidence,
 and real committed frame/input execution remain pending. No merge, push,
 publish, PR, shared daemon restart, tmux/global service action, or device
 action was performed.
+
+## 2026-11-08 01:44 UTC - current main base correction and integration finding
+
+Purpose: apply Jenny's correction `m1794101422131-8937`, which says local main
+is now `b9b479f6` and the composition candidate must be composed or rebased
+onto it before delivery or integration.
+
+Baseline facts:
+
+- Worktree: `/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107`.
+- Branch: `daemon-terminal-admission-20261107`.
+- `git status --short --branch` is clean except for the branch header.
+- `git merge-base --is-ancestor b9b479f65a7ac9ef71177068d43fcee468b50145 HEAD`
+  exits 0.
+- `git rev-list --count b9b479f65a7ac9ef71177068d43fcee468b50145..HEAD`
+  returns 3.
+- The local candidate commits are `c92dab11`, `878bde70`, and `aebe82d2`.
+
+Result: the candidate is already composed on top of current local main
+`b9b479f6`. No rebase or merge operation was needed, and no dirty user change
+was reset or discarded.
+
+Focused integration test:
+
+```text
+node --test \
+  v2/modules/members/tests/members.test.mjs \
+  v2/modules/daemon/tests/terminal-admission.test.mjs \
+  v2/modules/daemon/tests/terminal-slice.test.mjs \
+  v2/modules/daemon/tests/terminal-input-raw.test.mjs
+```
+
+Observed result: 45 passed, 5 failed. All five failures are in
+`v2/modules/daemon/tests/terminal-input-raw.test.mjs`. The same test file
+passes 5/5 on local main `b9b479f6`.
+
+Root cause: `b9b479f6` added `terminal-input-raw.test.mjs`, which starts
+`createDaemon` with only a terminal port and V2 token. The composition branch
+requires `context.admission` for `/api/terminal/input`, so the route returns
+503 `TERMINAL_ADMISSION_REQUIRED`. The inherited test also asserts the legacy
+token-only auto-Enter contract. The composition admission tests instead require
+admission and exact byte forwarding, with a separate explicit CR case.
+
+This is an integration contract conflict, not a missing current-main
+composition step. The branch cannot be called green until the inherited test
+is updated or retired by its owner. Do not restore the legacy token-only input
+path; that would violate the composition contract.
+
+Jenny received the evidence and decision request as `m1794102792261-9084`.
+The board task was updated to revision 25 with the same facts.
+
+No push, PR, publish, merge to main, shared daemon restart, tmux/global service
+action, or device action was performed.
