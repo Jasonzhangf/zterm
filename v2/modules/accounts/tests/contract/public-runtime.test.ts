@@ -15,6 +15,15 @@ interface RelayAccount {
   password: string
 }
 
+interface RelayMachine {
+  machineId: string
+  ownerAccountId: string
+  legacyDeviceId: string
+  displayName: string
+  status: 'active' | 'revoked'
+  createdAt: string
+}
+
 function json(body: unknown, status: number): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -22,9 +31,13 @@ function json(body: unknown, status: number): Response {
   })
 }
 
-function createRelay(accounts: RelayAccount[]) {
+function createRelay(
+  accounts: RelayAccount[],
+  initialMachines: RelayMachine[] = [],
+) {
   const sessions = new Map<string, string>()
   const revoked = new Set<string>()
+  const machines = [...initialMachines]
   const calls: string[] = []
   let sequence = 0
   const fetchImpl: typeof fetch = async (input, init) => {
@@ -71,9 +84,37 @@ function createRelay(accounts: RelayAccount[]) {
       revoked.add(token)
       return json({ ok: true }, 200)
     }
+    if (url.pathname === '/api/directory' && method === 'GET') {
+      return json({
+        ok: true,
+        user: { id: account.id, username: account.username },
+        directory: {
+          schemaVersion: 1,
+          user: { id: account.id, username: account.username },
+          devices: [],
+          updatedAt: '2026-11-07T00:00:00.000Z',
+        },
+      }, 200)
+    }
+    if (url.pathname === '/api/machines' && method === 'GET') {
+      return json({
+        ok: true,
+        user: { id: account.id, username: account.username },
+        machines: machines
+          .filter((machine) => machine.ownerAccountId === account.id)
+          .map((machine) => ({
+            machineId: machine.machineId,
+            ownerAccountId: machine.ownerAccountId,
+            deviceId: machine.legacyDeviceId,
+            displayName: machine.displayName,
+            status: machine.status,
+            createdAt: machine.createdAt,
+          })),
+      }, 200)
+    }
     return json({ error: 'not_found' }, 404)
   }
-  return { fetchImpl, calls }
+  return { fetchImpl, calls, machines }
 }
 
 function tempRoot() {
@@ -105,6 +146,21 @@ async function seedAdmin(
     memberIds: [],
     updatedAt: '2026-11-07T00:00:00.000Z',
   })
+}
+
+function relayMachine(
+  ownerAccountId: string,
+  machineId: string,
+  status: 'active' | 'revoked' = 'active',
+): RelayMachine {
+  return {
+    machineId,
+    ownerAccountId,
+    legacyDeviceId: `legacy-${machineId}`,
+    displayName: machineId,
+    status,
+    createdAt: '2026-11-07T00:00:00.000Z',
+  }
 }
 
 function expectError(
@@ -163,8 +219,7 @@ test('grant persists exact workspace and machine scope and verifies only that pa
   t.after(() => rmSync(root, { recursive: true, force: true }))
   const relay = createRelay([
     { id: 'acct-admin', username: 'admin', password: 'admin-secret' },
-    { id: 'acct-alice', username: 'alice', password: 'alice-secret' },
-  ])
+  ], [relayMachine('acct-admin', 'mach-a')])
   const storeFile = join(root, 'authorization.json')
   await seedAdmin(storeFile, 'acct-admin')
   const runtime = createRuntime(relay, storeFile)
@@ -172,40 +227,36 @@ test('grant persists exact workspace and machine scope and verifies only that pa
     loginName: 'admin',
     credential: 'admin-secret',
   })
-  const alice = await runtime.login({
-    loginName: 'alice',
-    credential: 'alice-secret',
-  })
   const granted = await runtime.grant({
     token: admin.token,
-    accountId: alice.accountId,
+    accountId: admin.accountId,
     scopes: ['org:read'],
     allWorkspaces: false,
     workspaceIds: ['ws-a'],
     machineIds: ['mach-a'],
   })
-  assert.equal(granted.accountId, alice.accountId)
-  assert.equal(granted.authorizationGeneration, 1)
+  assert.equal(granted.accountId, admin.accountId)
+  assert.equal(granted.authorizationGeneration, 2)
   assert.deepEqual(granted.workspaceIds, ['ws-a'])
   assert.deepEqual(granted.machineIds, ['mach-a'])
 
   const authority = await runtime.verifyAuthority({
-    token: alice.token,
+    token: admin.token,
     workspaceId: 'ws-a',
     machineId: 'mach-a',
   })
   assert.deepEqual(authority, {
-    accountId: alice.accountId,
+    accountId: admin.accountId,
     workspaceId: 'ws-a',
     machineId: 'mach-a',
     scopes: ['org:read'],
-    authorizationGeneration: 1,
-    bindingGeneration: 1,
+    authorizationGeneration: 2,
+    bindingGeneration: 2,
   })
 
   await assert.rejects(
     runtime.verifyAuthority({
-      token: alice.token,
+      token: admin.token,
       workspaceId: 'ws-b',
       machineId: 'mach-a',
     }),
@@ -213,7 +264,7 @@ test('grant persists exact workspace and machine scope and verifies only that pa
   )
   await assert.rejects(
     runtime.verifyAuthority({
-      token: alice.token,
+      token: admin.token,
       workspaceId: 'ws-a',
       machineId: 'mach-b',
     }),
@@ -221,7 +272,7 @@ test('grant persists exact workspace and machine scope and verifies only that pa
   )
   await assert.rejects(
     runtime.verifyAuthority({
-      token: alice.token,
+      token: admin.token,
       workspaceId: 'ws-a',
       machineId: 'mach-a',
       expectedGeneration: 0,
@@ -232,26 +283,98 @@ test('grant persists exact workspace and machine scope and verifies only that pa
   const reopened = createRuntime(
     createRelay([
       { id: 'acct-admin', username: 'admin', password: 'admin-secret' },
-      { id: 'acct-alice', username: 'alice', password: 'alice-secret' },
-    ]),
+    ], [relayMachine('acct-admin', 'mach-a')]),
     storeFile,
   )
-  const aliceAfterRestart = await reopened.login({
-    loginName: 'alice',
-    credential: 'alice-secret',
+  const adminAfterRestart = await reopened.login({
+    loginName: 'admin',
+    credential: 'admin-secret',
   })
   assert.equal(
     (await reopened.verifyAuthority({
-      token: aliceAfterRestart.token,
+      token: adminAfterRestart.token,
       workspaceId: 'ws-a',
       machineId: 'mach-a',
     })).authorizationGeneration,
-    1,
+    2,
   )
   const persisted = readFileSync(storeFile, 'utf8')
   assert.equal(persisted.includes('admin-secret'), false)
-  assert.equal(persisted.includes('alice-secret'), false)
   assert.equal(persisted.includes('relay-token-'), false)
+})
+
+test('grant rejects unverified targets and leaves the policy store unchanged', async (t) => {
+  const root = tempRoot()
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const relay = createRelay([
+    { id: 'acct-admin', username: 'admin', password: 'admin-secret' },
+    { id: 'acct-bob', username: 'bob', password: 'bob-secret' },
+  ], [
+    relayMachine('acct-admin', 'mach-admin'),
+    relayMachine('acct-admin', 'mach-revoked', 'revoked'),
+    relayMachine('acct-bob', 'mach-bob'),
+  ])
+  const storeFile = join(root, 'authorization.json')
+  await seedAdmin(storeFile, 'acct-admin')
+  const store = createFileAccountAuthorizationStore(storeFile)
+  const runtime = createRuntime(relay, storeFile)
+  const admin = await runtime.login({
+    loginName: 'admin',
+    credential: 'admin-secret',
+  })
+  const before = await store.getGrant('acct-admin')
+  assert.ok(before)
+
+  await assert.rejects(
+    runtime.grant({
+      token: admin.token,
+      accountId: 'acct-unknown',
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: ['mach-admin'],
+    }),
+    expectError('UNSUPPORTED', 501),
+  )
+  await assert.rejects(
+    runtime.grant({
+      token: admin.token,
+      accountId: admin.accountId,
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: ['mach-missing'],
+    }),
+    expectError('MACHINE_NOT_FOUND', 404),
+  )
+  await assert.rejects(
+    runtime.grant({
+      token: admin.token,
+      accountId: admin.accountId,
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: ['mach-bob'],
+    }),
+    expectError('MACHINE_NOT_FOUND', 404),
+  )
+  await assert.rejects(
+    runtime.grant({
+      token: admin.token,
+      accountId: admin.accountId,
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: ['mach-revoked'],
+    }),
+    expectError('MACHINE_REVOKED', 403),
+  )
+
+  const after = await store.getGrant('acct-admin')
+  assert.equal(after?.authorizationGeneration, before.authorizationGeneration)
+  assert.deepEqual(after?.workspaceIds, before.workspaceIds)
+  assert.deepEqual(after?.machineIds, before.machineIds)
+  assert.equal(await store.getGrant('acct-unknown'), undefined)
 })
 
 test('revoke invalidates the existing grant and generation, and regrant advances the generation', async (t) => {
@@ -261,12 +384,19 @@ test('revoke invalidates the existing grant and generation, and regrant advances
     { id: 'acct-admin', username: 'admin', password: 'admin-secret' },
     { id: 'acct-alice', username: 'alice', password: 'alice-secret' },
   ])
-  const runtime = createRuntime(relay, join(root, 'authorization.json'))
-  await seedAdmin(
-    join(root, 'authorization.json'),
-    'acct-admin',
-    ['org:write'],
-  )
+  const storeFile = join(root, 'authorization.json')
+  const store = createFileAccountAuthorizationStore(storeFile)
+  await seedAdmin(storeFile, 'acct-admin', ['org:write'])
+  const first = await store.putGrant({
+    accountId: 'acct-alice',
+    scopes: ['org:read'],
+    allWorkspaces: false,
+    workspaceIds: ['ws-a'],
+    machineIds: ['mach-a'],
+    memberIds: [],
+    updatedAt: '2026-11-07T00:00:00.000Z',
+  })
+  const runtime = createRuntime(relay, storeFile)
   const admin = await runtime.login({
     loginName: 'admin',
     credential: 'admin-secret',
@@ -274,14 +404,6 @@ test('revoke invalidates the existing grant and generation, and regrant advances
   const alice = await runtime.login({
     loginName: 'alice',
     credential: 'alice-secret',
-  })
-  const first = await runtime.grant({
-    token: admin.token,
-    accountId: alice.accountId,
-    scopes: ['org:read'],
-    allWorkspaces: false,
-    workspaceIds: ['ws-a'],
-    machineIds: ['mach-a'],
   })
   await runtime.verifyAuthority({
     token: alice.token,
@@ -307,13 +429,14 @@ test('revoke invalidates the existing grant and generation, and regrant advances
     expectError('WORKSPACE_AUTHORIZATION_REQUIRED', 403),
   )
 
-  const second = await runtime.grant({
-    token: admin.token,
+  const second = await store.putGrant({
     accountId: alice.accountId,
     scopes: ['org:read'],
     allWorkspaces: false,
     workspaceIds: ['ws-a'],
     machineIds: ['mach-a'],
+    memberIds: [],
+    updatedAt: '2026-11-07T00:00:01.000Z',
   })
   assert.ok(second.authorizationGeneration > first.authorizationGeneration)
   await assert.rejects(

@@ -1,3 +1,5 @@
+import type { AccountDirectoryPort } from '../ports/account-directory.ts'
+import type { MachineRegistrationPort } from '../ports/machine-registration.ts'
 import type { RelayAuthPort } from '../ports/relay-authority.ts'
 import type { AccountAuthorizationStore } from '../ports/account-authorization-store.ts'
 import {
@@ -113,7 +115,7 @@ function toStringList(value: unknown, field: string): readonly string[] {
  */
 export function createAccountsAuthorityRuntime(options: {
   readonly authService: AuthService
-  readonly relay: RelayAuthPort
+  readonly relay: RelayAuthPort & AccountDirectoryPort & MachineRegistrationPort
   readonly store: AccountAuthorizationStore
 }): AccountsAuthorityRuntime {
   const authService = options.authService
@@ -155,13 +157,53 @@ export function createAccountsAuthorityRuntime(options: {
     if (!request || typeof request !== 'object') {
       throw new AccountsError('INVALID_REQUEST', 400, 'Grant request is required.')
     }
-    await requireManagementGrant(request.token)
+    const { authContext } = await requireManagementGrant(request.token)
+    const accountId = requireNonEmpty(request.accountId, 'accountId')
+    const directory = await relay.getDirectory(authContext.sessionId)
+    if (directory.user.id !== accountId) {
+      // V1 relay exposes only caller-scoped account and machine lookups, so a
+      // grant for a different account cannot be verified without a new relay
+      // lookup. Refuse the gap instead of persisting unverifiable authority.
+      throw new AccountsError(
+        'UNSUPPORTED',
+        501,
+        'V1 relay lookup is caller-scoped and cannot verify a different target account.',
+        { targetAccountId: accountId },
+      )
+    }
+    const requestedMachineIds = toStringList(request.machineIds, 'machineIds')
+    const relayMachines = requestedMachineIds.length > 0
+      ? await relay.listMachines(authContext.sessionId)
+      : []
+    const machineIds: string[] = []
+    for (const machineId of requestedMachineIds) {
+      const machine = relayMachines.find(
+        (candidate) => candidate.machineId === machineId,
+      )
+      if (!machine || machine.ownerAccountId !== accountId) {
+        throw new AccountsError(
+          'MACHINE_NOT_FOUND',
+          404,
+          'The requested machine is not a relay-verified machine for this account.',
+          { machineId },
+        )
+      }
+      if (machine.status !== 'active') {
+        throw new AccountsError(
+          'MACHINE_REVOKED',
+          403,
+          'The requested machine is revoked at the relay.',
+          { machineId },
+        )
+      }
+      machineIds.push(machine.machineId)
+    }
     const input: AccountAuthorizationGrantInput = {
-      accountId: request.accountId,
+      accountId,
       scopes: toStringList(request.scopes, 'scopes'),
       allWorkspaces: request.allWorkspaces === true,
       workspaceIds: toStringList(request.workspaceIds, 'workspaceIds'),
-      machineIds: toStringList(request.machineIds, 'machineIds'),
+      machineIds,
       memberIds: [],
       updatedAt: new Date().toISOString(),
     }

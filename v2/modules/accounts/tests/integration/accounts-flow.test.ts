@@ -412,25 +412,46 @@ test('real V1 relay drives workspace and machine authorization adapters end to e
   }
 })
 
-test('real V1 relay backs the public accounts authority entry end to end', async (t) => {
+test('real V1 relay verifies grant targets and exposes the cross-account lookup gap', async (t) => {
   assert.ok(relay, 'real relay is unavailable')
   const storeRoot = mkdtempSync(join(tmpdir(), 'zterm-accounts-runtime-real-'))
   t.after(() => rmSync(storeRoot, { recursive: true, force: true }))
   const storeFile = join(storeRoot, 'authorization.json')
 
   const adminIdentity = uniqueIdentity('public-admin')
-  const aliceIdentity = uniqueIdentity('public-alice')
-  const bobIdentity = uniqueIdentity('public-bob')
   const admin = await createAccount(relay.baseUrl, 'public-admin')
   const alice = await createAccount(relay.baseUrl, 'public-alice')
   const bob = await createAccount(relay.baseUrl, 'public-bob')
 
-  await createFileAccountAuthorizationStore(storeFile).putGrant({
+  const adminMachine = await admin.machines.enrollMachine(admin.token, {
+    deviceId: 'public-admin-machine',
+    deviceToken: 'public-admin-proof',
+  })
+  const aliceMachine = await alice.machines.enrollMachine(alice.token, {
+    deviceId: 'public-alice-machine',
+    deviceToken: 'public-alice-proof',
+  })
+  const bobMachine = await bob.machines.enrollMachine(bob.token, {
+    deviceId: 'public-bob-machine',
+    deviceToken: 'public-bob-proof',
+  })
+
+  const store = createFileAccountAuthorizationStore(storeFile)
+  await store.putGrant({
     accountId: admin.accountId,
     scopes: ['org:read', 'org:write'],
     allWorkspaces: true,
     workspaceIds: [],
     machineIds: [],
+    memberIds: [],
+    updatedAt: '2026-11-07T00:00:00.000Z',
+  })
+  const aliceInitial = await store.putGrant({
+    accountId: alice.accountId,
+    scopes: ['org:read'],
+    allWorkspaces: false,
+    workspaceIds: ['ws-a'],
+    machineIds: [aliceMachine.machineId],
     memberIds: [],
     updatedAt: '2026-11-07T00:00:00.000Z',
   })
@@ -441,7 +462,6 @@ test('real V1 relay backs the public accounts authority entry end to end', async
   })
   const adminLogin = await runtime.login(admin.identity)
   const aliceLogin = await runtime.login(alice.identity)
-  const bobLogin = await runtime.login(bob.identity)
 
   await expectError(
     runtime.login({ loginName: adminIdentity.loginName, credential: 'wrong' }),
@@ -450,99 +470,148 @@ test('real V1 relay backs the public accounts authority entry end to end', async
   )
   await expectError(
     runtime.grant({
-      token: aliceLogin.token,
+      token: alice.token,
       accountId: alice.accountId,
       scopes: ['org:read'],
       allWorkspaces: false,
       workspaceIds: ['ws-a'],
-      machineIds: ['mach-a'],
+      machineIds: [aliceMachine.machineId],
     }),
     'WORKSPACE_AUTHORIZATION_REQUIRED',
     403,
   )
 
-  const first = await runtime.grant({
+  const adminGrantBefore = await store.getGrant(admin.accountId)
+  const aliceGrantBefore = await store.getGrant(alice.accountId)
+  assert.ok(adminGrantBefore)
+  assert.ok(aliceGrantBefore)
+
+  await expectError(
+    runtime.grant({
+      token: adminLogin.token,
+      accountId: 'acct_missing',
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: [adminMachine.machineId],
+    }),
+    'UNSUPPORTED',
+    501,
+  )
+  await expectError(
+    runtime.grant({
+      token: adminLogin.token,
+      accountId: adminLogin.accountId,
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: ['mach_missing'],
+    }),
+    'MACHINE_NOT_FOUND',
+    404,
+  )
+  await expectError(
+    runtime.grant({
+      token: adminLogin.token,
+      accountId: adminLogin.accountId,
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: [bobMachine.machineId],
+    }),
+    'MACHINE_NOT_FOUND',
+    404,
+  )
+
+  assert.equal(
+    (await store.getGrant(admin.accountId))?.authorizationGeneration,
+    adminGrantBefore.authorizationGeneration,
+  )
+  assert.equal(
+    (await store.getGrant(alice.accountId))?.authorizationGeneration,
+    aliceGrantBefore.authorizationGeneration,
+  )
+  assert.equal(await store.getGrant('acct_missing'), undefined)
+
+  const revoked = await runtime.revoke({
     token: adminLogin.token,
     accountId: aliceLogin.accountId,
-    scopes: ['org:read'],
-    allWorkspaces: false,
-    workspaceIds: ['ws-a'],
-    machineIds: ['mach-a'],
+    expectedGeneration: aliceInitial.authorizationGeneration,
   })
-  assert.equal(first.accountId, alice.accountId)
-  assert.equal(first.authorizationGeneration, 1)
-
-  const authority = await runtime.verifyAuthority({
-    token: aliceLogin.token,
-    workspaceId: 'ws-a',
-    machineId: 'mach-a',
-    expectedGeneration: first.bindingGeneration,
-  })
-  assert.equal(authority.accountId, alice.accountId)
-  assert.equal(authority.bindingGeneration, first.bindingGeneration)
-
+  assert.equal(revoked.revokedGeneration, aliceInitial.authorizationGeneration)
   await expectError(
     runtime.verifyAuthority({
       token: aliceLogin.token,
+      workspaceId: 'ws-a',
+      machineId: aliceMachine.machineId,
+      expectedGeneration: aliceInitial.authorizationGeneration,
+    }),
+    'WORKSPACE_AUTHORIZATION_REQUIRED',
+    403,
+  )
+
+  const aliceReplacement = await store.putGrant({
+    accountId: alice.accountId,
+    scopes: ['org:read'],
+    allWorkspaces: false,
+    workspaceIds: ['ws-a'],
+    machineIds: [aliceMachine.machineId],
+    memberIds: [],
+    updatedAt: '2026-11-07T00:00:01.000Z',
+  })
+  assert.ok(
+    aliceReplacement.authorizationGeneration
+      > aliceInitial.authorizationGeneration,
+  )
+  await expectError(
+    runtime.verifyAuthority({
+      token: aliceLogin.token,
+      workspaceId: 'ws-a',
+      machineId: aliceMachine.machineId,
+      expectedGeneration: aliceInitial.authorizationGeneration,
+    }),
+    'AUTHORIZATION_GENERATION_STALE',
+    409,
+  )
+
+  const selfGrant = await runtime.grant({
+    token: adminLogin.token,
+    accountId: adminLogin.accountId,
+    scopes: ['org:read'],
+    allWorkspaces: false,
+    workspaceIds: ['ws-a'],
+    machineIds: [adminMachine.machineId],
+  })
+  assert.equal(selfGrant.accountId, admin.accountId)
+  assert.equal(
+    selfGrant.authorizationGeneration,
+    adminGrantBefore.authorizationGeneration + 1,
+  )
+
+  const authority = await runtime.verifyAuthority({
+    token: adminLogin.token,
+    workspaceId: 'ws-a',
+    machineId: adminMachine.machineId,
+    expectedGeneration: selfGrant.bindingGeneration,
+  })
+  assert.equal(authority.accountId, admin.accountId)
+  assert.equal(authority.bindingGeneration, selfGrant.bindingGeneration)
+  await expectError(
+    runtime.verifyAuthority({
+      token: adminLogin.token,
       workspaceId: 'ws-b',
-      machineId: 'mach-a',
+      machineId: adminMachine.machineId,
     }),
     'WORKSPACE_FORBIDDEN',
     403,
   )
   await expectError(
     runtime.verifyAuthority({
-      token: bobLogin.token,
+      token: adminLogin.token,
       workspaceId: 'ws-a',
-      machineId: 'mach-a',
+      machineId: bobMachine.machineId,
     }),
-    'WORKSPACE_AUTHORIZATION_REQUIRED',
+    'MACHINE_NOT_OWNED',
     403,
-  )
-
-  const revoked = await runtime.revoke({
-    token: adminLogin.token,
-    accountId: aliceLogin.accountId,
-    expectedGeneration: first.authorizationGeneration,
-  })
-  assert.equal(revoked.revokedGeneration, first.authorizationGeneration)
-  await expectError(
-    runtime.verifyAuthority({
-      token: aliceLogin.token,
-      workspaceId: 'ws-a',
-      machineId: 'mach-a',
-      expectedGeneration: first.authorizationGeneration,
-    }),
-    'WORKSPACE_AUTHORIZATION_REQUIRED',
-    403,
-  )
-
-  const second = await runtime.grant({
-    token: adminLogin.token,
-    accountId: aliceLogin.accountId,
-    scopes: ['org:read'],
-    allWorkspaces: false,
-    workspaceIds: ['ws-a'],
-    machineIds: ['mach-a'],
-  })
-  assert.ok(second.authorizationGeneration > first.authorizationGeneration)
-  await expectError(
-    runtime.verifyAuthority({
-      token: aliceLogin.token,
-      workspaceId: 'ws-a',
-      machineId: 'mach-a',
-      expectedGeneration: first.authorizationGeneration,
-    }),
-    'AUTHORIZATION_GENERATION_STALE',
-    409,
-  )
-  assert.equal(
-    (await runtime.verifyAuthority({
-      token: aliceLogin.token,
-      workspaceId: 'ws-a',
-      machineId: 'mach-a',
-      expectedGeneration: second.authorizationGeneration,
-    })).bindingGeneration,
-    second.authorizationGeneration,
   )
 })

@@ -84,8 +84,12 @@ accounts/
 - `login`：把登录名和凭据交给 relay 的正式 login 端点，返回 relay session token、
   accountId 和 loginName，不在本地签发会话。
 - `grant`：先通过 relay 复核调用者会话，再要求当前账号持有显式
-  `allWorkspaces + org:write` 管理授权；随后把目标账号的 workspace/machine
-  精确范围和递增 `authorizationGeneration` 写入 accounts-owned 持久 store。
+  `allWorkspaces + org:write` 管理授权；随后用 relay directory 确认目标账号是
+  caller 账号，并用 relay machine list 逐个确认 machineId 是 canonical active
+  且 owner 匹配，最后才把 workspace/machine 精确范围和递增
+  `authorizationGeneration` 写入 accounts-owned 持久 store。V1 relay 的
+  directory/machine 查询当前均为 caller-scoped，跨账号目标没有可验证 lookup，
+  因此返回 `UNSUPPORTED` 501，不持久化未验证 authority。
 - `revoke`：同样复核管理授权，删除目标账号当前 grant；持久 store 保留已用代次，
   后续同账号重新 grant 必须得到更高代次。
 - `verifyAuthority`：先复核 relay session，再要求当前账号存在 grant，并精确匹配

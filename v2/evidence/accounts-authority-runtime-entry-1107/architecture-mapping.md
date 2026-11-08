@@ -21,6 +21,8 @@ login(loginName, credential)
 
 grant(admin session, accountId, workspaceIds, machineIds)
   -> relay session revalidation
+  -> relay directory caller-account confirmation
+  -> relay machine list canonical-active/owner validation
   -> accounts policy store (single writer)
   -> authorization generation
 
@@ -39,6 +41,9 @@ revoke(admin session, accountId)
 
 All paths end in one typed result or one typed `AccountsError`. The public
 entry does not open a connection, read a member binding, or write members.
+The current V1 relay directory and machine list are caller-scoped. A target
+account other than the authenticated caller therefore has no relay-owned
+lookup and is rejected as `UNSUPPORTED` 501 before `putGrant`.
 
 ## Ownership
 
