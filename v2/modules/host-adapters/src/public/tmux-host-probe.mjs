@@ -39,8 +39,8 @@ export function createTmuxHostProbe({
     throw new TypeError("host probe requires a tmux socketName");
   }
   const resolvedBackend = readText(backend);
-  if (!resolvedBackend) {
-    throw new TypeError("host probe requires a terminal backend");
+  if (resolvedBackend !== "tmux") {
+    throw new TypeError("host probe only supports the tmux terminal backend");
   }
   const authoritativeMachineId = readText(machineId) || null;
   const adapter = new TmuxAdapter({ socketName: resolvedSocketName, tmuxBin });

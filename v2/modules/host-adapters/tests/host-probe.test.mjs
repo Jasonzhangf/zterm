@@ -40,6 +40,13 @@ test("tmux host probe observes the exact session_id target", async (t) => {
   assertAuthoritativeTmuxIdentity(observation);
 });
 
+test("tmux host probe rejects a non-tmux backend at creation", () => {
+  assert.throws(
+    () => createTmuxHostProbe({ socketName, backend: "herdr" }),
+    TypeError
+  );
+});
+
 test("tmux host probe surfaces an injected authoritative machine identity", async (t) => {
   tmux(["new-session", "-d", "-s", sessionName]);
   t.after(() => tmux(["kill-session", "-t", sessionName]));

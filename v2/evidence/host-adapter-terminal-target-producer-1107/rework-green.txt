@@ -1,0 +1,64 @@
+TAP version 13
+# Subtest: tmux host probe observes the exact session_id target
+ok 1 - tmux host probe observes the exact session_id target
+  ---
+  duration_ms: 36.61175
+  type: 'test'
+  ...
+# Subtest: tmux host probe rejects a non-tmux backend at creation
+ok 2 - tmux host probe rejects a non-tmux backend at creation
+  ---
+  duration_ms: 0.255875
+  type: 'test'
+  ...
+# Subtest: tmux host probe surfaces an injected authoritative machine identity
+ok 3 - tmux host probe surfaces an injected authoritative machine identity
+  ---
+  duration_ms: 32.919417
+  type: 'test'
+  ...
+# Subtest: tmux host probe reports anchorPresent true for a live pane
+ok 4 - tmux host probe reports anchorPresent true for a live pane
+  ---
+  duration_ms: 29.957291
+  type: 'test'
+  ...
+# Subtest: tmux host probe reports anchorPresent false for a missing pane
+ok 5 - tmux host probe reports anchorPresent false for a missing pane
+  ---
+  duration_ms: 32.293292
+  type: 'test'
+  ...
+# Subtest: tmux host probe reports unavailable for a missing session
+ok 6 - tmux host probe reports unavailable for a missing session
+  ---
+  duration_ms: 5.470709
+  type: 'test'
+  ...
+# Subtest: tmux adapter lists, captures and sends input to a real session
+ok 7 - tmux adapter lists, captures and sends input to a real session
+  ---
+  duration_ms: 51.300708
+  type: 'test'
+  ...
+# Subtest: tmux adapter returns a typed error for a missing target
+ok 8 - tmux adapter returns a typed error for a missing target
+  ---
+  duration_ms: 26.93525
+  type: 'test'
+  ...
+# Subtest: tmux adapter reports no sessions when the dedicated server is absent
+ok 9 - tmux adapter reports no sessions when the dedicated server is absent
+  ---
+  duration_ms: 5.780292
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 216.713667

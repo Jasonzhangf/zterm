@@ -137,3 +137,53 @@ All four follow-up outputs and their exit codes are saved in this evidence direc
 The complete change was committed locally on branch `host-adapter-terminal-target-producer-20261107` as `fix(v2/host-adapters): emit tmux:v1 terminal identity`. The local commit is `de0cbd16408ab7e99389afeca8c3312436d0fc40` (`de0cbd16`). The same ID is recorded in `commit.txt`.
 
 No push, merge, PR, publish, remote CI, daemon restart, tmux restart, global install, or broad process kill was performed. The producer and members consumer now pass the affected suites. Remote integration and delivery remain outside this local-commit scope.
+
+## Rework 1108: backend coherence P1
+
+### Finding and fix
+
+Review P1: `createTmuxHostProbe` accepted any non-empty `backend` and projected it into `terminalTarget.backend`, while `stableId` was always in the `tmux:v1:` domain. A caller could pass `backend: "herdr"` and receive a contradictory target.
+
+Fix: `createTmuxHostProbe` now rejects every non-`tmux` backend with a `TypeError` before constructing the probe. The returned `terminalTarget.backend` is therefore always `tmux` and coherent with the `tmux:v1:` stableId. The public signature and all existing callers are unchanged; no caller passes a non-tmux backend. `DESIGN.md` records this invariant.
+
+The second reviewer finding (members runtime boundary) was rejected by Jenny per the board description; the members runtime changes are preserved outside this rework.
+
+### Red evidence
+
+Command:
+
+```sh
+node --test v2/modules/host-adapters/tests/host-probe.test.mjs
+```
+
+Exit code: `1` (`rework-red.txt`). The new test failed before the fix:
+
+```text
+not ok 2 - tmux host probe rejects a non-tmux backend at creation
+error: 'Missing expected exception (TypeError).'
+```
+
+### Green evidence
+
+| Check | Command | Exit | Result |
+|---|---|---:|---|
+| Host-adapter suites | `node --test v2/modules/host-adapters/tests/host-probe.test.mjs v2/modules/host-adapters/tests/tmux-adapter.test.mjs` | `0` | `9` passed, `0` failed (`rework-green.txt`) |
+| Members suite | `node --test v2/modules/members/tests/members.test.mjs` | `0` | `29` passed, `0` failed (`rework-members-suite.txt`) |
+| Syntax checks | `node --check` on `tmux-adapter.mjs`, `tmux-host-probe.mjs`, `host-probe.test.mjs`, `members.test.mjs` | `0` for all four | `rework-check-*.exit` / `.txt` |
+| Diff check | `git diff --check` | `0` | `rework-git-diff-check.txt` |
+| DAG validate | `dagpipe graph validate` on `workspace-control-plane.graph.json` and `workspace-member-resolve.graph.json` | `0` for both | `dag-workspace-control-plane.txt`, `dag-workspace-member-resolve.txt` |
+
+The host-adapters suite grew from `8` to `9` tests because this rework adds the invalid-backend rejection test required by the review remediation. The members suite remains `29` tests and still passes its tmux consumer checks unchanged.
+
+### Changed paths for this rework
+
+- `v2/modules/host-adapters/src/public/tmux-host-probe.mjs`
+- `v2/modules/host-adapters/tests/host-probe.test.mjs`
+- `v2/modules/host-adapters/DESIGN.md`
+- `v2/evidence/host-adapter-terminal-target-producer-1107/` (rework evidence)
+
+No members runtime, daemon, resolver, shared resource, or other module changed.
+
+### Remaining risk
+
+The probe still has no authoritative machine-identity source; `machineId` remains an explicitly injected nullable fact. Broader daemon composition and herdr integration stay outside this producer scope.
