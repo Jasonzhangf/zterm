@@ -1,0 +1,58 @@
+TAP version 13
+# Subtest: returns a machine-scoped directory from the current authorized link without opening a channel
+ok 1 - returns a machine-scoped directory from the current authorized link without opening a channel
+  ---
+  duration_ms: 1.764958
+  type: 'test'
+  ...
+# Subtest: rejects a link whose peer daemon does not match the verified daemonHostId
+ok 2 - rejects a link whose peer daemon does not match the verified daemonHostId
+  ---
+  duration_ms: 0.256417
+  type: 'test'
+  ...
+# Subtest: rejects an authorization written for a different machine
+ok 3 - rejects an authorization written for a different machine
+  ---
+  duration_ms: 0.132333
+  type: 'test'
+  ...
+# Subtest: fences a superseded link so the old directory cannot open a terminal channel
+ok 4 - fences a superseded link so the old directory cannot open a terminal channel
+  ---
+  duration_ms: 0.154625
+  type: 'test'
+  ...
+# Subtest: rejects directory operations after the current link is revoked
+ok 5 - rejects directory operations after the current link is revoked
+  ---
+  duration_ms: 0.715625
+  type: 'test'
+  ...
+# Subtest: preserves the cause of a typed directory rejection
+ok 6 - preserves the cause of a typed directory rejection
+  ---
+  duration_ms: 0.139583
+  type: 'test'
+  ...
+# Subtest: closes the link and preserves the typed error when the catalog read fails
+ok 7 - closes the link and preserves the typed error when the catalog read fails
+  ---
+  duration_ms: 0.253125
+  type: 'test'
+  ...
+# Subtest: keeps the original catalog error when a concurrent connect supersedes the pending link
+ok 8 - keeps the original catalog error when a concurrent connect supersedes the pending link
+  ---
+  duration_ms: 0.390834
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 129.969833

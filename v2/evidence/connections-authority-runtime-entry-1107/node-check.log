@@ -1,0 +1,2 @@
+node --check index.mjs EXIT=0
+node --check test EXIT=0
