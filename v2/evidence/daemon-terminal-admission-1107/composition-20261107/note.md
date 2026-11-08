@@ -526,3 +526,49 @@ The board task was updated to revision 25 with the same facts.
 
 No push, PR, publish, merge to main, shared daemon restart, tmux/global service
 action, or device action was performed.
+
+## 2026-11-08 02:00 UTC - decision, test repair, and 2bc9bab5 rebase
+
+Purpose: apply Jenny's decision `m1794102837521-9090`.
+
+Decision:
+
+- Update `v2/modules/daemon/tests/terminal-input-raw.test.mjs` to the
+  admission contract.
+- Do not retire the test and do not restore the legacy token-only route.
+- Keep raw-input byte-exactness coverage.
+- Compose the candidate onto current local main `2bc9bab5`.
+
+Implementation:
+
+- The inherited test now constructs `createDaemon` with admission ports and a
+  fake machine-scoped terminal consumer.
+- It still covers exact bytes, explicit CR, missing/non-string data rejection,
+  delivery order, authentication failure, and exact target rejection.
+- It does not use or restore the token-only legacy input path.
+
+Focused verification before rebase:
+
+- `node --test v2/modules/daemon/tests/terminal-input-raw.test.mjs`: 5/5 PASS.
+- Four-file composition suite: 50/50 PASS.
+- `node --check` on the rewritten test: exit 0.
+
+Composition:
+
+- Local test/evidence commit before rebase: `c4f55c27`.
+- `git rebase 2bc9bab5e98d7cf73780ec3efdbb8403e0e59844`: completed with no
+  conflict.
+- Rebased code/test commit: `13d9e0a4`.
+- `2bc9bab5` is an ancestor of the rebased HEAD; the branch is 4 local commits
+  ahead.
+
+Focused verification after rebase:
+
+- Four-file composition suite: 50/50 PASS.
+- `node --check` on the rewritten test: exit 0.
+- Evidence:
+  `v2/evidence/daemon-terminal-admission-1107/composition-20261107/current-main-2bc9bab5-decision-verification-20261108.txt`.
+
+The task remains `working/INCOMPLETE` pending David review, integration, and the
+existing production-composition gaps. No push, PR, publish, shared daemon
+restart, tmux/global service action, or device action was performed.

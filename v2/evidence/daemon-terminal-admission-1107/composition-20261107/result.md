@@ -258,3 +258,34 @@ The board task was updated to revision 25 with the same facts.
 The task remains `working/INCOMPLETE`. No push, PR, publish, merge to main,
 shared daemon restart, tmux/global service action, or device action was
 performed.
+
+## 2026-11-08 decision and 2bc9bab5 rebase verification
+
+Jenny's decision `m1794102837521-9090` directed the inherited raw-input test to
+be updated to the admission contract without retiring it and without restoring
+the legacy token-only route. The test now exercises a real `createDaemon`
+admission configuration with a fake machine-scoped terminal consumer.
+Coverage remains for exact bytes, explicit CR, invalid data rejection, delivery
+order, authentication failure, and exact target rejection.
+
+Before rebase:
+
+- Rewritten raw-input test: 5/5 PASS.
+- Four-file composition suite: 50/50 PASS.
+- Test syntax check: exit 0.
+
+The candidate was then rebased onto current local main `2bc9bab5`; the rebase
+completed with no conflict. The rebased code/test commit is `13d9e0a4`, and
+the branch is 4 local commits ahead of `2bc9bab5`.
+
+After rebase:
+
+- Four-file composition suite: 50/50 PASS.
+- Test syntax check: exit 0.
+- Raw evidence:
+  `v2/evidence/daemon-terminal-admission-1107/composition-20261107/current-main-2bc9bab5-decision-verification-20261108.txt`.
+
+The task remains `working/INCOMPLETE` pending David review, integration, and the
+existing production-composition gaps. No push, PR, publish, merge to main,
+shared daemon restart, tmux/global service action, or device action was
+performed.
