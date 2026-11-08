@@ -123,3 +123,28 @@ node --check src/public/index.mjs                  EXIT=0
 收据：`red-link-leak-node-test.log`、`green-link-leak-node-test.log`、
 `node-check-link-leak.log`。新增契约用例：catalog 读取失败时 link 必须关闭且返还原
 typed error。
+
+## rework 2：清理错误不得覆盖原 catalog 错误（Mia 复审，owner=Leo）
+
+Mia 对 `471caef9` 复审发现：catch 内 `closeOwnLink(link)` 未隔离清理错误。并发第二个
+`connect` supersede pending link 时，清理抛 `stale_generation`，调用方收到
+`stale_generation` 而不是原始的 `list_sessions_failed`。
+
+修复（仅 `v2/modules/connections/**`）：`src/public/index.mjs` 中清理改为 best-effort，
+把 `closeOwnLink(link)` 包在自身 try/catch 内，清理失败不改变原错误；随后始终 rethrow
+原始 typed catalog error。未改 daemon/host-adapters/members，未改公开入口其余语义。
+
+红 -> 绿：
+
+```
+red:   node --test tests/contract/public-runtime.contract.test.mjs
+       EXIT=1   # tests 8, pass 7, fail 1; got stale_generation instead of list_sessions_failed
+green: node --test tests/contract/public-runtime.contract.test.mjs
+       EXIT=0   # tests 8, pass 8, fail 0
+node --check src/public/index.mjs                              EXIT=0
+node --check tests/contract/public-runtime.contract.test.mjs   EXIT=0
+```
+
+收据：`red-link-leak-race-node-test.log`、`green-link-leak-race-node-test.log`、
+`node-check-link-leak-race.log`。新增契约用例：并发第二个 connect supersede pending
+link 时，调用方仍收到原始 catalog 错误，且测试进程无未处理拒绝。

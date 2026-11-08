@@ -22,7 +22,13 @@ export async function resolveAuthorizedTerminalDirectory({
   } catch (error) {
     // The caller cannot release a link it never received, so a failed catalog
     // read owns the physical connection and closes it before rethrowing.
-    connectionManager.closeOwnLink(link);
+    try {
+      connectionManager.closeOwnLink(link);
+    } catch {
+      // Cleanup is best-effort: a superseded link already released its
+      // transport, and that cleanup failure must not replace the caller's
+      // original typed catalog error.
+    }
     throw error;
   }
   return {

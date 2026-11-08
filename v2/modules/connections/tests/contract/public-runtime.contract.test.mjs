@@ -224,3 +224,33 @@ test("closes the link and preserves the typed error when the catalog read fails"
   assert.equal(closeCalls, 1);
   assert.equal(manager.observeLink(createdLink).status, "closed");
 });
+
+test("keeps the original catalog error when a concurrent connect supersedes the pending link", async () => {
+  const catalogFailure = new ConnectionError("list_sessions_failed", "catalog unavailable", {
+    machineId: "machine-a",
+  });
+  const fake = makeFakeTransport({ peerIdentity: "daemon-machine-a" });
+  let enterCatalog;
+  const enteredCatalog = new Promise((resolve) => { enterCatalog = resolve; });
+  let releaseCatalog;
+  const catalogGate = new Promise((resolve) => { releaseCatalog = resolve; });
+  fake.handle.listSessions = async () => {
+    enterCatalog();
+    await catalogGate;
+    throw catalogFailure;
+  };
+  const manager = managerFor(fake.handle);
+
+  const pendingDirectory = resolveAuthorizedTerminalDirectory({
+    connectionManager: manager,
+    machineId: "machine-a",
+    verifiedAuthorization: authFor("machine-a", "daemon-machine-a"),
+  });
+  await enteredCatalog;
+
+  const superseding = await manager.connect("machine-a", authFor("machine-a", "daemon-machine-a"));
+  assert.equal(superseding.generation, 2);
+  releaseCatalog();
+
+  await assert.rejects(pendingDirectory, (err) => err === catalogFailure);
+});
