@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +17,7 @@ import {
   createMembersService,
   resolveBindingTarget,
 } from '../src/public/index.mjs';
+import { createTmuxHostProbe } from '../../host-adapters/src/public/index.mjs';
 import { createTrustedAuthDouble } from './support/trusted-auth-double.mjs';
 
 const TOKENS = {
@@ -57,6 +59,7 @@ function hostProbeDouble(overrides = {}) {
         sessionId: '$0',
         anchor: '%0',
         anchorPresent: true,
+        terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:observed' },
         observedAt: new Date().toISOString(),
         ...overrides,
       };
@@ -157,7 +160,7 @@ test('bindings are independent per member and CAS update advances generation', a
   await members.configureRuntime({
     token: TOKENS.owner,
     memberId: second.memberId,
-    machineId: 'mac-2',
+    machineId: 'mac-1',
     hostKind: 'dsh',
     agentKind: 'claude',
     launchProfileRef: 'lp-b',
@@ -369,7 +372,7 @@ test('verifyHost confirms the host machine identity and rejects mismatch', async
   assert.equal(verified.machineId, 'mac-1');
   assert.equal(verified.generation, 1);
 
-  const mismatch = await fixture({ hostProbe: hostProbeDouble({ machineId: 'mac-2' }) });
+  const mismatch = await fixture();
   await mismatch.members.configureRuntime({
     token: TOKENS.owner,
     memberId: mismatch.first.memberId,
@@ -385,8 +388,14 @@ test('verifyHost confirms the host machine identity and rejects mismatch', async
     anchor: '%0',
     expectedGeneration: 0,
   });
+  const wrongMachine = createMembersService({
+    store: createBindingStore(mismatch.bindFile),
+    auth,
+    organization: mismatch.organization,
+    hostProbe: hostProbeDouble({ machineId: 'mac-2' }),
+  });
   await assert.rejects(
-    () => mismatch.members.verifyHost({ token: TOKENS.owner, memberId: mismatch.first.memberId }),
+    () => wrongMachine.verifyHost({ token: TOKENS.owner, memberId: mismatch.first.memberId }),
     (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH),
   );
 });
@@ -412,35 +421,63 @@ test('restoreBinding re-verifies the host and returns typed BINDING_HOST_UNAVAIL
   assert.equal(restored.restored, true);
   assert.equal(restored.sessionId, '$0');
 
-  const down = await fixture({ hostProbe: hostProbeDouble({ available: false }) });
-  await down.members.configureRuntime({
+  const config = {
     token: TOKENS.owner,
-    memberId: down.first.memberId,
     machineId: 'mac-1',
     hostKind: 'tmux',
     agentKind: 'codex',
     launchProfileRef: 'lp-a',
-  });
-  await down.members.bindSession({
+  };
+
+  // Binding consumes the same probe: an unreachable host refuses the bind and
+  // leaves no binding or generation behind.
+  const unreachable = await fixture({ hostProbe: hostProbeDouble({ available: false }) });
+  await unreachable.members.configureRuntime({ ...config, memberId: unreachable.first.memberId });
+  await assert.rejects(
+    () => unreachable.members.bindSession({
+      token: TOKENS.owner,
+      memberId: unreachable.first.memberId,
+      sessionId: '$0',
+      anchor: '%0',
+      expectedGeneration: 0,
+    }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE),
+  );
+  const unreachableStored = await readStore(unreachable.bindFile);
+  assert.equal(unreachableStored.bindings[unreachable.first.memberId], undefined);
+  assert.equal(unreachableStored.generations[unreachable.first.memberId], undefined);
+
+  // A binding that observed a reachable host must still refuse verify/restore
+  // once the host stops answering.
+  const reachable = await fixture();
+  await reachable.members.configureRuntime({ ...config, memberId: reachable.first.memberId });
+  await reachable.members.bindSession({
     token: TOKENS.owner,
-    memberId: down.first.memberId,
+    memberId: reachable.first.memberId,
     sessionId: '$0',
     anchor: '%0',
     expectedGeneration: 0,
   });
-
+  const degraded = createMembersService({
+    store: createBindingStore(reachable.bindFile),
+    auth,
+    organization: reachable.organization,
+    hostProbe: hostProbeDouble({ available: false }),
+  });
   await assert.rejects(
-    () => down.members.verifyHost({ token: TOKENS.owner, memberId: down.first.memberId }),
+    () => degraded.verifyHost({ token: TOKENS.owner, memberId: reachable.first.memberId }),
     (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE) && error.retryDisposition === 'retryable',
   );
   await assert.rejects(
-    () => down.members.restoreBinding({ token: TOKENS.owner, memberId: down.first.memberId }),
+    () => degraded.restoreBinding({ token: TOKENS.owner, memberId: reachable.first.memberId }),
     (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE) && error.retryDisposition === 'retryable',
   );
 });
 
 test('verifyHost and restoreBinding reject missing authoritative machine identity', async () => {
-  const { members, first } = await fixture({ hostProbe: hostProbeDouble({ machineId: null }) });
+  const { bindFile, members, first } = await fixture({
+    hostProbe: hostProbeDouble({ machineId: null, terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' } }),
+  });
   await members.configureRuntime({
     token: TOKENS.owner,
     memberId: first.memberId,
@@ -449,22 +486,114 @@ test('verifyHost and restoreBinding reject missing authoritative machine identit
     agentKind: 'codex',
     launchProfileRef: 'lp-a',
   });
-  await members.bindSession({
+
+  await assert.rejects(
+    () => members.bindSession({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      sessionId: 'sess-a',
+      anchor: 'pane:0',
+      expectedGeneration: 0,
+    }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_IDENTITY_UNAVAILABLE),
+  );
+
+  const stored = await readStore(bindFile);
+  assert.equal(stored.bindings[first.memberId], undefined);
+  assert.equal(stored.generations[first.memberId], undefined);
+});
+
+test('verifyHost and restoreBinding reject missing authoritative machine identity on an existing binding', async () => {
+  const ok = await fixture();
+  await ok.members.configureRuntime({
     token: TOKENS.owner,
-    memberId: first.memberId,
+    memberId: ok.first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await ok.members.bindSession({
+    token: TOKENS.owner,
+    memberId: ok.first.memberId,
     sessionId: '$0',
     anchor: '%0',
     expectedGeneration: 0,
   });
 
+  const missingIdentityService = createMembersService({
+    store: createBindingStore(ok.bindFile),
+    auth,
+    organization: ok.organization,
+    hostProbe: hostProbeDouble({ machineId: null }),
+  });
   await assert.rejects(
-    () => members.verifyHost({ token: TOKENS.owner, memberId: first.memberId }),
+    () => missingIdentityService.verifyHost({ token: TOKENS.owner, memberId: ok.first.memberId }),
     (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_IDENTITY_UNAVAILABLE),
   );
   await assert.rejects(
-    () => members.restoreBinding({ token: TOKENS.owner, memberId: first.memberId }),
+    () => missingIdentityService.restoreBinding({ token: TOKENS.owner, memberId: ok.first.memberId }),
     (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_IDENTITY_UNAVAILABLE),
   );
+});
+
+test('bindSession refuses a wrong-machine host observation with no binding or generation write', async () => {
+  const { bindFile, members, first } = await fixture({
+    hostProbe: hostProbeDouble({ machineId: 'mac-2', terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' } }),
+  });
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+
+  await assert.rejects(
+    () => members.bindSession({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      sessionId: 'sess-a',
+      anchor: 'pane:0',
+      expectedGeneration: 0,
+      terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' },
+    }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH),
+  );
+
+  const stored = await readStore(bindFile);
+  assert.equal(stored.bindings[first.memberId], undefined);
+  assert.equal(stored.generations[first.memberId], undefined);
+});
+
+test('bindSession refuses a missing anchor observation with no binding or generation write', async () => {
+  const { bindFile, members, first } = await fixture({
+    hostProbe: hostProbeDouble({ machineId: 'mac-1', anchorPresent: false, terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' } }),
+  });
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+
+  await assert.rejects(
+    () => members.bindSession({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      sessionId: 'sess-a',
+      anchor: 'pane:0',
+      expectedGeneration: 0,
+    }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE),
+  );
+
+  const stored = await readStore(bindFile);
+  assert.equal(stored.bindings[first.memberId], undefined);
+  assert.equal(stored.generations[first.memberId], undefined);
 });
 
 test('bindSession requires a runtime configuration before writing a binding', async () => {
@@ -573,8 +702,10 @@ test('getRuntimeBinding rejects an invalid binding with a typed error', async ()
   );
 });
 
-test('bindSession persists terminalTarget, rebind replaces it, and omission clears it', async () => {
-  const { members, first } = await fixture();
+test('bindSession persists the observed terminalTarget, replaces it on rebind, and an observed null clears it', async () => {
+  const { bindFile, organization, members, first } = await fixture({
+    hostProbe: hostProbeDouble({ terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' } }),
+  });
   await members.configureRuntime({
     token: TOKENS.owner,
     memberId: first.memberId,
@@ -590,7 +721,6 @@ test('bindSession persists terminalTarget, rebind replaces it, and omission clea
     sessionId: 'sess-a',
     anchor: 'pane:0',
     expectedGeneration: 0,
-    terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' },
   });
   assert.equal(bound.generation, 1);
   assert.deepEqual(bound.terminalTarget, { backend: 'tmux', stableId: 'tmux:v1:aa' });
@@ -603,18 +733,29 @@ test('bindSession persists terminalTarget, rebind replaces it, and omission clea
     stableId: 'tmux:v1:aa',
   });
 
-  const rebound = await members.bindSession({
+  const reboundService = createMembersService({
+    store: createBindingStore(bindFile),
+    auth,
+    organization,
+    hostProbe: hostProbeDouble({ terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:bb' } }),
+  });
+  const rebound = await reboundService.bindSession({
     token: TOKENS.owner,
     memberId: first.memberId,
     sessionId: 'sess-a2',
     anchor: 'pane:1',
     expectedGeneration: 1,
-    terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:bb' },
   });
   assert.equal(rebound.generation, 2);
   assert.deepEqual(rebound.terminalTarget, { backend: 'tmux', stableId: 'tmux:v1:bb' });
 
-  const cleared = await members.bindSession({
+  const clearedService = createMembersService({
+    store: createBindingStore(bindFile),
+    auth,
+    organization,
+    hostProbe: hostProbeDouble({ terminalTarget: null }),
+  });
+  const cleared = await clearedService.bindSession({
     token: TOKENS.owner,
     memberId: first.memberId,
     sessionId: 'sess-a3',
@@ -624,10 +765,10 @@ test('bindSession persists terminalTarget, rebind replaces it, and omission clea
   assert.equal(cleared.generation, 3);
   assert.equal(cleared.terminalTarget, null);
   assert.equal(
-    (await members.queryBinding({ token: TOKENS.owner, memberId: first.memberId })).terminalTarget,
+    (await clearedService.queryBinding({ token: TOKENS.owner, memberId: first.memberId })).terminalTarget,
     null,
   );
-  assert.equal((await members.getRuntimeBinding(first.memberId)).terminalTarget, null);
+  assert.equal((await clearedService.getRuntimeBinding(first.memberId)).terminalTarget, null);
 });
 
 test('bindSession rejects a malformed terminalTarget before writing a binding', async () => {
@@ -646,7 +787,6 @@ test('bindSession rejects a malformed terminalTarget before writing a binding', 
     sessionId: 'sess-a',
     anchor: 'pane:0',
     expectedGeneration: 0,
-    terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' },
   });
 
   await assert.rejects(
@@ -674,7 +814,7 @@ test('bindSession rejects a malformed terminalTarget before writing a binding', 
   // A refused bind is not a rebind: the recorded binding and generation stay.
   const binding = await members.queryBinding({ token: TOKENS.owner, memberId: first.memberId });
   assert.equal(binding.generation, 1);
-  assert.deepEqual(binding.terminalTarget, { backend: 'tmux', stableId: 'tmux:v1:aa' });
+  assert.deepEqual(binding.terminalTarget, { backend: 'tmux', stableId: 'tmux:v1:observed' });
 });
 
 test('resolveBindingTarget returns a copy only on an exact catalog match', () => {
@@ -746,7 +886,13 @@ test('binding generation stays monotonic across invalidation and never reissues 
   await members.configureRuntime({ ...config, machineId: 'mac-2' });
   assert.equal(await members.queryBinding({ token: TOKENS.owner, memberId: first.memberId }), null);
 
-  const rebindB = await members.bindSession({
+  const membersOnMac2 = createMembersService({
+    store: createBindingStore(bindFile),
+    auth,
+    organization,
+    hostProbe: hostProbeDouble({ machineId: 'mac-2' }),
+  });
+  const rebindB = await membersOnMac2.bindSession({
     token: TOKENS.owner,
     memberId: first.memberId,
     sessionId: 'sess-b',
@@ -759,7 +905,7 @@ test('binding generation stays monotonic across invalidation and never reissues 
   await members.configureRuntime(config);
   assert.equal(await members.queryBinding({ token: TOKENS.owner, memberId: first.memberId }), null);
   await assert.rejects(
-    () => members.bindSession({
+    () => membersOnMac2.bindSession({
       token: TOKENS.owner,
       memberId: first.memberId,
       sessionId: 'sess-a2',
@@ -964,7 +1110,13 @@ test('legacy version-1 store backfills the binding generation before any rebind'
   });
   assert.equal(await reopened.queryBinding({ token: TOKENS.owner, memberId: first.memberId }), null);
 
-  const rebound = await reopened.bindSession({
+  const reopenedOnMac2 = createMembersService({
+    store: createBindingStore(bindFile),
+    auth,
+    organization,
+    hostProbe: hostProbeDouble({ machineId: 'mac-2' }),
+  });
+  const rebound = await reopenedOnMac2.bindSession({
     token: TOKENS.owner,
     memberId: first.memberId,
     sessionId: 'new-sess',
@@ -981,3 +1133,181 @@ test('legacy version-1 store backfills the binding generation before any rebind'
   });
   assert.equal((await reopenedAgain.queryBinding({ token: TOKENS.owner, memberId: first.memberId })).generation, 3);
 });
+
+test('bindSession refuses a caller assertion that disagrees with the host observation', async () => {
+  const { bindFile, members, first } = await fixture();
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+
+  await assert.rejects(
+    () => members.bindSession({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      sessionId: 'sess-a',
+      anchor: 'pane:0',
+      expectedGeneration: 0,
+      terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:caller-installed' },
+    }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE),
+  );
+
+  // A refused bind is not a mutation: no binding and no generation are written.
+  const stored = await readStore(bindFile);
+  assert.equal(stored.bindings[first.memberId], undefined);
+  assert.equal(stored.generations[first.memberId], undefined);
+});
+
+test('verifyHost and restoreBinding refuse when the persisted target no longer matches the host observation', async () => {
+  const { bindFile, organization, members, first } = await fixture({
+    hostProbe: hostProbeDouble({ terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' } }),
+  });
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+
+  const changed = createMembersService({
+    store: createBindingStore(bindFile),
+    auth,
+    organization,
+    hostProbe: hostProbeDouble({ terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:bb' } }),
+  });
+  await assert.rejects(
+    () => changed.verifyHost({ token: TOKENS.owner, memberId: first.memberId }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE),
+  );
+  await assert.rejects(
+    () => changed.restoreBinding({ token: TOKENS.owner, memberId: first.memberId }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE),
+  );
+});
+
+test('the same target text on a different machine cannot pass verification', async () => {
+  const ok = await fixture({
+    hostProbe: hostProbeDouble({ terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' } }),
+  });
+  await ok.members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: ok.first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await ok.members.bindSession({
+    token: TOKENS.owner,
+    memberId: ok.first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+
+  const wrongMachine = createMembersService({
+    store: createBindingStore(ok.bindFile),
+    auth,
+    organization: ok.organization,
+    hostProbe: hostProbeDouble({
+      machineId: 'mac-2',
+      terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' },
+    }),
+  });
+  await assert.rejects(
+    () => wrongMachine.verifyHost({ token: TOKENS.owner, memberId: ok.first.memberId }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH),
+  );
+});
+
+test('host-adapters public probe is the real producer consumed by members bind and verify', async (t) => {
+  const socketName = `zterm-v2-members-real-${process.pid}`;
+  const sessionName = `members-real-${process.pid}`;
+  realTmux(socketName, ['new-session', '-d', '-s', sessionName]);
+  t.after(() => realTmux(socketName, ['kill-session', '-t', sessionName]));
+
+  const probe = createTmuxHostProbe({ socketName, machineId: 'mac-1' });
+  const orgFile = await tempFile('zterm-members-real-org-');
+  const bindFile = await tempFile('zterm-members-real-binding-');
+  const organization = createOrganizationService({ store: createOrganizationStore(orgFile), auth });
+  const members = createMembersService({ store: createBindingStore(bindFile), auth, organization, hostProbe: probe });
+
+  const workspace = await organization.createWorkspace({ token: TOKENS.owner, name: 'Real Host' });
+  const first = await organization.addMember({
+    token: TOKENS.owner,
+    workspaceId: workspace.workspaceId,
+    groupId: workspace.rootGroupId,
+    name: 'Worker',
+    expectedRevision: workspace.revision,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-real',
+  });
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-real',
+  });
+
+  const bound = await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: sessionName,
+    anchor: '%0',
+    expectedGeneration: 0,
+  });
+  assert.equal(bound.terminalTarget.backend, 'tmux');
+  // The observed stableId is the tmux session_id, not the session name.
+  assert.match(bound.terminalTarget.stableId, /^\$[0-9]+$/);
+  assert.notEqual(bound.terminalTarget.stableId, sessionName);
+  const observedStableId = bound.terminalTarget.stableId;
+
+  const verified = await members.verifyHost({ token: TOKENS.owner, memberId: first.memberId });
+  assert.equal(verified.verified, true);
+  assert.equal(verified.terminalTarget.stableId, observedStableId);
+
+  const restored = await members.restoreBinding({ token: TOKENS.owner, memberId: first.memberId });
+  assert.equal(restored.restored, true);
+  assert.equal(restored.terminalTarget.stableId, observedStableId);
+
+  // The real producer reports the pane list, so a missing anchor refuses the
+  // rebind through BINDING_HOST_UNAVAILABLE and preserves the existing binding.
+  await assert.rejects(
+    () => members.bindSession({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      sessionId: sessionName,
+      anchor: '%999',
+      expectedGeneration: 1,
+    }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE),
+  );
+  const preserved = await members.queryBinding({ token: TOKENS.owner, memberId: first.memberId });
+  assert.equal(preserved.generation, 1);
+  assert.equal(preserved.anchor, '%0');
+});
+
+function realTmux(socketName, args) {
+  return execFileSync('tmux', ['-L', socketName, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+}

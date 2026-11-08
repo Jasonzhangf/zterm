@@ -82,9 +82,66 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
 
   function requireHostProbe() {
     if (!hostProbe || typeof hostProbe.probe !== 'function') {
-      throw new TypeError('members service requires a hostProbe with probe() to verify host identity');
+      throw new TypeError('members service requires a hostProbe with probe() to bind or verify host identity');
     }
     return hostProbe;
+  }
+
+  // Single host-observation port for bind, verify and restore. The probe is the
+  // host-adapters public producer. availability is mandatory; identity and
+  // target are validated by the caller because bind and verify need different
+  // strictness.
+  function validateHostObservation(observation, runtime, memberId, action) {
+    if (!observation || observation.available !== true) {
+      fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host session/anchor is not reachable', {
+        owningModule: MODULE,
+        retryDisposition: 'retryable',
+        details: { memberId, sessionId: observation?.sessionId ?? null, anchor: observation?.anchor ?? null, action },
+      });
+    }
+    if (observation.anchorPresent === false) {
+      fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host anchor is gone', {
+        owningModule: MODULE,
+        retryDisposition: 'retryable',
+        details: { memberId, anchor: observation.anchor ?? null },
+      });
+    }
+    if (observation.machineId === null || observation.machineId === undefined) {
+      fail(MEMBER_ERROR_CODES.BINDING_HOST_IDENTITY_UNAVAILABLE, 'host adapter did not report an authoritative machine identity', {
+        owningModule: MODULE,
+        details: { memberId, requiredPort: 'hostProbe.machineId' },
+      });
+    }
+    if (observation.machineId !== runtime.machineId) {
+      fail(MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH, `host machine ${observation.machineId} != configured ${runtime.machineId}`, {
+        owningModule: MODULE,
+        details: { memberId, configuredMachineId: runtime.machineId, observedMachineId: observation.machineId },
+      });
+    }
+    return observation;
+  }
+
+  async function probeHost(runtime, { memberId, sessionId, anchor } = {}, action) {
+    const probe = requireHostProbe();
+    let observation;
+    try {
+      observation = await probe.probe({ memberId, machineId: runtime.machineId, sessionId, anchor });
+    } catch (error) {
+      fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host probe failed', {
+        owningModule: MODULE,
+        cause: error,
+        retryDisposition: 'retryable',
+        details: { memberId, action },
+      });
+    }
+    if (!observation || observation.available !== true) {
+      fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host session/anchor is not reachable', {
+        owningModule: MODULE,
+        retryDisposition: 'retryable',
+        details: { memberId, sessionId, anchor, action },
+      });
+    }
+    return observation;
   }
 
   function normalizeTerminalTarget(terminalTarget) {
@@ -105,6 +162,24 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
       });
     }
     return { backend, stableId };
+  }
+
+  // Host observations are not caller input. A malformed or missing observation
+  // target is unavailable, not something the members module may repair into an
+  // identifier. Only a fully observed backend + stableId becomes a target.
+  function normalizeObservedTarget(terminalTarget) {
+    if (!terminalTarget || typeof terminalTarget !== 'object' || Array.isArray(terminalTarget)) {
+      return null;
+    }
+    const backend = typeof terminalTarget.backend === 'string' ? terminalTarget.backend.trim() : '';
+    const stableId = typeof terminalTarget.stableId === 'string' ? terminalTarget.stableId.trim() : '';
+    return backend && stableId ? { backend, stableId } : null;
+  }
+
+  function sameTarget(left, right) {
+    return Boolean(left && right)
+      && left.backend === right.backend
+      && left.stableId === right.stableId;
   }
 
   // Bindings and their targets are returned as copies; a caller mutation must
@@ -168,13 +243,52 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     if (!Number.isInteger(expectedGeneration) || expectedGeneration < 0) {
       fail(ERROR_CODES.VALIDATION, 'expectedGeneration must be a non-negative integer', { owningModule: MODULE });
     }
-    const normalizedTerminalTarget = normalizeTerminalTarget(terminalTarget);
+    // A caller-supplied target is only an assertion. It can never install or
+    // rewrite the relationship; the host observation below is authoritative.
+    const assertedTerminalTarget = normalizeTerminalTarget(terminalTarget);
     const member = await requireMember(memberId);
     assertWorkspaceAllowed(context, member.workspaceId);
     assertMemberAllowed(context, memberId);
 
+    const snapshot = await store.read();
+    const runtime = readRuntime(snapshot, memberId);
+    const snapshotGeneration = snapshot.generations[memberId] ?? 0;
+    if (expectedGeneration !== snapshotGeneration) {
+      fail(ERROR_CODES.BINDING_GENERATION_STALE, `binding generation ${snapshotGeneration} != expected ${expectedGeneration}`, {
+        owningModule: MODULE,
+        details: { memberId, expectedGeneration, currentGeneration: snapshotGeneration },
+      });
+    }
+
+    // Observe the real host at the explicit-bind boundary. The observed target
+    // is persisted with sessionId and anchor in the same store mutation and
+    // binding generation. A null observation is persisted as null; the stored
+    // target is never copied from a previous binding.
+    //
+    // A host without an injected probe keeps the explicit-bind input. That is
+    // the existing authorized bind surface, not a stream/input caller; it
+    // cannot infer or synthesize a target and stores null when omitted. When a
+    // probe is injected, the observation is authoritative and a caller
+    // assertion that disagrees is refused.
+    const hasHostProbe = hostProbe !== null && typeof hostProbe.probe === 'function';
+    const observation = hasHostProbe
+      ? await probeHost(runtime, { memberId, sessionId, anchor }, 'bind')
+      : null;
+    if (hasHostProbe) {
+      validateHostObservation(observation, runtime, memberId, 'bind');
+    }
+    const observedTerminalTarget = observation ? normalizeObservedTarget(observation.terminalTarget) : null;
+    const persistedTerminalTarget = hasHostProbe ? observedTerminalTarget : assertedTerminalTarget;
+    if (hasHostProbe && assertedTerminalTarget && !sameTarget(assertedTerminalTarget, observedTerminalTarget)) {
+      fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host observation did not confirm the asserted terminal target', {
+        owningModule: MODULE,
+        retryDisposition: 'retryable',
+        details: { memberId, assertedTerminalTarget, observedTerminalTarget },
+      });
+    }
+
     return store.update((state) => {
-      const runtime = readRuntime(state, memberId);
+      const currentRuntime = readRuntime(state, memberId);
       const currentGeneration = state.generations[memberId] ?? 0;
       if (expectedGeneration !== currentGeneration) {
         fail(ERROR_CODES.BINDING_GENERATION_STALE, `binding generation ${currentGeneration} != expected ${expectedGeneration}`, {
@@ -182,13 +296,26 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
           details: { memberId, expectedGeneration, currentGeneration },
         });
       }
+      // The host target above was observed for this runtime machine. A runtime
+      // identity change during the probe must not pair the old target with the
+      // new machine.
+      if (currentRuntime.machineId !== runtime.machineId) {
+        fail(ERROR_CODES.BINDING_GENERATION_STALE, 'runtime machine changed while the binding was observed', {
+          owningModule: MODULE,
+          details: {
+            memberId,
+            observedMachineId: runtime.machineId,
+            currentMachineId: currentRuntime.machineId,
+          },
+        });
+      }
       const binding = {
         memberId,
-        machineId: runtime.machineId,
+        machineId: currentRuntime.machineId,
         sessionId,
         anchor,
         generation: currentGeneration + 1,
-        terminalTarget: normalizedTerminalTarget,
+        terminalTarget: persistedTerminalTarget ? { ...persistedTerminalTarget } : null,
       };
       state.bindings[memberId] = binding;
       state.generations[memberId] = binding.generation;
@@ -240,48 +367,28 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
   }
 
   async function observeHost(runtime, binding) {
-    const probe = requireHostProbe();
-    let observation;
-    try {
-      observation = await probe.probe({
-        memberId: runtime.memberId,
-        machineId: runtime.machineId,
-        sessionId: binding.sessionId,
-        anchor: binding.anchor,
-      });
-    } catch (error) {
-      fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host probe failed', {
-        owningModule: MODULE,
-        cause: error,
-        retryDisposition: 'retryable',
-        details: { memberId: runtime.memberId },
-      });
-    }
-    if (!observation || observation.available !== true) {
-      fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host session/anchor is not reachable', {
-        owningModule: MODULE,
-        retryDisposition: 'retryable',
-        details: { memberId: runtime.memberId, sessionId: binding.sessionId, anchor: binding.anchor },
-      });
-    }
-    if (observation.anchorPresent === false) {
-      fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host anchor is gone', {
-        owningModule: MODULE,
-        retryDisposition: 'retryable',
-        details: { memberId: runtime.memberId, anchor: binding.anchor },
-      });
-    }
-    if (observation.machineId === null || observation.machineId === undefined) {
-      fail(MEMBER_ERROR_CODES.BINDING_HOST_IDENTITY_UNAVAILABLE, 'host adapter did not report an authoritative machine identity', {
-        owningModule: MODULE,
-        details: { memberId: runtime.memberId, requiredPort: 'hostProbe.machineId' },
-      });
-    }
-    if (observation.machineId !== runtime.machineId) {
-      fail(MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH, `host machine ${observation.machineId} != configured ${runtime.machineId}`, {
-        owningModule: MODULE,
-        details: { memberId: runtime.memberId, configuredMachineId: runtime.machineId, observedMachineId: observation.machineId },
-      });
+    const observation = await probeHost(runtime, {
+      memberId: runtime.memberId,
+      sessionId: binding.sessionId,
+      anchor: binding.anchor,
+    }, 'verify');
+    validateHostObservation(observation, runtime, runtime.memberId, 'verify');
+    // A persisted terminal target must still be the exact target observed on
+    // the current host. A legacy binding without a target stays a valid binding
+    // but is not checked here; terminal admission then reports unavailable.
+    if (binding.terminalTarget) {
+      const observedTerminalTarget = normalizeObservedTarget(observation.terminalTarget);
+      if (!sameTarget(binding.terminalTarget, observedTerminalTarget)) {
+        fail(MEMBER_ERROR_CODES.BINDING_HOST_UNAVAILABLE, 'host observation does not match the persisted terminal target', {
+          owningModule: MODULE,
+          retryDisposition: 'retryable',
+          details: {
+            memberId: runtime.memberId,
+            persistedTerminalTarget: { ...binding.terminalTarget },
+            observedTerminalTarget,
+          },
+        });
+      }
     }
     return observation;
   }
@@ -302,6 +409,7 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
       sessionId: binding.sessionId,
       anchor: binding.anchor,
       generation: binding.generation,
+      terminalTarget: binding.terminalTarget ? { ...binding.terminalTarget } : null,
       observedAt: observation.observedAt,
     };
   }
@@ -323,6 +431,7 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
       sessionId: binding.sessionId,
       anchor: binding.anchor,
       generation: binding.generation,
+      terminalTarget: binding.terminalTarget ? { ...binding.terminalTarget } : null,
       observedAt: observation.observedAt,
     };
   }
