@@ -1,9 +1,9 @@
 # accounts 模块设计与执行卡
 
-状态：2026-11-06 workspace authorization adapter 工作线。V2 accounts adapter
-已接 V1 relay account/machine 正式端点，并新增账号授权策略与 workspace/machine
-公开适配入口；代码级正反例与真实 relay 集成已验收。产品组合仍由 integration
-owner 负责。
+状态：2026-11-07 public runtime entry 候选。V2 accounts adapter 已接 V1 relay
+account/machine 正式端点，并新增账号授权策略、workspace/machine 公开适配入口及
+`login/grant/revoke/verifyAuthority` 最小 runtime。当前候选的代码级正反例和
+真实 relay 集成已在任务 worktree 通过；产品组合仍由 integration owner 负责。
 
 本卡是 accounts 模块的结构和联调合同。正式根为 `v2/modules/accounts/`；Jenny
 负责派具体 peer、建工作线和集成。实际进度只在
@@ -23,13 +23,15 @@ accounts/
 │   ├── application/auth-service.ts  # register/login/logout/verifySession
 │   ├── application/workspace-authorization.ts # verify/bindCreatedWorkspace
 │   ├── application/accounts-authorization.ts  # authorizeMachine adapter
+│   ├── application/accounts-authority-runtime.ts # public authority lifecycle
 │   ├── application/machine-service.ts # enroll/list/possession/revoke
 │   ├── ports/account-directory.ts   # account-scoped directory read
 │   ├── ports/account-authorization-store.ts # 授权策略持久化边界
 │   ├── ports/machine-registration.ts # machine challenge/verify/revoke
 │   ├── ports/relay-authority.ts     # auth authority boundary
 │   ├── adapters/v1-relay.ts         # V1 relay HTTP adapter
-│   └── adapters/file-account-authorization-store.ts # single-writer JSON store
+│   ├── adapters/file-account-authorization-store.ts # single-writer JSON store
+│   └── public/index.mjs             # composition entry for accounts runtime
 └── tests/
     ├── contract/                    # 当前契约的必要正反例
     └── integration/                 # 真实 V1 relay consumer
@@ -73,6 +75,30 @@ accounts/
   `POST /api/machines/:machineId/revoke`，非 owner 保持 `MACHINE_NOT_OWNED`。
 - 跨账号 grant/revoke 仍显式返回 `CROSS_ACCOUNT_ACCESS_DISABLED`；V2 不新增第二
   套账号或机器真源。
+
+## 公开 runtime 入口
+
+`src/public/index.mjs` 暴露最小组合工厂
+`createAccountsRuntime({ relayBaseUrl, authorizationStoreFile })`，并绑定四个方法：
+
+- `login`：把登录名和凭据交给 relay 的正式 login 端点，返回 relay session token、
+  accountId 和 loginName，不在本地签发会话。
+- `grant`：先通过 relay 复核调用者会话，再要求当前账号持有显式
+  `allWorkspaces + org:write` 管理授权；随后用 relay directory 确认目标账号是
+  caller 账号，并用 relay machine list 逐个确认 machineId 是 canonical active
+  且 owner 匹配，最后才把 workspace/machine 精确范围和递增
+  `authorizationGeneration` 写入 accounts-owned 持久 store。V1 relay 的
+  directory/machine 查询当前均为 caller-scoped，跨账号目标没有可验证 lookup，
+  因此返回 `UNSUPPORTED` 501，不持久化未验证 authority。
+- `revoke`：同样复核管理授权，删除目标账号当前 grant；持久 store 保留已用代次，
+  后续同账号重新 grant 必须得到更高代次。
+- `verifyAuthority`：先复核 relay session，再要求当前账号存在 grant，并精确匹配
+  workspace、machine 和可选调用方 `expectedGeneration`；不把 token 当授权证明，
+  也不做 wildcard 或 fallback。
+
+公开结果中的 `bindingGeneration` 是 accounts grant 被下游绑定时的当前代次投影。
+members-owned 的 member binding generation 仍由 members 持有和递增，accounts 不写
+members binding。revoke 后旧 grant 与旧代次必须由 `verifyAuthority` 拒绝。
 
 401/403、404、409、429 分别映射为 typed `AccountsError`；新增 workspace
 授权缺失/禁止和机器身份未证明错误分别使用

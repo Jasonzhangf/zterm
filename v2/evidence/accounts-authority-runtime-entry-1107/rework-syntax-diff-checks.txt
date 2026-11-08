@@ -1,0 +1,3 @@
+node --check v2/modules/accounts/src/public/index.mjs: exit 0
+node --check v2/modules/accounts/src/application/accounts-authority-runtime.ts: exit 0
+git diff --check: exit 0
