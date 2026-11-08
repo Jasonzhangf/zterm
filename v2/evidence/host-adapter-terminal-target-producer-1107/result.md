@@ -134,6 +134,6 @@ All four follow-up outputs and their exit codes are saved in this evidence direc
 
 ## Local commit
 
-The complete change was committed locally on branch `host-adapter-terminal-target-producer-20261107` as `fix(v2/host-adapters): emit tmux:v1 terminal identity`. The commit ID is recorded in `commit.txt`.
+The complete change was committed locally on branch `host-adapter-terminal-target-producer-20261107` as `fix(v2/host-adapters): emit tmux:v1 terminal identity`. The local commit is `de0cbd16408ab7e99389afeca8c3312436d0fc40` (`de0cbd16`). The same ID is recorded in `commit.txt`.
 
 No push, merge, PR, publish, remote CI, daemon restart, tmux restart, global install, or broad process kill was performed. The producer and members consumer now pass the affected suites. Remote integration and delivery remain outside this local-commit scope.
