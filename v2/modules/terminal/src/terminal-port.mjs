@@ -58,7 +58,7 @@ function normalizeSession(catalogEntry) {
   };
 }
 
-function toFrameChunk(payload) {
+export function toFrameChunk(payload) {
   const cols = Number.isFinite(payload.cols) && payload.cols > 0 ? Math.floor(payload.cols) : 80;
   const rows = Number.isFinite(payload.rows) && payload.rows > 0 ? Math.floor(payload.rows) : 24;
   const normalized = normalizeWireLines(Array.isArray(payload.lines) ? payload.lines : [], cols);
@@ -95,7 +95,7 @@ function toFrameChunk(payload) {
   };
 }
 
-function snapshotToFrame(snapshot) {
+export function snapshotToFrame(snapshot) {
   const lines = snapshot.lines.map((cells, offset) => (
     cells ? { index: snapshot.startIndex + offset, cells } : { index: snapshot.startIndex + offset, cells: null }
   ));
