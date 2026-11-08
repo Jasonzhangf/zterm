@@ -1,0 +1,4 @@
+
+[integration re-verify on local main b9b479f6, 2026-11-08]
+connections type-check (delivery now imports connections public types): exit 0
+delivery module has no tsconfig; applicable check is the connections type-check
