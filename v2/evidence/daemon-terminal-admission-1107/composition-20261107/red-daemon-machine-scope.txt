@@ -1,0 +1,174 @@
+TAP version 13
+# Subtest: routing-configured daemon rejects a legacy terminal input that bypasses admission
+ok 1 - routing-configured daemon rejects a legacy terminal input that bypasses admission
+  ---
+  duration_ms: 46.099833
+  type: 'test'
+  ...
+# Subtest: admission rejects missing and invalid credentials before target access
+ok 2 - admission rejects missing and invalid credentials before target access
+  ---
+  duration_ms: 46.68675
+  type: 'test'
+  ...
+# Subtest: admission rejects an unauthorized workspace
+ok 3 - admission rejects an unauthorized workspace
+  ---
+  duration_ms: 37.435167
+  type: 'test'
+  ...
+# Subtest: admission rejects an unknown member
+ok 4 - admission rejects an unknown member
+  ---
+  duration_ms: 35.631166
+  type: 'test'
+  ...
+# Subtest: admission rejects an unbound member
+ok 5 - admission rejects an unbound member
+  ---
+  duration_ms: 40.347375
+  type: 'test'
+  ...
+# Subtest: admission rejects a stale binding generation
+ok 6 - admission rejects a stale binding generation
+  ---
+  duration_ms: 43.899042
+  type: 'test'
+  ...
+# Subtest: admission rejects a missing or wrong terminal target identity
+not ok 7 - admission rejects a missing or wrong terminal target identity
+  ---
+  duration_ms: 42.8815
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:389:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    424 !== 404
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 404
+  actual: 424
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:408:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: admission rejects an authorized member targeting an unrelated terminal
+ok 8 - admission rejects an authorized member targeting an unrelated terminal
+  ---
+  duration_ms: 50.404
+  type: 'test'
+  ...
+# Subtest: admission opens the exact existingOnly target and forwards typed input
+not ok 9 - admission opens the exact existingOnly target and forwards typed input
+  ---
+  duration_ms: 39.380333
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:439:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    424 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 424
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:453:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: admission forwards nonempty raw input without appending an Enter
+not ok 10 - admission forwards nonempty raw input without appending an Enter
+  ---
+  duration_ms: 39.244166
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:473:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    424 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 424
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:487:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: admission forwards one Enter as exactly one CR
+not ok 11 - admission forwards one Enter as exactly one CR
+  ---
+  duration_ms: 33.687291
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:496:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    424 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 424
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:508:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: admission stream exposes the exact admitted session
+not ok 12 - admission stream exposes the exact admitted session
+  ---
+  duration_ms: 37.177833
+  type: 'test'
+  location: '/Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:515:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    Expected values to be strictly equal:
+    
+    424 !== 200
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 200
+  actual: 424
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/daemon/tests/terminal-admission.test.mjs:538:10)
+    process.processTicksAndRejections (node:internal/process/task_queues:103:5)
+    async Test.run (node:internal/test_runner/test:1054:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+  ...
+# Subtest: startDaemon forwards admission to the public input route
+ok 13 - startDaemon forwards admission to the public input route
+  ---
+  duration_ms: 35.786416
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 8
+# fail 5
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 688.162667
+exit=1

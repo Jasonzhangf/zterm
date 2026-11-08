@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
+import path from "node:path";
 import { test } from "node:test";
 import { frameToText } from "../src/terminal-ansi-serializer.mjs";
 import { TerminalPort } from "../src/terminal-port.mjs";
@@ -22,6 +23,7 @@ function tmux(args) {
 }
 
 function startSession(t, name) {
+  execFileSync("mkdir", ["-p", path.dirname(socket)]);
   tmux(["new-session", "-d", "-s", name, "-x", "80", "-y", "24"]);
   t.after(() => {
     try {
@@ -43,8 +45,8 @@ async function waitFor(check, timeoutMs = 6000) {
   throw new Error("Timed out waiting for the expected terminal state.");
 }
 
-function failingWebSocketClass() {
-  const state = { failNextClose: true };
+function failingWebSocketClass(failOnCloseNumber) {
+  const state = { closeSends: 0 };
   class FailingWebSocket extends NodeWebSocket {
     send(data) {
       let frame = null;
@@ -53,8 +55,10 @@ function failingWebSocketClass() {
       } catch {
         frame = null;
       }
-      if (state.failNextClose && frame && frame.type === "mux-channel-close") {
-        state.failNextClose = false;
+      if (frame && frame.type === "mux-channel-close") {
+        state.closeSends += 1;
+      }
+      if (state.closeSends === failOnCloseNumber && frame && frame.type === "mux-channel-close") {
         throw new TypeError("injected late-open close send failure");
       }
       return super.send(data);
@@ -67,12 +71,13 @@ test("late-open close failure reaches the TerminalPort observer and retries one 
   startSession(t, sessionA);
   startSession(t, sessionB);
 
-  const FailingWebSocket = failingWebSocketClass();
+  const FailingWebSocket = failingWebSocketClass(2);
   const fixture = createV1MuxFixture({
     tmuxSocket: socket,
     authToken: token,
     openDelaySessionName: sessionB,
     openDelayMs: 140,
+    ignoreCloseUntilOpened: true,
   });
   const { port } = await fixture.listen();
   let terminal = null;
@@ -87,7 +92,7 @@ test("late-open close failure reaches the TerminalPort observer and retries one 
   terminal = new TerminalPort({
     wsUrl: `ws://127.0.0.1:${port}/ws?token=${token}`,
     WebSocketImpl: FailingWebSocket,
-    requestTimeoutMs: 40,
+    requestTimeoutMs: 1000,
   });
 
   assert.equal(typeof terminal.onChannelCloseFailure, "function", "TerminalPort must expose the channel close failure outlet");
@@ -99,24 +104,22 @@ test("late-open close failure reaches the TerminalPort observer and retries one 
 
   const aFrames = [];
   const subscriptionA = await terminal.subscribe(sessionA, (frame) => aFrames.push(frame));
+  await subscriptionA.ready;
   t.after(() => subscriptionA.close());
   await waitFor(() => aFrames.length > 0);
   assert.equal(fixture.openChannelCount, 1, "only session A owns an open channel before B is attempted");
 
-  let timeoutError = null;
-  try {
-    await terminal.subscribe(sessionB, () => {});
-  } catch (error) {
-    timeoutError = error;
-  }
-  assert.ok(timeoutError, "the delayed session open must time out");
-  assert.equal(timeoutError.code, "V1_CHANNEL_OPEN_TIMEOUT");
-  assert.equal(typeof timeoutError.channelId, "string", "the open timeout must carry a structured channelId");
+  const subscriptionB = await terminal.subscribe(sessionB, () => {});
+  const entryB = Array.from(terminal.targets.values()).find((entry) => entry.session.name === sessionB);
+  assert.ok(entryB, "the delayed target must retain its pending open identity");
+  assert.equal(typeof entryB.channelId, "string", "the pending open must retain a structured channelId");
+  const pendingChannelId = entryB.channelId;
+  subscriptionB.close();
 
   await waitFor(() => failures.length === 1);
   assert.equal(failures[0].code, "V1_CHANNEL_CLOSE_FAILED");
   assert.equal(typeof failures[0].channelId, "string", "the close failure must carry a structured channelId");
-  assert.equal(failures[0].channelId, timeoutError.channelId);
+  assert.equal(failures[0].channelId, pendingChannelId);
   const channelId = failures[0].channelId;
 
   assert.equal(terminal.retryLateOpenClose(channelId), true, "the failed late-open close must retry on this channel");

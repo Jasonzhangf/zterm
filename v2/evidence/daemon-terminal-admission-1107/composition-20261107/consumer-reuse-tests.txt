@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: forMachine projects the verified connections link
+ok 1 - forMachine projects the verified connections link
+  ---
+  duration_ms: 1.3155
+  type: 'test'
+  ...
+# Subtest: forMachine fails closed when the connections catalog edge is missing
+ok 2 - forMachine fails closed when the connections catalog edge is missing
+  ---
+  duration_ms: 0.332208
+  type: 'test'
+  ...
+# Subtest: forMachine rejects an unverified peer identity and closes the link
+ok 3 - forMachine rejects an unverified peer identity and closes the link
+  ---
+  duration_ms: 0.111041
+  type: 'test'
+  ...
+# Subtest: input maps stableId to an exact-existing terminal channel and forwards raw bytes
+ok 4 - input maps stableId to an exact-existing terminal channel and forwards raw bytes
+  ---
+  duration_ms: 0.147375
+  type: 'test'
+  ...
+# Subtest: input rejects a stableId that is not in the current catalog
+ok 5 - input rejects a stableId that is not in the current catalog
+  ---
+  duration_ms: 0.145834
+  type: 'test'
+  ...
+# Subtest: subscribe opens one channel and returns an unsubscribe that closes it
+ok 6 - subscribe opens one channel and returns an unsubscribe that closes it
+  ---
+  duration_ms: 0.123
+  type: 'test'
+  ...
+# Subtest: forMachine reuses one link per machine and keeps catalogs machine-scoped
+ok 7 - forMachine reuses one link per machine and keeps catalogs machine-scoped
+  ---
+  duration_ms: 0.260542
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 80.344292

@@ -1,0 +1,172 @@
+TAP version 13
+# Subtest: routing-configured daemon rejects a legacy terminal input that bypasses admission
+ok 1 - routing-configured daemon rejects a legacy terminal input that bypasses admission
+  ---
+  duration_ms: 48.725667
+  type: 'test'
+  ...
+# Subtest: admission rejects missing and invalid credentials before target access
+ok 2 - admission rejects missing and invalid credentials before target access
+  ---
+  duration_ms: 42.282625
+  type: 'test'
+  ...
+# Subtest: admission rejects an unauthorized workspace
+ok 3 - admission rejects an unauthorized workspace
+  ---
+  duration_ms: 35.507375
+  type: 'test'
+  ...
+# Subtest: admission rejects an unknown member
+ok 4 - admission rejects an unknown member
+  ---
+  duration_ms: 31.87125
+  type: 'test'
+  ...
+# Subtest: admission rejects an unbound member
+ok 5 - admission rejects an unbound member
+  ---
+  duration_ms: 33.50675
+  type: 'test'
+  ...
+# Subtest: admission rejects a stale binding generation
+ok 6 - admission rejects a stale binding generation
+  ---
+  duration_ms: 31.347542
+  type: 'test'
+  ...
+# Subtest: admission rejects a missing or wrong terminal target identity
+ok 7 - admission rejects a missing or wrong terminal target identity
+  ---
+  duration_ms: 40.569625
+  type: 'test'
+  ...
+# Subtest: admission rejects an authorized member targeting an unrelated terminal
+ok 8 - admission rejects an authorized member targeting an unrelated terminal
+  ---
+  duration_ms: 49.725917
+  type: 'test'
+  ...
+# Subtest: admission opens the exact existingOnly target and forwards typed input
+ok 9 - admission opens the exact existingOnly target and forwards typed input
+  ---
+  duration_ms: 63.5455
+  type: 'test'
+  ...
+# Subtest: admission forwards nonempty raw input without appending an Enter
+ok 10 - admission forwards nonempty raw input without appending an Enter
+  ---
+  duration_ms: 58.588334
+  type: 'test'
+  ...
+# Subtest: admission forwards one Enter as exactly one CR
+ok 11 - admission forwards one Enter as exactly one CR
+  ---
+  duration_ms: 53.004667
+  type: 'test'
+  ...
+# Subtest: admission stream exposes the exact admitted session
+ok 12 - admission stream exposes the exact admitted session
+  ---
+  duration_ms: 4054.10975
+  type: 'test'
+  ...
+# Subtest: startDaemon forwards admission to the public input route
+ok 13 - startDaemon forwards admission to the public input route
+  ---
+  duration_ms: 31.900917
+  type: 'test'
+  ...
+# Subtest: admission rejects the same target text when the scoped consumer belongs to another machine
+ok 14 - admission rejects the same target text when the scoped consumer belongs to another machine
+  ---
+  duration_ms: 51.517666
+  type: 'test'
+  ...
+# Subtest: admission rejects a revoked machine link before opening the target
+ok 15 - admission rejects a revoked machine link before opening the target
+  ---
+  duration_ms: 31.435167
+  type: 'test'
+  ...
+# Subtest: admission preserves a connections peer identity mismatch
+ok 16 - admission preserves a connections peer identity mismatch
+  ---
+  duration_ms: 38.715625
+  type: 'test'
+  ...
+# Subtest: admission rejects a superseded link generation before dispatch
+ok 17 - admission rejects a superseded link generation before dispatch
+  ---
+  duration_ms: 47.479042
+  type: 'test'
+  ...
+# Subtest: admission rejects a rebind that lands between lookup and dispatch
+ok 18 - admission rejects a rebind that lands between lookup and dispatch
+  ---
+  duration_ms: 47.637458
+  type: 'test'
+  ...
+# Subtest: admission fails closed when the machine terminal consumer is absent
+ok 19 - admission fails closed when the machine terminal consumer is absent
+  ---
+  duration_ms: 38.253208
+  type: 'test'
+  ...
+# Subtest: admission fails closed when members does not expose the public resolver
+ok 20 - admission fails closed when members does not expose the public resolver
+  ---
+  duration_ms: 36.280208
+  type: 'test'
+  ...
+# Subtest: daemon keeps the V1 session catalog token-gated while terminal data routes fail closed without admission
+ok 21 - daemon keeps the V1 session catalog token-gated while terminal data routes fail closed without admission
+  ---
+  duration_ms: 53.751583
+  type: 'test'
+  ...
+# Subtest: V1 credential failure maps to an explicit connection error before any target access
+ok 22 - V1 credential failure maps to an explicit connection error before any target access
+  ---
+  duration_ms: 23.36875
+  type: 'test'
+  ...
+# Subtest: cookie session no longer bypasses terminal admission
+ok 23 - cookie session no longer bypasses terminal admission
+  ---
+  duration_ms: 23.633
+  type: 'test'
+  ...
+# Subtest: lists real tmux sessions and streams committed V1 mux frames
+ok 24 - lists real tmux sessions and streams committed V1 mux frames
+  ---
+  duration_ms: 274.279583
+  type: 'test'
+  ...
+# Subtest: reuses one channel for two subscribers and keeps tmux alive after close
+ok 25 - reuses one channel for two subscribers and keeps tmux alive after close
+  ---
+  duration_ms: 292.943917
+  type: 'test'
+  ...
+# Subtest: assembles multi-chunk frames and emits only committed snapshots
+ok 26 - assembles multi-chunk frames and emits only committed snapshots
+  ---
+  duration_ms: 41.4745
+  type: 'test'
+  ...
+# Subtest: rejects missing and wrong V1 credentials before target access
+ok 27 - rejects missing and wrong V1 credentials before target access
+  ---
+  duration_ms: 25.042458
+  type: 'test'
+  ...
+1..27
+# tests 27
+# suites 0
+# pass 27
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5016.614792

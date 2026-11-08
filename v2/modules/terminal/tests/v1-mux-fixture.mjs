@@ -75,6 +75,7 @@ export function createV1MuxFixture({
   autoCapture = true,
   openDelayMs = 0,
   openDelaySessionName = "",
+  ignoreCloseUntilOpened = false,
 } = {}) {
   const channels = new Map();
   const recorded = {
@@ -149,6 +150,10 @@ export function createV1MuxFixture({
   function stopChannel(channelId, reason) {
     const channel = channels.get(channelId);
     if (!channel) {
+      return;
+    }
+    if (ignoreCloseUntilOpened && channel.openTimer) {
+      log({ event: "fixture.channel.close.ignored_until_opened", channelId, reason });
       return;
     }
     channels.delete(channelId);

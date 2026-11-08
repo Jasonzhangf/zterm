@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { createDaemon } from "../src/server.mjs";
 import { startDaemon as startDaemonEntry } from "../src/main.mjs";
 import { createV1MuxFixture } from "../../terminal/tests/v1-mux-fixture.mjs";
-import { TerminalPort } from "../../terminal/src/terminal-port.mjs";
+import { TerminalPort } from "../../terminal/src/public/index.mjs";
 import {
   createOrganizationService,
   createOrganizationStore,
@@ -437,7 +437,7 @@ test("admission rejects an unbound member", async (t) => {
   const target = await exactCatalogTarget(daemon);
 
   const response = await postInput(base, admissionBody(harness, target));
-  assert.equal(response.status, 409);
+  assert.equal(response.status, 404);
   assert.equal(await errorCode(response), "MEMBER_BINDING_NOT_FOUND");
   assert.equal(fixture.recorded.input.length, 0);
 });

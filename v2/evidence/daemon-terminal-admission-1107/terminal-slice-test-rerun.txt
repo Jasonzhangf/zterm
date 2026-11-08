@@ -1,0 +1,28 @@
+TAP version 13
+# Subtest: daemon facade bridges V1 mux sessions, input, and subscribers without touching tmux
+ok 1 - daemon facade bridges V1 mux sessions, input, and subscribers without touching tmux
+  ---
+  duration_ms: 4299.5805
+  type: 'test'
+  ...
+# Subtest: V1 credential failure maps to an explicit connection error before any target access
+ok 2 - V1 credential failure maps to an explicit connection error before any target access
+  ---
+  duration_ms: 24.1715
+  type: 'test'
+  ...
+# Subtest: cookie login gates input behind CSRF
+ok 3 - cookie login gates input behind CSRF
+  ---
+  duration_ms: 64.783875
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 4562.059333

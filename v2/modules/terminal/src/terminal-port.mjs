@@ -1,7 +1,7 @@
 import { createTerminalBufferRenderRuntime } from "@zterm/stream-boundary";
 import { normalizeWireLines } from "@zterm/shared/terminal-buffer";
-import { TypedError } from "../../errors/src/typed-error.mjs";
-import { observation } from "../../status/src/observation.mjs";
+import { TypedError } from "../../errors/src/public/index.mjs";
+import { observation } from "../../status/src/public/index.mjs";
 import { createV1MuxClient } from "./v1-mux-client.mjs";
 
 const SESSION_CACHE_MS = 2000;

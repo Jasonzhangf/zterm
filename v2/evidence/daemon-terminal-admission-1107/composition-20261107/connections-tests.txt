@@ -1,0 +1,12 @@
+
+ RUN  v1.6.0 /Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/connections
+
+ ↓ tests/integration/real-daemon.test.ts  (2 tests | 2 skipped)
+ ✓ tests/contract/connection-manager.contract.test.ts  (27 tests) 8ms
+ ✓ tests/integration/real-entry.test.ts  (14 tests) 16236ms
+
+ Test Files  2 passed | 1 skipped (3)
+      Tests  41 passed | 2 skipped (43)
+   Start at  11:45:55
+   Duration  16.66s (transform 196ms, setup 0ms, collect 496ms, tests 16.24s, environment 0ms, prepare 245ms)
+

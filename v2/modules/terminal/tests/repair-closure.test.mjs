@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import path from "node:path";
 import { test } from "node:test";
 import { createTerminalBufferRenderRuntime } from "@zterm/stream-boundary";
 import { TerminalPort } from "../src/terminal-port.mjs";
@@ -93,6 +94,18 @@ function tmux(args) {
   return execFileSync("tmux", ["-S", socket, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+  });
+}
+
+function startSession(t) {
+  execFileSync("mkdir", ["-p", path.dirname(socket)]);
+  tmux(["new-session", "-d", "-s", session, "-x", "80", "-y", "24"]);
+  t.after(() => {
+    try {
+      tmux(["kill-session", "-t", session]);
+    } catch {
+      // The dedicated session is already gone.
+    }
   });
 }
 
@@ -268,19 +281,13 @@ test("stale-frame with a null repair range does not dispatch", () => {
 });
 
 test("real V1 mux rejection requests an exact range and commits one complete repair frame", async (t) => {
-  tmux(["new-session", "-d", "-s", session, "-x", "80", "-y", "24"]);
-  t.after(() => {
-    try {
-      tmux(["kill-session", "-t", session]);
-    } catch {
-      // The dedicated session is already gone.
-    }
-  });
+  startSession(t);
   const { fixture, port } = await startFixture(t);
   const terminal = new TerminalPort({ wsUrl: `ws://127.0.0.1:${port}/ws?token=${token}` });
   t.after(() => terminal.close());
   const frames = [];
   const subscription = await terminal.subscribe(session, (frame) => frames.push(frame));
+  await subscription.ready;
   t.after(() => subscription.close());
 
   fixture.emitChannelMessage(message(payload({

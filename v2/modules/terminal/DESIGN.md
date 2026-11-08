@@ -26,7 +26,9 @@ terminal/
 
 ## 公开接口、数据及错误
 
-attach/read/subscribe/input/requestWidth；读取正文不得触发上游同步策略；预览遵守既定 detached snapshot 例外。
+当前公开入口 `src/public/index.mjs` 导出 `TerminalPort`、`snapshotToFrame`、`toFrameChunk`、`frameToAnsi`、`frameToText`。前两项中的 `snapshotToFrame`/`toFrameChunk` 是 committed frame 的纯投影适配，只接受已有 frame/chunk 数据并返回新值，不拥有 stream、buffer、connection 或 lifecycle；daemon 只能消费这两个纯适配和串行化函数，不能借此获得 terminal runtime 所有权。
+
+`TerminalPort` 的 attach/read/subscribe/input/requestWidth 是公开操作边界；读取正文不得触发上游同步策略；预览遵守既定 detached snapshot 例外。
 
 冲突未闭合只停相关验收，不以常开 body 订阅绕过。
 

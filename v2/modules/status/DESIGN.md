@@ -26,7 +26,9 @@ status/
 
 ## 公开接口、数据及错误
 
-query/subscribe(subjectRefs) → source/observedAt/freshness/value；查询不通过发agent消息探测。
+当前公开入口 `src/public/index.mjs` 只导出 `observation(source,value,observedAt?)`，返回 `{source,observedAt,value}` 的只读来源标签。它不导出 future aggregator、订阅或持久状态。
+
+query/subscribe(subjectRefs) → source/observedAt/freshness/value 是后续对外查询契约；查询不通过发 agent 消息探测。
 
 一个source不可达仅影响对应subject；计时不能将观测缺口补成idle。
 
