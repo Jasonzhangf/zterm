@@ -1,4 +1,4 @@
-import { TypedError } from "../../errors/src/typed-error.mjs";
+import { TypedError } from "../../errors/src/public/index.mjs";
 
 const VERSION = 1;
 const HANDSHAKE_TIMEOUT_MS = 8000;

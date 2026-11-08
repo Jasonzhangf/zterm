@@ -1,0 +1,42 @@
+Foundation public-boundary minimal correction - verification receipt
+Date: 2026-11-07 (PST) / 2026-11-08 (UTC)
+Worktree: /Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107
+Base (local main): 2bc9bab5 (server.mjs/terminal-port.mjs used private cross-module paths)
+HEAD before this check: 219574b7
+HEAD after wording fix: 3fd6ab09
+
+Adjudication: tmp/v2-webui-audit/foundation-public-boundaries-20261107.md
+Dispatch: m1794104584548-102 (dispatch), m1794104947227-138 (Jenny confirm)
+
+Public entries declared (explicit named exports only, no export-star):
+- v2/modules/errors/src/public/index.mjs  -> TypedError, asTypedError
+- v2/modules/status/src/public/index.mjs  -> observation
+- v2/modules/terminal/src/public/index.mjs -> TerminalPort, snapshotToFrame, toFrameChunk, frameToAnsi, frameToText
+
+Cross-module consumers switched to public entries:
+- v2/modules/daemon/src/server.mjs lines 7-9 (errors/status/terminal)
+- v2/modules/terminal/src/terminal-port.mjs lines 3-4 (errors/status)
+- v2/modules/daemon/src/machine-terminal-consumer.mjs (errors public + terminal public snapshotToFrame/toFrameChunk)
+- v2/modules/terminal/src/v1-mux-client.mjs uses errors public entry
+
+DESIGN.md public-contract sections updated: errors / status / terminal.
+Terminal wording corrected in commit 3fd6ab09 ("前两项中的" -> "其中").
+
+Verification commands and results
+1) node --check on errors/status/terminal public index + server.mjs + terminal-port.mjs
+   -> ALL node --check PASS
+2) node --test v2/modules/members/tests/members.test.mjs
+              v2/modules/daemon/tests/terminal-admission.test.mjs
+              v2/modules/daemon/tests/terminal-slice.test.mjs
+              v2/modules/daemon/tests/terminal-input-raw.test.mjs
+   -> tests 50 / pass 50 / fail 0
+3) real source/public consumer import resolution
+   node --input-type=module -e 'await import(<errors public>); await import(<status public>); await import(<terminal public>); await import(daemon server.mjs); await import(terminal-port.mjs); await import(machine-terminal-consumer.mjs)'
+   errors exports:  TypedError,asTypedError
+   status exports:  observation
+   terminal exports: TerminalPort,frameToAnsi,frameToText,snapshotToFrame,toFrameChunk
+   -> REAL CONSUMERS IMPORT OK
+
+Out-of-scope observation (not changed by this task): host-adapters/tests/tmux-adapter.test.mjs still imports ../../errors/src/typed-error.mjs private path. It is a test file outside the dispatch consumer list.
+
+Git: freeze held. Only local commit 3fd6ab09 added. No push/PR/merge/publish.

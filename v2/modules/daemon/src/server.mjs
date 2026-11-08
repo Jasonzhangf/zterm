@@ -4,9 +4,9 @@ import { stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { asTypedError, TypedError } from "../../errors/src/typed-error.mjs";
-import { observation } from "../../status/src/observation.mjs";
-import { frameToAnsi, frameToText } from "../../terminal/src/terminal-ansi-serializer.mjs";
+import { asTypedError, TypedError } from "../../errors/src/public/index.mjs";
+import { observation } from "../../status/src/public/index.mjs";
+import { frameToAnsi, frameToText } from "../../terminal/src/public/index.mjs";
 import { isTypedError as isControlTypedError } from "../../organization/src/public/typed-error.mjs";
 import { MEMBER_ERROR_CODES } from "../../members/src/public/index.mjs";
 
@@ -158,7 +158,7 @@ function createLazyTerminal({ wsUrl, clientInstanceId, log }) {
   let terminal = null;
   async function ensureTerminal() {
     if (!terminal) {
-      const { TerminalPort } = await import("../../terminal/src/terminal-port.mjs");
+      const { TerminalPort } = await import("../../terminal/src/public/index.mjs");
       terminal = new TerminalPort({ wsUrl, clientInstanceId, log });
     }
     return terminal;
