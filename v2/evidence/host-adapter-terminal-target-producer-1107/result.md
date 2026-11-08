@@ -134,7 +134,7 @@ All four follow-up outputs and their exit codes are saved in this evidence direc
 
 ## Local commit
 
-The complete change was committed locally on branch `host-adapter-terminal-target-producer-20261107` as `fix(v2/host-adapters): emit tmux:v1 terminal identity`. The local commit is `de0cbd16408ab7e99389afeca8c3312436d0fc40` (`de0cbd16`). The same ID is recorded in `commit.txt`.
+The complete change was committed locally on branch `host-adapter-terminal-target-producer-20261107` as `fix(v2/host-adapters): emit tmux:v1 terminal identity`. The first candidate commit is `de0cbd16408ab7e99389afeca8c3312436d0fc40` (`de0cbd16`). That ID was recorded in `commit.txt` at that time; the current candidate is recorded in `rework-commit.txt`.
 
 No push, merge, PR, publish, remote CI, daemon restart, tmux restart, global install, or broad process kill was performed. The producer and members consumer now pass the affected suites. Remote integration and delivery remain outside this local-commit scope.
 
@@ -174,6 +174,8 @@ error: 'Missing expected exception (TypeError).'
 | DAG validate | `dagpipe graph validate` on `workspace-control-plane.graph.json` and `workspace-member-resolve.graph.json` | `0` for both | `dag-workspace-control-plane.txt`, `dag-workspace-member-resolve.txt` |
 
 The host-adapters suite grew from `8` to `9` tests because this rework adds the invalid-backend rejection test required by the review remediation. The members suite remains `29` tests and still passes its tmux consumer checks unchanged.
+
+The rework was committed locally on branch `host-adapter-terminal-target-producer-20261107` as `fix(v2/host-adapters): reject non-tmux host probe backend`. The rework code commit is `ddb115e1b30243151719f59c0424d828df966868` (`ddb115e1`), recorded in `rework-commit.txt`; the candidate HEAD that includes this receipt is `a6808e0d2ffc1e2886b46d2d9a69b4378b5ff804` (`a6808e0d`). No push, merge, PR, publish, daemon restart, tmux restart, or global install was performed.
 
 ### Changed paths for this rework
 
