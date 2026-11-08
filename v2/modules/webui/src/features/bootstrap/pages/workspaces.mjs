@@ -35,20 +35,32 @@ function workspacesBlock(loadable) {
 }
 
 function machinesBlock(state) {
-  const machines = Array.isArray(state.machineCandidates) ? state.machineCandidates : [];
+  const members = Array.isArray(state.memberCandidates) ? state.memberCandidates : [];
+  const selection = state.machineSelection || {
+    available: false,
+    reason: {
+      code: "MACHINE_SELECTION_UNAVAILABLE",
+      message: "Machine selection is unavailable.",
+    },
+  };
   const enrollment = state.machineEnrollment || { enabled: false, reason: { code: "MACHINE_ENROLLMENT_UNAVAILABLE", message: "" } };
   return `
     <section class="panel" aria-labelledby="machines-title">
       <div class="panel-head">
-        <h2 id="machines-title">Machines</h2>
+        <h2 id="machines-title">Workspace members</h2>
         <button type="button" data-action="enroll-machine" data-disabled-reason="${esc(enrollment.reason.code)}" ${enrollment.enabled ? "" : "disabled"} data-testid="enroll-machine-button">Enroll machine</button>
       </div>
       ${enrollment.enabled ? "" : `<p class="status-line" data-role="machine-enrollment-reason" data-code="${esc(enrollment.reason.code)}">${esc(enrollment.reason.code)}: ${esc(enrollment.reason.message)}</p>`}
+      ${
+        selection.available
+          ? ""
+          : `<p class="status-line" data-role="machine-selection-reason" data-code="${esc(selection.reason.code)}">${esc(selection.reason.code)}: ${esc(selection.reason.message)}</p>`
+      }
       <ul class="machine-list" data-role="machine-list">
-        ${machines.map((machine) => `
-          <li data-machine-id="${esc(machine.memberId)}">
-            <span class="machine-name">${esc(machine.name || machine.memberId)}</span>
-            <span class="machine-id">${esc(machine.memberId)}</span>
+        ${members.map((member) => `
+          <li data-member-id="${esc(member.memberId)}">
+            <span class="machine-name">${esc(member.name || member.memberId)}</span>
+            <span class="machine-id">${esc(member.memberId)}</span>
           </li>
         `).join("")}
       </ul>
@@ -64,13 +76,18 @@ export function renderWorkspacesPage(state = {}) {
       <header class="page-head">
         <div>
           <h1 id="workspaces-title">Workspaces</h1>
-          <p class="page-sub">Only server-authorized workspaces are listed. Workspace, group, and member configuration stays read-only until daemon endpoints are integrated.</p>
+          <p class="page-sub">Only server-authorized workspaces are listed. Workspace, group, and member configuration stays read-only until the member runtime and selection edge are integrated.</p>
         </div>
         <span class="badge ${session.authenticated ? "badge-ok" : "badge-muted"}" data-role="session-badge">
           ${session.authenticated ? "Authenticated" : "Not authenticated"}
         </span>
-        <button type="button" data-action="load-workspaces" data-testid="load-workspaces-button">Load workspaces</button>
+        <div class="actions">
+          <button type="button" data-action="load-workspaces" data-testid="load-workspaces-button">Load workspaces</button>
+          <button type="button" data-action="logout" data-testid="logout-button" ${state.logoutPending ? "disabled" : ""}>Log out</button>
+        </div>
       </header>
+
+      ${state.logoutError ? `<p class="alert" role="alert" data-role="logout-error">${esc(state.logoutError.code)}: ${esc(state.logoutError.message)}</p>` : ""}
 
       <section class="panel" aria-labelledby="directory-title">
         <div class="panel-head">

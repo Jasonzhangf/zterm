@@ -17,13 +17,18 @@ export function renderLoginPage(state = {}) {
 
       <form id="login-form" class="panel" data-role="login-form" novalidate>
         <label class="field">
-          <span>Daemon credential</span>
+          <span>Login name</span>
+          <input name="loginName" data-field="login-name" autocomplete="username">
+        </label>
+        <label class="field">
+          <span>Credential</span>
           <input name="credential" data-field="credential" type="password" autocomplete="current-password">
         </label>
         ${authError ? `<p class="alert" role="alert" data-role="login-error">${esc(authError.code)}: ${esc(authError.message)}</p>` : ""}
+        ${state.logoutError ? `<p class="alert" role="alert" data-role="logout-error">${esc(state.logoutError.code)}: ${esc(state.logoutError.message)}</p>` : ""}
         <div class="actions">
           <button type="submit" data-action="login" ${state.loginPending ? "disabled" : ""}>Log in</button>
-          <button type="button" data-action="logout" data-testid="logout-button">Log out</button>
+          <button type="button" data-action="logout" data-testid="logout-button" ${state.logoutPending ? "disabled" : ""}>Log out</button>
         </div>
       </form>
 

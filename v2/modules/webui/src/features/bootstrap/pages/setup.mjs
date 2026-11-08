@@ -28,11 +28,6 @@ export function renderSetupPage(state = {}) {
           <span>Daemon endpoint</span>
           <input name="daemonEndpoint" data-field="daemon-endpoint" value="${esc(endpoint)}" autocomplete="url" inputmode="url" placeholder="http://127.0.0.1:3334">
         </label>
-        <label class="field">
-          <span>Workspace account token (optional)</span>
-          <input name="accountToken" data-field="account-token" type="password" autocomplete="off">
-          <small>Used only in memory for control-plane workspace queries. This browser never stores it.</small>
-        </label>
         ${endpointError ? `<p class="alert" role="alert" data-role="endpoint-error">${esc(endpointError.code)}: ${esc(endpointError.message)}</p>` : ""}
         <div class="actions">
           <button type="submit" data-action="save-endpoint">Save endpoint</button>

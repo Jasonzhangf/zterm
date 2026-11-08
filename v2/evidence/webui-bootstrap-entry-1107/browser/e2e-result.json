@@ -1,17 +1,21 @@
 {
   "status": "PASS",
-  "publicEntry": "http://127.0.0.1:64315/features/bootstrap/index.html#/setup",
-  "daemon": {
-    "port": 64315,
-    "credentialsConfigured": true
+  "publicEntry": "http://127.0.0.1:62066/features/bootstrap/index.html#/setup",
+  "harness": {
+    "kind": "combined public API fixture",
+    "account": "alice",
+    "note": "The browser harness implements only the public account-session and workspace HTTP shapes. It does not prove production account data or daemon wiring."
   },
   "checks": {
-    "setupRouteRendered": true,
-    "endpointSavedWithoutCredential": true,
-    "invalidLoginTypedError": "V2_CREDENTIAL_INVALID",
-    "validLoginAuthenticated": true,
-    "workspaceDirectoryTypedUnavailable": "METHOD_NOT_ALLOWED",
+    "endpointSaved": "http://127.0.0.1:62066",
+    "crossOriginEndpointRemoved": true,
+    "accountLoginTypedFailure": "ACCOUNT_CREDENTIAL_INVALID",
+    "accountLoginAuthenticated": true,
+    "workspaceDirectoryLoaded": true,
+    "workspaceTreeLoaded": true,
+    "machineSelectionUnavailable": "MACHINE_SELECTION_UNAVAILABLE",
     "machineEnrollmentDisabled": "MACHINE_ENROLLMENT_UNAVAILABLE",
+    "logoutFailurePreservedSession": "ACCOUNT_REVOCATION_FAILED",
     "desktopNoHorizontalOverflow": {
       "innerWidth": 1440,
       "scrollWidth": 1440,
@@ -22,6 +26,5 @@
       "scrollWidth": 390,
       "bodyScrollWidth": 390
     }
-  },
-  "note": "The base daemon at this commit exposes auth/session but not /api/workspaces; the UI reports typed unavailable instead of fabricating a workspace list."
+  }
 }

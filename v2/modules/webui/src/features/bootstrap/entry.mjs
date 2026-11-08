@@ -31,7 +31,6 @@ export function mountBootstrapApp(root) {
         const form = button.closest("form");
         try {
           app.setDaemonEndpoint(field(form, "daemon-endpoint"));
-          app.setAccountWorkspaceToken(field(form, "account-token"));
         } catch (error) {
           app.state.endpointError = { code: error.code, message: error.message };
         }
@@ -40,7 +39,10 @@ export function mountBootstrapApp(root) {
       }
       case "login": {
         const form = button.closest("form");
-        const authenticated = await app.login({ credential: field(form, "credential") });
+        const authenticated = await app.login({
+          loginName: field(form, "login-name"),
+          credential: field(form, "credential"),
+        });
         if (authenticated) {
           if (globalThis.location) {
             globalThis.location.hash = bootstrapRouteUrl("workspaces");
@@ -51,11 +53,13 @@ export function mountBootstrapApp(root) {
         break;
       }
       case "logout": {
-        await app.logout();
-        if (globalThis.location) {
+        const result = await app.logout();
+        if (result.ok && globalThis.location) {
           globalThis.location.hash = bootstrapRouteUrl("login");
         }
-        app.navigate("login");
+        if (result.ok) {
+          app.navigate("login");
+        }
         render();
         break;
       }
@@ -109,7 +113,16 @@ export function mountBootstrapApp(root) {
   }
 
   render();
-  void app.restoreSession().then(() => render());
+  void app.restoreSession().then(() => {
+    if (
+      globalThis.location &&
+      app.state.route === "workspaces" &&
+      globalThis.location.hash !== bootstrapRouteUrl("workspaces")
+    ) {
+      globalThis.location.hash = bootstrapRouteUrl("workspaces");
+    }
+    render();
+  });
   return app;
 }
 
