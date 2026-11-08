@@ -237,3 +237,36 @@ not yet enable admission end-to-end by itself.
 
 Next: hand the result to the reviewer/master; do not commit, push, merge, or
 publish in this worker scope.
+
+## 2026-11-08 01:20 UTC - idle patrol: wait on production composition routing
+
+Purpose: consume durable board-idle patrol `m1794100755851-8880` and review
+whether the parent task has any work that can proceed independently.
+
+Evidence source: `collab recv`, `collab board show`, and `collab notify status`.
+
+Current state:
+
+- Parent `daemon-terminal-admission-1107` is `working/INCOMPLETE`. Its remaining
+  public-entry work is owned by child `terminal-admission-composition-1107`.
+- Child is `working/INCOMPLETE` after local commit `032afafc`. It has real
+  isolated V1 fixture PASS and regression evidence, but production startup/config
+  assembly, real host-binding producer, real accounts login/grant/revocation, and
+  committed frame/input execution remain pending.
+- Child already has board-idle patrol cancelled while waiting on Jenny's routing.
+- Inbox is empty. No master routing decision has arrived yet.
+
+Decision:
+
+- The parent has no in-scope implementation work until Jenny routes the production
+  composition owner and members/host binding producer. Do not duplicate child work
+  and do not substitute the fixture for production composition.
+- Cancel parent board-idle patrol while waiting on this external dependency. Keep
+  direct messages active.
+
+Resume condition:
+
+- Jenny routes the daemon production composition owner and members/host adapter
+  owner, or returns new in-scope instructions.
+
+No new code, no tests, no service action, and no remote integration is performed.
