@@ -9,6 +9,7 @@ import { observation } from "../../status/src/observation.mjs";
 import { frameToAnsi, frameToText } from "../../terminal/src/terminal-ansi-serializer.mjs";
 import { isTypedError as isControlTypedError } from "../../organization/src/public/typed-error.mjs";
 import { MEMBER_ERROR_CODES } from "../../members/src/public/index.mjs";
+import { createTerminalAdmission, requireTarget } from "./terminal-admission.mjs";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultWebuiDir = path.resolve(moduleDir, "../../webui/src");
@@ -99,6 +100,7 @@ export function createDaemon({
   log = () => {},
   sessionTtlMs = DEFAULT_SESSION_TTL_MS,
   terminalPort,
+  admission = null,
   clientInstanceId,
   workspaceAuth,
   organization,
@@ -113,9 +115,21 @@ export function createDaemon({
     clientInstanceId,
     log,
   });
+  const terminalAdmission = admission
+    ? createTerminalAdmission({
+        auth: admission.auth,
+        members: admission.members,
+        routing: admission.routing,
+        machineTerminal: admission.machineTerminal,
+        resolveBindingTarget: admission.resolveBindingTarget,
+        terminal,
+        log,
+      })
+    : null;
   const sessions = new Map();
   const context = {
     terminal,
+    admission: terminalAdmission,
     v2Token,
     webuiDir,
     sessions,
@@ -213,13 +227,13 @@ async function handleRequest({ request, response, context }) {
   }
 
   if (request.method === "GET" && url.pathname === "/api/terminal/stream") {
-    authenticate(request, context);
-    return streamTerminal(request, response, context, url);
+    requireTerminalAdmission(context, "terminal.stream");
+    return streamTerminal(request, response, context, url, credentialHeader(request));
   }
 
   if (request.method === "POST" && url.pathname === "/api/terminal/input") {
-    authenticate(request, context, { requireCsrf: true });
-    return sendTerminalInput(request, response, context);
+    requireTerminalAdmission(context, "terminal.input");
+    return sendTerminalInput(request, response, context, credentialHeader(request));
   }
 
   if (request.method === "GET" && url.pathname === "/api/workspaces") {
@@ -767,11 +781,34 @@ function constantTimeEqual(left, right) {
   return diff === 0;
 }
 
-async function streamTerminal(request, response, context, url) {
-  const target = url.searchParams.get("target");
-  if (!target) {
-    throw daemonError("TARGET_REQUIRED", "terminal.stream", "A terminal target is required.", "Missing target query parameter.");
-  }
+async function streamTerminal(request, response, context, url, callerToken) {
+  let streamSession = null;
+  let streamResolution = null;
+  let target = null;
+  requireTerminalAdmission(context, "terminal.stream");
+  streamResolution = await withTerminalAdmission("terminal.stream", () => context.admission.admit({
+    callerToken,
+    workspaceId: url.searchParams.get("workspaceId"),
+    memberId: url.searchParams.get("memberId"),
+    machineId: url.searchParams.get("machineId"),
+    groupPath: url.searchParams.get("groupPath"),
+    expectedGeneration: parseOptionalInteger(url.searchParams.get("expectedGeneration")),
+    target: requireTarget(
+      {
+        backend: url.searchParams.get("backend"),
+        stableId: url.searchParams.get("stableId"),
+      },
+      "terminal.stream",
+    ),
+  }));
+  streamSession = streamResolution.session;
+  target = streamSession.stableId;
+  streamResolution = {
+    ...streamResolution,
+    terminal: await withTerminalAdmission("terminal.stream", () => (
+      context.admission.requireCurrent(streamResolution, "terminal.stream")
+    )),
+  };
 
   let closed = false;
   let subscription = null;
@@ -810,7 +847,8 @@ async function streamTerminal(request, response, context, url) {
   response.on("close", finish);
 
   try {
-    subscription = await context.terminal.subscribe(target, {
+    const terminal = streamResolution?.terminal || context.terminal;
+    subscription = await terminal.subscribe(target, {
       onFrame: (frame, meta) => {
         send("buffer", {
           target: meta.target,
@@ -868,9 +906,15 @@ async function streamTerminal(request, response, context, url) {
   });
   started = true;
   send("ready", {
-    target,
+    target: streamSession ? streamSession.name : target,
     source: "v1-mux",
     observedAt: new Date().toISOString(),
+    ...(streamSession ? {
+      backend: streamSession.backend,
+      stableId: streamSession.stableId,
+      memberId: streamResolution.resolution.memberId,
+      bindingGeneration: streamResolution.resolution.bindingGeneration,
+    } : {}),
   });
   const flush = pending.splice(0, pending.length);
   for (const [event, data] of flush) {
@@ -884,20 +928,78 @@ async function streamTerminal(request, response, context, url) {
   }, 15000);
 }
 
-async function sendTerminalInput(request, response, context) {
+async function sendTerminalInput(request, response, context, callerToken) {
+  requireTerminalAdmission(context, "terminal.input");
   const body = await readJson(request);
-  if (typeof body.target !== "string" || typeof body.data !== "string") {
-    throw daemonError("INPUT_INVALID", "terminal.input", "Terminal input is invalid.", "Expected string fields: target, data.");
-  }
-  const data = body.raw === true
-    ? body.data
-    : (body.data.endsWith("\r") ? body.data : `${body.data}\r`);
-  const receipt = await context.terminal.input(body.target, data);
-  sendJson(response, 200, {
+  const result = await withTerminalAdmission("terminal.input", () => context.admission.forwardInput({
+    callerToken,
+    workspaceId: body.workspaceId,
+    memberId: body.memberId,
+    machineId: body.machineId,
+    groupPath: body.groupPath,
+    expectedGeneration: body.expectedGeneration,
+    target: requireTarget(body.target, "terminal.input"),
+    data: body.data,
+  }));
+  return sendJson(response, 200, {
     accepted: true,
-    receipt,
-    observation: observation("v1-mux", { target: body.target, inputSubmitted: true }),
+    receipt: result.receipt,
+    admission: {
+      memberId: result.resolution.memberId,
+      bindingGeneration: result.resolution.bindingGeneration,
+      backend: result.target.backend,
+      stableId: result.target.stableId,
+    },
+    observation: observation("v1-mux", { target: result.session.name, inputSubmitted: true }),
   });
+}
+
+function requireTerminalAdmission(context, operationId) {
+  if (!context.admission) {
+    throw daemonError(
+      "TERMINAL_ADMISSION_REQUIRED",
+      operationId,
+      "Terminal admission is not configured; the token-only legacy path is disabled.",
+      { reason: "admission-missing" },
+    );
+  }
+}
+
+async function withTerminalAdmission(operationId, action) {
+  try {
+    return await action();
+  } catch (error) {
+    if (error && error.name === "ConnectionError" && typeof error.code === "string") {
+      throw new TypedError({
+        code: error.code,
+        owningModule: "connections",
+        operationId,
+        cause: {
+          message: error.message || error.code,
+          machineId: error.machineId ?? null,
+          channelId: error.channelId ?? null,
+          cause: error.cause ?? null,
+        },
+        message: error.message || error.code,
+      });
+    }
+    if (error && error.name === "TypedError" && typeof error.code === "string") {
+      throw daemonError(
+        error.code,
+        error.operationId || operationId,
+        error.message || error.code,
+        error.cause ?? error.details ?? null,
+      );
+    }
+    throw error;
+  }
+}
+
+function parseOptionalInteger(value) {
+  if (value === null || value.trim() === "") {
+    return undefined;
+  }
+  return Number(value);
 }
 
 async function readJson(request) {
@@ -992,6 +1094,7 @@ function statusForError(error) {
     case "BINDING_HOST_IDENTITY_UNAVAILABLE":
       return 503;
     case "V2_AUTH_UNCONFIGURED":
+    case "TERMINAL_ADMISSION_REQUIRED":
       return 503;
     case "V2_CREDENTIAL_REQUIRED":
     case "V2_CREDENTIAL_INVALID":
@@ -1007,6 +1110,41 @@ function statusForError(error) {
     case "TARGET_REQUIRED":
     case "INPUT_INVALID":
     case "REQUEST_INVALID_JSON":
+      return 400;
+    case "UNAUTHENTICATED":
+      return 401;
+    case "ROUTE_FORBIDDEN":
+      return 403;
+    case "MEMBER_NOT_FOUND":
+    case "TERMINAL_TARGET_IDENTITY_MISMATCH":
+      return 404;
+    case "MEMBER_BINDING_NOT_FOUND":
+    case "MEMBER_RUNTIME_NOT_CONFIGURED":
+    case "MEMBER_BINDING_INVALID":
+    case "BINDING_GENERATION_STALE":
+      return 409;
+    case "TERMINAL_TARGET_BINDING_UNAVAILABLE":
+      return 424;
+    case "unauthorized":
+    case "peer_identity_mismatch":
+      return 401;
+    case "directory_rejected":
+      return 403;
+    case "machine_mismatch":
+    case "stale_generation":
+      return 409;
+    case "link_not_found":
+    case "link_closed":
+    case "unreachable":
+    case "unsupported_channel":
+    case "channel_close_failed":
+      return 424;
+    case "invalid_input":
+      return 400;
+    case "unknown":
+      return 502;
+    case "VALIDATION":
+    case "TERMINAL_TARGET_IDENTITY_REQUIRED":
       return 400;
     case "REQUEST_TOO_LARGE":
       return 413;

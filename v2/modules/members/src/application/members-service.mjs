@@ -1,5 +1,6 @@
 import { ERROR_CODES, fail } from '../../../organization/src/public/typed-error.mjs';
 import { requireString } from '../../../organization/src/public/boundary.mjs';
+import { resolveBindingTarget } from '../adapters/terminal-target-resolver.mjs';
 
 const MODULE = 'members';
 
@@ -86,6 +87,35 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     return hostProbe;
   }
 
+  function normalizeTerminalTarget(terminalTarget) {
+    if (terminalTarget === undefined || terminalTarget === null) {
+      return null;
+    }
+    if (typeof terminalTarget !== 'object' || Array.isArray(terminalTarget)) {
+      fail(ERROR_CODES.VALIDATION, 'terminalTarget must be an object with backend and stableId, or null', {
+        owningModule: MODULE,
+      });
+    }
+    const backend = typeof terminalTarget.backend === 'string' ? terminalTarget.backend.trim() : '';
+    const stableId = typeof terminalTarget.stableId === 'string' ? terminalTarget.stableId.trim() : '';
+    if (!backend || !stableId) {
+      fail(ERROR_CODES.VALIDATION, 'terminalTarget requires non-empty backend and stableId', {
+        owningModule: MODULE,
+        details: { backend: backend || null, stableId: stableId || null },
+      });
+    }
+    return { backend, stableId };
+  }
+
+  // Bindings and their targets are returned as copies; a caller mutation must
+  // never reach the members store truth or a later reader.
+  function copyBinding(binding) {
+    return {
+      ...binding,
+      terminalTarget: binding.terminalTarget ? { ...binding.terminalTarget } : null,
+    };
+  }
+
   async function configureRuntime({ token, memberId, machineId, hostKind, agentKind, launchProfileRef } = {}) {
     const context = await authorize(token, WRITE_SCOPE);
     requireString(memberId, 'memberId', MODULE);
@@ -130,7 +160,7 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     return runtime ? { ...runtime } : null;
   }
 
-  async function bindSession({ token, memberId, sessionId, anchor, expectedGeneration } = {}) {
+  async function bindSession({ token, memberId, sessionId, anchor, expectedGeneration, terminalTarget } = {}) {
     const context = await authorize(token, WRITE_SCOPE);
     requireString(memberId, 'memberId', MODULE);
     requireString(sessionId, 'sessionId', MODULE);
@@ -138,6 +168,7 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     if (!Number.isInteger(expectedGeneration) || expectedGeneration < 0) {
       fail(ERROR_CODES.VALIDATION, 'expectedGeneration must be a non-negative integer', { owningModule: MODULE });
     }
+    const normalizedTerminalTarget = normalizeTerminalTarget(terminalTarget);
     const member = await requireMember(memberId);
     assertWorkspaceAllowed(context, member.workspaceId);
     assertMemberAllowed(context, memberId);
@@ -157,10 +188,11 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
         sessionId,
         anchor,
         generation: currentGeneration + 1,
+        terminalTarget: normalizedTerminalTarget,
       };
       state.bindings[memberId] = binding;
       state.generations[memberId] = binding.generation;
-      return { ...binding };
+      return copyBinding(binding);
     });
   }
 
@@ -172,7 +204,7 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     assertMemberAllowed(context, memberId);
     const state = await store.read();
     const binding = state.bindings[memberId];
-    return binding ? { ...binding } : null;
+    return binding ? copyBinding(binding) : null;
   }
 
   function readRuntime(state, memberId) {
@@ -300,7 +332,7 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
   async function getBinding(memberId) {
     const state = await store.read();
     const binding = state.bindings[memberId];
-    return binding ? { ...binding } : null;
+    return binding ? copyBinding(binding) : null;
   }
 
   // Consistent runtime reader for routing. It returns the configured machine and
@@ -339,6 +371,7 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
       bindingGeneration: binding.generation,
       sessionId: binding.sessionId,
       anchor: binding.anchor,
+      terminalTarget: binding.terminalTarget ? { ...binding.terminalTarget } : null,
     };
   }
 
@@ -351,6 +384,7 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     queryBinding,
     getBinding,
     getRuntimeBinding,
+    resolveBindingTarget,
   });
 }
 

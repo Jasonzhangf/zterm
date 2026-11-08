@@ -14,6 +14,7 @@ import {
   MEMBER_ERROR_CODES,
   createBindingStore,
   createMembersService,
+  resolveBindingTarget,
 } from '../src/public/index.mjs';
 import { createTrustedAuthDouble } from './support/trusted-auth-double.mjs';
 
@@ -570,6 +571,155 @@ test('getRuntimeBinding rejects an invalid binding with a typed error', async ()
     () => members.getRuntimeBinding(first.memberId),
     (error) => isCode(error, MEMBER_ERROR_CODES.MEMBER_BINDING_INVALID),
   );
+});
+
+test('bindSession persists terminalTarget, rebind replaces it, and omission clears it', async () => {
+  const { members, first } = await fixture();
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+
+  const bound = await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+    terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' },
+  });
+  assert.equal(bound.generation, 1);
+  assert.deepEqual(bound.terminalTarget, { backend: 'tmux', stableId: 'tmux:v1:aa' });
+  assert.deepEqual(
+    (await members.queryBinding({ token: TOKENS.owner, memberId: first.memberId })).terminalTarget,
+    { backend: 'tmux', stableId: 'tmux:v1:aa' },
+  );
+  assert.deepEqual((await members.getRuntimeBinding(first.memberId)).terminalTarget, {
+    backend: 'tmux',
+    stableId: 'tmux:v1:aa',
+  });
+
+  const rebound = await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a2',
+    anchor: 'pane:1',
+    expectedGeneration: 1,
+    terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:bb' },
+  });
+  assert.equal(rebound.generation, 2);
+  assert.deepEqual(rebound.terminalTarget, { backend: 'tmux', stableId: 'tmux:v1:bb' });
+
+  const cleared = await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a3',
+    anchor: 'pane:2',
+    expectedGeneration: 2,
+  });
+  assert.equal(cleared.generation, 3);
+  assert.equal(cleared.terminalTarget, null);
+  assert.equal(
+    (await members.queryBinding({ token: TOKENS.owner, memberId: first.memberId })).terminalTarget,
+    null,
+  );
+  assert.equal((await members.getRuntimeBinding(first.memberId)).terminalTarget, null);
+});
+
+test('bindSession rejects a malformed terminalTarget before writing a binding', async () => {
+  const { members, first } = await fixture();
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+    terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' },
+  });
+
+  await assert.rejects(
+    () => members.bindSession({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      sessionId: 'sess-a2',
+      anchor: 'pane:1',
+      expectedGeneration: 1,
+      terminalTarget: { backend: 'tmux' },
+    }),
+    (error) => isCode(error, ERROR_CODES.VALIDATION),
+  );
+  await assert.rejects(
+    () => members.bindSession({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      sessionId: 'sess-a2',
+      anchor: 'pane:1',
+      expectedGeneration: 1,
+      terminalTarget: 'tmux:v1:aa',
+    }),
+    (error) => isCode(error, ERROR_CODES.VALIDATION),
+  );
+  // A refused bind is not a rebind: the recorded binding and generation stay.
+  const binding = await members.queryBinding({ token: TOKENS.owner, memberId: first.memberId });
+  assert.equal(binding.generation, 1);
+  assert.deepEqual(binding.terminalTarget, { backend: 'tmux', stableId: 'tmux:v1:aa' });
+});
+
+test('resolveBindingTarget returns a copy only on an exact catalog match', () => {
+  const binding = {
+    memberId: 'mbr-1',
+    machineId: 'mac-1',
+    bindingGeneration: 2,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:aa' },
+  };
+  const catalog = [
+    { name: 'alpha', backend: 'tmux', stableId: 'tmux:v1:aa' },
+    { name: 'beta', backend: 'tmux', stableId: 'tmux:v1:bb' },
+  ];
+  const resolved = resolveBindingTarget({ binding, catalog });
+  assert.deepEqual(resolved, { backend: 'tmux', stableId: 'tmux:v1:aa' });
+  // The adapter returns a copy, never the stored binding target or a catalog entry.
+  assert.notEqual(resolved, binding.terminalTarget);
+  assert.notEqual(resolved, catalog[0]);
+  resolved.backend = 'tampered';
+  assert.equal(catalog[0].backend, 'tmux');
+  assert.equal(binding.terminalTarget.backend, 'tmux');
+  // Catalog and binding stay read-only.
+  assert.deepEqual(catalog[0], { name: 'alpha', backend: 'tmux', stableId: 'tmux:v1:aa' });
+
+  assert.equal(resolveBindingTarget({
+    binding,
+    catalog: [{ name: 'beta', backend: 'tmux', stableId: 'tmux:v1:bb' }],
+  }), null);
+  assert.equal(resolveBindingTarget({ binding, catalog: [] }), null);
+  assert.equal(resolveBindingTarget({
+    binding: { ...binding, terminalTarget: null },
+    catalog,
+  }), null);
+  assert.equal(resolveBindingTarget({ binding: {}, catalog }), null);
+  // Two live entries for the same identity are unresolved, not a pick-one guess.
+  assert.equal(resolveBindingTarget({
+    binding,
+    catalog: [
+      { name: 'alpha', backend: 'tmux', stableId: 'tmux:v1:aa' },
+      { name: 'alpha-copy', backend: 'tmux', stableId: 'tmux:v1:aa' },
+    ],
+  }), null);
+  assert.throws(() => resolveBindingTarget({ binding, catalog: 'tmux' }), TypeError);
 });
 
 
