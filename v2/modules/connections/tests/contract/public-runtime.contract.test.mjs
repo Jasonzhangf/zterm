@@ -188,3 +188,39 @@ test("preserves the cause of a typed directory rejection", async () => {
       err.cause === root,
   );
 });
+
+test("closes the link and preserves the typed error when the catalog read fails", async () => {
+  const catalogFailure = new ConnectionError("list_sessions_failed", "catalog unavailable", {
+    machineId: "machine-a",
+  });
+  const fake = makeFakeTransport({ peerIdentity: "daemon-machine-a" });
+  fake.handle.listSessions = async () => {
+    throw catalogFailure;
+  };
+  const manager = managerFor(fake.handle);
+
+  let createdLink;
+  let closeCalls = 0;
+  const connect = manager.connect.bind(manager);
+  manager.connect = async (...args) => {
+    createdLink = await connect(...args);
+    return createdLink;
+  };
+  const closeOwnLink = manager.closeOwnLink.bind(manager);
+  manager.closeOwnLink = (link) => {
+    closeCalls += 1;
+    closeOwnLink(link);
+  };
+
+  await assert.rejects(
+    resolveAuthorizedTerminalDirectory({
+      connectionManager: manager,
+      machineId: "machine-a",
+      verifiedAuthorization: authFor("machine-a", "daemon-machine-a"),
+    }),
+    (err) => err === catalogFailure,
+  );
+
+  assert.equal(closeCalls, 1);
+  assert.equal(manager.observeLink(createdLink).status, "closed");
+});

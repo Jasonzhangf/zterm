@@ -16,7 +16,15 @@ export async function resolveAuthorizedTerminalDirectory({
   verifiedAuthorization,
 }) {
   const link = await connectionManager.connect(machineId, verifiedAuthorization);
-  const entries = await connectionManager.listSessions(link);
+  let entries;
+  try {
+    entries = await connectionManager.listSessions(link);
+  } catch (error) {
+    // The caller cannot release a link it never received, so a failed catalog
+    // read owns the physical connection and closes it before rethrowing.
+    connectionManager.closeOwnLink(link);
+    throw error;
+  }
   return {
     link,
     machineId: link.machineId,

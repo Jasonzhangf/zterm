@@ -99,3 +99,27 @@ node --check tests/contract/public-runtime.contract.test.mjs   EXIT=0
   聚焦 `node --test` 与 `node --check`。
 - 真实跨机 daemon 组合与成员绑定写路径由父任务 `daemon-terminal-admission-1107` 负责，
   不在本任务范围。
+
+## rework：catalog 读取失败时关闭刚创建的 link（rev 10 REWORK，owner=Leo）
+
+独立审查（Mia）发现 P1 泄漏：catalog 读取失败时 `resolveAuthorizedTerminalDirectory`
+直接抛出，未 `closeOwnLink`，物理连接残留。组合侧 Emma 亦独立复现
+（`list_sessions_failed, closeCalls=0, status=connected`）。
+
+唯一 owner 修复（仅 `v2/modules/connections/**`）：
+`src/public/index.mjs` 中 `listSessions` 拒绝时先 `closeOwnLink(link)`，再 rethrow
+原 typed error；`close` 语义与其余公开入口不变。未改 daemon/host-adapters。
+
+红 -> 绿：
+
+```
+red:   node --test tests/contract/public-runtime.contract.test.mjs
+       EXIT=1   # tests 7, pass 6, fail 1 (closeCalls 0 !== 1)
+green: node --test tests/contract/public-runtime.contract.test.mjs
+       EXIT=0   # tests 7, pass 7, fail 0
+node --check src/public/index.mjs                  EXIT=0
+```
+
+收据：`red-link-leak-node-test.log`、`green-link-leak-node-test.log`、
+`node-check-link-leak.log`。新增契约用例：catalog 读取失败时 link 必须关闭且返还原
+typed error。
