@@ -12,8 +12,28 @@ export interface AccountAuthorizationGrant {
   readonly scopes: readonly string[]
   readonly allWorkspaces: boolean
   readonly workspaceIds: readonly string[]
+  readonly machineIds?: readonly string[]
   readonly memberIds: readonly string[]
+  /**
+   * Accounts-owned generation for the authorization record. It is the
+   * generation a composed binding was authorized against; it is not the
+   * members-owned member binding generation.
+   */
+  readonly authorizationGeneration?: number
   readonly updatedAt: string
+}
+
+export interface NormalizedAccountAuthorizationGrant extends AccountAuthorizationGrant {
+  readonly machineIds: readonly string[]
+  readonly authorizationGeneration: number
+}
+
+export type AccountAuthorizationGrantInput = Omit<
+  AccountAuthorizationGrant,
+  'machineIds' | 'authorizationGeneration'
+> & {
+  readonly machineIds?: readonly string[]
+  readonly authorizationGeneration?: number
 }
 
 /**
@@ -59,8 +79,8 @@ function stringList(value: unknown, field: string): readonly string[] {
 }
 
 export function normalizeAccountAuthorizationGrant(
-  grant: AccountAuthorizationGrant,
-): AccountAuthorizationGrant {
+  grant: AccountAuthorizationGrantInput,
+): NormalizedAccountAuthorizationGrant {
   if (!grant || typeof grant !== 'object') {
     throw new AccountsError('INVALID_REQUEST', 400, 'Account authorization grant is required.')
   }
@@ -71,12 +91,25 @@ export function normalizeAccountAuthorizationGrant(
   if (updatedAt.length === 0) {
     throw new AccountsError('INVALID_REQUEST', 400, 'updatedAt must be a non-empty timestamp.')
   }
+  const authorizationGeneration = grant.authorizationGeneration ?? 1
+  if (
+    !Number.isSafeInteger(authorizationGeneration) ||
+    authorizationGeneration < 1
+  ) {
+    throw new AccountsError(
+      'INVALID_REQUEST',
+      400,
+      'authorizationGeneration must be a positive safe integer.',
+    )
+  }
   return {
     accountId: stableId(grant.accountId, 'accountId'),
     scopes: stringList(grant.scopes, 'scopes'),
     allWorkspaces: grant.allWorkspaces,
     workspaceIds: stringList(grant.workspaceIds, 'workspaceIds'),
+    machineIds: stringList(grant.machineIds ?? [], 'machineIds'),
     memberIds: stringList(grant.memberIds, 'memberIds'),
+    authorizationGeneration,
     updatedAt,
   }
 }

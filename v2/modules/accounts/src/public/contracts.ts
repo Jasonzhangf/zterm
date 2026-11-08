@@ -46,6 +46,9 @@ export {
   AccountsAuthorizationAdapter,
   createAccountsAuthorizationPort,
 } from '../application/accounts-authorization.ts'
+export {
+  createAccountsAuthorityRuntime,
+} from '../application/accounts-authority-runtime.ts'
 export type {
   AccountsAuthorizationOptions,
   AccountsAuthorizationPort,
