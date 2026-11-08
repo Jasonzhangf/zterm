@@ -1,6 +1,14 @@
 import { queryReceipt } from "../application/query-receipts.ts";
 import { resumeDispatch } from "../application/resume-dispatch.ts";
 import { submitMessage } from "../application/submit-message.ts";
+export { createConnectionsDispatchPort } from "../adapters/connections-dispatch.ts";
+export type {
+  ConnectionsDispatchOptions,
+  MessageSendChannel,
+  MessageSendObservation,
+  MessageSendStage,
+  MessageSendStatus,
+} from "../adapters/connections-dispatch.ts";
 import type {
   DeliveryDependencies,
 } from "../ports/dependencies.ts";
@@ -65,6 +73,7 @@ export type DeliveryErrorCode =
   | "REJECTED_BEFORE_WRITE"
   | "DISPATCH_UNAVAILABLE"
   | "DISPATCH_UNKNOWN"
+  | "DISPATCH_FAILED"
   | "RESUME_UNAVAILABLE";
 
 export type SubmissionResult =
@@ -88,6 +97,13 @@ export type SubmissionResult =
   | {
       readonly kind: "dispatch-unknown";
       readonly code: "DISPATCH_UNKNOWN";
+      readonly errorRef: string;
+      readonly receipt: Receipt;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  | {
+      readonly kind: "dispatch-failed";
+      readonly code: "DISPATCH_FAILED";
       readonly errorRef: string;
       readonly receipt: Receipt;
       readonly errorChain?: DeliveryErrorChain;
@@ -138,6 +154,13 @@ export type ResumeResult =
   | {
       readonly kind: "dispatch-unknown";
       readonly code: "DISPATCH_UNKNOWN";
+      readonly errorRef: string;
+      readonly receipt: Receipt;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  | {
+      readonly kind: "dispatch-failed";
+      readonly code: "DISPATCH_FAILED";
       readonly errorRef: string;
       readonly receipt: Receipt;
       readonly errorChain?: DeliveryErrorChain;

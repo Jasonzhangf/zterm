@@ -1,126 +1,122 @@
-
-> @ test:integration /Volumes/Intel/playground/zterm/worktrees/delivery-production-dispatch-20261107/v2/modules/delivery
-> node --test tests/integration/*.test.ts
-
 TAP version 13
 # Subtest: real package specifier facade creates durable receipt and reopens in child
 ok 1 - real package specifier facade creates durable receipt and reopens in child
   ---
-  duration_ms: 141.776041
+  duration_ms: 151.74775
   type: 'test'
   ...
 # Subtest: lifecycle evidence through package specifier persists across fresh process reopen
 ok 2 - lifecycle evidence through package specifier persists across fresh process reopen
   ---
-  duration_ms: 210.849417
+  duration_ms: 208.266
   type: 'test'
   ...
 # Subtest: fresh child applies evidence into parent-created record and parent observes it
 ok 3 - fresh child applies evidence into parent-created record and parent observes it
   ---
-  duration_ms: 133.216041
+  duration_ms: 133.156417
   type: 'test'
   ...
 # Subtest: conflicts and stale bindings do not overwrite accepted receipt
 ok 4 - conflicts and stale bindings do not overwrite accepted receipt
   ---
-  duration_ms: 12.069542
+  duration_ms: 11.892125
   type: 'test'
   ...
 # Subtest: strong evidence monotonic through local persistence adapter
 ok 5 - strong evidence monotonic through local persistence adapter
   ---
-  duration_ms: 83.278709
+  duration_ms: 78.865292
   type: 'test'
   ...
 # Subtest: repeated and older strong evidence is ignored without rollback
 ok 6 - repeated and older strong evidence is ignored without rollback
   ---
-  duration_ms: 31.67975
+  duration_ms: 37.362708
   type: 'test'
   ...
 # Subtest: unknown then later strong evidence recovers durable stage
 ok 7 - unknown then later strong evidence recovers durable stage
   ---
-  duration_ms: 71.652792
+  duration_ms: 69.57125
   type: 'test'
   ...
 # Subtest: weak evidence never promotes durableStage
 ok 8 - weak evidence never promotes durableStage
   ---
-  duration_ms: 25.346792
+  duration_ms: 14.700792
   type: 'test'
   ...
 # Subtest: identity mismatch on full ref/target and not-found on absent ref
 ok 9 - identity mismatch on full ref/target and not-found on absent ref
   ---
-  duration_ms: 29.610709
+  duration_ms: 24.069166
   type: 'test'
   ...
 # Subtest: concurrent evidence application serializes and ends at highest durable stage
 ok 10 - concurrent evidence application serializes and ends at highest durable stage
   ---
-  duration_ms: 40.800958
+  duration_ms: 45.012625
   type: 'test'
   ...
 # Subtest: queryReceipt is pure read with no apply or accept side effect
 ok 11 - queryReceipt is pure read with no apply or accept side effect
   ---
-  duration_ms: 19.98075
+  duration_ms: 11.000042
   type: 'test'
   ...
 # Subtest: strong evidence persisted by child process is visible after parent reopen
 ok 12 - strong evidence persisted by child process is visible after parent reopen
   ---
-  duration_ms: 143.314959
+  duration_ms: 139.739833
   type: 'test'
   ...
 # Subtest: child query sees parent-committed stage through fresh process
 ok 13 - child query sees parent-committed stage through fresh process
   ---
-  duration_ms: 134.989542
+  duration_ms: 139.978708
   type: 'test'
   ...
 # Subtest: public delivery port does not expose the local evidence primitive
 ok 14 - public delivery port does not expose the local evidence primitive
   ---
-  duration_ms: 12.502333
+  duration_ms: 22.588042
   type: 'test'
   ...
 # Subtest: real delivery record path exists in temp root and does not touch production
 ok 15 - real delivery record path exists in temp root and does not touch production
   ---
-  duration_ms: 21.727125
+  duration_ms: 19.513541
   type: 'test'
   ...
 # Subtest: real facade adapter accepts once, replays, conflicts and rejects stale binding
 ok 16 - real facade adapter accepts once, replays, conflicts and rejects stale binding
   ---
-  duration_ms: 63.285583
+  duration_ms: 66.142167
   type: 'test'
   ...
 # Subtest: complete DeliveryRef isolates identifiers and query remains read-only
 ok 17 - complete DeliveryRef isolates identifiers and query remains read-only
   ---
-  duration_ms: 90.035167
+  duration_ms: 89.623167
   type: 'test'
   ...
 # Subtest: authorization denial returns before any store call
 ok 18 - authorization denial returns before any store call
   ---
-  duration_ms: 4.199542
+  duration_ms: 3.794417
   type: 'test'
   ...
 # Subtest: fresh reopen and child process recover durable acceptance
 ok 19 - fresh reopen and child process recover durable acceptance
   ---
-  duration_ms: 260.583666
+  duration_ms: 267.449125
   type: 'test'
   ...
 # Subtest: corrupt durable read preserves unavailable and acceptance-unknown chains
 ok 20 - corrupt durable read preserves unavailable and acceptance-unknown chains
   ---
-  duration_ms: 13.553458
+  duration_ms: 19.717292
   type: 'test'
   ...
 1..20
@@ -131,4 +127,4 @@ ok 20 - corrupt durable read preserves unavailable and acceptance-unknown chains
 # cancelled 0
 # skipped 0
 # todo 0
-# duration_ms 754.257625
+# duration_ms 757.161834

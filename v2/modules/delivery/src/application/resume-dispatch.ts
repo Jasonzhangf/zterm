@@ -239,6 +239,16 @@ export async function resumeDispatch<AuthContext, TargetAddress>(
           ? {}
           : { errorChain: dispatch.errorChain }),
       };
+    case "failed":
+      return {
+        kind: "dispatch-failed",
+        code: "DISPATCH_FAILED",
+        errorRef: dispatch.errorRef,
+        receipt,
+        ...(dispatch.errorChain === undefined
+          ? {}
+          : { errorChain: dispatch.errorChain }),
+      };
     case "unavailable":
       return {
         kind: "dispatch-unavailable",

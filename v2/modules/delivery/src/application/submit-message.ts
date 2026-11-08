@@ -150,6 +150,16 @@ function mapDispatch(
   receipt: Receipt,
 ): SubmissionResult {
   switch (result.kind) {
+    case "failed":
+      return {
+        kind: "dispatch-failed",
+        code: "DISPATCH_FAILED",
+        errorRef: result.errorRef,
+        receipt,
+        ...(result.errorChain === undefined
+          ? {}
+          : { errorChain: result.errorChain }),
+      };
     case "unknown":
       return {
         kind: "dispatch-unknown",

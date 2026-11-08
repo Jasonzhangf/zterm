@@ -12,6 +12,12 @@ export type DeliveryErrorFrame = {
   readonly code: string;
   readonly message: string;
   readonly source?: string;
+  /**
+   * Wire/protocol stage observed when the error was produced. It is carried so
+   * a definitive or inconclusive send outcome never loses its stage while the
+   * code and cause are preserved.
+   */
+  readonly stage?: string;
 };
 
 export type DeliveryErrorChain = readonly DeliveryErrorFrame[];

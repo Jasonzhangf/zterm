@@ -95,6 +95,20 @@ export type MessageDispatchResult =
       readonly errorRef: string;
       readonly errorChain?: DeliveryErrorChain;
     }
+  /**
+   * The wire returned a definitive protocol rejection. This is a failure, not
+   * an inconclusive state: the stage is preserved and no confirmation is
+   * invented.
+   */
+  | {
+      readonly kind: "failed";
+      readonly errorRef: string;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  /**
+   * The dispatch capability itself was unavailable before a definitive answer
+   * (for example an unauthorized source gateway or a missing capability).
+   */
   | {
       readonly kind: "unavailable";
       readonly errorRef: string;

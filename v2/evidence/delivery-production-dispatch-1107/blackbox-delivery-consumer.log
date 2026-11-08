@@ -1,18 +1,34 @@
-PASS: persistence accepts the message
-PASS: accepted receipt carries a v1MessageId
-PASS: accepted receipt is at the accepted stage
-PASS: readAcceptedCommand returns the persisted command
-PASS: persisted command v1MessageId matches the receipt
-PASS: resumeDispatch returns resumed
+PASS: adapter maps received/received to remote-stored
+PASS: adapter keeps delivered/received unconfirmed as unknown
+PASS: adapter keeps consumed/received unconfirmed as unknown
+PASS: adapter keeps received/sent unconfirmed as unknown
+PASS: adapter maps a definitive protocol rejection to failed with stage
+PASS: adapter keeps storage_error unknown with typed code/stage/cause
+PASS: adapter keeps a post-write transport loss unknown
+PASS: normal submit is accepted and created
+PASS: normal receipt is remote-stored
+PASS: normal receipt carries a v1MessageId
+PASS: deliveryRef.sourceMachineId matches the real source link
+PASS: real target inbox holds exactly one record
+PASS: target record preserves subject and body
+PASS: target record came from the real source daemon
+PASS: exactly one channel send for the normal message
+PASS: missing subject returns dispatch-unavailable with SUBJECT_REQUIRED
+PASS: missing subject writes no send
+PASS: first recovery attempt stays unknown
+PASS: lost-result receipt keeps the accepted stage
+PASS: target stored the message despite the lost result
+PASS: resume reaches remote-stored
 PASS: resumed receipt is remote-stored
-PASS: exactly one app-send-message reached the gateway
-PASS: wire frame is app-send-message
-PASS: wire correlation uses the persisted v1MessageId
-PASS: non-secret selector never reaches the wire
-PASS: second resumeDispatch returns already-dispatched
-PASS: replay sends no second frame
-PASS: fresh reopen finds the receipt
-PASS: durable receipt is remote-stored
-PASS: reopen preserves the accepted command
-PASS: reopen preserves v1MessageId
-BLACKBOX PASS (17 checks)
+PASS: resume reused the same persisted v1MessageId
+PASS: recovery reaches exactly one destination message (no duplicate)
+PASS: recovery used a real second send attempt
+PASS: stale setup attempt stays unknown
+PASS: stale binding refuses resume with an explicit refusal
+PASS: stale binding refusal writes no new send
+PASS: wrong credential is refused before dispatch
+PASS: wrong workspace is refused before dispatch
+PASS: refusals write no send
+PASS: adapter refuses a mismatched source machine
+PASS: source mismatch guard writes no send
+BLACKBOX PASS (33 checks)

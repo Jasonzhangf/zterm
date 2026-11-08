@@ -1,28 +1,16 @@
- v2/modules/delivery/src/application/error-chain.ts |   9 +-
- .../delivery/src/application/query-receipts.ts     |   4 +
- .../delivery/src/application/submit-message.ts     | 118 +++-
- v2/modules/delivery/src/domain/receipt.ts          |  17 +
- v2/modules/delivery/src/ports/dependencies.ts      |  64 +-
- v2/modules/delivery/src/public/delivery-port.ts    |  77 ++-
- .../delivery/tests/contract/delivery-port.test.ts  | 715 ++++++++++++++++++++-
- .../delivery/tests/contract/v1-error-chain.test.ts |  24 +-
- .../tests/integration/receipt-lifecycle.test.ts    |  34 +-
- .../tests/integration/v1-receipt-store.test.ts     |  99 ++-
- 10 files changed, 1096 insertions(+), 65 deletions(-)
+ .../blackbox-delivery-consumer.log                 |  50 +-
+ .../blackbox-delivery-consumer.mts                 | 912 ++++++++++++++-------
+ .../diff-stat.txt                                  |  28 -
+ .../delivery-production-dispatch-1107/summary.md   | 153 ++--
+ .../test-contract.txt                              |  92 +--
+ .../test-integration.txt                           |  46 +-
+ .../delivery/src/application/resume-dispatch.ts    |  10 +
+ .../delivery/src/application/submit-message.ts     |  10 +
+ v2/modules/delivery/src/ports/dependencies.ts      |  14 +
+ v2/modules/delivery/src/ports/receipt-store.ts     |   6 +
+ v2/modules/delivery/src/public/delivery-port.ts    |  23 +
+ 11 files changed, 837 insertions(+), 507 deletions(-)
 
--- untracked --
- M v2/modules/delivery/src/application/error-chain.ts
- M v2/modules/delivery/src/application/query-receipts.ts
- M v2/modules/delivery/src/application/submit-message.ts
- M v2/modules/delivery/src/domain/receipt.ts
- M v2/modules/delivery/src/ports/dependencies.ts
- M v2/modules/delivery/src/public/delivery-port.ts
- M v2/modules/delivery/tests/contract/delivery-port.test.ts
- M v2/modules/delivery/tests/contract/v1-error-chain.test.ts
- M v2/modules/delivery/tests/integration/receipt-lifecycle.test.ts
- M v2/modules/delivery/tests/integration/v1-receipt-store.test.ts
-?? result.md
-?? v2/evidence/delivery-production-dispatch-1107/
-?? v2/modules/delivery/src/application/dispatch-evidence.ts
-?? v2/modules/delivery/src/application/resume-dispatch.ts
-?? v2/modules/delivery/src/ports/accepted-command-reader.ts
+Untracked files (included in this candidate):
+result.md
+v2/modules/delivery/src/adapters/connections-dispatch.ts
