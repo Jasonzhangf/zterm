@@ -1,0 +1,21 @@
+21:export type DeliveryRef = AppDeliveryRef;
+22:export type DeliveryTarget = AppDeliveryTarget;
+23:export type DurableStage = AppDeliveryStage;
+24:export type ReceiptOutcome = AppDeliveryOutcome;
+26:export type MessageContent = {
+31:export type Receipt = {
+40:export type ReceiptObservation = {
+46:export type AcceptMessageCommand = {
+53:export type AcceptMessageResult =
+66:export type ReadReceiptResult =
+78:export type ReceiptEvidenceKind =
+89:export type ReceiptEvidence = Readonly<
+103:export type ApplyReceiptEvidenceResult =
+114:export type ReceiptEvidenceTransitionResult =
+119:export type ReceiptEvidenceTransition = (
+124:export interface ReceiptStore {
+130:export type AppMessagingErrorOperation = 'accept' | 'read' | 'apply-evidence';
+132:export type AppMessagingErrorReport = {
+138:export type AppMessagingErrorReporter = (report: AppMessagingErrorReport) => void;
+140:export type AppMessagingPersistenceOptions = {
+313:export function createAppMessagingPersistence(

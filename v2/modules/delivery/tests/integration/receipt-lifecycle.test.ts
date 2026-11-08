@@ -16,6 +16,7 @@ import type {
 import type {
   DeliveryAuthorizationPort,
   DeliveryRoutingPort,
+  MessageDispatchPort,
 } from "../../src/ports/dependencies.ts";
 import type { ReceiptStore } from "../../src/ports/receipt-store.ts";
 
@@ -140,10 +141,20 @@ function createIntegration(
     },
   };
 
+  const dispatch: MessageDispatchPort = {
+    async dispatchMessage() {
+      return {
+        kind: "remote-stored",
+        observedAt: "2026-11-03T10:01:00.000Z",
+      };
+    },
+  };
+
   return {
     port: createDeliveryPort<AuthContext, string>({
       authorization,
       routing,
+      dispatch,
       receiptStore,
     }),
     adapter,
@@ -160,14 +171,14 @@ async function createAccepted(
   ref: DeliveryRef = deliveryRef(),
 ) {
   const integration = createIntegration(appRootDir);
-  const accepted = await integration.port.submitMessage(
-    actorFor(ref),
-    "member-a",
-    ref.requestId,
-    { subject: "subject", body: "body" },
-  );
-  assert.equal(accepted.kind, "accepted");
-  if (accepted.kind !== "accepted") assert.fail("submission was not accepted");
+  const accepted = await integration.adapter.acceptMessage({
+    deliveryRef: ref,
+    target,
+    kind: "message",
+    message: { subject: "subject", body: "body" },
+  });
+  assert.equal(accepted.kind, "created");
+  if (accepted.kind !== "created") assert.fail("persistence did not create receipt");
   assert.equal(accepted.receipt.durableStage, "accepted");
   return integration;
 }
@@ -377,13 +388,23 @@ test("public delivery port does not expose the local evidence primitive", async 
     actorFor(ref),
     "member-a",
     ref.requestId,
-    { body: "accepted" },
+    { subject: "subject", body: "accepted" },
   );
+  // The persistence read-back edge now supplies v1MessageId at accept time,
+  // so the first submission can dispatch instead of stopping at accepted.
   assert.equal(accepted.kind, "accepted");
+  if (accepted.kind !== "accepted") assert.fail("first submission was not accepted");
+  assert.match(
+    accepted.receipt.v1MessageId ?? "",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  assert.equal(accepted.receipt.durableStage, "remote-stored");
   const applied = await integration.port.queryReceipt(actorFor(ref), ref);
   assert.equal(applied.kind, "found");
-  assert.equal(applied.observation.receipt.durableStage, "accepted");
-  assert.equal(integration.counts.applies(), 0);
+  assert.equal(applied.observation.receipt.durableStage, "remote-stored");
+  // The dispatch writes remote-stored evidence, so exactly one apply happens
+  // through the injected store; the port still exposes no evidence primitive.
+  assert.equal(integration.counts.applies(), 1);
 });
 
 test("real delivery record path exists in temp root and does not touch production", async () => {

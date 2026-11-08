@@ -1,0 +1,8 @@
+ .../blackbox-delivery-consumer.log                 |   6 +-
+ .../blackbox-delivery-consumer.mts                 | 149 ++++++++++++++-------
+ .../diff-stat.txt                                  |  16 ---
+ .../test-contract.txt                              |  92 +++++++------
+ .../test-integration.txt                           |  46 ++++---
+ .../delivery/src/adapters/connections-dispatch.ts  |  83 ++++--------
+ v2/modules/delivery/src/public/delivery-port.ts    |   3 -
+ 7 files changed, 207 insertions(+), 188 deletions(-)

@@ -1,5 +1,11 @@
 import { queryReceipt } from "../application/query-receipts.ts";
+import { resumeDispatch } from "../application/resume-dispatch.ts";
 import { submitMessage } from "../application/submit-message.ts";
+export { createConnectionsDispatchPort } from "../adapters/connections-dispatch.ts";
+export type {
+  ConnectionsDispatchOptions,
+  MessageSendChannel,
+} from "../adapters/connections-dispatch.ts";
 import type {
   DeliveryDependencies,
 } from "../ports/dependencies.ts";
@@ -31,10 +37,19 @@ export type {
   ReceiptStore,
 } from "../ports/receipt-store.ts";
 export type {
+  AcceptedCommand,
+  AcceptedCommandReader,
+  ReadAcceptedCommandResult,
+} from "../ports/accepted-command-reader.ts";
+export type {
   DeliveryAuthorizationPort,
   DeliveryDependencies,
   DeliveryRoutingPort,
+  MessageDispatchCommand,
+  MessageDispatchPort,
+  MessageDispatchResult,
   ReceiptQueryAuthorizationResult,
+  ResumeAuthorizationResult,
   SubmissionAuthorizationResult,
   TargetResolutionResult,
   TrustedDeliveryIdentity,
@@ -48,16 +63,47 @@ export type DeliveryErrorCode =
   | "TARGET_NOT_FOUND"
   | "TARGET_AMBIGUOUS"
   | "ROUTING_UNAVAILABLE"
+  | "DELIVERY_NOT_FOUND"
   | "TARGET_BINDING_STALE"
   | "DELIVERY_CONFLICT"
   | "DEDUPE_WINDOW_EXPIRED"
-  | "REJECTED_BEFORE_WRITE";
+  | "REJECTED_BEFORE_WRITE"
+  | "DISPATCH_UNAVAILABLE"
+  | "DISPATCH_UNKNOWN"
+  | "DISPATCH_FAILED"
+  | "RESUME_UNAVAILABLE";
 
 export type SubmissionResult =
   | {
       readonly kind: "accepted";
       readonly disposition: "created" | "replayed";
       readonly receipt: Receipt;
+    }
+  | {
+      readonly kind: "routing-unavailable";
+      readonly code: "ROUTING_UNAVAILABLE";
+      readonly errorRef: string;
+    }
+  | {
+      readonly kind: "dispatch-unavailable";
+      readonly code: "DISPATCH_UNAVAILABLE";
+      readonly errorRef: string;
+      readonly receipt: Receipt;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  | {
+      readonly kind: "dispatch-unknown";
+      readonly code: "DISPATCH_UNKNOWN";
+      readonly errorRef: string;
+      readonly receipt: Receipt;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  | {
+      readonly kind: "dispatch-failed";
+      readonly code: "DISPATCH_FAILED";
+      readonly errorRef: string;
+      readonly receipt: Receipt;
+      readonly errorChain?: DeliveryErrorChain;
     }
   | {
       readonly kind: "rejected";
@@ -86,6 +132,48 @@ export type QueryResult =
       readonly errorChain?: DeliveryErrorChain;
     };
 
+export type ResumeResult =
+  | {
+      readonly kind: "resumed";
+      readonly receipt: Receipt;
+    }
+  | {
+      readonly kind: "already-dispatched";
+      readonly receipt: Receipt;
+    }
+  | {
+      readonly kind: "dispatch-unavailable";
+      readonly code: "DISPATCH_UNAVAILABLE";
+      readonly errorRef: string;
+      readonly receipt?: Receipt;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  | {
+      readonly kind: "dispatch-unknown";
+      readonly code: "DISPATCH_UNKNOWN";
+      readonly errorRef: string;
+      readonly receipt: Receipt;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  | {
+      readonly kind: "dispatch-failed";
+      readonly code: "DISPATCH_FAILED";
+      readonly errorRef: string;
+      readonly receipt: Receipt;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  | {
+      readonly kind: "resume-unavailable";
+      readonly code: "RESUME_UNAVAILABLE";
+      readonly errorRef: string;
+      readonly errorChain?: DeliveryErrorChain;
+    }
+  | {
+      readonly kind: "rejected";
+      readonly code: DeliveryErrorCode;
+      readonly errorRef?: string;
+    };
+
 export interface DeliveryPort<AuthContext, TargetAddress = unknown> {
   submitMessage(
     actor: AuthContext,
@@ -98,6 +186,11 @@ export interface DeliveryPort<AuthContext, TargetAddress = unknown> {
     actor: AuthContext,
     ref: DeliveryRef,
   ): Promise<QueryResult>;
+
+  resumeDispatch(
+    actor: AuthContext,
+    ref: DeliveryRef,
+  ): Promise<ResumeResult>;
 }
 
 export function createDeliveryPort<AuthContext, TargetAddress = unknown>(
@@ -114,5 +207,7 @@ export function createDeliveryPort<AuthContext, TargetAddress = unknown>(
       ),
     queryReceipt: (actor, ref) =>
       queryReceipt(dependencies, actor, ref),
+    resumeDispatch: (actor, ref) =>
+      resumeDispatch(dependencies, actor, ref),
   };
 }
