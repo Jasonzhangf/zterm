@@ -1275,8 +1275,13 @@ test('host-adapters public probe is the real producer consumed by members bind a
     expectedGeneration: 0,
   });
   assert.equal(bound.terminalTarget.backend, 'tmux');
-  // The observed stableId is the tmux session_id, not the session name.
-  assert.match(bound.terminalTarget.stableId, /^\$[0-9]+$/);
+  // The observed stableId is the authoritative tmux identity, not the session name.
+  const observedIdentity = JSON.parse(decodeURIComponent(bound.terminalTarget.stableId.slice('tmux:v1:'.length)));
+  assert.ok(bound.terminalTarget.stableId.startsWith('tmux:v1:'));
+  assert.equal(observedIdentity.backend, 'tmux');
+  assert.ok(typeof observedIdentity.serverPid === 'string' && observedIdentity.serverPid.length > 0);
+  assert.match(observedIdentity.sessionId, /^\$[0-9]+$/);
+  assert.ok(typeof observedIdentity.createdAt === 'number' && Number.isFinite(observedIdentity.createdAt));
   assert.notEqual(bound.terminalTarget.stableId, sessionName);
   const observedStableId = bound.terminalTarget.stableId;
 

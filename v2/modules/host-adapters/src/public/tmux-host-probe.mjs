@@ -2,7 +2,7 @@
 //
 // The probe reads the real tmux endpoint through TmuxAdapter.listSessions and
 // then inspects the selected session's actual panes. A session name is only a
-// lookup key; the returned stableId is always the tmux session_id from the live
+// lookup key; the returned stableId is the V1 tmux identity from the live
 // endpoint, never a name-derived or synthesized identifier.
 //
 // Authoritative machine identity has no source inside this host adapter yet.
@@ -12,8 +12,20 @@
 
 import { TmuxAdapter } from "../tmux/tmux-adapter.mjs";
 
+const TMUX_STABLE_ID_PREFIX = "tmux:v1:";
+
 function readText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function buildTmuxStableId({ socketPath, serverPid, sessionId, createdAt }) {
+  return `${TMUX_STABLE_ID_PREFIX}${encodeURIComponent(JSON.stringify({
+    backend: "tmux",
+    ...(socketPath ? { socketPath } : {}),
+    serverPid,
+    sessionId,
+    createdAt,
+  }))}`;
 }
 
 export function createTmuxHostProbe({
@@ -93,7 +105,15 @@ export function createTmuxHostProbe({
       sessionId: session.id,
       anchor: requestedAnchor || null,
       anchorPresent: requestedAnchor ? paneIds.includes(requestedAnchor) : false,
-      terminalTarget: { backend: resolvedBackend, stableId: session.id },
+      terminalTarget: {
+        backend: resolvedBackend,
+        stableId: buildTmuxStableId({
+          socketPath: session.socketPath,
+          serverPid: session.serverPid,
+          sessionId: session.id,
+          createdAt: session.createdAt,
+        }),
+      },
       observedAt,
     };
   }
