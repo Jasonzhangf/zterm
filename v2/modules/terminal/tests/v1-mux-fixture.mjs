@@ -2,11 +2,6 @@ import { execFileSync } from "node:child_process";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 
-import {
-  buildTerminalMuxCapabilities,
-  buildTerminalMuxReady,
-} from "../../../../packages/shared/src/connection/protocol.ts";
-
 const require = createRequire(import.meta.url);
 const { WebSocketServer } = require("ws");
 
@@ -68,14 +63,12 @@ function stableIdFor({ socket, serverPid, sessionId, createdAt }) {
 export function createV1MuxFixture({
   tmuxSocket,
   authToken = "",
-  daemonHostId = "",
   host = "127.0.0.1",
   log = () => {},
   chunkSize = 0,
   autoCapture = true,
   openDelayMs = 0,
   openDelaySessionName = "",
-  ignoreCloseUntilOpened = false,
 } = {}) {
   const channels = new Map();
   const recorded = {
@@ -150,10 +143,6 @@ export function createV1MuxFixture({
   function stopChannel(channelId, reason) {
     const channel = channels.get(channelId);
     if (!channel) {
-      return;
-    }
-    if (ignoreCloseUntilOpened && channel.openTimer) {
-      log({ event: "fixture.channel.close.ignored_until_opened", channelId, reason });
       return;
     }
     channels.delete(channelId);
@@ -296,10 +285,10 @@ export function createV1MuxFixture({
     recorded.frames.push({ kind: "in", frame });
     switch (frame.type) {
       case "mux-hello":
-        send(ws, buildTerminalMuxReady({
-          ...(daemonHostId ? { daemonHostId } : {}),
-          capabilities: buildTerminalMuxCapabilities({ reliableInput: { version: 1 } }),
-        }));
+        send(ws, {
+          type: "mux-ready",
+          payload: { version: 1, capabilities: { reliableInput: { version: 1 } } },
+        });
         return;
       case "mux-target-message": {
         const message = frame.payload && frame.payload.message;
@@ -344,19 +333,6 @@ export function createV1MuxFixture({
             message,
             at: Date.now(),
           });
-        }
-        return;
-      }
-      case "mux-channel-binary": {
-        const channelId = frame.payload && frame.payload.channelId;
-        const channel = channels.get(channelId);
-        if (!channel) {
-          send(ws, { type: "mux-error", payload: { code: "mux_unknown_channel", message: "channel is not open", channelId } });
-          return;
-        }
-        const dataBase64 = frame.payload && frame.payload.dataBase64;
-        if (typeof dataBase64 === "string") {
-          handleInput(channel, Buffer.from(dataBase64, "base64").toString("utf8"));
         }
         return;
       }

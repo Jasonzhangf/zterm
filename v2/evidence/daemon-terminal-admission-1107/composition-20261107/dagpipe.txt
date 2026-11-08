@@ -1,6 +1,0 @@
-valid DAG: daemon.connection_channel_catalog@0.1 (19 nodes, 24 edges, 10 waves)
-operator bindings are syntactically present; project compile() remains the authoritative registry/schema/effect gate
-valid DAG: daemon.input_schedule@0.1 (11 nodes, 14 edges, 5 waves)
-operator bindings are syntactically present; project compile() remains the authoritative registry/schema/effect gate
-
-exit=0

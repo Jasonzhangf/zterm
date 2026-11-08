@@ -18,7 +18,7 @@ import {
   createRoutingService,
 } from "../../routing/src/public/index.mjs";
 import { createTrustedAuthDouble } from "../../members/tests/support/trusted-auth-double.mjs";
-import { TypedError } from "../../errors/src/public/index.mjs";
+import { TypedError } from "../../errors/src/typed-error.mjs";
 
 const TOKENS = Object.freeze({
   owner: "control-owner-token",

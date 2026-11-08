@@ -51,9 +51,9 @@ async function startDaemon(t, { v1Token = V1_TOKEN, v1Port, v2Token = TOKEN } = 
 
 const authHeaders = { authorization: `Bearer ${TOKEN}` };
 
-test("daemon keeps the V1 session catalog token-gated while terminal data routes fail closed without admission", async (t) => {
+test("daemon facade bridges V1 mux sessions, input, and subscribers without touching tmux", async (t) => {
   startSession(t);
-  const { port: v1Port } = await startFixture(t);
+  const { fixture, port: v1Port } = await startFixture(t);
   const { base } = await startDaemon(t, { v1Port });
 
   let response = await fetch(`${base}/api/health`);
@@ -74,17 +74,52 @@ test("daemon keeps the V1 session catalog token-gated while terminal data routes
   assert.ok(sessionsPayload.sessions.some((session) => session.name === SESSION));
   assert.equal(sessionsPayload.observation.source, "v1-mux");
 
-  response = await fetch(`${base}/api/terminal/stream?target=${SESSION}`, { headers: authHeaders });
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error.code, "TERMINAL_ADMISSION_REQUIRED");
+  response = await fetch(`${base}/api/terminal/stream?target=does-not-exist`, { headers: authHeaders });
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error.code, "TARGET_NOT_FOUND");
 
   response = await fetch(`${base}/api/terminal/input`, {
     method: "POST",
     headers: { ...authHeaders, "content-type": "application/json" },
-    body: JSON.stringify({ target: SESSION, data: "echo SHOULD_NOT_RUN" }),
+    body: JSON.stringify({ target: "does-not-exist", data: "echo SHOULD_NOT_RUN" }),
   });
-  assert.equal(response.status, 503);
-  assert.equal((await response.json()).error.code, "TERMINAL_ADMISSION_REQUIRED");
+  assert.equal(response.status, 404);
+  assert.equal((await response.json()).error.code, "TARGET_NOT_FOUND");
+
+  response = await fetch(`${base}/api/terminal/input`, {
+    method: "POST",
+    headers: { ...authHeaders, "content-type": "application/json" },
+    body: JSON.stringify({ target: SESSION, data: "echo ZTERM_V2_SLICE" }),
+  });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).accepted, true);
+
+  await waitFor(() => tmux(["capture-pane", "-p", "-t", SESSION]).includes("ZTERM_V2_SLICE"), 6000);
+  const captureAfterInput = tmux(["capture-pane", "-p", "-t", SESSION]);
+  assert.ok(captureAfterInput.split("\n").some((line) => line.trim() === "ZTERM_V2_SLICE"));
+
+  const first = await openStream(`${base}/api/terminal/stream?target=${SESSION}`, authHeaders);
+  const second = await openStream(`${base}/api/terminal/stream?target=${SESSION}`, authHeaders);
+  await first.waitForBuffer((text) => text.includes("ZTERM_V2_SLICE"), 6000);
+  await second.waitForBuffer((text) => text.includes("ZTERM_V2_SLICE"), 6000);
+  assert.equal(fixture.recorded.channelOpen.length, 2, "one input channel plus one shared stream channel");
+  assert.equal(fixture.openChannelCount, 1, "both subscribers share one live V1 channel");
+
+  first.close();
+  await waitFor(() => fixture.openChannelCount >= 1, 2000);
+
+  response = await fetch(`${base}/api/terminal/input`, {
+    method: "POST",
+    headers: { ...authHeaders, "content-type": "application/json" },
+    body: JSON.stringify({ target: SESSION, data: "echo ZTERM_V2_SECOND" }),
+  });
+  assert.equal(response.status, 200);
+  await second.waitForBuffer((text) => text.includes("ZTERM_V2_SECOND"), 6000);
+  assert.equal(tmux(["has-session", "-t", SESSION]), "");
+
+  second.close();
+  await waitFor(() => fixture.openChannelCount === 0, 4000);
+  assert.equal(tmux(["has-session", "-t", SESSION]), "");
 });
 
 test("V1 credential failure maps to an explicit connection error before any target access", async (t) => {
@@ -99,7 +134,7 @@ test("V1 credential failure maps to an explicit connection error before any targ
   assert.equal(fixture.recorded.input.length, 0, "no input may be sent with a bad V1 credential");
 });
 
-test("cookie session no longer bypasses terminal admission", async (t) => {
+test("cookie login gates input behind CSRF", async (t) => {
   startSession(t);
   const { port: v1Port } = await startFixture(t);
   const { base } = await startDaemon(t, { v1Port });
@@ -120,16 +155,16 @@ test("cookie session no longer bypasses terminal admission", async (t) => {
     headers: { cookie, "content-type": "application/json" },
     body: JSON.stringify({ target: SESSION, data: "echo NO_CSRF" }),
   });
-  assert.equal(missingCsrf.status, 503);
-  assert.equal((await missingCsrf.json()).error.code, "TERMINAL_ADMISSION_REQUIRED");
+  assert.equal(missingCsrf.status, 403);
+  assert.equal((await missingCsrf.json()).error.code, "CSRF_REQUIRED");
 
   const withCsrf = await fetch(`${base}/api/terminal/input`, {
     method: "POST",
     headers: { cookie, "content-type": "application/json", "x-zterm-csrf": csrfToken },
     body: JSON.stringify({ target: SESSION, data: "echo WITH_CSRF" }),
   });
-  assert.equal(withCsrf.status, 503);
-  assert.equal((await withCsrf.json()).error.code, "TERMINAL_ADMISSION_REQUIRED");
+  assert.equal(withCsrf.status, 200);
+  await waitFor(() => tmux(["capture-pane", "-p", "-t", SESSION]).includes("WITH_CSRF"), 6000);
 });
 
 async function openStream(url, headers) {

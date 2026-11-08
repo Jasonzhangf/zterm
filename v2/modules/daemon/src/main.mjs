@@ -26,7 +26,6 @@ export async function startDaemon({
   webuiDir,
   log,
   terminalPort,
-  admission,
   clientInstanceId,
 } = {}) {
   assertBindIsAllowed(host);
@@ -38,7 +37,6 @@ export async function startDaemon({
     webuiDir,
     log: log || ((entry) => process.stdout.write(`${JSON.stringify(entry)}\n`)),
     terminalPort,
-    admission,
     clientInstanceId,
   });
 

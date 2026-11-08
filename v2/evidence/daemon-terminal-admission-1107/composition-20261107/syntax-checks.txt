@@ -1,3 +1,0 @@
-node --check: 8 files PASS
-
-exit=0
