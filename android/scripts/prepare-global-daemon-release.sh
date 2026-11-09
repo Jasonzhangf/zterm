@@ -907,7 +907,22 @@ case "$cmd" in
   start) start_service ;;
   status) status ;;
   stop) stop_service ;;
-  restart) restart_service ;;
+  restart)
+    if [[ $# -gt 1 ]]; then
+      case "$2" in
+        -h|--help)
+          usage
+          ;;
+        *)
+          echo "unknown restart option: $2" >&2
+          usage >&2
+          exit 1
+          ;;
+      esac
+    else
+      restart_service
+    fi
+    ;;
   config) "$NODE_BIN" "$TERMINAL_CONFIG_COMMAND" daemon-config ;;
   configure-relay) configure_relay "$@" ;;
   install-service) install_service ;;
