@@ -6,7 +6,6 @@ const ALLOWED_STATES = Object.freeze([
   'offline',
   'degraded',
   'stale',
-  'detached',
   'unknown',
   'error',
 ]);
@@ -17,7 +16,6 @@ const TONE_BY_STATE = Object.freeze({
   offline: 'muted',
   degraded: 'caution',
   stale: 'caution',
-  detached: 'muted',
   unknown: 'muted',
   error: 'negative',
 });

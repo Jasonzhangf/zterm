@@ -216,7 +216,7 @@ test('renderSplitLayout emits both interactive border splitters', () => {
   assert.strictEqual(result.model.primaryWidthPx, 538);
 });
 
-test('renderSessionWorkbench renders every peer in one scrollable desktop grid', () => {
+test('renderSessionWorkbench renders a 1+4 desktop grid and keeps remaining members in the switcher', () => {
   const members = Array.from({ length: 12 }, (_, index) => `m${index + 1}`);
   const layout = createDefaultSessionLayout({ members });
   const result = renderSessionWorkbench({
@@ -226,20 +226,15 @@ test('renderSessionWorkbench renders every peer in one scrollable desktop grid',
     containerHeight: 760,
   });
   assert.strictEqual(result.model.totalMemberCount, 12);
-  assert.strictEqual(result.model.visiblePeerIds.length, 11);
-  assert.strictEqual(result.model.hiddenPeerIds.length, 0);
-  assert.strictEqual(result.model.peerWindows.length, 11);
-  assert.strictEqual(result.model.rightGridScrollable, true);
+  assert.strictEqual(result.model.visiblePeerIds.length, 4);
+  assert.strictEqual(result.model.hiddenPeerIds.length, 7);
+  assert.strictEqual(result.model.peerWindows.length, 4);
+  assert.strictEqual(result.model.rightGridScrollable, false);
   assert.ok(result.html.includes('data-role="peer-scroll-grid"'));
   assert.ok(result.html.includes('grid-template-columns:minmax(0,1fr) minmax(0,1fr)'));
-  // Rows are a fixed viewport-derived height so exactly two peer rows intersect
-  // the desktop viewport; remaining peers stay reachable by scrolling.
-  assert.match(result.html, /grid-auto-rows:\d+px/);
-  assert.match(result.html, /data-peer-row-height="\d+"/);
-  assert.ok(result.html.includes('overflow-y:auto'));
+  assert.ok(result.html.includes('grid-template-rows:minmax(0,1fr) minmax(0,1fr)'));
   assert.ok(result.html.includes('data-role="member-switcher"'));
   assert.ok(result.html.includes('data-member-id="m6"'));
-  assert.ok(result.html.includes('data-member-id="m12"'));
   assert.ok(!result.html.includes('height:220px'));
   assert.ok(result.html.includes('data-resize-handle="n|s|e|w|ne|nw|se|sw"'));
   assert.ok(result.html.includes('data-member-id="m2"'));

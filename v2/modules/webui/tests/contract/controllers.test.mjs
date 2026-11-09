@@ -74,6 +74,7 @@ test('property-controller keeps per-window property state isolated', async () =>
   assert.equal(controller.getMemberState('m-2').draft.description, 'm2-own-draft')
   assert.equal(controller.getMemberState('m-2').saving, false)
 })
+
 test('property-controller returns typed save error without leaking to another member', async () => {
   const daemonApi = {
     async getMemberProperties() {
@@ -113,10 +114,8 @@ function makeSessionDeps({ members = [createMember('m-1'), createMember('m-2'), 
   const disconnectCalls = []
   const suspendCalls = []
   const resumeCalls = []
-  const lifecycleCalls = []
   const terminalClient = {
     async attachSession(member) {
-      lifecycleCalls.push(`attach:${member.memberId}`)
       attachCalls.push(member.memberId)
       const gate = attachGateByMemberId?.get(member.memberId)
       if (gate) await gate.promise
@@ -157,18 +156,8 @@ function makeSessionDeps({ members = [createMember('m-1'), createMember('m-2'), 
       terminalHandles.delete(handle.memberId)
       return { ok: true }
     },
-    async suspend(handle) {
-      lifecycleCalls.push(`suspend:${handle.memberId}`)
-      suspendCalls.push(handle.memberId)
-      handle.suspend()
-      return { ok: true }
-    },
-    async resume(handle) {
-      lifecycleCalls.push(`resume:${handle.memberId}`)
-      resumeCalls.push(handle.memberId)
-      handle.resume()
-      return { ok: true }
-    },
+    async suspend(handle) { suspendCalls.push(handle.memberId); handle.suspend(); return { ok: true } },
+    async resume(handle) { resumeCalls.push(handle.memberId); handle.resume(); return { ok: true } },
   }
   function createLayout(requestedWorkspaceId, memberList) {
     return {
@@ -221,7 +210,7 @@ function makeSessionDeps({ members = [createMember('m-1'), createMember('m-2'), 
       return memberList.map((member) => ({ ...member, workspaceId: requestedWorkspaceId }))
     },
   }
-  return { terminalClient, terminalHandles, attachCalls, createCalls, disconnectCalls, suspendCalls, resumeCalls, lifecycleCalls, layouts, layoutStore, deliveryClient, daemonApi }
+  return { terminalClient, terminalHandles, attachCalls, createCalls, disconnectCalls, suspendCalls, resumeCalls, layouts, layoutStore, deliveryClient, daemonApi }
 }
 
 test('session-controller reuses healthy handles across layout operations', async () => {
@@ -292,7 +281,7 @@ test('session-controller initial load keeps terminal attach focus-bound', async 
   assert.equal(controller.getTerminalHandle('m-3').status, 'attached')
 })
 
-test('session-controller attaches the primary and every peer in the desktop workbench', async () => {
+test('session-controller attaches the primary and four visible peers without opening hidden members', async () => {
   const members = [
     createMember('m-1'),
     createMember('m-2'),
@@ -310,15 +299,16 @@ test('session-controller attaches the primary and every peer in the desktop work
   })
 
   await controller.loadWorkspaceSessions('ws-1')
-  const visibleMemberIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6']
+  const visibleMemberIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5']
   const handles = await controller.attachVisibleMembers('ws-1', visibleMemberIds)
 
   assert.deepEqual(deps.attachCalls, visibleMemberIds)
-  assert.equal(handles.length, 6)
-  assert.equal(new Set(handles.map((handle) => handle.handleId)).size, 6)
+  assert.equal(handles.length, 5)
+  assert.equal(new Set(handles.map((handle) => handle.handleId)).size, 5)
   for (const memberId of visibleMemberIds) {
     assert.equal(controller.getTerminalHandle(memberId).isBodyActive(), true)
   }
+  assert.equal(controller.getTerminalHandle('m-6'), null)
 })
 
 test('session-controller focus changes reuse the visible handles without suspending peers', async () => {
@@ -339,7 +329,7 @@ test('session-controller focus changes reuse the visible handles without suspend
   })
 
   await controller.loadWorkspaceSessions('ws-1')
-  const visibleMemberIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6']
+  const visibleMemberIds = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5']
   const beforeHandles = await controller.attachVisibleMembers('ws-1', visibleMemberIds)
   const attachCount = deps.attachCalls.length
 
@@ -353,126 +343,6 @@ test('session-controller focus changes reuse the visible handles without suspend
   for (const memberId of visibleMemberIds) {
     assert.equal(controller.getTerminalHandle(memberId).isBodyActive(), true)
   }
-})
-
-test('session-controller mobile focus attaches only the focused member', async () => {
-  const members = [
-    createMember('m-1'),
-    createMember('m-2'),
-    createMember('m-3'),
-    createMember('m-4'),
-    createMember('m-5'),
-    createMember('m-6'),
-  ]
-  const deps = makeSessionDeps({ members })
-  const controller = createSessionController({
-    daemonApi: deps.daemonApi,
-    terminalClient: deps.terminalClient,
-    deliveryClient: deps.deliveryClient,
-    layoutStore: deps.layoutStore,
-  })
-
-  await controller.loadWorkspaceSessions('ws-1')
-  controller.setViewportMode('mobile')
-  await controller.applyLayoutOperation('ws-1', { kind: 'switchMobileMode', mobileMode: 'focus' })
-
-  assert.deepEqual(deps.attachCalls, ['m-1'])
-  assert.equal(controller.getTerminalHandle('m-1').isBodyActive(), true)
-  for (const memberId of ['m-2', 'm-3', 'm-4', 'm-5', 'm-6']) {
-    assert.equal(controller.getTerminalHandle(memberId), null)
-  }
-  assert.deepEqual(deps.suspendCalls, [])
-})
-
-test('session-controller mobile focus suspends the previous focus on step', async () => {
-  const members = [
-    createMember('m-1'),
-    createMember('m-2'),
-    createMember('m-3'),
-    createMember('m-4'),
-    createMember('m-5'),
-    createMember('m-6'),
-  ]
-  const deps = makeSessionDeps({ members })
-  const controller = createSessionController({
-    daemonApi: deps.daemonApi,
-    terminalClient: deps.terminalClient,
-    deliveryClient: deps.deliveryClient,
-    layoutStore: deps.layoutStore,
-  })
-
-  await controller.loadWorkspaceSessions('ws-1')
-  controller.setViewportMode('mobile')
-  await controller.applyLayoutOperation('ws-1', { kind: 'switchMobileMode', mobileMode: 'focus' })
-  await controller.applyLayoutOperation('ws-1', { kind: 'stepMobileFocus', direction: 'next' })
-
-  assert.deepEqual(deps.attachCalls, ['m-1', 'm-2'])
-  assert.deepEqual(deps.suspendCalls, ['m-1'])
-  assert.equal(controller.getTerminalHandle('m-1').isBodyActive(), false)
-  assert.equal(controller.getTerminalHandle('m-2').isBodyActive(), true)
-  for (const memberId of ['m-3', 'm-4', 'm-5', 'm-6']) {
-    assert.equal(controller.getTerminalHandle(memberId), null)
-  }
-})
-
-test('session-controller suspends desktop streams when viewport collapses to mobile focus', async () => {
-  const members = [
-    createMember('m-1'),
-    createMember('m-2'),
-    createMember('m-3'),
-    createMember('m-4'),
-    createMember('m-5'),
-    createMember('m-6'),
-  ]
-  const deps = makeSessionDeps({ members })
-  const controller = createSessionController({
-    daemonApi: deps.daemonApi,
-    terminalClient: deps.terminalClient,
-    deliveryClient: deps.deliveryClient,
-    layoutStore: deps.layoutStore,
-  })
-
-  await controller.loadWorkspaceSessions('ws-1')
-  await controller.attachVisibleMembers('ws-1', ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6'])
-  await controller.applyLayoutOperation('ws-1', { kind: 'enterMemberFocus', memberId: 'm-3' })
-  await controller.setViewportMode('mobile')
-
-  assert.deepEqual(deps.suspendCalls, ['m-1', 'm-2', 'm-4', 'm-5', 'm-6'])
-  assert.equal(controller.getTerminalHandle('m-3').isBodyActive(), true)
-  for (const memberId of ['m-1', 'm-2', 'm-4', 'm-5', 'm-6']) {
-    assert.equal(controller.getTerminalHandle(memberId).isBodyActive(), false)
-  }
-
-  await controller.setViewportMode('desktop')
-  for (const memberId of ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6']) {
-    assert.equal(controller.getTerminalHandle(memberId).isBodyActive(), true)
-  }
-})
-
-test('session-controller mobile preview subscribes to the visible set, not a single pane', async () => {
-  const members = [
-    createMember('m-1'),
-    createMember('m-2'),
-    createMember('m-3'),
-    createMember('m-4'),
-    createMember('m-5'),
-    createMember('m-6'),
-  ]
-  const deps = makeSessionDeps({ members })
-  const controller = createSessionController({
-    daemonApi: deps.daemonApi,
-    terminalClient: deps.terminalClient,
-    deliveryClient: deps.deliveryClient,
-    layoutStore: deps.layoutStore,
-  })
-
-  await controller.loadWorkspaceSessions('ws-1')
-  controller.setViewportMode('mobile')
-  await controller.applyLayoutOperation('ws-1', { kind: 'switchMobileMode', mobileMode: 'preview' })
-  const handles = await controller.attachVisibleMembers('ws-1')
-
-  assert.deepEqual(handles.map((handle) => handle.memberId), ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6'])
-  assert.deepEqual(deps.attachCalls, ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6'])
 })
 
 test('session-controller suspends handles that leave the visible set and reuses them on return', async () => {
@@ -505,36 +375,6 @@ test('session-controller suspends handles that leave the visible set and reuses 
   assert.equal(controller.getTerminalHandle('m-3').isBodyActive(), true)
   assert.equal(controller.getTerminalHandle('m-6').isBodyActive(), false)
   assert.deepEqual(deps.attachCalls, ['m-1', 'm-2', 'm-3', 'm-4', 'm-5', 'm-6'])
-})
-
-test('session-controller releases leaving streams before attaching entering viewport panes', async () => {
-  const members = ['m-1', 'm-2', 'm-3', 'm-4', 'm-5'].map((memberId) => createMember(memberId))
-  const deps = makeSessionDeps({ members })
-  const controller = createSessionController({
-    daemonApi: deps.daemonApi,
-    terminalClient: deps.terminalClient,
-    deliveryClient: deps.deliveryClient,
-    layoutStore: deps.layoutStore,
-  })
-
-  await controller.loadWorkspaceSessions('ws-1')
-  await controller.attachVisibleMembers('ws-1', ['m-1', 'm-2', 'm-3'])
-  deps.lifecycleCalls.length = 0
-
-  await controller.attachVisibleMembers('ws-1', ['m-1', 'm-4', 'm-5'])
-
-  const leavingSuspends = deps.lifecycleCalls
-    .map((entry, index) => ({ entry, index }))
-    .filter(({ entry }) => entry === 'suspend:m-2' || entry === 'suspend:m-3')
-    .map(({ index }) => index)
-  const enteringAttaches = deps.lifecycleCalls
-    .map((entry, index) => ({ entry, index }))
-    .filter(({ entry }) => entry === 'attach:m-4' || entry === 'attach:m-5')
-    .map(({ index }) => index)
-
-  assert.equal(leavingSuspends.length, 2)
-  assert.equal(enteringAttaches.length, 2)
-  assert.ok(Math.max(...leavingSuspends) < Math.min(...enteringAttaches))
 })
 
 test('session-controller replaces a handle when the member target session changes', async () => {
@@ -737,7 +577,7 @@ test('session-controller A-B-A suspends and reuses the original handle', async (
   assert.deepEqual(deps.disconnectCalls, [])
 })
 
-test('pane-terminal-client suspend closes the body stream and resume reopens while keeping the handle', async () => {
+test('pane-terminal-client suspend and resume keep one stream and one renderer handle', async () => {
   let emitBuffer = null
   let openCalls = 0
   let closeCalls = 0
@@ -763,21 +603,19 @@ test('pane-terminal-client suspend closes the body stream and resume reopens whi
   emitBuffer({ ansi: 'first', frame: { cols: 80, rows: 24 } })
   assert.equal(handle.getSnapshot().deliveredFrameCount, 1)
   assert.equal(handle.getSnapshot().subscriptionState, 'active')
-  assert.equal(openCalls, 1)
-  assert.equal(closeCalls, 0)
 
   await client.suspend(handle)
-  assert.equal(closeCalls, 1, 'suspend must stop the hidden body fetch')
   emitBuffer({ ansi: 'inactive', frame: { cols: 80, rows: 24 } })
   assert.equal(handle.getSnapshot().deliveredFrameCount, 1)
   assert.equal(handle.getSnapshot().subscriptionState, 'suspended')
 
   await client.resume(handle)
-  assert.equal(openCalls, 2, 'resume must reopen the body fetch')
   emitBuffer({ ansi: 'resumed', frame: { cols: 80, rows: 24 } })
   assert.equal(handle.getSnapshot().deliveredFrameCount, 2)
   assert.equal(handle.getSnapshot().subscriptionState, 'active')
   assert.strictEqual(await client.attachSession(member), handle)
+  assert.equal(openCalls, 1)
+  assert.equal(closeCalls, 0)
 })
 
 test('session-controller rejects unknown and stale target writes with typed errors', async () => {
@@ -850,3 +688,4 @@ test('session-controller never fabricates fake handles or fake write success whe
     return true
   })
 })
+

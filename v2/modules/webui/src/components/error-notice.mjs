@@ -9,8 +9,6 @@ import { escapeHtml, normalizeTypedError } from './loadable.mjs';
  *   error?: unknown,
  *   title?: string|null,
  *   onRetryAction?: string,
- *   retryAttributes?: Record<string, string|number|boolean>,
- *   forceRetry?: boolean,
  *   contextId?: string|null,
  * }} [props]
  */
@@ -18,24 +16,19 @@ export function renderErrorNotice({
   error,
   title = null,
   onRetryAction = 'retry-error',
-  retryAttributes = {},
-  forceRetry = false,
   contextId = null,
 } = {}) {
   const typed = normalizeTypedError(error);
   const { code, category, message, details } = typed;
   const retryable = typed.retryable === true;
-  const retryAttributesHtml = Object.entries(retryAttributes)
-    .map(([name, value]) => ` data-${escapeHtml(name)}="${escapeHtml(value)}"`)
-    .join('');
 
   const detailsAttr = details == null ? '' : ` data-error-details="${escapeHtml(typeof details === 'string' ? details : JSON.stringify(details))}"`;
   const contextAttr = contextId ? ` data-context-id="${escapeHtml(contextId)}"` : '';
   const titleHtml = title
     ? `<p class="v2-error-title" data-role="error-title">${escapeHtml(title)}</p>`
     : '';
-  const retryHtml = retryable || forceRetry === true
-    ? `<button type="button" class="v2-error-retry" data-action="${escapeHtml(onRetryAction)}"${retryAttributesHtml} data-error-code="${escapeHtml(code)}" data-context-id="${escapeHtml(contextId ?? '')}">Retry</button>`
+  const retryHtml = retryable
+    ? `<button type="button" class="v2-error-retry" data-action="${escapeHtml(onRetryAction)}" data-error-code="${escapeHtml(code)}" data-context-id="${escapeHtml(contextId ?? '')}">Retry</button>`
     : '';
 
   const attrs = {

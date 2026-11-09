@@ -102,6 +102,15 @@ function terminalUnavailableError(message = 'Terminal client port is not configu
   }, 'TERMINAL_CLIENT_UNAVAILABLE')
 }
 
+function terminalNotLoadedError() {
+  return normalizeTypedError({
+    code: 'TERMINAL_NOT_LOADED',
+    category: 'terminal',
+    message: 'Terminal body is not loaded until this member receives focus.',
+    retryable: false,
+  }, 'TERMINAL_NOT_LOADED')
+}
+
 function terminalStartingError() {
   return normalizeTypedError({
     code: 'TERMINAL_FRAME_PENDING',
@@ -110,6 +119,8 @@ function terminalStartingError() {
     retryable: true,
   }, 'TERMINAL_FRAME_PENDING')
 }
+
+const VISIBLE_PEER_SLOT_COUNT = 4
 
 function workspaceSelectionRequiredError(message = 'Please select or create a workspace first.') {
   return normalizeTypedError({
@@ -357,7 +368,6 @@ export function createWebUIApp({
     mountedRoot: null,
     document: null,
   }
-  sessionController.setViewportMode(state.viewportMode)
 
   let initialized = false
   let suppressHashListener = false
@@ -443,82 +453,18 @@ export function createWebUIApp({
     state.transfers = entry.transfers
   }
 
-  // Delegate to the controller's single visible-set resolver so the attach
-  // path and the render projection always agree on desktop 1+4, mobile focus,
-  // and mobile preview.
+  // One handle per visible pane. The visible set is the same primary + four
+  // peers the desktop 1+4 workbench renders, so every rendered body owns its
+  // own stream instead of only the focused member.
   function visibleMemberIdsForProjection() {
-    return sessionController.getVisibleMemberIds(state.activeWorkspaceId)
-  }
-
-  // Vv: the viewport-intersecting frame set. A frame counts only when its rect
-  // clipped by the viewport (and, for peer cells, by the scroll grid) is both
-  // wider and taller than 4 CSS pixels.
-  const VIEWPORT_MIN_VISIBLE_PX = 4
-  const appliedVisibleKeyByWorkspace = new Map()
-
-  function clippedVisibleMemberIds() {
-    const root = state.mountedRoot
-    if (!root || typeof root.querySelectorAll !== 'function') return []
-    const win = state.document && state.document.defaultView
-    const vw = Number(state.viewportWidth) || (win && win.innerWidth) || 0
-    const vh = Number(state.viewportHeight) || (win && win.innerHeight) || 0
-    if (!(vw > 0) || !(vh > 0)) return []
-    const grid = root.querySelector('[data-role="peer-scroll-grid"]')
-    const gridRect = grid && typeof grid.getBoundingClientRect === 'function' ? grid.getBoundingClientRect() : null
-    const peerClip = gridRect
-      ? {
-        left: Math.max(0, gridRect.left),
-        top: Math.max(0, gridRect.top),
-        right: Math.min(vw, gridRect.right),
-        bottom: Math.min(vh, gridRect.bottom),
-      }
-      : { left: 0, top: 0, right: vw, bottom: vh }
-    const seen = new Set()
-    const visible = []
-    let measured = false
-    for (const frame of root.querySelectorAll('[data-component="window-frame"][data-member-id]')) {
-      const memberId = String(frame.getAttribute('data-member-id') || '')
-      if (!memberId || seen.has(memberId)) continue
-      if (typeof frame.getBoundingClientRect !== 'function') continue
-      const rect = frame.getBoundingClientRect()
-      if (rect.width > 0 || rect.height > 0) measured = true
-      const inGrid = Boolean(frame.closest && frame.closest('[data-role="peer-scroll-grid"]'))
-      const clip = inGrid ? peerClip : { left: 0, top: 0, right: vw, bottom: vh }
-      const width = Math.min(rect.right, clip.right) - Math.max(rect.left, clip.left)
-      const height = Math.min(rect.bottom, clip.bottom) - Math.max(rect.top, clip.top)
-      if (width > VIEWPORT_MIN_VISIBLE_PX && height > VIEWPORT_MIN_VISIBLE_PX) {
-        seen.add(memberId)
-        visible.push(memberId)
-      }
-    }
-    // No layout engine (for example a jsdom mount) reports every rect as 0x0;
-    // report that as "unmeasured" so the caller keeps the layout default rather
-    // than suspending every pane.
-    return measured ? visible : null
-  }
-
-  // Reconcile the mounted DOM's Vv with the controller. Runs after every mount
-  // and after peer-grid scroll. When the set changes the controller attaches the
-  // new visible panes and suspends the rest, then this re-renders once so the
-  // bodies show the settled attached/starting/detached state.
-  function reconcileViewportVisibleMembers() {
-    const workspaceId = state.activeWorkspaceId
-    if (!workspaceId || state.activeRoute !== 'sessions') return false
-    if (typeof sessionController.setVisibleMembers !== 'function') return false
-    const ids = clippedVisibleMemberIds()
-    if (ids === null) return false
-    const key = ids.join('\u0000')
-    if (appliedVisibleKeyByWorkspace.get(workspaceId) === key) return false
-    appliedVisibleKeyByWorkspace.set(workspaceId, key)
-    Promise.resolve(sessionController.setVisibleMembers(workspaceId, ids))
-      .then(() => {
-        if (state.activeWorkspaceId !== workspaceId) return
-        syncActiveWorkspaceProjection()
-        notify()
-        render()
-      })
-      .catch(() => {})
-    return true
+    const members = state.members || []
+    const layout = state.layout
+    if (members.length === 0 && !layout) return []
+    const available = new Set(members.map((member) => String(member.memberId)))
+    const primary = layout?.primaryMemberId || members[0]?.memberId || null
+    const peers = layout?.peerMemberIds || members.slice(1).map((member) => member.memberId)
+    return [...new Set([primary, ...(peers || []).slice(0, VISIBLE_PEER_SLOT_COUNT)].map(String))]
+      .filter((memberId) => available.has(memberId))
   }
 
   function terminalBodiesForMembers(members) {
@@ -563,16 +509,15 @@ export function createWebUIApp({
       } else if (isVisible && terminalClient && !handleError) {
         const err = terminalStartingError()
         out[member.memberId] = `<div class="terminal-viewport" data-terminal-body="true" data-terminal-status="starting" data-member-id="${esc(member.memberId)}"><div class="v2-terminal-pending" data-terminal-pending="true" role="status" aria-live="polite"><span>Attaching this terminal and waiting for its first frame...</span><code>TERMINAL_FRAME_PENDING</code></div>${renderErrorNotice({ error: err }).html}<div class="terminal-scroll-owner">Scroll stays inside this terminal.</div></div>`
-      } else if (terminalClient && !isVisible) {
-        // Intentional offscreen secondary: it holds no stream. Show a compact
-        // detached state instead of a misleading generic "not loaded" error.
-        out[member.memberId] = `<div class="terminal-viewport" data-terminal-body="true" data-terminal-status="detached" data-member-id="${esc(member.memberId)}"><div class="v2-terminal-detached" role="status">Detached while offscreen. Scroll this window into view to attach it.</div></div>`
       } else {
         let err
         let terminalStatus
         if (!terminalClient) {
           err = terminalUnavailableError()
           terminalStatus = 'unavailable'
+        } else if (!isVisible) {
+          err = terminalNotLoadedError()
+          terminalStatus = 'not-loaded'
         } else if (handleError) {
           err = handleError
           terminalStatus = 'unavailable'
@@ -580,16 +525,7 @@ export function createWebUIApp({
           err = terminalStartingError()
           terminalStatus = 'starting'
         }
-        const noticeHtml = renderErrorNotice(
-          handleError && terminalClient
-            ? {
-                error: err,
-                onRetryAction: 'retry-terminal',
-                retryAttributes: { 'member-id': member.memberId },
-                forceRetry: true,
-              }
-            : { error: err },
-        ).html
+        const noticeHtml = renderErrorNotice({ error: err }).html
         out[member.memberId] = `<div class="terminal-viewport" data-terminal-body="true" data-terminal-status="${terminalStatus}" data-member-id="${esc(member.memberId)}">${noticeHtml}<div class="terminal-scroll-owner">Scroll stays inside this terminal.</div></div>`
       }
     }
@@ -948,7 +884,6 @@ export function createWebUIApp({
       state.mountedRoot.innerHTML = shell.html
       mountTerminalViewportsIfNeeded()
       restoreTerminalScrollState(scrollSnapshots)
-      reconcileViewportVisibleMembers()
     }
     return shell
   }
@@ -1044,7 +979,6 @@ export function createWebUIApp({
 
   async function loadWorkspace(workspaceId) {
     state.activeWorkspaceId = workspaceId || null
-    if (workspaceId) appliedVisibleKeyByWorkspace.delete(workspaceId)
     state.workspaceOverflowOpen = false
     state.mobileNavOpen = false
 
@@ -1251,7 +1185,6 @@ export function createWebUIApp({
   }
 
   function setViewport({ width, height, userAgent: nextUserAgent } = {}) {
-    const previousViewportMode = state.viewportMode
     if (typeof width === 'number' && width > 0) state.viewportWidth = width
     if (typeof height === 'number' && height > 0) state.viewportHeight = height
     if (typeof nextUserAgent === 'string') state.userAgent = nextUserAgent
@@ -1260,25 +1193,11 @@ export function createWebUIApp({
       height: state.viewportHeight,
       userAgent: state.userAgent,
     })
-    const reconcile = sessionController.setViewportMode(state.viewportMode)
     if (state.viewportMode === 'desktop') {
       state.mobileNavOpen = false
     }
-    // Project the new viewport mode immediately. Stream attach/detach runs in
-    // the background: waiting for it would leave the previous mobile focus DOM
-    // on screen for up to the 8s attach timeout after a resize.
-    syncActiveWorkspaceProjection()
     notify()
     render()
-    if (previousViewportMode !== state.viewportMode && reconcile && typeof reconcile.then === 'function') {
-      return reconcile.then(() => {
-        syncActiveWorkspaceProjection()
-        notify()
-        render()
-        return app
-      })
-    }
-    return app
   }
 
   async function toggleProperty(windowId, memberId) {
@@ -1756,26 +1675,6 @@ export function createWebUIApp({
       }
       case 'send-terminal-input':
         return sendTerminalInput(detail.memberId, detail.data || '')
-      case 'retry-terminal': {
-        if (!detail.memberId) {
-          return { ok: false, error: normalizeTypedError(new Error('A member id is required to retry a terminal.'), 'TERMINAL_MEMBER_REQUIRED') }
-        }
-        try {
-          const handle = await sessionController.retryTerminalMember(state.activeWorkspaceId, detail.memberId)
-          if (!handle || !HEALTHY_STATUSES.includes(handle.status)) {
-            return { ok: false, error: normalizeTypedError(new Error('The terminal stream is still unavailable.'), 'TERMINAL_STREAM_UNAVAILABLE') }
-          }
-          syncActiveWorkspaceProjection()
-          notify()
-          render()
-          return { ok: true, handle }
-        } catch (error) {
-          const typed = normalizeTypedError(error, 'TERMINAL_RETRY_FAILED')
-          state.lastError = typed
-          render()
-          return { ok: false, error: typed }
-        }
-      }
       case 'send-member-message':
         return sendMessage(detail.memberId || detail.recipientMemberId, detail.body || '', { workspaceId: detail.workspaceId || state.activeWorkspaceId })
       case 'select-member':
@@ -1838,7 +1737,6 @@ export function createWebUIApp({
       height: state.viewportHeight,
       userAgent: state.userAgent,
     })
-    sessionController.setViewportMode(state.viewportMode)
 
     render()
     if (!doc) return
@@ -1846,7 +1744,6 @@ export function createWebUIApp({
     if (root.__ztermV2Handler) root.removeEventListener('click', root.__ztermV2Handler)
     if (root.__ztermV2InputHandler) root.removeEventListener('input', root.__ztermV2InputHandler)
     if (root.__ztermV2PointerDownHandler) root.removeEventListener('pointerdown', root.__ztermV2PointerDownHandler)
-    if (root.__ztermV2ScrollHandler) root.removeEventListener('scroll', root.__ztermV2ScrollHandler, true)
     if (win && root.__ztermV2ResizeHandler) {
       win.removeEventListener('resize', root.__ztermV2ResizeHandler)
       win.removeEventListener('orientationchange', root.__ztermV2ResizeHandler)
@@ -1925,16 +1822,6 @@ export function createWebUIApp({
       doc.addEventListener('pointerup', onPointerUp, { once: true })
     }
 
-    // Peer-grid scroll changes which panes intersect the viewport, so the
-    // visible subscription set must be reconciled on scroll (scroll does not
-    // bubble, hence the capture listener on the mount root).
-    const onScroll = (event) => {
-      const target = event.target
-      if (target && typeof target.matches === 'function' && target.matches('[data-role="peer-scroll-grid"]')) {
-        reconcileViewportVisibleMembers()
-      }
-    }
-
     const onWindowResize = () => {
       if (!win) return
       const nextW = typeof win.innerWidth === 'number' && win.innerWidth > 0 ? win.innerWidth : state.viewportWidth
@@ -1963,11 +1850,9 @@ export function createWebUIApp({
     root.addEventListener('click', onClick)
     root.addEventListener('input', onInput)
     root.addEventListener('pointerdown', onPointerDown)
-    root.addEventListener('scroll', onScroll, true)
     root.__ztermV2Handler = onClick
     root.__ztermV2InputHandler = onInput
     root.__ztermV2PointerDownHandler = onPointerDown
-    root.__ztermV2ScrollHandler = onScroll
     if (win) {
       win.addEventListener('resize', onWindowResize)
       win.addEventListener('orientationchange', onWindowResize)
@@ -2012,7 +1897,6 @@ export function createWebUIApp({
         if (state.mountedRoot.__ztermV2Handler) state.mountedRoot.removeEventListener('click', state.mountedRoot.__ztermV2Handler)
         if (state.mountedRoot.__ztermV2InputHandler) state.mountedRoot.removeEventListener('input', state.mountedRoot.__ztermV2InputHandler)
         if (state.mountedRoot.__ztermV2PointerDownHandler) state.mountedRoot.removeEventListener('pointerdown', state.mountedRoot.__ztermV2PointerDownHandler)
-        if (state.mountedRoot.__ztermV2ScrollHandler) state.mountedRoot.removeEventListener('scroll', state.mountedRoot.__ztermV2ScrollHandler, true)
         if (win && state.mountedRoot.__ztermV2ResizeHandler) {
           win.removeEventListener('resize', state.mountedRoot.__ztermV2ResizeHandler)
           win.removeEventListener('orientationchange', state.mountedRoot.__ztermV2ResizeHandler)

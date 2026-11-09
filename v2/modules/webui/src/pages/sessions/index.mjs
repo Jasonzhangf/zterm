@@ -117,16 +117,10 @@ function terminalBody(member, terminalBodiesByMember, renderErrorNoticeFn = defa
 // member's connection status. A body that never loaded must not read online.
 function terminalStatusState(bodyHtml, member) {
   const raw = /data-terminal-status="([^"]+)"/.exec(String(bodyHtml || ''))?.[1] || ''
-  if (raw === 'attached') {
-    // An attached stream without a delivered frame is still waiting for the
-    // terminal body, so the window header must not report online yet.
-    if (/data-terminal-pending="true"/.test(String(bodyHtml || ''))) return 'busy'
-    return 'online'
-  }
+  if (raw === 'attached') return 'online'
   if (raw === 'starting') return 'busy'
   if (raw === 'unavailable') return 'error'
   if (raw === 'not-loaded') return 'unknown'
-  if (raw === 'detached') return 'detached'
   return statusText(member)
 }
 

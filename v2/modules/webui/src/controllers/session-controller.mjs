@@ -5,14 +5,12 @@ const WRITE_BLOCKED_STATUSES = Object.freeze([
   'offline',
   'unavailable',
 ])
-// Desktop is the continuous N-window workbench: the grid renders every peer,
-// but only the primary plus the first viewport-visible peers hold terminal
-// streams before the DOM pass reports the exact intersecting set. The value is
-// a starting guess that matches the default 1440x900 1+4 viewport.
-const DEFAULT_DESKTOP_VISIBLE_PEERS = 4
+const VISIBLE_PEER_SLOT_COUNT = 4
+
 function nowIso() {
   return new Date().toISOString()
 }
+
 function normalizeTypedError(error, fallbackCode = 'SESSION_UNAVAILABLE') {
   if (error && typeof error === 'object') {
     return {
@@ -104,16 +102,11 @@ export function createSessionController({
   let layoutByWorkspace = new Map()
   let lastOperationError = null
   let activeWorkspaceId = null
-  let viewportMode = 'desktop'
   const attachRequestsByWorkspaceId = new Map()
   // Focus-bound attach and visible-set attach are both legitimate callers.
   // Remember the active strategy so a focus layout change replays the same
   // strategy instead of silently switching between the two.
   const attachModeByWorkspaceId = new Map()
-  // DOM-derived viewport-intersecting set (Vv). When present it is authoritative
-  // for both attach/detach and the render projection; otherwise the resolver
-  // falls back to a layout-derived default.
-  const visibleMembersByWorkspaceId = new Map()
 
   function isHealthyMember(member) {
     if (!member) return false
@@ -170,7 +163,6 @@ export function createSessionController({
 
   async function loadWorkspaceSessions(workspaceId) {
     activeWorkspaceId = workspaceId
-    visibleMembersByWorkspaceId.delete(workspaceId)
     setWorkspaceLoadable(null)
     lastOperationError = null
 
@@ -386,51 +378,18 @@ export function createSessionController({
     }
   }
 
-  // Single owner of the projection's visible member set. Desktop keeps the
-  // 1+4 workbench; mobile focus collapses to the focused pane; mobile preview
-  // keeps the rendered visible set. The attach path and the render projection
-  // both read this resolver so they cannot drift apart.
-  function setViewportMode(nextViewportMode) {
-    const previousViewportMode = viewportMode
-    viewportMode = nextViewportMode === 'mobile' ? 'mobile' : 'desktop'
-    if (previousViewportMode === viewportMode) return Promise.resolve()
-    return reconcileViewportAttach()
-  }
-
-  // A viewport switch changes the visible set itself. Replay the active attach
-  // strategy so hidden bodies stop fetching and returning handles resume.
-  function reconcileViewportAttach() {
-    if (!activeWorkspaceId || !layoutByWorkspace.has(activeWorkspaceId)) return Promise.resolve()
-    if (!attachModeByWorkspaceId.has(activeWorkspaceId)) return Promise.resolve()
-    const mode = attachModeByWorkspaceId.get(activeWorkspaceId)
-    if (mode?.kind === 'focused') return attachFocusedMember(activeWorkspaceId)
-    return attachVisibleMembers(activeWorkspaceId)
-  }
-
   function resolveVisibleMemberIds(workspaceId, requestedMemberIds = null) {
     const layout = layoutByWorkspace.get(workspaceId)
     const members = layout?.members || []
     if (!layout) return []
     const available = new Set(members.map((member) => String(member.memberId)))
-    if (Array.isArray(requestedMemberIds)) {
-      return [...new Set(requestedMemberIds.map(String).filter((memberId) => available.has(memberId)))]
-    }
-    if (viewportMode === 'mobile' && layout.mobileMode === 'focus') {
-      const focused = defaultFocusedMemberId(layout, members)
-      return focused && available.has(String(focused)) ? [String(focused)] : []
-    }
-    const explicit = visibleMembersByWorkspaceId.get(workspaceId)
-    if (Array.isArray(explicit)) {
-      return [...new Set(explicit.map(String).filter((memberId) => available.has(memberId)))]
-    }
-    const peers = (layout.peerMemberIds || []).map(String)
-    if (viewportMode === 'mobile') {
-      // Mobile preview still receives the DOM-derived set. Until that pass runs
-      // the preview canvas renders the whole workspace, so keep the prior set.
-      return [...new Set([String(layout.primaryMemberId || ''), ...peers].filter((memberId) => memberId && available.has(memberId)))]
-    }
-    const requested = [String(layout.primaryMemberId || ''), ...peers.slice(0, DEFAULT_DESKTOP_VISIBLE_PEERS)]
-    return [...new Set(requested.filter((memberId) => memberId && available.has(memberId)))]
+    const requested = Array.isArray(requestedMemberIds)
+      ? requestedMemberIds
+      : [
+          layout.primaryMemberId,
+          ...(layout.peerMemberIds || []).slice(0, VISIBLE_PEER_SLOT_COUNT),
+        ]
+    return [...new Set(requested.map(String).filter((memberId) => available.has(memberId)))]
   }
 
   async function attachMembers(workspaceId, requestedMemberIds = null, { resumeInactive = true } = {}) {
@@ -459,13 +418,6 @@ export function createSessionController({
       isCurrentRequest() && visibleMemberIdSet.has(memberId)
     attachRequestsByWorkspaceId.set(workspaceId, request)
     request.promise = (async () => {
-      for (const [memberId, handle] of terminalHandlesByMemberId.entries()) {
-        if (!visibleMemberIdSet.has(String(memberId))) {
-          if (!isCurrentRequest()) return []
-          await suspendTerminalHandle(handle)
-        }
-      }
-
       const attached = await Promise.all(visibleMemberIds.map(async (memberId) => {
         const member = members.find((candidate) => String(candidate.memberId) === memberId)
         if (!member) return null
@@ -480,6 +432,12 @@ export function createSessionController({
       const handles = new Map()
       for (const handle of attached) {
         if (handle) handles.set(String(handle.memberId), handle)
+      }
+
+      for (const [memberId, handle] of terminalHandlesByMemberId.entries()) {
+        if (!visibleMemberIdSet.has(String(memberId))) {
+          await suspendTerminalHandle(handle)
+        }
       }
 
       const activeHandles = []
@@ -504,33 +462,8 @@ export function createSessionController({
 
   async function attachVisibleMembers(workspaceId, requestedMemberIds = null) {
     const visibleMemberIds = resolveVisibleMemberIds(workspaceId, requestedMemberIds)
-    // An explicit caller-supplied set is the current visible set; later layout
-    // operations must replay it instead of falling back to the default guess.
-    if (Array.isArray(requestedMemberIds)) {
-      visibleMembersByWorkspaceId.set(workspaceId, visibleMemberIds)
-    }
     attachModeByWorkspaceId.set(workspaceId, { kind: 'visible', memberIds: visibleMemberIds })
     return attachMembers(workspaceId, visibleMemberIds)
-  }
-
-  // The app-shell owns the DOM and computes the exact viewport-intersecting set
-  // (Vv). Both the attach path and the render projection read this set, so they
-  // cannot drift apart. Members that leave the set are suspended: a pending
-  // CONNECTING attempt is cancelled and the stream detaches to CLOSED. Members
-  // that enter it are attached, or resumed when their stream was suspended.
-  function setVisibleMembers(workspaceId, memberIds) {
-    if (!workspaceId) return Promise.resolve([])
-    const layout = layoutByWorkspace.get(workspaceId)
-    if (!layout) return Promise.resolve([])
-    const available = new Set((layout.members || []).map((member) => String(member.memberId)))
-    const next = [...new Set(
-      (Array.isArray(memberIds) ? memberIds : [])
-        .map(String)
-        .filter((memberId) => memberId && available.has(memberId)),
-    )]
-    visibleMembersByWorkspaceId.set(workspaceId, next)
-    attachModeByWorkspaceId.set(workspaceId, { kind: 'visible', memberIds: next })
-    return attachMembers(workspaceId, next)
   }
 
   async function attachFocusedMember(workspaceId) {
@@ -550,30 +483,6 @@ export function createSessionController({
     // Focus is an explicit intent: re-assert the focused body even when a
     // freshly attached renderer already reports itself active.
     if (handle) await resumeTerminalHandle(handle)
-    return handle
-  }
-
-  // Retry is scoped to one visible member. A failed stream keeps the same pane
-  // identity; suspend the failed handle first so the client can open exactly one
-  // fresh stream instead of treating the unavailable handle as reusable.
-  async function retryTerminalMember(workspaceId, memberId) {
-    if (!workspaceId || !memberId) return null
-    const layout = layoutByWorkspace.get(workspaceId)
-    const member = (layout?.members || []).find((candidate) => String(candidate.memberId) === String(memberId))
-    if (!member) return null
-
-    const isCurrentRequest = () => activeWorkspaceId === workspaceId
-    const existing = terminalHandlesByMemberId.get(memberId)
-    if (existing && !HEALTHY_STATUSES.includes(existing.status)) {
-      await suspendTerminalHandle(existing)
-      if (!isCurrentRequest()) return null
-    }
-
-    const handle = await ensureTerminalHandle(member, isCurrentRequest)
-    if (handle && HEALTHY_STATUSES.includes(handle.status)) {
-      const state = memberState(memberId)
-      state.errors = []
-    }
     return handle
   }
 
@@ -654,21 +563,12 @@ export function createSessionController({
       return { ok: false, error: normalizeTypedError(error, 'LAYOUT_SAVE_FAILED') }
     }
 
-    if (
-      kind === 'enterMemberFocus'
-      || kind === 'stepMobileFocus'
-      || kind === 'promotePrimary'
-      || kind === 'switchMobileMode'
-    ) {
+    if (kind === 'enterMemberFocus' || kind === 'stepMobileFocus' || kind === 'promotePrimary') {
       const mode = attachModeByWorkspaceId.get(workspaceId)
       if (mode?.kind === 'focused') {
-        // Focus-bound attach (desktop or mobile) keeps a single focused handle.
         await attachFocusedMember(workspaceId)
-      } else {
-        // Re-resolve from the current layout + viewport so focus/preview/desktop
-        // switches update the same visible set instead of replaying a stale
-        // member list captured at the previous attach.
-        await attachVisibleMembers(workspaceId)
+      } else if (mode?.kind === 'visible') {
+        await attachVisibleMembers(workspaceId, mode.memberIds)
       }
     }
 
@@ -892,11 +792,7 @@ export function createSessionController({
     loadWorkspaceSessions,
     ensureTerminalHandle,
     attachFocusedMember,
-    retryTerminalMember,
     attachVisibleMembers,
-    setVisibleMembers,
-    setViewportMode,
-    getVisibleMemberIds: (workspaceId) => resolveVisibleMemberIds(workspaceId),
     applyLayoutOperation,
     syncWorkspaceMembers,
     dragBorder,
@@ -921,3 +817,4 @@ export function createSessionController({
 }
 
 export { HEALTHY_STATUSES, WRITE_BLOCKED_STATUSES, normalizeTypedError }
+
