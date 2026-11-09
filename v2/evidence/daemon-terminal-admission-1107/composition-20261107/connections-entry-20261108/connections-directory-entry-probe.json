@@ -1,0 +1,23 @@
+{
+  "machineId": "machine-directory-probe",
+  "linkId": "link:machine-directory-probe",
+  "linkGeneration": 1,
+  "entryCount": 2,
+  "entries": [
+    {
+      "name": "directory-probe-2829-a",
+      "backend": "tmux",
+      "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22socketPath%22%3A%22%2Fvar%2Ffolders%2Fjm%2Fblkk8bbd6v78rv2pwxgxh3kr0000gn%2FT%2Fzterm-connections-directory-probe%2F2829.sock%22%2C%22serverPid%22%3A%222912%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794129889%7D"
+    },
+    {
+      "name": "directory-probe-2829-b",
+      "backend": "tmux",
+      "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22socketPath%22%3A%22%2Fvar%2Ffolders%2Fjm%2Fblkk8bbd6v78rv2pwxgxh3kr0000gn%2FT%2Fzterm-connections-directory-probe%2F2829.sock%22%2C%22serverPid%22%3A%222912%22%2C%22sessionId%22%3A%22%241%22%2C%22createdAt%22%3A1794129889%7D"
+    }
+  ],
+  "channelOpensAfterResolve": 0,
+  "channelId": "link:machine-directory-probe#terminal#1",
+  "channelLinkId": "link:machine-directory-probe",
+  "channelOpensAfterOpen": 1,
+  "closed": true
+}

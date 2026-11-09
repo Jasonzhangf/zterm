@@ -1,0 +1,7 @@
+{
+  "name": "TypedError",
+  "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+  "status": null,
+  "owningModule": "accounts",
+  "message": "No workspace authorization grant exists for this account."
+}

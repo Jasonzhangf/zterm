@@ -1,0 +1,5 @@
+startedAt=2026-11-09T02:08:01.266Z
+fixtureLatest=/Volumes/Intel/playground/zterm/.worker-runs/isolated-v1-stream-fixture-1105/runs/latest.json
+argv=["/opt/homebrew/Cellar/node@22/22.22.2_2/bin/node","/Volumes/Intel/playground/zterm/worktrees/terminal-admission-composition-p1-merge-20261109/v2/evidence/daemon-terminal-admission-1107/p12-p13-formal-composite-20261109/p12-formal.mjs"]
+node=v22.22.2
+cwd=/Volumes/Intel/playground/zterm/worktrees/terminal-admission-composition-p1-merge-20261109

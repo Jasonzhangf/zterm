@@ -1,0 +1,45 @@
+{
+  "probe": "startup-config-real-blackbox",
+  "outcome": "BLOCKED",
+  "productionEntry": "node v2/modules/daemon/src/main.mjs --config",
+  "positive": {
+    "admittedInput": true,
+    "inputSubmitted": true,
+    "markerSeen": false,
+    "tmuxCaptureConfirmed": false,
+    "gap": "Input was admitted and submitted, but the marker did not appear in the real tmux capture. The V1 traversal adapter sends mux-channel-binary, while the V1 terminal mux runtime routes terminal input through mux-channel-message; no public send-channel-message edge is exposed to the daemon."
+  },
+  "failures": {
+    "missingConfig": {
+      "status": 503,
+      "code": "TERMINAL_ADMISSION_REQUIRED",
+      "zeroSideEffect": true
+    },
+    "missingHostProbe": {
+      "status": null,
+      "exitCode": 1,
+      "code": "DAEMON_STARTUP_CONFIG_INVALID",
+      "zeroSideEffect": true
+    },
+    "missingResolver": {
+      "status": 424,
+      "code": "TERMINAL_TARGET_BINDING_UNAVAILABLE",
+      "zeroSideEffect": true
+    },
+    "wrongTerminalTarget": {
+      "status": 424,
+      "code": "TERMINAL_TARGET_BINDING_UNAVAILABLE",
+      "zeroSideEffect": true
+    },
+    "staleGeneration": {
+      "status": 409,
+      "code": "BINDING_GENERATION_STALE",
+      "zeroSideEffect": true
+    },
+    "wrongMachine": {
+      "status": 404,
+      "code": "MEMBER_NOT_FOUND",
+      "zeroSideEffect": true
+    }
+  }
+}

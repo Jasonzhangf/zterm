@@ -1,0 +1,22 @@
+{
+  "status": 200,
+  "events": [
+    {
+      "event": "ready",
+      "parsed": {
+        "target": "fixture-alpha-28147",
+        "source": "v1-mux",
+        "observedAt": "2026-11-08T13:44:57.926Z",
+        "backend": "tmux",
+        "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D",
+        "memberId": "mbr_135c283b-e848-4b7e-8cf5-ac93ab252fcf",
+        "bindingGeneration": 2
+      }
+    }
+  ],
+  "sideEffects": {
+    "connects": 1,
+    "channelOpens": 1,
+    "inputWrites": 0
+  }
+}

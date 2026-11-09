@@ -1,0 +1,10 @@
+{
+  "observedAt": "2026-11-08T14:13:52.949Z",
+  "fixtureAlphaSession": "fixture-alpha-28147",
+  "fixtureTmuxSocket": "/tmp/isolated-v1-28147-mw7sco4k/tmux.sock",
+  "hostProbeAvailable": true,
+  "hostProbeAnchorPresent": true,
+  "hostProbeStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22socketPath%22%3A%22%2Ftmp%2Fisolated-v1-28147-mw7sco4k%2Ftmux.sock%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D",
+  "catalogAlphaStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D",
+  "equal": false
+}

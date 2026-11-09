@@ -1,0 +1,32 @@
+{
+  "label": "wrong-terminal-target",
+  "status": 424,
+  "body": {
+    "error": {
+      "code": "TERMINAL_TARGET_BINDING_UNAVAILABLE",
+      "owningModule": "daemon",
+      "operationId": "terminal.admission.input",
+      "cause": {
+        "reason": "binding-target-mismatch",
+        "memberId": "mbr_3718bbfd-09db-48ae-b0a6-b4f94f3d1fa2",
+        "bindingSessionId": "fixture-alpha-28147",
+        "bindingAnchor": "%0",
+        "requested": {
+          "backend": "tmux",
+          "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%241%22%2C%22createdAt%22%3A1794139528%7D"
+        },
+        "boundTarget": {
+          "backend": "tmux",
+          "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D"
+        }
+      },
+      "message": "The requested terminal target is not the member's bound terminal target."
+    }
+  },
+  "sideEffects": {
+    "terminalBufferUnchanged": true,
+    "channelOpenDelta": 0,
+    "inputDelta": 0,
+    "evidence": "HTTP refusal happens before connection-manager channel open/input; real tmux buffer unchanged"
+  }
+}

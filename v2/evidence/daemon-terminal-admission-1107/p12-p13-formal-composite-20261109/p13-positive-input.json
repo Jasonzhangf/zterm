@@ -1,0 +1,31 @@
+{
+  "status": 200,
+  "body": {
+    "accepted": true,
+    "receipt": {
+      "target": "fixture-alpha-46546",
+      "channelId": "2:p13-formal-1794190090320",
+      "source": "v1-mux",
+      "deliveredAt": "2026-11-09T02:08:10.573Z"
+    },
+    "admission": {
+      "memberId": "mbr_15e42347-7312-49b5-a285-b724c4eeabf2",
+      "bindingGeneration": 1,
+      "backend": "tmux",
+      "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2246550%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794168385%7D"
+    },
+    "observation": {
+      "source": "v1-mux",
+      "observedAt": "2026-11-09T02:08:10.573Z",
+      "value": {
+        "target": "fixture-alpha-46546",
+        "inputSubmitted": true
+      }
+    }
+  },
+  "sideEffects": {
+    "connects": 1,
+    "channelOpens": 1,
+    "inputWrites": 1
+  }
+}

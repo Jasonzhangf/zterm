@@ -1,0 +1,33 @@
+input_text=printf 'P12OUT_p12mw8mg7oycegjbd_'; od -An -N4 -tx1 /dev/urandom | tr -d ' \n'; printf '\n'<CR>
+output_marker=P12OUT_p12mw8mg7oycegjbd_d9c58004
+unique_token=d9c58004
+token_in_input_text=false
+stream_frame_has_output=true
+tmux_capture_has_output=true
+--- tmux capture (alpha) ---
+echo ALPHA_INITIAL_FRAME
+fanzhang@Macstudio-2 isolated-v1-stream-fixture-1105 % echo ALPHA_INITIAL_FRAME
+ALPHA_INITIAL_FRAME
+fanzhang@Macstudio-2 isolated-v1-stream-fixture-1105 % echo STARTUP_CFG_1a1bcc50c94_f7d886
+
+STARTUP_CFG_1a1bcc50c94_f7d886
+fanzhang@Macstudio-2 isolated-v1-stream-fixture-1105 % printf 'P12OUT_p12mw8lhc5ap1wf05_';
+ od -An -N4 -tx1 /dev/urandom | tr -d ' \n'; printf '\n'
+P12OUT_p12mw8lhc5ap1wf05_79850b55
+fanzhang@Macstudio-2 isolated-v1-stream-fixture-1105 % printf 'P12OUT_p12mw8ll8x333cz6v_';
+ od -An -N4 -tx1 /dev/urandom | tr -d ' \n'; printf '\n'
+P12OUT_p12mw8ll8x333cz6v_dd21e38a
+fanzhang@Macstudio-2 isolated-v1-stream-fixture-1105 % echo P13_POSITIVE
+P13_POSITIVE
+fanzhang@Macstudio-2 isolated-v1-stream-fixture-1105 % printf 'P12OUT_p12mw8mg7oycegjbd_';
+ od -An -N4 -tx1 /dev/urandom | tr -d ' \n'; printf '\n'
+P12OUT_p12mw8mg7oycegjbd_d9c58004
+fanzhang@Macstudio-2 isolated-v1-stream-fixture-1105 %
+
+
+
+
+
+
+
+

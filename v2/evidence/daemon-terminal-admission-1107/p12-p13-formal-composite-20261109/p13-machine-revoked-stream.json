@@ -1,0 +1,17 @@
+{
+  "status": 403,
+  "body": {
+    "error": {
+      "code": "MACHINE_REVOKED",
+      "owningModule": "accounts",
+      "operationId": "machine-terminal.forMachine",
+      "cause": "Machine is revoked.",
+      "message": "Machine is revoked."
+    }
+  },
+  "sideEffects": {
+    "connects": 1,
+    "channelOpens": 1,
+    "inputWrites": 1
+  }
+}

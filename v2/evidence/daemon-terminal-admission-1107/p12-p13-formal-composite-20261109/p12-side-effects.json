@@ -1,0 +1,29 @@
+{
+  "afterPositive": {
+    "connects": 1,
+    "channelOpens": 1,
+    "inputWrites": 1
+  },
+  "linkObserved": {
+    "machineId": "mach_ab50358fd2e40801b782ad9810c78539",
+    "generation": 1,
+    "path": "direct",
+    "status": "connected",
+    "freshness": "fresh",
+    "observedAt": 1794190082079,
+    "transportKind": "lan",
+    "peerIdentity": "daemon-Macstudio-2.local-e4f4de19edf5c3f6",
+    "peerIdentityVerified": true,
+    "capabilities": {
+      "channelKinds": [
+        "terminal"
+      ],
+      "transportKind": "lan"
+    },
+    "backpressure": {
+      "queuedBytes": 0,
+      "bufferedBytes": 0,
+      "backpressured": false
+    }
+  }
+}

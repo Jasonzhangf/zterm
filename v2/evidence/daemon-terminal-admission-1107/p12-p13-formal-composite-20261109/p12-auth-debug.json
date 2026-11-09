@@ -1,0 +1,8 @@
+{
+  "tokenType": "string",
+  "tokenLength": 48,
+  "accountId": "35b1268674a191e125c7a5960c889dcd",
+  "verifiedAccountId": "35b1268674a191e125c7a5960c889dcd",
+  "verifiedSessionIdLength": 48,
+  "relayBaseUrl": "http://127.0.0.1:49615"
+}

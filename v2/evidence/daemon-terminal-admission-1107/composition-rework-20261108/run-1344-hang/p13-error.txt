@@ -1,0 +1,4 @@
+TypedError: host observation did not confirm the asserted terminal target
+    at fail (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/organization/src/public/typed-error.mjs:83:9)
+    at Object.bindSession (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/modules/members/src/application/members-service.mjs:283:7)
+    at async main (file:///Volumes/Intel/playground/zterm/worktrees/daemon-terminal-admission-20261107/v2/evidence/daemon-terminal-admission-1107/composition-rework-20261108/p13-revocation-probe.mjs:391:28)

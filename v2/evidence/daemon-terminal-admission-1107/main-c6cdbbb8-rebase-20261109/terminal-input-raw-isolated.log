@@ -1,0 +1,40 @@
+TAP version 13
+# Subtest: admitted raw input preserves exact bytes and does not add an Enter
+ok 1 - admitted raw input preserves exact bytes and does not add an Enter
+  ---
+  duration_ms: 25.916584
+  type: 'test'
+  ...
+# Subtest: legacy raw flag values do not change admitted byte forwarding
+ok 2 - legacy raw flag values do not change admitted byte forwarding
+  ---
+  duration_ms: 10.66325
+  type: 'test'
+  ...
+# Subtest: missing or non-string data is rejected before reaching terminal.input
+ok 3 - missing or non-string data is rejected before reaching terminal.input
+  ---
+  duration_ms: 5.582916
+  type: 'test'
+  ...
+# Subtest: invalid admitted input produces a typed 400 and no terminal side effect
+ok 4 - invalid admitted input produces a typed 400 and no terminal side effect
+  ---
+  duration_ms: 1.984791
+  type: 'test'
+  ...
+# Subtest: admitted input preserves delivery order and cannot bypass auth or target checks
+ok 5 - admitted input preserves delivery order and cannot bypass auth or target checks
+  ---
+  duration_ms: 4.097166
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 198.88525

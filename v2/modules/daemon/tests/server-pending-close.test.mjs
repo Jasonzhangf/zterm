@@ -1,16 +1,43 @@
 import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
 import { createConnection } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { createDaemon } from "../src/server.mjs";
-import { TerminalPort } from "../../terminal/src/terminal-port.mjs";
+import { TerminalPort } from "../../terminal/src/public/index.mjs";
+import {
+  createOrganizationService,
+  createOrganizationStore,
+} from "../../organization/src/public/index.mjs";
+import {
+  createBindingStore,
+  createMembersService,
+} from "../../members/src/public/index.mjs";
+import {
+  createRoutingDevAuth,
+  createRoutingService,
+} from "../../routing/src/public/index.mjs";
 
 const TOKEN = "pending-close-token";
 const AUTH = `Bearer ${TOKEN}`;
+const OWNER_TOKEN = "pending-close-owner-token";
+const MACHINE_ID = "pending-close-machine";
+const DAEMON_HOST_ID = "pending-close-daemon";
 
-function createTerminalStub() {
+function createTerminalStub(stableId) {
   const pending = [];
+  const session = {
+    name: stableId.replace(/^tmux:v1:/u, ""),
+    backend: "tmux",
+    stableId,
+  };
   return {
     pending,
+    async listSessions() {
+      return [{ ...session }];
+    },
+    async input() {},
     subscribe(target, handlers) {
       let resolve;
       let reject;
@@ -25,13 +52,130 @@ function createTerminalStub() {
   };
 }
 
-async function startDaemon(t, terminal) {
+async function createAdmissionHarness(stableId) {
+  const dir = await mkdtemp(join(tmpdir(), "zterm-pending-close-"));
+  const ownerAuth = createRoutingDevAuth({
+    accounts: {
+      [OWNER_TOKEN]: {
+        accountId: "acct-owner",
+        scopes: ["org:write", "members:read", "members:write"],
+        workspaces: "*",
+      },
+    },
+  });
+  const organization = createOrganizationService({
+    store: createOrganizationStore(join(dir, "organization.json")),
+    auth: ownerAuth,
+  });
+  const members = createMembersService({
+    store: createBindingStore(join(dir, "members.json")),
+    auth: ownerAuth,
+    organization,
+  });
+
+  const workspace = await organization.createWorkspace({
+    token: OWNER_TOKEN,
+    name: "Pending close",
+  });
+  const group = await organization.createGroup({
+    token: OWNER_TOKEN,
+    workspaceId: workspace.workspaceId,
+    name: "team",
+    expectedRevision: workspace.revision,
+  });
+  const member = await organization.addMember({
+    token: OWNER_TOKEN,
+    workspaceId: workspace.workspaceId,
+    groupId: group.groupId,
+    name: "Worker",
+    expectedRevision: group.revision,
+  });
+  await members.configureRuntime({
+    token: OWNER_TOKEN,
+    memberId: member.memberId,
+    machineId: MACHINE_ID,
+    hostKind: "tmux",
+    agentKind: "codex",
+    launchProfileRef: "lp-pending-close",
+  });
+  const binding = await members.bindSession({
+    token: OWNER_TOKEN,
+    memberId: member.memberId,
+    sessionId: stableId,
+    anchor: "pane:0",
+    expectedGeneration: 0,
+    terminalTarget: {
+      backend: "tmux",
+      stableId,
+    },
+  });
+
+  const callerAuth = createRoutingDevAuth({
+    accounts: {
+      [TOKEN]: {
+        accountId: "acct-caller",
+        scopes: ["routing:resolve"],
+        workspaces: [workspace.workspaceId],
+        members: [member.memberId],
+      },
+    },
+  });
+  const routing = createRoutingService({
+    organization,
+    members,
+    auth: callerAuth,
+  });
+
+  return {
+    binding,
+    callerAuth,
+    group,
+    member,
+    members,
+    organization,
+    routing,
+    workspace,
+  };
+}
+
+function createMachineTerminal(terminal) {
+  const link = {
+    machineId: MACHINE_ID,
+    status: "connected",
+    freshness: "fresh",
+    peerIdentityVerified: true,
+    daemonHostId: DAEMON_HOST_ID,
+    linkGeneration: 0,
+    calls: 0,
+  };
+  return {
+    link,
+    async forMachine() {
+      link.calls += 1;
+      return {
+        ...link,
+        listSessions: () => terminal.listSessions(),
+        input: (target, data) => terminal.input(target, data),
+        subscribe: (target, listener, options) => terminal.subscribe(target, listener, options),
+      };
+    },
+  };
+}
+
+async function startDaemon(t, terminal, harness) {
+  const machineTerminal = createMachineTerminal(terminal);
   const daemon = createDaemon({
     v1WsUrl: "ws://127.0.0.1:1/ws",
     v2Token: TOKEN,
     webuiDir: "/definitely-missing-webui",
     log: () => {},
     terminalPort: terminal,
+    admission: {
+      auth: harness.callerAuth,
+      members: harness.members,
+      routing: harness.routing,
+      machineTerminal,
+    },
   });
   const port = await new Promise((resolve, reject) => {
     daemon.server.once("error", reject);
@@ -41,19 +185,31 @@ async function startDaemon(t, terminal) {
     for (const entry of terminal.pending || []) {
       entry.resolve(settledSubscription());
     }
-    daemon.server.close(resolve);
     daemon.server.closeAllConnections();
+    daemon.server.close(() => {
+      void terminal.close?.();
+      resolve();
+    });
   }));
   return port;
 }
 
-function openTargetSocket(port, target) {
+function openTargetSocket(port, harness) {
   const socket = createConnection(port, "127.0.0.1");
   const chunks = [];
+  const query = new URLSearchParams({
+    workspaceId: harness.workspace.workspaceId,
+    memberId: harness.member.memberId,
+    machineId: MACHINE_ID,
+    groupPath: harness.group.path,
+    expectedGeneration: String(harness.binding.generation),
+    backend: harness.binding.terminalTarget.backend,
+    stableId: harness.binding.terminalTarget.stableId,
+  });
   socket.on("data", (chunk) => chunks.push(chunk));
   socket.on("connect", () => {
     socket.write(
-      `GET /api/terminal/stream?target=${encodeURIComponent(target)} HTTP/1.1\r\n`
+      `GET /api/terminal/stream?${query.toString()} HTTP/1.1\r\n`
         + `host: 127.0.0.1:${port}\r\n`
         + `authorization: ${AUTH}\r\n`
         + "connection: keep-alive\r\n\r\n",
@@ -182,9 +338,10 @@ function createDeferredFakeMux() {
 test("delayed open + client disconnect cancels once and a late open cannot revive the target", async (t) => {
   const mux = createDeferredFakeMux();
   const terminal = new TerminalPort({ muxClient: mux });
-  const port = await startDaemon(t, terminal);
+  const harness = await createAdmissionHarness("tmux:v1:target");
+  const port = await startDaemon(t, terminal, harness);
 
-  const client = openTargetSocket(port, "target");
+  const client = openTargetSocket(port, harness);
   t.after(() => client.close());
 
   await waitFor(() => mux.pendingOpenCount >= 1);
@@ -202,7 +359,7 @@ test("delayed open + client disconnect cancels once and a late open cannot reviv
   assert.equal(mux.closedChannelIds.includes(channelId), true, "the late channel must be closed");
   assert.doesNotMatch(client.text(), /event: ready/u);
 
-  const nextClient = openTargetSocket(port, "target");
+  const nextClient = openTargetSocket(port, harness);
   t.after(() => nextClient.close());
   await waitFor(() => mux.pendingOpenCount === 1 && mux.lastOpenChannelId !== channelId);
   const nextChannelId = mux.lastOpenChannelId;
@@ -239,9 +396,10 @@ test("delayed open + client disconnect cancels once and a late open cannot reviv
 test("one pending HTTP subscriber disconnect keeps the shared open for the other subscriber", async (t) => {
   const mux = createDeferredFakeMux();
   const terminal = new TerminalPort({ muxClient: mux });
-  const port = await startDaemon(t, terminal);
-  const first = openTargetSocket(port, "target");
-  const second = openTargetSocket(port, "target");
+  const harness = await createAdmissionHarness("tmux:v1:target");
+  const port = await startDaemon(t, terminal, harness);
+  const first = openTargetSocket(port, harness);
+  const second = openTargetSocket(port, harness);
   t.after(() => first.close());
   t.after(() => second.close());
 
@@ -291,9 +449,10 @@ test("one pending HTTP subscriber disconnect keeps the shared open for the other
 });
 
 test("an established stream closes its subscription exactly once", async (t) => {
-  const terminal = createTerminalStub();
-  const port = await startDaemon(t, terminal);
-  const client = openTargetSocket(port, "normal");
+  const terminal = createTerminalStub("tmux:v1:normal");
+  const harness = await createAdmissionHarness("tmux:v1:normal");
+  const port = await startDaemon(t, terminal, harness);
+  const client = openTargetSocket(port, harness);
   t.after(() => client.close());
 
   await waitFor(() => terminal.pending.length === 1);
@@ -308,10 +467,11 @@ test("an established stream closes its subscription exactly once", async (t) => 
 });
 
 test("a pending subscription that closes late is closed once without leaking to the shared target", async (t) => {
-  const terminal = createTerminalStub();
-  const port = await startDaemon(t, terminal);
-  const closing = openTargetSocket(port, "shared");
-  const staying = openTargetSocket(port, "shared");
+  const terminal = createTerminalStub("tmux:v1:shared");
+  const harness = await createAdmissionHarness("tmux:v1:shared");
+  const port = await startDaemon(t, terminal, harness);
+  const closing = openTargetSocket(port, harness);
+  const staying = openTargetSocket(port, harness);
   t.after(() => closing.close());
   t.after(() => staying.close());
 
@@ -339,9 +499,10 @@ test("a pending subscription that closes late is closed once without leaking to 
 });
 
 test("a pending subscription that rejects after client close is contained", async (t) => {
-  const terminal = createTerminalStub();
-  const port = await startDaemon(t, terminal);
-  const client = openTargetSocket(port, "reject");
+  const terminal = createTerminalStub("tmux:v1:reject");
+  const harness = await createAdmissionHarness("tmux:v1:reject");
+  const port = await startDaemon(t, terminal, harness);
+  const client = openTargetSocket(port, harness);
   t.after(() => client.close());
 
   await waitFor(() => terminal.pending.length === 1);

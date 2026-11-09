@@ -1,0 +1,186 @@
+{
+  "generatedAt": "2026-11-08T09:23:14.146Z",
+  "harness": "dev-auth + isolated tmux-backed simulated V1 mux fixture + real connections manager/V1TraversalTransport + real members/organization/routing services + daemon public HTTP (not real accounts, not real V1 daemon)",
+  "cases": [
+    {
+      "name": "green-admit",
+      "expected": {
+        "status": "ok",
+        "code": null,
+        "channelOpens": 0,
+        "inputs": 0
+      },
+      "actual": {
+        "status": "ok",
+        "code": null
+      },
+      "sideEffects": {
+        "channelOpens": 0,
+        "inputs": 0
+      },
+      "passed": true
+    },
+    {
+      "name": "green-raw-input",
+      "expected": {
+        "status": "ok",
+        "code": null,
+        "channelOpens": 1,
+        "inputs": 1
+      },
+      "actual": {
+        "status": "ok",
+        "code": null
+      },
+      "sideEffects": {
+        "channelOpens": 1,
+        "inputs": 1
+      },
+      "passed": true
+    },
+    {
+      "name": "green-stream-ready",
+      "expected": {
+        "status": 200,
+        "code": null,
+        "channelOpens": 1,
+        "inputs": 1
+      },
+      "actual": {
+        "status": 200,
+        "code": null
+      },
+      "sideEffects": {
+        "channelOpens": 1,
+        "inputs": 1
+      },
+      "passed": true
+    },
+    {
+      "name": "green-http-raw-input",
+      "expected": {
+        "status": 200,
+        "code": null,
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "actual": {
+        "status": 200,
+        "code": null
+      },
+      "sideEffects": {
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "red-wrong-machine",
+      "expected": {
+        "status": 404,
+        "code": "MEMBER_NOT_FOUND",
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "actual": {
+        "status": 404,
+        "code": "MEMBER_NOT_FOUND"
+      },
+      "sideEffects": {
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "red-unbound-target",
+      "expected": {
+        "status": 424,
+        "code": "TERMINAL_TARGET_BINDING_UNAVAILABLE",
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "actual": {
+        "status": 424,
+        "code": "TERMINAL_TARGET_BINDING_UNAVAILABLE"
+      },
+      "sideEffects": {
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "red-unknown-target",
+      "expected": {
+        "status": 404,
+        "code": "TERMINAL_TARGET_IDENTITY_MISMATCH",
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "actual": {
+        "status": 404,
+        "code": "TERMINAL_TARGET_IDENTITY_MISMATCH"
+      },
+      "sideEffects": {
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "red-rebind-stale-generation",
+      "expected": {
+        "status": 409,
+        "code": "BINDING_GENERATION_STALE",
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "actual": {
+        "status": 409,
+        "code": "BINDING_GENERATION_STALE"
+      },
+      "sideEffects": {
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "red-wrong-daemon-identity",
+      "expected": {
+        "status": null,
+        "code": "peer_identity_mismatch",
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "actual": {
+        "status": null,
+        "code": "peer_identity_mismatch"
+      },
+      "sideEffects": {
+        "channelOpens": 2,
+        "inputs": 2
+      },
+      "passed": true
+    },
+    {
+      "name": "red-revoked-link",
+      "expected": {
+        "status": null,
+        "code": "TERMINAL_TARGET_BINDING_UNAVAILABLE",
+        "channelOpens": 0,
+        "inputs": 0
+      },
+      "actual": {
+        "status": null,
+        "code": "TERMINAL_TARGET_BINDING_UNAVAILABLE"
+      },
+      "sideEffects": {
+        "channelOpens": 0,
+        "inputs": 0
+      },
+      "passed": true
+    }
+  ]
+}

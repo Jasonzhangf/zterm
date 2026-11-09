@@ -1,0 +1,13 @@
+{
+  "status": "PASS",
+  "results": {
+    "bindPersistsObservedTarget": {
+      "stableId": "$0",
+      "generation": 1
+    },
+    "missingIdentityFailsClosed": "BINDING_HOST_IDENTITY_UNAVAILABLE (refused, no binding or generation written)",
+    "daemonCatalogStableIdDomain": "tmux:v1:<url-encoded identity>",
+    "probeStableIdDomain": "raw tmux session_id $N",
+    "domainGap": "producer $N target does not equal daemon catalog tmux:v1:... target; exact resolve returns null and admission stays unavailable until one domain is authoritative"
+  }
+}

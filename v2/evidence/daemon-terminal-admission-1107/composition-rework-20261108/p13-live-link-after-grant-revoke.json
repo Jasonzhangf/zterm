@@ -1,0 +1,47 @@
+{
+  "beforeRevoke": {
+    "machineId": "mach_e2448932d9e9abbd8394cdc0aa93d2b6",
+    "generation": 1,
+    "path": "direct",
+    "status": "connected",
+    "freshness": "fresh",
+    "observedAt": 1794147233558,
+    "transportKind": "lan",
+    "peerIdentity": "daemon-Macstudio-2.local-e77d4c1116506598",
+    "peerIdentityVerified": true,
+    "capabilities": {
+      "channelKinds": [
+        "terminal"
+      ],
+      "transportKind": "lan"
+    },
+    "backpressure": {
+      "queuedBytes": 0,
+      "bufferedBytes": 0,
+      "backpressured": false
+    }
+  },
+  "afterRevoke": {
+    "machineId": "mach_e2448932d9e9abbd8394cdc0aa93d2b6",
+    "generation": 1,
+    "path": "direct",
+    "status": "connected",
+    "freshness": "fresh",
+    "observedAt": 1794147233558,
+    "transportKind": "lan",
+    "peerIdentity": "daemon-Macstudio-2.local-e77d4c1116506598",
+    "peerIdentityVerified": true,
+    "capabilities": {
+      "channelKinds": [
+        "terminal"
+      ],
+      "transportKind": "lan"
+    },
+    "backpressure": {
+      "queuedBytes": 0,
+      "bufferedBytes": 0,
+      "backpressured": false
+    }
+  },
+  "transportStayedConnected": true
+}

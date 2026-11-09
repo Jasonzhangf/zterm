@@ -1,0 +1,26 @@
+echo ALPHA_INITIAL_FRAME
+fanzhang@Macstudio-2 zterm % echo ALPHA_INITIAL_FRAME
+ALPHA_INITIAL_FRAME
+fanzhang@Macstudio-2 zterm %
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

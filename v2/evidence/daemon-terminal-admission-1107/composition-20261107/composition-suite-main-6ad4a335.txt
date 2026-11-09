@@ -1,0 +1,448 @@
+TAP version 13
+# Subtest: forMachine projects the verified connections link
+ok 1 - forMachine projects the verified connections link
+  ---
+  duration_ms: 1.840417
+  type: 'test'
+  ...
+# Subtest: forMachine fails closed when the connections catalog edge is missing
+ok 2 - forMachine fails closed when the connections catalog edge is missing
+  ---
+  duration_ms: 0.401875
+  type: 'test'
+  ...
+# Subtest: forMachine rejects an unverified peer identity and closes the link
+ok 3 - forMachine rejects an unverified peer identity and closes the link
+  ---
+  duration_ms: 0.130583
+  type: 'test'
+  ...
+# Subtest: input maps stableId to an exact-existing terminal channel and forwards raw bytes
+ok 4 - input maps stableId to an exact-existing terminal channel and forwards raw bytes
+  ---
+  duration_ms: 0.822542
+  type: 'test'
+  ...
+# Subtest: input rejects a stableId that is not in the current catalog
+ok 5 - input rejects a stableId that is not in the current catalog
+  ---
+  duration_ms: 0.196458
+  type: 'test'
+  ...
+# Subtest: subscribe opens one channel and returns an unsubscribe that closes it
+ok 6 - subscribe opens one channel and returns an unsubscribe that closes it
+  ---
+  duration_ms: 0.192834
+  type: 'test'
+  ...
+# Subtest: subscribe accepts object listeners and emits committed terminal frames
+ok 7 - subscribe accepts object listeners and emits committed terminal frames
+  ---
+  duration_ms: 1.507958
+  type: 'test'
+  ...
+# Subtest: subscribe emits only after all frame chunks are assembled
+ok 8 - subscribe emits only after all frame chunks are assembled
+  ---
+  duration_ms: 0.326459
+  type: 'test'
+  ...
+# Subtest: forMachine reuses one link per machine and keeps catalogs machine-scoped
+ok 9 - forMachine reuses one link per machine and keeps catalogs machine-scoped
+  ---
+  duration_ms: 0.48275
+  type: 'test'
+  ...
+# Subtest: terminal routes fail closed with typed unavailable when admission is missing
+ok 10 - terminal routes fail closed with typed unavailable when admission is missing
+  ---
+  duration_ms: 20.754875
+  type: 'test'
+  ...
+# Subtest: terminal routes fail closed before token configuration is considered
+ok 11 - terminal routes fail closed before token configuration is considered
+  ---
+  duration_ms: 4.73475
+  type: 'test'
+  ...
+# Subtest: routing-configured daemon rejects a legacy terminal input that bypasses admission
+ok 12 - routing-configured daemon rejects a legacy terminal input that bypasses admission
+  ---
+  duration_ms: 57.265459
+  type: 'test'
+  ...
+# Subtest: admission rejects missing and invalid credentials before target access
+ok 13 - admission rejects missing and invalid credentials before target access
+  ---
+  duration_ms: 48.088875
+  type: 'test'
+  ...
+# Subtest: admission rejects an unauthorized workspace
+ok 14 - admission rejects an unauthorized workspace
+  ---
+  duration_ms: 41.573583
+  type: 'test'
+  ...
+# Subtest: admission rejects an unknown member
+ok 15 - admission rejects an unknown member
+  ---
+  duration_ms: 38.570458
+  type: 'test'
+  ...
+# Subtest: admission rejects an unbound member
+ok 16 - admission rejects an unbound member
+  ---
+  duration_ms: 36.929625
+  type: 'test'
+  ...
+# Subtest: admission rejects a stale binding generation
+ok 17 - admission rejects a stale binding generation
+  ---
+  duration_ms: 39.999583
+  type: 'test'
+  ...
+# Subtest: admission rejects a missing or wrong terminal target identity
+ok 18 - admission rejects a missing or wrong terminal target identity
+  ---
+  duration_ms: 50.649833
+  type: 'test'
+  ...
+# Subtest: admission rejects an authorized member targeting an unrelated terminal
+ok 19 - admission rejects an authorized member targeting an unrelated terminal
+  ---
+  duration_ms: 61.430083
+  type: 'test'
+  ...
+# Subtest: admission opens the exact existingOnly target and forwards typed input
+ok 20 - admission opens the exact existingOnly target and forwards typed input
+  ---
+  duration_ms: 78.286583
+  type: 'test'
+  ...
+# Subtest: admission forwards nonempty raw input without appending an Enter
+ok 21 - admission forwards nonempty raw input without appending an Enter
+  ---
+  duration_ms: 69.509375
+  type: 'test'
+  ...
+# Subtest: admission forwards one Enter as exactly one CR
+ok 22 - admission forwards one Enter as exactly one CR
+  ---
+  duration_ms: 69.259792
+  type: 'test'
+  ...
+# Subtest: admission stream exposes the exact admitted session
+ok 23 - admission stream exposes the exact admitted session
+  ---
+  duration_ms: 4066.019
+  type: 'test'
+  ...
+# Subtest: startDaemon forwards admission to the public input route
+ok 24 - startDaemon forwards admission to the public input route
+  ---
+  duration_ms: 45.933958
+  type: 'test'
+  ...
+# Subtest: admission rejects the same target text when the scoped consumer belongs to another machine
+ok 25 - admission rejects the same target text when the scoped consumer belongs to another machine
+  ---
+  duration_ms: 78.526542
+  type: 'test'
+  ...
+# Subtest: admission rejects a revoked machine link before opening the target
+ok 26 - admission rejects a revoked machine link before opening the target
+  ---
+  duration_ms: 55.37025
+  type: 'test'
+  ...
+# Subtest: admission preserves a connections peer identity mismatch
+ok 27 - admission preserves a connections peer identity mismatch
+  ---
+  duration_ms: 43.818125
+  type: 'test'
+  ...
+# Subtest: admission rejects a superseded link generation before dispatch
+ok 28 - admission rejects a superseded link generation before dispatch
+  ---
+  duration_ms: 49.963125
+  type: 'test'
+  ...
+# Subtest: admission rejects a rebind that lands between lookup and dispatch
+ok 29 - admission rejects a rebind that lands between lookup and dispatch
+  ---
+  duration_ms: 67.95125
+  type: 'test'
+  ...
+# Subtest: admission fails closed when the machine terminal consumer is absent
+ok 30 - admission fails closed when the machine terminal consumer is absent
+  ---
+  duration_ms: 55.065042
+  type: 'test'
+  ...
+# Subtest: admission fails closed when members does not expose the public resolver
+ok 31 - admission fails closed when members does not expose the public resolver
+  ---
+  duration_ms: 44.848375
+  type: 'test'
+  ...
+# Subtest: admitted raw input preserves exact bytes and does not add an Enter
+ok 32 - admitted raw input preserves exact bytes and does not add an Enter
+  ---
+  duration_ms: 26.296917
+  type: 'test'
+  ...
+# Subtest: legacy raw flag values do not change admitted byte forwarding
+ok 33 - legacy raw flag values do not change admitted byte forwarding
+  ---
+  duration_ms: 10.459125
+  type: 'test'
+  ...
+# Subtest: missing or non-string data is rejected before reaching terminal.input
+ok 34 - missing or non-string data is rejected before reaching terminal.input
+  ---
+  duration_ms: 5.397459
+  type: 'test'
+  ...
+# Subtest: invalid admitted input produces a typed 400 and no terminal side effect
+ok 35 - invalid admitted input produces a typed 400 and no terminal side effect
+  ---
+  duration_ms: 1.886792
+  type: 'test'
+  ...
+# Subtest: admitted input preserves delivery order and cannot bypass auth or target checks
+ok 36 - admitted input preserves delivery order and cannot bypass auth or target checks
+  ---
+  duration_ms: 4.925166
+  type: 'test'
+  ...
+# Subtest: daemon keeps the V1 session catalog token-gated while terminal data routes fail closed without admission
+ok 37 - daemon keeps the V1 session catalog token-gated while terminal data routes fail closed without admission
+  ---
+  duration_ms: 60.577459
+  type: 'test'
+  ...
+# Subtest: V1 credential failure maps to an explicit connection error before any target access
+ok 38 - V1 credential failure maps to an explicit connection error before any target access
+  ---
+  duration_ms: 26.944333
+  type: 'test'
+  ...
+# Subtest: cookie session no longer bypasses terminal admission
+ok 39 - cookie session no longer bypasses terminal admission
+  ---
+  duration_ms: 27.057625
+  type: 'test'
+  ...
+# Subtest: tmux host probe observes the exact session_id target
+ok 40 - tmux host probe observes the exact session_id target
+  ---
+  duration_ms: 34.724209
+  type: 'test'
+  ...
+# Subtest: tmux host probe surfaces an injected authoritative machine identity
+ok 41 - tmux host probe surfaces an injected authoritative machine identity
+  ---
+  duration_ms: 37.479667
+  type: 'test'
+  ...
+# Subtest: tmux host probe reports anchorPresent true for a live pane
+ok 42 - tmux host probe reports anchorPresent true for a live pane
+  ---
+  duration_ms: 32.366
+  type: 'test'
+  ...
+# Subtest: tmux host probe reports anchorPresent false for a missing pane
+ok 43 - tmux host probe reports anchorPresent false for a missing pane
+  ---
+  duration_ms: 31.455708
+  type: 'test'
+  ...
+# Subtest: tmux host probe reports unavailable for a missing session
+ok 44 - tmux host probe reports unavailable for a missing session
+  ---
+  duration_ms: 5.246541
+  type: 'test'
+  ...
+# Subtest: runtime config is owned by members, keyed by memberId, and survives reopen
+ok 45 - runtime config is owned by members, keyed by memberId, and survives reopen
+  ---
+  duration_ms: 12.225583
+  type: 'test'
+  ...
+# Subtest: bindings are independent per member and CAS update advances generation
+ok 46 - bindings are independent per member and CAS update advances generation
+  ---
+  duration_ms: 9.584334
+  type: 'test'
+  ...
+# Subtest: stale expected generation is rejected with BINDING_GENERATION_STALE
+ok 47 - stale expected generation is rejected with BINDING_GENERATION_STALE
+  ---
+  duration_ms: 5.547042
+  type: 'test'
+  ...
+# Subtest: binding and runtime persist across a reopened store instance
+ok 48 - binding and runtime persist across a reopened store instance
+  ---
+  duration_ms: 5.072417
+  type: 'test'
+  ...
+# Subtest: missing or wrong token is rejected before any members store write
+ok 49 - missing or wrong token is rejected before any members store write
+  ---
+  duration_ms: 7.450083
+  type: 'test'
+  ...
+# Subtest: missing scope is rejected with MEMBER_FORBIDDEN_SCOPE and no side effect
+ok 50 - missing scope is rejected with MEMBER_FORBIDDEN_SCOPE and no side effect
+  ---
+  duration_ms: 3.292916
+  type: 'test'
+  ...
+# Subtest: cross workspace and cross account targets are rejected with no side effect
+ok 51 - cross workspace and cross account targets are rejected with no side effect
+  ---
+  duration_ms: 6.242375
+  type: 'test'
+  ...
+# Subtest: verifyHost confirms the host machine identity and rejects mismatch
+ok 52 - verifyHost confirms the host machine identity and rejects mismatch
+  ---
+  duration_ms: 10.796041
+  type: 'test'
+  ...
+# Subtest: restoreBinding re-verifies the host and returns typed BINDING_HOST_UNAVAILABLE
+ok 53 - restoreBinding re-verifies the host and returns typed BINDING_HOST_UNAVAILABLE
+  ---
+  duration_ms: 11.543542
+  type: 'test'
+  ...
+# Subtest: verifyHost and restoreBinding reject missing authoritative machine identity
+ok 54 - verifyHost and restoreBinding reject missing authoritative machine identity
+  ---
+  duration_ms: 3.310167
+  type: 'test'
+  ...
+# Subtest: verifyHost and restoreBinding reject missing authoritative machine identity on an existing binding
+ok 55 - verifyHost and restoreBinding reject missing authoritative machine identity on an existing binding
+  ---
+  duration_ms: 4.074292
+  type: 'test'
+  ...
+# Subtest: bindSession refuses a wrong-machine host observation with no binding or generation write
+ok 56 - bindSession refuses a wrong-machine host observation with no binding or generation write
+  ---
+  duration_ms: 3.117625
+  type: 'test'
+  ...
+# Subtest: bindSession refuses a missing anchor observation with no binding or generation write
+ok 57 - bindSession refuses a missing anchor observation with no binding or generation write
+  ---
+  duration_ms: 3.144541
+  type: 'test'
+  ...
+# Subtest: bindSession requires a runtime configuration before writing a binding
+ok 58 - bindSession requires a runtime configuration before writing a binding
+  ---
+  duration_ms: 2.4595
+  type: 'test'
+  ...
+# Subtest: configureRuntime to a different machine invalidates the old binding atomically
+ok 59 - configureRuntime to a different machine invalidates the old binding atomically
+  ---
+  duration_ms: 4.830416
+  type: 'test'
+  ...
+# Subtest: getRuntimeBinding returns machineId and bindingGeneration for the same generation
+ok 60 - getRuntimeBinding returns machineId and bindingGeneration for the same generation
+  ---
+  duration_ms: 3.44025
+  type: 'test'
+  ...
+# Subtest: getRuntimeBinding rejects missing runtime configuration
+ok 61 - getRuntimeBinding rejects missing runtime configuration
+  ---
+  duration_ms: 2.479083
+  type: 'test'
+  ...
+# Subtest: getRuntimeBinding rejects an invalid binding with a typed error
+ok 62 - getRuntimeBinding rejects an invalid binding with a typed error
+  ---
+  duration_ms: 3.944084
+  type: 'test'
+  ...
+# Subtest: bindSession persists the observed terminalTarget, replaces it on rebind, and an observed null clears it
+ok 63 - bindSession persists the observed terminalTarget, replaces it on rebind, and an observed null clears it
+  ---
+  duration_ms: 7.346792
+  type: 'test'
+  ...
+# Subtest: bindSession rejects a malformed terminalTarget before writing a binding
+ok 64 - bindSession rejects a malformed terminalTarget before writing a binding
+  ---
+  duration_ms: 4.220625
+  type: 'test'
+  ...
+# Subtest: resolveBindingTarget returns a copy only on an exact catalog match
+ok 65 - resolveBindingTarget returns a copy only on an exact catalog match
+  ---
+  duration_ms: 0.302042
+  type: 'test'
+  ...
+# Subtest: binding generation stays monotonic across invalidation and never reissues an old tuple
+ok 66 - binding generation stays monotonic across invalidation and never reissues an old tuple
+  ---
+  duration_ms: 7.812125
+  type: 'test'
+  ...
+# Subtest: configureRuntime invalidates the binding when hostKind, agentKind, or launchProfileRef changes
+ok 67 - configureRuntime invalidates the binding when hostKind, agentKind, or launchProfileRef changes
+  ---
+  duration_ms: 8.761084
+  type: 'test'
+  ...
+# Subtest: AuthContext.members allowlist gates every public action before store or probe side effects
+ok 68 - AuthContext.members allowlist gates every public action before store or probe side effects
+  ---
+  duration_ms: 6.192209
+  type: 'test'
+  ...
+# Subtest: legacy version-1 store backfills the binding generation before any rebind
+ok 69 - legacy version-1 store backfills the binding generation before any rebind
+  ---
+  duration_ms: 5.299208
+  type: 'test'
+  ...
+# Subtest: bindSession refuses a caller assertion that disagrees with the host observation
+ok 70 - bindSession refuses a caller assertion that disagrees with the host observation
+  ---
+  duration_ms: 3.001333
+  type: 'test'
+  ...
+# Subtest: verifyHost and restoreBinding refuse when the persisted target no longer matches the host observation
+ok 71 - verifyHost and restoreBinding refuse when the persisted target no longer matches the host observation
+  ---
+  duration_ms: 3.941417
+  type: 'test'
+  ...
+# Subtest: the same target text on a different machine cannot pass verification
+ok 72 - the same target text on a different machine cannot pass verification
+  ---
+  duration_ms: 3.224584
+  type: 'test'
+  ...
+# Subtest: host-adapters public probe is the real producer consumed by members bind and verify
+ok 73 - host-adapters public probe is the real producer consumed by members bind and verify
+  ---
+  duration_ms: 67.779375
+  type: 'test'
+  ...
+1..73
+# tests 73
+# suites 0
+# pass 73
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5285.083792

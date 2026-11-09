@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: admission forwards nonempty raw input without appending an Enter
+ok 1 - admission forwards nonempty raw input without appending an Enter
+  ---
+  duration_ms: 95.771459
+  type: 'test'
+  ...
+# Subtest: admission forwards one Enter as exactly one CR
+ok 2 - admission forwards one Enter as exactly one CR
+  ---
+  duration_ms: 64.531958
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 318.82225

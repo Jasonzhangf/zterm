@@ -1,0 +1,14 @@
+$ git diff -- v2/modules/connections/src/public/index.mjs
+diff --git a/v2/modules/connections/src/public/index.mjs b/v2/modules/connections/src/public/index.mjs
+index f12709ba..cdefa49b 100644
+--- a/v2/modules/connections/src/public/index.mjs
++++ b/v2/modules/connections/src/public/index.mjs
+@@ -1,5 +1,6 @@
+ export { createConnectionManager } from "./link-port.ts";
+ export { ConnectionError } from "./errors.ts";
++export { V1TraversalTransport } from "../adapters/v1-traversal.ts";
+ 
+ /**
+  * Resolve one member's machine-scoped authorized terminal directory.
+
+exit code: 0

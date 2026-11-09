@@ -1,0 +1,22 @@
+{
+  "status": 403,
+  "body": {
+    "error": {
+      "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+      "owningModule": "accounts",
+      "operationId": "terminal.admission",
+      "cause": {
+        "sourceCode": "WORKSPACE_AUTHORIZATION_REQUIRED",
+        "sourceModule": null,
+        "details": null,
+        "message": "No workspace authorization grant exists for this account."
+      },
+      "message": "No workspace authorization grant exists for this account."
+    }
+  },
+  "sideEffects": {
+    "connects": 1,
+    "channelOpens": 2,
+    "inputWrites": 1
+  }
+}

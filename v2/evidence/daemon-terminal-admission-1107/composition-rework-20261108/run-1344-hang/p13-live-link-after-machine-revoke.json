@@ -1,0 +1,30 @@
+{
+  "revokedMachine": {
+    "machineId": "mach_a2acea3faa7172d8ac11a30a8e305378",
+    "status": "revoked",
+    "deviceName": null
+  },
+  "observation": {
+    "machineId": "mach_a2acea3faa7172d8ac11a30a8e305378",
+    "generation": 1,
+    "path": "direct",
+    "status": "connected",
+    "freshness": "fresh",
+    "observedAt": 1794145497849,
+    "transportKind": "lan",
+    "peerIdentity": "daemon-Macstudio-2.local-e77d4c1116506598",
+    "peerIdentityVerified": true,
+    "capabilities": {
+      "channelKinds": [
+        "terminal"
+      ],
+      "transportKind": "lan"
+    },
+    "backpressure": {
+      "queuedBytes": 0,
+      "bufferedBytes": 0,
+      "backpressured": false
+    }
+  },
+  "transportStayedConnected": true
+}

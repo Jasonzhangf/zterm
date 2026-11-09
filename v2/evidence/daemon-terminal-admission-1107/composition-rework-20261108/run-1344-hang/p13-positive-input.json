@@ -1,0 +1,30 @@
+{
+  "status": 200,
+  "body": {
+    "accepted": true,
+    "receipt": {
+      "channelId": "link:mach_a2acea3faa7172d8ac11a30a8e305378#terminal#2",
+      "linkId": "link:mach_a2acea3faa7172d8ac11a30a8e305378",
+      "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D"
+    },
+    "admission": {
+      "memberId": "mbr_135c283b-e848-4b7e-8cf5-ac93ab252fcf",
+      "bindingGeneration": 2,
+      "backend": "tmux",
+      "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D"
+    },
+    "observation": {
+      "source": "v1-mux",
+      "observedAt": "2026-11-08T13:44:57.988Z",
+      "value": {
+        "target": "fixture-alpha-28147",
+        "inputSubmitted": true
+      }
+    }
+  },
+  "sideEffects": {
+    "connects": 1,
+    "channelOpens": 2,
+    "inputWrites": 1
+  }
+}

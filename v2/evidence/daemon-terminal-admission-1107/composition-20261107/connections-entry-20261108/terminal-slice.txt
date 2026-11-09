@@ -1,0 +1,28 @@
+TAP version 13
+# Subtest: daemon keeps the V1 session catalog token-gated while terminal data routes fail closed without admission
+ok 1 - daemon keeps the V1 session catalog token-gated while terminal data routes fail closed without admission
+  ---
+  duration_ms: 61.975541
+  type: 'test'
+  ...
+# Subtest: V1 credential failure maps to an explicit connection error before any target access
+ok 2 - V1 credential failure maps to an explicit connection error before any target access
+  ---
+  duration_ms: 27.378584
+  type: 'test'
+  ...
+# Subtest: cookie session no longer bypasses terminal admission
+ok 3 - cookie session no longer bypasses terminal admission
+  ---
+  duration_ms: 24.107375
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 266.38775

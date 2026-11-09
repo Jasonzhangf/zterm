@@ -1,6 +1,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createDaemon } from "./server.mjs";
+import { loadStartupConfig } from "./startup-config.mjs";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
@@ -26,7 +27,14 @@ export async function startDaemon({
   webuiDir,
   log,
   terminalPort,
+  admission,
   clientInstanceId,
+  workspaceAuth,
+  organization,
+  members,
+  routing,
+  memberHostObserver,
+  terminalCatalog,
 } = {}) {
   assertBindIsAllowed(host);
 
@@ -37,7 +45,14 @@ export async function startDaemon({
     webuiDir,
     log: log || ((entry) => process.stdout.write(`${JSON.stringify(entry)}\n`)),
     terminalPort,
+    admission,
     clientInstanceId,
+    workspaceAuth,
+    organization,
+    members,
+    routing,
+    memberHostObserver,
+    terminalCatalog,
   });
 
   await new Promise((resolve, reject) => {
@@ -50,23 +65,37 @@ export async function startDaemon({
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const args = process.argv.slice(2);
-  const port = Number(readArg(args, "--port") || process.env.PORT || 3334);
-  const host = readArg(args, "--host") || process.env.ZTERM_V2_HOST || "127.0.0.1";
+  const configPath = readArg(args, "--config") || process.env.ZTERM_V2_CONFIG || "";
+  const assembled = configPath
+    ? await loadStartupConfig(configPath)
+    : null;
+  const port = Number(
+    readArg(args, "--port")
+    || (assembled ? assembled.server.port : process.env.PORT)
+    || 3334,
+  );
+  const host = readArg(args, "--host")
+    || (assembled ? assembled.server.host : process.env.ZTERM_V2_HOST)
+    || "127.0.0.1";
   const v1WsUrl = readArg(args, "--v1-ws-url") || process.env.ZTERM_V1_WS_URL || "";
   const v1Token = process.env.ZTERM_V1_AUTH_TOKEN || "";
   const v2Token = process.env.ZTERM_V2_AUTH_TOKEN || "";
   const webuiDir = readArg(args, "--webui-dir");
 
-  const daemon = await startDaemon({ port, host, v1WsUrl, v1Token, v2Token, webuiDir });
+  const daemon = assembled
+    ? await startDaemon({ port, host, ...assembled.daemonOptions })
+    : await startDaemon({ port, host, v1WsUrl, v1Token, v2Token, webuiDir });
   const address = daemon.server.address();
+  const effectiveV1Token = assembled ? assembled.daemonOptions.v1Token : v1Token;
+  const effectiveV2Token = assembled ? assembled.daemonOptions.v2Token : v2Token;
   process.stdout.write(
     `${JSON.stringify({
       event: "listening",
       host: address.address,
       port: address.port,
       v1WsUrl: daemon.resolvedV1WsUrl,
-      v2AuthRequired: Boolean(v2Token),
-      v1AuthConfigured: Boolean(v1Token),
+      v2AuthRequired: Boolean(effectiveV2Token),
+      v1AuthConfigured: Boolean(effectiveV1Token),
     })}\n`,
   );
 

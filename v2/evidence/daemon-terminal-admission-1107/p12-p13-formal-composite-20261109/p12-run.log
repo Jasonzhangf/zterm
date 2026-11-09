@@ -1,0 +1,33 @@
+{
+  "ok": true,
+  "probe": "p12-committed-frame-probe",
+  "supportedEntry": "startDaemon",
+  "fixture": {
+    "port": 56129,
+    "alpha": "fixture-alpha-46546",
+    "alphaStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2246550%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794168385%7D",
+    "daemonHostId": "daemon-Macstudio-2.local-e4f4de19edf5c3f6"
+  },
+  "stream": {
+    "readySeen": true,
+    "committedInitialFrameObserved": true,
+    "committedOutputFrameObserved": true
+  },
+  "input": {
+    "lastByteHex": "0d",
+    "crReal": true
+  },
+  "uniqueOutput": {
+    "marker": "P12OUT_p12mw8mg7oycegjbd_d9c58004",
+    "token": "d9c58004",
+    "tokenInInputText": false,
+    "streamFrameConfirmed": true,
+    "tmuxCaptureConfirmed": true
+  },
+  "sideEffectsAfterPositive": {
+    "connects": 1,
+    "channelOpens": 1,
+    "inputWrites": 1
+  },
+  "completedAt": "2026-11-09T02:08:02.471Z"
+}
