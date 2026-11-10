@@ -175,41 +175,78 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
     },
 
     async resolveTerminalAdmission(session = {}) {
-      const stableId = typeof session.stableId === "string"
+      const workspaceId = session.workspaceId;
+      const memberId = session.memberId;
+      if (
+        typeof workspaceId !== "string"
+        || workspaceId.trim() === ""
+        || typeof memberId !== "string"
+        || memberId.trim() === ""
+      ) {
+        return null;
+      }
+
+      const requestedStableId = typeof session.stableId === "string" && session.stableId !== ""
         ? session.stableId
         : (typeof session.binding?.terminalTarget?.stableId === "string"
           ? session.binding.terminalTarget.stableId
           : "");
-      if (!stableId) {
+
+      const memberRuntime = await this.getMemberRuntime({ workspaceId, memberId });
+      const member = memberRuntime?.member;
+      const requestedGroupPath = typeof session.groupPath === "string" && session.groupPath !== ""
+        ? session.groupPath
+        : "";
+      const responseGroupPath = typeof member?.groupPath === "string" && member.groupPath !== ""
+        ? member.groupPath
+        : "";
+      const groupPath = requestedGroupPath || responseGroupPath;
+      if (
+        !member
+        || typeof member !== "object"
+        || String(member.memberId ?? "") !== memberId
+        || String(member.workspaceId ?? "") !== workspaceId
+      ) {
+        throw new DaemonError({
+          code: "WORKSPACE_SCOPE_MISMATCH",
+          message: "Daemon returned a member outside the requested workspace scope.",
+        }, 502);
+      }
+
+      const binding = memberRuntime.binding;
+      const target = binding?.terminalTarget;
+      const runtimeMachineId = memberRuntime.runtime?.machineId;
+      const bindingMachineId = binding?.machineId;
+      if (
+        !binding
+        || !target
+        || typeof target.backend !== "string"
+        || target.backend === ""
+        || typeof target.stableId !== "string"
+        || target.stableId === ""
+        || binding.generation == null
+        || typeof groupPath !== "string"
+        || groupPath === ""
+        || typeof runtimeMachineId !== "string"
+        || runtimeMachineId === ""
+        || typeof bindingMachineId !== "string"
+        || bindingMachineId === ""
+        || runtimeMachineId !== bindingMachineId
+        || (requestedGroupPath !== "" && responseGroupPath !== "" && responseGroupPath !== requestedGroupPath)
+        || (requestedStableId !== "" && target.stableId !== requestedStableId)
+      ) {
         return null;
       }
-      const workspaces = await this.listWorkspaces();
-      for (const workspace of workspaces) {
-        const workspaceId = workspace.workspaceId;
-        if (!workspaceId) {
-          continue;
-        }
-        const tree = await this.getWorkspaceTree({ workspaceId });
-        const members = flattenTree(tree.root);
-        for (const member of members) {
-          const runtime = await this.getMemberRuntime({ workspaceId, memberId: member.memberId });
-          const binding = runtime.binding;
-          const target = binding && binding.terminalTarget;
-          if (!target || target.stableId !== stableId) {
-            continue;
-          }
-          return {
-            workspaceId,
-            memberId: member.memberId,
-            machineId: runtime.runtime?.machineId ?? binding.machineId ?? "",
-            groupPath: member.groupPath ?? "",
-            expectedGeneration: binding.generation,
-            backend: target.backend,
-            stableId: target.stableId,
-          };
-        }
-      }
-      return null;
+
+      return {
+        workspaceId,
+        memberId,
+        machineId: runtimeMachineId,
+        groupPath,
+        expectedGeneration: binding.generation,
+        backend: target.backend,
+        stableId: target.stableId,
+      };
     },
 
     openTerminalStream(admission, { onReady, onBuffer, onError } = {}) {

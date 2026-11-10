@@ -59,6 +59,41 @@ function createTree() {
   }
 }
 
+function createScopedRuntime(overrides = {}) {
+  return {
+    member: {
+      memberId: 'm-scoped',
+      workspaceId: 'ws-scoped',
+      groupId: 'g-scoped',
+      groupPath: '/acme/team',
+      name: 'Scoped Member',
+      managerMemberId: null,
+      ...overrides.member,
+    },
+    runtime: {
+      memberId: 'm-scoped',
+      machineId: 'machine-scoped',
+      hostKind: 'tmux',
+      agentKind: 'codex',
+      ...overrides.runtime,
+    },
+    binding: {
+      machineId: 'machine-scoped',
+      sessionId: 'session-scoped',
+      generation: 4,
+      terminalTarget: {
+        backend: 'tmux',
+        stableId: 'tmux:v1:scoped',
+      },
+      ...overrides.binding,
+    },
+    availability: {
+      status: 'bound',
+      observedAt: '2026-11-10T17:00:00.000Z',
+    },
+  }
+}
+
 function createFetchRecorder() {
   const calls = []
   const fetchImpl = async (url, options = {}) => {
@@ -166,4 +201,232 @@ test('workspace snapshot rejects omitted workspace scope ids', async () => {
     createDaemonApi({ fetchImpl: makeFetch('ws-1') }).getWorkspaceSnapshot({ workspaceId: 'ws-1' }),
     (error) => error.code === 'WORKSPACE_SCOPE_MISMATCH',
   )
+})
+
+test('terminal admission reads one scoped member runtime and preserves its identity', async () => {
+  const calls = []
+  const api = createDaemonApi({
+    fetchImpl: async (url) => {
+      const parsed = new URL(String(url), 'http://daemon.test')
+      calls.push(parsed.pathname)
+      if (parsed.pathname === '/api/workspaces/ws-scoped/members/m-scoped/runtime') {
+        return jsonResponse(200, createScopedRuntime())
+      }
+      return jsonResponse(405, { error: { code: 'METHOD_NOT_ALLOWED' } })
+    },
+  })
+
+  const admission = await api.resolveTerminalAdmission({
+    workspaceId: 'ws-scoped',
+    memberId: 'm-scoped',
+  })
+
+  assert.deepEqual(admission, {
+    workspaceId: 'ws-scoped',
+    memberId: 'm-scoped',
+    machineId: 'machine-scoped',
+    groupPath: '/acme/team',
+    expectedGeneration: 4,
+    backend: 'tmux',
+    stableId: 'tmux:v1:scoped',
+  })
+  assert.deepEqual(calls, ['/api/workspaces/ws-scoped/members/m-scoped/runtime'])
+})
+
+test('terminal admission uses the scoped session group path when the runtime member omits it', async () => {
+  const api = createDaemonApi({
+    fetchImpl: async (url) => {
+      const parsed = new URL(String(url), 'http://daemon.test')
+      if (parsed.pathname === '/api/workspaces/ws-scoped/members/m-scoped/runtime') {
+        return jsonResponse(200, createScopedRuntime({
+          member: { groupPath: undefined },
+        }))
+      }
+      return jsonResponse(405, { error: { code: 'METHOD_NOT_ALLOWED' } })
+    },
+  })
+
+  const admission = await api.resolveTerminalAdmission({
+    workspaceId: 'ws-scoped',
+    memberId: 'm-scoped',
+    groupPath: '/acme/team',
+  })
+
+  assert.equal(admission.groupPath, '/acme/team')
+})
+
+test('terminal admission never resolves a shared stable id through another workspace', async () => {
+  const calls = []
+  const api = createDaemonApi({
+    fetchImpl: async (url) => {
+      const parsed = new URL(String(url), 'http://daemon.test')
+      calls.push(parsed.pathname)
+      if (parsed.pathname === '/api/workspaces') {
+        return jsonResponse(200, {
+          workspaces: [
+            { workspaceId: 'ws-other' },
+            { workspaceId: 'ws-scoped' },
+          ],
+        })
+      }
+      if (parsed.pathname === '/api/workspaces/ws-other/tree') {
+        return jsonResponse(200, {
+          workspace: { workspaceId: 'ws-other' },
+          root: {
+            path: '/other',
+            members: [{
+              memberId: 'm-other',
+              workspaceId: 'ws-other',
+              groupId: 'g-other',
+              name: 'Other Member',
+            }],
+            children: [],
+          },
+        })
+      }
+      if (parsed.pathname === '/api/workspaces/ws-other/members/m-other/runtime') {
+        return jsonResponse(200, createScopedRuntime({
+          member: {
+            memberId: 'm-other',
+            workspaceId: 'ws-other',
+            groupId: 'g-other',
+            groupPath: '/other',
+            name: 'Other Member',
+          },
+          runtime: { memberId: 'm-other', machineId: 'machine-other' },
+          binding: {
+            machineId: 'machine-other',
+            terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:scoped' },
+          },
+        }))
+      }
+      if (parsed.pathname === '/api/workspaces/ws-scoped/members/m-scoped/runtime') {
+        return jsonResponse(200, createScopedRuntime())
+      }
+      return jsonResponse(405, { error: { code: 'METHOD_NOT_ALLOWED' } })
+    },
+  })
+
+  const admission = await api.resolveTerminalAdmission({
+    workspaceId: 'ws-scoped',
+    memberId: 'm-scoped',
+    stableId: 'tmux:v1:scoped',
+  })
+
+  assert.equal(admission.workspaceId, 'ws-scoped')
+  assert.equal(admission.memberId, 'm-scoped')
+  assert.deepEqual(calls, ['/api/workspaces/ws-scoped/members/m-scoped/runtime'])
+})
+
+test('terminal admission rejects a member runtime outside the requested identity', async () => {
+  const cases = [
+    { member: { memberId: 'm-other' } },
+    { member: { memberId: undefined } },
+    { member: { workspaceId: 'ws-other' } },
+  ]
+
+  for (const overrides of cases) {
+    const api = createDaemonApi({
+      fetchImpl: async (url) => {
+        const parsed = new URL(String(url), 'http://daemon.test')
+        if (parsed.pathname === '/api/workspaces/ws-scoped/members/m-scoped/runtime') {
+          return jsonResponse(200, createScopedRuntime(overrides))
+        }
+        return jsonResponse(405, { error: { code: 'METHOD_NOT_ALLOWED' } })
+      },
+    })
+
+    await assert.rejects(
+      api.resolveTerminalAdmission({
+        workspaceId: 'ws-scoped',
+        memberId: 'm-scoped',
+      }),
+      (error) => {
+        assert.equal(error.code, 'WORKSPACE_SCOPE_MISMATCH')
+        return true
+      },
+    )
+  }
+})
+
+test('terminal admission fails closed on a requested terminal target mismatch', async () => {
+  const runtimes = [
+    createScopedRuntime(),
+    createScopedRuntime({ binding: { terminalTarget: null } }),
+  ]
+  const sessions = [
+    { stableId: 'tmux:v1:different' },
+    {
+      stableId: '',
+      binding: { terminalTarget: { stableId: 'tmux:v1:different' } },
+    },
+  ]
+
+  for (const runtime of runtimes) {
+    for (const session of sessions) {
+      const calls = []
+      const api = createDaemonApi({
+        fetchImpl: async (url) => {
+          const parsed = new URL(String(url), 'http://daemon.test')
+          calls.push(parsed.pathname)
+          if (parsed.pathname === '/api/workspaces/ws-scoped/members/m-scoped/runtime') {
+            return jsonResponse(200, runtime)
+          }
+          return jsonResponse(405, { error: { code: 'METHOD_NOT_ALLOWED' } })
+        },
+      })
+
+      const admission = await api.resolveTerminalAdmission({
+        workspaceId: 'ws-scoped',
+        memberId: 'm-scoped',
+        ...session,
+      })
+
+      assert.equal(admission, null)
+      assert.deepEqual(calls, ['/api/workspaces/ws-scoped/members/m-scoped/runtime'])
+    }
+  }
+})
+
+test('terminal admission fails closed when runtime and binding machines differ', async () => {
+  const api = createDaemonApi({
+    fetchImpl: async (url) => {
+      const parsed = new URL(String(url), 'http://daemon.test')
+      if (parsed.pathname === '/api/workspaces/ws-scoped/members/m-scoped/runtime') {
+        return jsonResponse(200, createScopedRuntime({
+          binding: { machineId: 'machine-other' },
+        }))
+      }
+      return jsonResponse(405, { error: { code: 'METHOD_NOT_ALLOWED' } })
+    },
+  })
+
+  assert.equal(await api.resolveTerminalAdmission({
+    workspaceId: 'ws-scoped',
+    memberId: 'm-scoped',
+  }), null)
+})
+
+test('terminal admission fails closed before runtime reads when scope ids are missing', async () => {
+  const sessions = [
+    {},
+    { workspaceId: 'ws-scoped' },
+    { memberId: 'm-scoped' },
+    { workspaceId: '', memberId: 'm-scoped' },
+    { workspaceId: 'ws-scoped', memberId: '' },
+  ]
+
+  for (const session of sessions) {
+    const calls = []
+    const api = createDaemonApi({
+      fetchImpl: async (url) => {
+        const parsed = new URL(String(url), 'http://daemon.test')
+        calls.push(parsed.pathname)
+        return jsonResponse(200, createScopedRuntime())
+      },
+    })
+
+    assert.equal(await api.resolveTerminalAdmission(session), null)
+    assert.deepEqual(calls, [])
+  }
 })
