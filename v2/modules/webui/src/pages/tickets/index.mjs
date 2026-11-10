@@ -136,9 +136,7 @@ export function renderTicketsPage(state = {}, helpers = {}) {
     : `<div class="v2-ticket-list" data-role="ticket-list">${filteredTickets.map((ticket) => `<div class="v2-ticket-item" data-ticket-id="${esc(ticket.ticketId)}" data-workspace-id="${esc(activeWorkspaceId)}" data-ticket-status="${esc(ticket.status || '')}">${esc(ticket.title || ticket.ticketId)} ${esc(ticket.status || '')}</div>`).join('')}</div>`
 
   const selectedTicket = filteredTickets.find((ticket) => ticket.ticketId === selectedTicketId)
-    || scopedTickets.find((ticket) => ticket.ticketId === selectedTicketId)
     || filteredTickets[0]
-    || scopedTickets[0]
     || null
   const detailLoadable = selectedTicket
     ? { status: 'ready', value: selectedTicket, error: null }

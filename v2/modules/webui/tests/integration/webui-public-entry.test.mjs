@@ -16,6 +16,8 @@ import {
 import { createDemoPorts, createDemoWebUIApp } from '../fixtures/demo-ports.mjs'
 import { createDaemonApi } from '../../src/clients/daemon-api/index.mjs'
 import { resolveProductionPorts } from '../../src/app/entry.mjs'
+import { renderTicketList, renderTicketDetail } from '../../src/components/index.mjs'
+import { renderTicketsPage } from '../../src/pages/tickets/index.mjs'
 
 // I0 recovery: the formal production entry must resolve a real daemon API
 // client instead of probing non-existent module paths and settling for null.
@@ -200,6 +202,38 @@ test('per-workspace Board and Tickets isolate queries, filters, creation, and tr
   assert.equal(ticketsPage.model.activeWorkspaceId, 'ws-alpha')
   assert.ok(ticketsPage.html.includes('T-101'))
   assert.ok(!ticketsPage.html.includes('Beta: New scoped ticket'))
+})
+
+test('ticket page zero-match filter shows an explicit empty detail and never falls back to unfiltered tickets', () => {
+  const tickets = [
+    { ticketId: 'T-101', workspaceId: 'ws-alpha', title: 'Alpha review ticket', status: 'review', allowedTransitions: ['close', 'reopen'] },
+    { ticketId: 'T-102', workspaceId: 'ws-alpha', title: 'Alpha in-progress ticket', status: 'in-progress', allowedTransitions: ['review'] },
+  ]
+  const helpers = { renderTicketList, renderTicketDetail }
+
+  const closed = renderTicketsPage({
+    workspaces: [],
+    activeWorkspaceId: 'ws-alpha',
+    ticketsLoadable: { status: 'ready', value: tickets, error: null },
+    activeFilter: 'closed',
+    selectedTicketId: 'T-101',
+  }, helpers)
+
+  assert.ok(closed.html.includes('data-role="ticket-detail-empty"'), 'zero-match filter must render an explicit empty detail')
+  assert.ok(!closed.html.includes('data-ticket-id="T-101"'), 'detail must not fall back to an unfiltered ticket')
+  assert.ok(!closed.html.includes('data-ticket-status="unknown"'), 'detail must not emit a ghost unknown status')
+  assert.ok(closed.html.includes('当前 Workspace 工单列表 (0/2)'), 'denominator must remain the full workspace count')
+
+  const inProgress = renderTicketsPage({
+    workspaces: [],
+    activeWorkspaceId: 'ws-alpha',
+    ticketsLoadable: { status: 'ready', value: tickets, error: null },
+    activeFilter: 'in-progress',
+    selectedTicketId: 'T-101',
+  }, helpers)
+
+  assert.ok(inProgress.html.includes('data-ticket-id="T-102"'), 'detail must follow the current filter')
+  assert.ok(!inProgress.html.includes('data-ticket-id="T-101"'), 'detail must not retain a ticket outside the current filter')
 })
 
 test('late async response from previous workspace never overwrites currently active workspace view', async () => {

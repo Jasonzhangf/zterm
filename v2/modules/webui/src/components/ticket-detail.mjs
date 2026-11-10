@@ -37,6 +37,8 @@ export function renderTicketDetail({
     bodyHtml = `<div class="v2-ticket-detail-skeleton" data-role="ticket-detail-loading"></div>`;
   } else if (status === 'unavailable') {
     bodyHtml = renderErrorNotice({ error: ticketLoadable.error }).html;
+  } else if (status === 'ready' && (!ticketLoadable.value || typeof ticketLoadable.value !== 'object' || ticketLoadable.value.ticketId == null)) {
+    bodyHtml = `<div class="v2-ticket-detail-empty" data-role="ticket-detail-empty">当前筛选下无匹配工单</div>`;
   } else {
     ticket = ticketLoadable.value && typeof ticketLoadable.value === 'object' ? ticketLoadable.value : {};
     allowedTransitions = Array.isArray(ticket.allowedTransitions)
