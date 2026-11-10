@@ -177,20 +177,25 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
     async resolveTerminalAdmission(session = {}) {
       const workspaceId = session.workspaceId;
       const memberId = session.memberId;
+      const requestedTarget = session.binding?.terminalTarget;
+      const requestedBackend = typeof session.backend === "string" && session.backend !== ""
+        ? session.backend
+        : requestedTarget?.backend;
+      const requestedStableId = typeof session.stableId === "string" && session.stableId !== ""
+        ? session.stableId
+        : requestedTarget?.stableId;
       if (
         typeof workspaceId !== "string"
         || workspaceId.trim() === ""
         || typeof memberId !== "string"
         || memberId.trim() === ""
+        || typeof requestedBackend !== "string"
+        || requestedBackend === ""
+        || typeof requestedStableId !== "string"
+        || requestedStableId === ""
       ) {
         return null;
       }
-
-      const requestedStableId = typeof session.stableId === "string" && session.stableId !== ""
-        ? session.stableId
-        : (typeof session.binding?.terminalTarget?.stableId === "string"
-          ? session.binding.terminalTarget.stableId
-          : "");
 
       const memberRuntime = await this.getMemberRuntime({ workspaceId, memberId });
       const member = memberRuntime?.member;
@@ -200,7 +205,6 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       const responseGroupPath = typeof member?.groupPath === "string" && member.groupPath !== ""
         ? member.groupPath
         : "";
-      const groupPath = requestedGroupPath || responseGroupPath;
       if (
         !member
         || typeof member !== "object"
@@ -225,15 +229,15 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
         || typeof target.stableId !== "string"
         || target.stableId === ""
         || binding.generation == null
-        || typeof groupPath !== "string"
-        || groupPath === ""
+        || responseGroupPath === ""
         || typeof runtimeMachineId !== "string"
         || runtimeMachineId === ""
         || typeof bindingMachineId !== "string"
         || bindingMachineId === ""
         || runtimeMachineId !== bindingMachineId
-        || (requestedGroupPath !== "" && responseGroupPath !== "" && responseGroupPath !== requestedGroupPath)
-        || (requestedStableId !== "" && target.stableId !== requestedStableId)
+        || (requestedGroupPath !== "" && responseGroupPath !== requestedGroupPath)
+        || target.backend !== requestedBackend
+        || target.stableId !== requestedStableId
       ) {
         return null;
       }
@@ -242,7 +246,7 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
         workspaceId,
         memberId,
         machineId: runtimeMachineId,
-        groupPath,
+        groupPath: responseGroupPath,
         expectedGeneration: binding.generation,
         backend: target.backend,
         stableId: target.stableId,

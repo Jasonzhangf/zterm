@@ -219,6 +219,8 @@ test('terminal admission reads one scoped member runtime and preserves its ident
   const admission = await api.resolveTerminalAdmission({
     workspaceId: 'ws-scoped',
     memberId: 'm-scoped',
+    groupPath: '/acme/team',
+    binding: { terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:scoped' } },
   })
 
   assert.deepEqual(admission, {
@@ -233,26 +235,33 @@ test('terminal admission reads one scoped member runtime and preserves its ident
   assert.deepEqual(calls, ['/api/workspaces/ws-scoped/members/m-scoped/runtime'])
 })
 
-test('terminal admission uses the scoped session group path when the runtime member omits it', async () => {
+test('terminal admission fails closed when the runtime member omits or mismatches group path', async () => {
+  const runtimes = [
+    createScopedRuntime({ member: { groupPath: undefined } }),
+    createScopedRuntime({ member: { groupPath: '/other/team' } }),
+  ]
+
+  let runtimeIndex = 0
   const api = createDaemonApi({
     fetchImpl: async (url) => {
       const parsed = new URL(String(url), 'http://daemon.test')
       if (parsed.pathname === '/api/workspaces/ws-scoped/members/m-scoped/runtime') {
-        return jsonResponse(200, createScopedRuntime({
-          member: { groupPath: undefined },
-        }))
+        return jsonResponse(200, runtimes[runtimeIndex++])
       }
       return jsonResponse(405, { error: { code: 'METHOD_NOT_ALLOWED' } })
     },
   })
 
-  const admission = await api.resolveTerminalAdmission({
-    workspaceId: 'ws-scoped',
-    memberId: 'm-scoped',
-    groupPath: '/acme/team',
-  })
+  for (let index = 0; index < 2; index += 1) {
+    const admission = await api.resolveTerminalAdmission({
+      workspaceId: 'ws-scoped',
+      memberId: 'm-scoped',
+      groupPath: '/acme/team',
+      binding: { terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:scoped' } },
+    })
 
-  assert.equal(admission.groupPath, '/acme/team')
+    assert.equal(admission, null)
+  }
 })
 
 test('terminal admission never resolves a shared stable id through another workspace', async () => {
@@ -310,7 +319,7 @@ test('terminal admission never resolves a shared stable id through another works
   const admission = await api.resolveTerminalAdmission({
     workspaceId: 'ws-scoped',
     memberId: 'm-scoped',
-    stableId: 'tmux:v1:scoped',
+    binding: { terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:scoped' } },
   })
 
   assert.equal(admission.workspaceId, 'ws-scoped')
@@ -340,6 +349,7 @@ test('terminal admission rejects a member runtime outside the requested identity
       api.resolveTerminalAdmission({
         workspaceId: 'ws-scoped',
         memberId: 'm-scoped',
+        binding: { terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:scoped' } },
       }),
       (error) => {
         assert.equal(error.code, 'WORKSPACE_SCOPE_MISMATCH')
@@ -355,11 +365,8 @@ test('terminal admission fails closed on a requested terminal target mismatch', 
     createScopedRuntime({ binding: { terminalTarget: null } }),
   ]
   const sessions = [
-    { stableId: 'tmux:v1:different' },
-    {
-      stableId: '',
-      binding: { terminalTarget: { stableId: 'tmux:v1:different' } },
-    },
+    { binding: { terminalTarget: { backend: 'wterm', stableId: 'tmux:v1:scoped' } } },
+    { binding: { terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:different' } } },
   ]
 
   for (const runtime of runtimes) {
@@ -404,7 +411,34 @@ test('terminal admission fails closed when runtime and binding machines differ',
   assert.equal(await api.resolveTerminalAdmission({
     workspaceId: 'ws-scoped',
     memberId: 'm-scoped',
+    binding: { terminalTarget: { backend: 'tmux', stableId: 'tmux:v1:scoped' } },
   }), null)
+})
+
+test('terminal admission fails closed before runtime reads when the requested target identity is incomplete', async () => {
+  const sessions = [
+    { workspaceId: 'ws-scoped', memberId: 'm-scoped', stableId: 'tmux:v1:scoped' },
+    { workspaceId: 'ws-scoped', memberId: 'm-scoped', backend: 'tmux' },
+    {
+      workspaceId: 'ws-scoped',
+      memberId: 'm-scoped',
+      binding: { terminalTarget: { backend: 'tmux' } },
+    },
+  ]
+
+  for (const session of sessions) {
+    const calls = []
+    const api = createDaemonApi({
+      fetchImpl: async (url) => {
+        const parsed = new URL(String(url), 'http://daemon.test')
+        calls.push(parsed.pathname)
+        return jsonResponse(200, createScopedRuntime())
+      },
+    })
+
+    assert.equal(await api.resolveTerminalAdmission(session), null)
+    assert.deepEqual(calls, [])
+  }
 })
 
 test('terminal admission fails closed before runtime reads when scope ids are missing', async () => {
