@@ -793,14 +793,18 @@ export function createWebUIApp({
     }
     const frameCount = () => {
       const snapshot = typeof handle.getSnapshot === 'function' ? handle.getSnapshot() : null
-    return Number.isFinite(snapshot?.deliveredFrameCount) ? snapshot.deliveredFrameCount : 0
+      return Number.isFinite(snapshot?.deliveredFrameCount) ? snapshot.deliveredFrameCount : 0
     }
     if (frameCount() > 0) {
       notice.remove()
       return
     }
-    if (typeof setInterval !== 'function') return
-    const timer = setInterval(() => {
+    const canSubscribe = typeof handle.subscribe === 'function'
+    if (!canSubscribe && typeof setInterval !== 'function') return
+    let unsubscribeFrame = null
+    let timer = null
+    let stopped = false
+    const removeWhenFrameReady = () => {
       if (!viewport.isConnected) {
         stop()
         return
@@ -809,12 +813,20 @@ export function createWebUIApp({
         notice.remove()
         stop()
       }
-    }, 400)
+    }
     function stop() {
-      clearInterval(timer)
+      if (stopped) return
+      stopped = true
+      unsubscribeFrame?.()
+      if (timer !== null) clearInterval(timer)
       pendingFrameWatches.delete(stop)
     }
     pendingFrameWatches.add(stop)
+    if (canSubscribe) {
+      unsubscribeFrame = handle.subscribe(removeWhenFrameReady)
+    } else {
+      timer = setInterval(removeWhenFrameReady, 400)
+    }
   }
 
   // Keep mounted renderer elements in the document at their current size while
@@ -1901,6 +1913,7 @@ export function createWebUIApp({
       return () => listeners.delete(listener)
     },
     destroy() {
+      clearPendingFrameWatches()
       unsubscribeTerminalStatus?.()
       const win = state.document?.defaultView || (typeof window !== 'undefined' ? window : null)
       if (state.mountedRoot && state.document) {
