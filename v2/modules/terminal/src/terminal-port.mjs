@@ -144,11 +144,7 @@ export class TerminalPort {
         if (!entry || !entry.subscribers) {
           continue;
         }
-        for (const subscriber of entry.subscribers) {
-          try {
-            subscriber.onError?.(error);
-          } catch {}
-        }
+        this.notifyTerminalError(entry, error);
       }
       for (const listener of this.closeListeners) {
         try {
@@ -226,6 +222,7 @@ export class TerminalPort {
       lastFrame: null,
       lastHead: null,
       closed: false,
+      terminated: false,
       unsubscribe: null,
       openCancelled: false,
     };
@@ -279,13 +276,21 @@ export class TerminalPort {
     if (this.targets.get(entry.key) === entry) {
       this.targets.delete(entry.key);
     }
-    for (const subscriber of entry.subscribers) {
+    this.notifyTerminalError(entry, error);
+    for (const waiter of entry.openWaiters.splice(0, entry.openWaiters.length)) {
+      waiter.reject(error);
+    }
+  }
+
+  notifyTerminalError(entry, error) {
+    if (!entry || entry.terminated) {
+      return;
+    }
+    entry.terminated = true;
+    for (const subscriber of Array.from(entry.subscribers)) {
       try {
         subscriber.onError?.(error);
       } catch {}
-    }
-    for (const waiter of entry.openWaiters.splice(0, entry.openWaiters.length)) {
-      waiter.reject(error);
     }
   }
 
@@ -333,13 +338,14 @@ export class TerminalPort {
         return;
       }
       entry.closed = true;
-      const error = new Error(String(message.payload && message.payload.reason ? message.payload.reason : "channel closed"));
-      error.code = "TERMINAL_CHANNEL_CLOSED";
-      for (const subscriber of entry.subscribers) {
-        try {
-          subscriber.onError?.(error);
-        } catch {}
-      }
+      const typed = message.payload && message.payload.error;
+      const error = typed && typeof typed.code === "string"
+        ? typed
+        : Object.assign(
+          new Error(String(message.payload && message.payload.reason ? message.payload.reason : "channel closed")),
+          { code: "TERMINAL_CHANNEL_CLOSED" },
+        );
+      this.notifyTerminalError(entry, error);
       if (this.targets.get(entry.key) === entry) {
         this.targets.delete(entry.key);
       }

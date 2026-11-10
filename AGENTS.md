@@ -73,6 +73,7 @@
 - daemon transport detach/close 只释放对应 physical subscriber；最后一个 subscriber 消失时，terminal runtime 必须释放该 mirror 的 daemon-owned buffer/input/timer 资源，但不得调用 `tmux kill-session`。同一 tmux target 仍有其他 attach 时必须保留 mirror 与其他 subscriber；`bodySubscribed=false` 仍是物理连接，不触发 zero-subscriber release。
 - mux 物理 transport 完成 `mux-hello` 后只允许 `TerminalMuxServerFrame` / `TerminalMuxClientFrame`：target 控制事实只能走 `mux-target-message`，session 业务只能走 `mux-channel-message` / `mux-channel-binary`。禁止任何 owner 向已协商 mux 的物理 transport 裸发 `BridgeServerMessage`；物理 sender 类型必须显式接受协议 wire-frame union，禁止 `as unknown as` 绕过类型锁。
 - mux channel open 必须原子：target 控制事实发布失败时，mux lifecycle owner 必须删除 channel registry、关闭 subscriber、发送显式 `mux-channel-closed` error，并禁止进入 attach。禁止空 catch、保留未 attach 的 phantom channel、或让业务 channel 错误污染控制线。
+- terminal transport close 必须保留 typed 区分：whole-transport shutdown（物理 V1 mux/WS 终止）向 active subscriber 传播 terminal-owned `TRANSPORT_CLOSED`，peer `mux-channel-closed` 仍保持 `TERMINAL_CHANNEL_CLOSED`；同一 subscriber 只接收一次终态错误，禁止把 transport 终止降级成 reason 字符串后由下游重建 code。
 - daemon/server 禁止持有任何客户端状态机或客户端身份真相：
   - 禁止 `logical client session`
   - 禁止 `clientSessionId` 成为 daemon 内部真源

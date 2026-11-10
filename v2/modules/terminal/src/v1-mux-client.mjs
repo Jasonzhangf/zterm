@@ -113,7 +113,7 @@ export function createV1MuxClient(options = {}) {
     pendingOpens.clear();
   }
 
-  function detachChannels(reason) {
+  function detachChannels(error) {
     for (const channelId of Array.from(channels.keys())) {
       channels.delete(channelId);
       channelPendingMessages.delete(channelId);
@@ -122,7 +122,7 @@ export function createV1MuxClient(options = {}) {
         channelMessageListeners.delete(channelId);
         for (const listener of listeners) {
           try {
-            listener({ type: "mux-channel-closed", payload: { channelId, reason } });
+            listener({ type: "mux-channel-closed", payload: { channelId, error } });
           } catch {}
         }
       }
@@ -144,7 +144,7 @@ export function createV1MuxClient(options = {}) {
     state = error ? "failed" : "closed";
     const terminalError = error || muxError("TRANSPORT_CLOSED", "V1 mux transport closed.");
     failPending(terminalError);
-    detachChannels(terminalError.message);
+    detachChannels(terminalError);
     lateOpenChannelIds.clear();
     if (rejectReady) {
       rejectReady(terminalError);

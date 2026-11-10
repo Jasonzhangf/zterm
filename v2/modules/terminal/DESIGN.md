@@ -30,6 +30,18 @@ terminal/
 
 `TerminalPort` 的 attach/read/subscribe/input/requestWidth 是公开操作边界；读取正文不得触发上游同步策略；预览遵守既定 detached snapshot 例外。
 
+### transport close 与 channel close 的 typed 区分
+
+- 普通 peer/服务端 `mux-channel-closed` 只关闭该 logical channel，`TerminalPort`
+  向 subscriber 投影 `TERMINAL_CHANNEL_CLOSED`；它不表示物理 transport 结束。
+- whole-transport shutdown（物理 V1 mux/WS 终止，`V1MuxClient.shutdown`）必须先
+  保留 terminal-owned typed error（正常 socket 关闭为 `TRANSPORT_CLOSED`），把它
+  作为 channel close 的 typed 原因传给仍 active 的 subscriber，而不是只传 reason
+  字符串由下游重建 code。
+- 同一 subscriber 只接收一次终态错误：先到达的终态原因生效，后续 channel close /
+  transport close / open failure 不得再次通知同一 subscriber。
+- channel registry、pending opens、pending messages 与 listener 清理仍必须完整。
+
 冲突未闭合只停相关验收，不以常开 body 订阅绕过。
 
 ## 依赖与联调
