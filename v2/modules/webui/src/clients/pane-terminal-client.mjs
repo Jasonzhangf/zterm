@@ -29,12 +29,14 @@ function typedError(code, message, details) {
 
 export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT_MS } = {}) {
   const handlesByMemberId = new Map()
+  const statusListeners = new Set()
 
   function createHandle(member) {
     const memberId = member.memberId
     const sessionId = member.sessionId || member.name
     let source = null
     let openPromise = null
+    let admission = null
     let terminal = null
     let terminalElement = null
     let terminalReady = false
@@ -57,7 +59,17 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
     }
 
     function enqueueInput(data) {
-      const run = writeQueue.then(() => api.sendInput(sessionId, data, { raw: true }))
+      if (!admission) {
+        return Promise.resolve({
+          ok: false,
+          error: typedError(
+            "TERMINAL_ADMISSION_UNRESOLVED",
+            "Terminal admission is not available for input.",
+          ),
+        })
+      }
+      const inputAdmission = admission
+      const run = writeQueue.then(() => api.sendInput(inputAdmission, data, { raw: true }))
       writeQueue = run.then(
         () => undefined,
         () => undefined,
@@ -145,6 +157,7 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
             }
             handle.status = status
             handle.lastError = error || null
+            publishStatus()
             resolveHandle()
           }
 
@@ -157,6 +170,7 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
             bodyActive = false
             handle.status = "unavailable"
             handle.lastError = error || null
+            publishStatus()
             resolveHandle()
           }
 
@@ -167,25 +181,58 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
             attachTimer = null
             handle.status = "starting"
             handle.lastError = null
+            publishStatus()
             resolveHandle()
           }
 
-          attachTimer = setTimeout(startPending, attachTimeoutMs)
-          try {
-            source = api.openTerminalStream(sessionId, {
-              onReady: () => finishAttach("attached"),
-              onBuffer: (payload) => {
-                // A real frame is the first observable body and proves attach.
-                if (!attachSettled) {
-                  finishAttach("attached")
-                }
-                applyFrame(payload)
-              },
-              onError: settleError,
-            })
-          } catch (error) {
-            finishAttach("unavailable", error)
+          const openStream = (resolvedAdmission) => {
+            attachTimer = setTimeout(startPending, attachTimeoutMs)
+            try {
+              source = api.openTerminalStream(resolvedAdmission, {
+                onReady: () => finishAttach("attached"),
+                onBuffer: (payload) => {
+                  // A real frame is the first observable body and proves attach.
+                  if (!attachSettled) {
+                    finishAttach("attached")
+                  }
+                  applyFrame(payload)
+                },
+                onError: settleError,
+              })
+            } catch (error) {
+              finishAttach("unavailable", error)
+            }
           }
+
+          void (async () => {
+            if (typeof api.resolveTerminalAdmission !== "function") {
+              settleError(typedError(
+                "TERMINAL_ADMISSION_UNRESOLVED",
+                "Terminal admission resolution is unavailable.",
+              ))
+              return
+            }
+            let resolvedAdmission = null
+            try {
+              resolvedAdmission = await api.resolveTerminalAdmission(member)
+            } catch (error) {
+              settleError(typedError(
+                "TERMINAL_ADMISSION_UNRESOLVED",
+                "Terminal admission could not be resolved.",
+                { cause: error },
+              ))
+              return
+            }
+            if (!resolvedAdmission) {
+              settleError(typedError(
+                "TERMINAL_ADMISSION_UNRESOLVED",
+                "No authorized terminal admission was found.",
+              ))
+              return
+            }
+            admission = resolvedAdmission
+            openStream(resolvedAdmission)
+          })()
         })
         return openPromise
       },
@@ -244,6 +291,7 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
         } catch (error) {
           handle.status = "unavailable"
           handle.lastError = { code: "TERMINAL_RENDERER_FAILED", message: String(error?.message || error) }
+          publishStatus()
           if (container.isConnected) {
             container.remove()
           }
@@ -269,7 +317,25 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
         terminalElement = null
         bodyActive = false
         handle.status = "disconnected"
+        publishStatus()
       },
+    }
+
+    function publishStatus() {
+      const event = {
+        handleId: handle.handleId,
+        memberId,
+        sessionId,
+        status: handle.status,
+        error: handle.lastError,
+      }
+      for (const listener of statusListeners) {
+        try {
+          listener(event)
+        } catch {
+          // Shell projection failures must not alter terminal stream truth.
+        }
+      }
     }
 
     return handle
@@ -313,6 +379,10 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
   }
 
   return {
+    subscribeStatus(listener) {
+      statusListeners.add(listener)
+      return () => statusListeners.delete(listener)
+    },
     attachSession,
     createSession: attachSession,
     writeInput,

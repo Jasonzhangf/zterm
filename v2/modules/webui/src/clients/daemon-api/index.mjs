@@ -121,19 +121,19 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
     },
 
     async getWorkspace({ workspaceId } = {}) {
-      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}`);
-      if (!payload.workspace || typeof payload.workspace !== "object") {
+      const tree = await this.getWorkspaceTree({ workspaceId });
+      if (!tree.workspace || typeof tree.workspace !== "object") {
         throw new DaemonError({ code: "WORKSPACE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace." }, 502);
       }
-      return payload.workspace;
+      return tree.workspace;
     },
 
     async listWorkspaceMembers({ workspaceId } = {}) {
-      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/members`);
-      if (!Array.isArray(payload.members)) {
+      const tree = await this.getWorkspaceTree({ workspaceId });
+      if (!tree.root || typeof tree.root !== "object") {
         throw new DaemonError({ code: "MEMBERS_RESPONSE_INVALID", message: "Daemon returned a malformed member list." }, 502);
       }
-      return payload.members;
+      return flattenTree(tree.root);
     },
 
     async getWorkspaceTree({ workspaceId } = {}) {
@@ -145,7 +145,11 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
     },
 
     async resolveTerminalAdmission(session = {}) {
-      const stableId = typeof session.stableId === "string" ? session.stableId : "";
+      const stableId = typeof session.stableId === "string"
+        ? session.stableId
+        : (typeof session.binding?.terminalTarget?.stableId === "string"
+          ? session.binding.terminalTarget.stableId
+          : "");
       if (!stableId) {
         return null;
       }
@@ -181,9 +185,11 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
     openTerminalStream(admission, { onReady, onBuffer, onError } = {}) {
       const query = admissionQuery(admission);
       const controller = new AbortController();
+      let explicitlyClosed = false;
       const source = {
         closed: false,
         close() {
+          explicitlyClosed = true;
           source.closed = true;
           controller.abort();
         },
@@ -268,6 +274,12 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
           while (!source.closed) {
             const { value, done } = await reader.read();
             if (done) {
+              if (!explicitlyClosed) {
+                emitError({
+                  code: "TERMINAL_STREAM_EOF",
+                  message: "Terminal stream ended unexpectedly.",
+                });
+              }
               break;
             }
             buffer += decoder.decode(value, { stream: true });

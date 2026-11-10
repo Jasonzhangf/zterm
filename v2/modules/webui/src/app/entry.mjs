@@ -108,7 +108,11 @@ export async function bootstrapWebUI(options = {}) {
     const root = options.root
       || (typeof document !== 'undefined' ? document.getElementById('app') : null)
     if (root && (await sessionNeedsLogin(ports.daemonApi))) {
-      renderLoginGate(root, ports.daemonApi, () => bootProductionWebUI(options))
+      renderLoginGate(root, ports.daemonApi, () => mountWebUI({
+        ...ports,
+        ...options,
+        root,
+      }))
       return null
     }
     return mountWebUI({
