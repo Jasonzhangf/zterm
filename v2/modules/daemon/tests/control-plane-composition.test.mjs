@@ -279,6 +279,7 @@ test("member identity stays stable when the bound session is replaced", async (t
   );
   assert.equal(first.response.status, 200);
   assert.equal(first.body.member.memberId, app.first.memberId);
+  assert.equal(first.body.member.groupPath, "/Acme/mac-a");
   assert.equal(first.body.binding.sessionId, "session-old");
   assert.equal(first.body.binding.generation, 1);
 

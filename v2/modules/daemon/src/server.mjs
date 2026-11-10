@@ -489,13 +489,13 @@ async function queryMemberControl(token, workspaceId, memberId, context, options
   } catch (error) {
     throw toControlTypedError(error, "workspace.member-runtime");
   }
-  const member = collectGroups(tree.root)
-    .flatMap((group) => group.members ?? [])
-    .find((candidate) => candidate.memberId === memberId);
-  if (!member) {
+  const group = collectGroups(tree.root)
+    .find((candidate) => (candidate.members ?? []).some((member) => member.memberId === memberId));
+  const member = group?.members?.find((candidate) => candidate.memberId === memberId);
+  if (!group || !member) {
     throw daemonError("CONTROL_MEMBER_NOT_FOUND", "workspace.member-runtime", "The member is not in the requested workspace.", `${memberId} in ${workspaceId}`);
   }
-  return projectMemberControl(token, member, context, options);
+  return projectMemberControl(token, { ...member, groupPath: group.path }, context, options);
 }
 
 async function projectMemberControl(token, member, context, options = {}) {
