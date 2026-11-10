@@ -1,53 +1,32 @@
-import { after, before, test } from 'node:test'
+import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createPaneTerminalClient } from '../../src/clients/pane-terminal-client.mjs'
-import { createDaemonApi } from '../../src/clients/daemon-api/index.mjs'
 
-class FakeEventSource {
+class FakeTerminalStream {
   static instances = []
 
-  constructor(url) {
-    this.url = url
-    this.listeners = new Map()
+  constructor({ onReady, onBuffer, onError } = {}) {
+    this.handlers = { onReady, onBuffer, onError }
     this.closeCalls = 0
-    FakeEventSource.instances.push(this)
+    FakeTerminalStream.instances.push(this)
   }
 
-  addEventListener(type, listener) {
-    const listeners = this.listeners.get(type) || []
-    listeners.push(listener)
-    this.listeners.set(type, listeners)
+  emit(type, data) {
+    const handler = this.handlers[`on${type[0].toUpperCase()}${type.slice(1)}`]
+    handler?.(data)
+    if (type === 'error') {
+      this.close()
+    }
   }
 
   close() {
     this.closeCalls += 1
   }
 
-  emit(type, data) {
-    const event = data === undefined ? {} : { data: JSON.stringify(data) }
-    for (const listener of this.listeners.get(type) || []) {
-      listener(event)
-    }
-  }
-
   static reset() {
-    FakeEventSource.instances.length = 0
+    FakeTerminalStream.instances.length = 0
   }
 }
-
-const realEventSource = globalThis.EventSource
-
-before(() => {
-  globalThis.EventSource = FakeEventSource
-})
-
-after(() => {
-  if (realEventSource === undefined) {
-    delete globalThis.EventSource
-  } else {
-    globalThis.EventSource = realEventSource
-  }
-})
 
 function createMember(memberId) {
   return {
@@ -58,23 +37,26 @@ function createMember(memberId) {
 }
 
 function createClient({ attachTimeoutMs = 5 } = {}) {
-  FakeEventSource.reset()
+  FakeTerminalStream.reset()
   return createPaneTerminalClient({
-    api: createDaemonApi({ baseUrl: '' }),
+    api: {
+      openTerminalStream: (_admission, handlers) => new FakeTerminalStream(handlers),
+      sendInput: async () => ({ accepted: true }),
+    },
     attachTimeoutMs,
   })
 }
 
-function openEventSource() {
-  const [source] = FakeEventSource.instances
-  assert.ok(source, 'expected the pane client to open exactly one EventSource')
+function openStream() {
+  const [source] = FakeTerminalStream.instances
+  assert.ok(source, 'expected the pane client to open exactly one terminal stream')
   return source
 }
 
 test('pane client timeout keeps a recoverable pending stream', async () => {
   const client = createClient()
   const handle = await client.attachSession(createMember('m-timeout'))
-  const source = openEventSource()
+  const source = openStream()
 
   assert.equal(handle.getSnapshot().status, 'starting')
   assert.equal(handle.getSnapshot().deliveredFrameCount, 0)
@@ -89,14 +71,14 @@ test('pane client timeout keeps a recoverable pending stream', async () => {
 test('pane client accepts a real first frame after the timeout without opening a second stream', async () => {
   const client = createClient()
   const handle = await client.attachSession(createMember('m-frame'))
-  const source = openEventSource()
+  const source = openStream()
 
   assert.equal(handle.getSnapshot().status, 'starting')
   source.emit('buffer', { ansi: 'late-frame', frame: { cols: 100, rows: 30 } })
 
   assert.equal(handle.getSnapshot().status, 'attached')
   assert.equal(handle.getSnapshot().deliveredFrameCount, 1)
-  assert.equal(FakeEventSource.instances.length, 1)
+  assert.equal(FakeTerminalStream.instances.length, 1)
   assert.equal(source.closeCalls, 0)
 })
 
@@ -104,13 +86,13 @@ test('pane client projects a real stream error after ready and does not resurrec
   const client = createClient({ attachTimeoutMs: 1000 })
   const pendingAttach = client.attachSession(createMember('m-error'))
   const handle = client.getHandle('m-error')
-  const source = openEventSource()
+  const source = openStream()
 
   source.emit('ready', {})
   assert.strictEqual(await pendingAttach, handle)
   assert.equal(handle.getSnapshot().status, 'attached')
 
-  source.emit('error', { error: { code: 'TERMINAL_STREAM_FAILED', message: 'Terminal stream failed.' } })
+  source.emit('error', { code: 'TERMINAL_STREAM_FAILED', message: 'Terminal stream failed.' })
   assert.equal(handle.getSnapshot().status, 'unavailable')
   assert.equal(handle.lastError.code, 'TERMINAL_STREAM_FAILED')
   assert.equal(source.closeCalls, 1)
