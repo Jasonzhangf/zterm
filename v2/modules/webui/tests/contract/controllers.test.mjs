@@ -582,6 +582,17 @@ test('pane-terminal-client suspend and resume keep one stream and one renderer h
   let openCalls = 0
   let closeCalls = 0
   const api = {
+    async resolveTerminalAdmission() {
+      return {
+        workspaceId: 'ws-1',
+        memberId: 'm-1',
+        machineId: 'mac-1',
+        groupPath: 'team',
+        expectedGeneration: 1,
+        backend: 'tmux',
+        stableId: 'tmux:v1:m-1',
+      }
+    },
     openTerminalStream(_target, handlers) {
       openCalls += 1
       emitBuffer = handlers.onBuffer

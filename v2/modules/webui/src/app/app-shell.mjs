@@ -377,6 +377,15 @@ export function createWebUIApp({
     for (const listener of listeners) listener(state)
   }
 
+  const unsubscribeTerminalStatus = typeof terminalClient?.subscribeStatus === 'function'
+    ? terminalClient.subscribeStatus(() => {
+        if (!state.mountedRoot) return
+        syncActiveWorkspaceProjection()
+        render()
+        notify()
+      })
+    : null
+
   function updateLocationHash(route, workspaceId) {
     if (typeof globalThis.location !== 'undefined' && globalThis.location) {
       try {
@@ -1892,6 +1901,7 @@ export function createWebUIApp({
       return () => listeners.delete(listener)
     },
     destroy() {
+      unsubscribeTerminalStatus?.()
       const win = state.document?.defaultView || (typeof window !== 'undefined' ? window : null)
       if (state.mountedRoot && state.document) {
         if (state.mountedRoot.__ztermV2Handler) state.mountedRoot.removeEventListener('click', state.mountedRoot.__ztermV2Handler)
