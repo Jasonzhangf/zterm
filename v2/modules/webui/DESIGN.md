@@ -73,6 +73,8 @@ v2/modules/webui/
 
 ## 公开接口、数据及错误
 
+工作区和成员只通过 daemon 已声明的 `GET /api/workspaces/:workspaceId/tree` 读取一次：`getWorkspaceSnapshot({ workspaceId })` 保留 `workspace` 与置平的 `members`（含 `groupPath`、`runtime`、`binding`、`availability`），`SessionController` 只消费该 snapshot。不再调用未声明的 workspace-detail 或 member-list HTTP 路径。
+
 组件接 typed snapshot 与 intent；MemberRef/WorkspaceRef 贯穿标题属性面板；窗口数不固定五个（`1+4` 仅定义桌面默认左主区 `0.42` 比例 + 右侧双列连续滚动区，5/6/N 个 peer 全部可达）。
 
 术语“巡检目标用户”“task q”保持待定（`PropertyPanel` 中显式标注只读待定提示），未明权限不接真实写；缺权限面板明确（`ErrorNotice` 显式暴露 `AUTH_INVALID_TOKEN` / `DELIVERY_TARGET_UNKNOWN_STATE` / `stale` / `unknown`），不能隐藏错误。

@@ -55,6 +55,24 @@ function flattenTree(root) {
   return members;
 }
 
+function projectSnapshotMember(member) {
+  const runtime = member.runtime ?? null;
+  const binding = member.binding ?? null;
+  const availability = member.availability ?? null;
+  const machineId = runtime?.machineId ?? binding?.machineId ?? "";
+  return {
+    ...member,
+    groupPath: member.groupPath ?? "",
+    runtime,
+    binding,
+    availability,
+    status: availability?.status ?? "unknown",
+    sessionId: binding?.sessionId ?? "",
+    machineId,
+    machine: machineId,
+  };
+}
+
 export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
   let csrfToken = "";
   let authToken = "";
@@ -120,20 +138,32 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       return payload.workspaces;
     },
 
-    async getWorkspace({ workspaceId } = {}) {
+    async getWorkspaceSnapshot({ workspaceId } = {}) {
       const tree = await this.getWorkspaceTree({ workspaceId });
       if (!tree.workspace || typeof tree.workspace !== "object") {
-        throw new DaemonError({ code: "WORKSPACE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace." }, 502);
+        throw new DaemonError({ code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace tree." }, 502);
       }
-      return tree.workspace;
-    },
-
-    async listWorkspaceMembers({ workspaceId } = {}) {
-      const tree = await this.getWorkspaceTree({ workspaceId });
+      if (String(tree.workspace.workspaceId ?? "") !== String(workspaceId)) {
+        throw new DaemonError({ code: "WORKSPACE_SCOPE_MISMATCH", message: "Daemon returned a workspace outside the requested scope." }, 502);
+      }
       if (!tree.root || typeof tree.root !== "object") {
-        throw new DaemonError({ code: "MEMBERS_RESPONSE_INVALID", message: "Daemon returned a malformed member list." }, 502);
+        throw new DaemonError({ code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace tree." }, 502);
       }
-      return flattenTree(tree.root);
+      let members;
+      try {
+        members = flattenTree(tree.root);
+      } catch {
+        throw new DaemonError({ code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace tree." }, 502);
+      }
+      for (const member of members) {
+        if (!member || typeof member !== "object" || !member.memberId) {
+          throw new DaemonError({ code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace member." }, 502);
+        }
+        if (String(member.workspaceId ?? "") !== String(workspaceId)) {
+          throw new DaemonError({ code: "WORKSPACE_SCOPE_MISMATCH", message: "Daemon returned a member outside the requested workspace." }, 502);
+        }
+      }
+      return { workspace: tree.workspace, members: members.map(projectSnapshotMember) };
     },
 
     async getWorkspaceTree({ workspaceId } = {}) {

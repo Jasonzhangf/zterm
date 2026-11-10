@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createPaneTerminalClient } from '../../src/clients/pane-terminal-client.mjs'
+import { anchorWTermInput, createPaneTerminalClient } from '../../src/clients/pane-terminal-client.mjs'
 
 const ADMISSION = Object.freeze({
   workspaceId: 'ws-terminal',
@@ -72,6 +72,25 @@ async function waitForStream() {
   }
   return openStream()
 }
+
+test('pane client anchors each wterm input inside its own pane container', () => {
+  const input = { style: {} }
+  const container = {
+    querySelector(selector) {
+      return selector === '[data-wterm-input="true"]' ? input : null
+    },
+  }
+
+  assert.strictEqual(anchorWTermInput(container), input)
+  assert.equal(input.style.position, 'absolute')
+  assert.equal(input.style.left, '0')
+  assert.equal(input.style.top, '0')
+  assert.equal(input.style.bottom, 'auto')
+  assert.equal(input.style.width, '100%')
+  assert.equal(input.style.height, '100%')
+  assert.equal(input.style.transform, 'none')
+  assert.equal(input.style.zIndex, '1')
+})
 
 test('pane client timeout keeps a recoverable pending stream', async () => {
   const client = createClient()

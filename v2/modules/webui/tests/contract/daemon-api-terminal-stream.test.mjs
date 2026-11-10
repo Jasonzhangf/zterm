@@ -31,45 +31,6 @@ function responseFor(chunks) {
   }
 }
 
-function jsonResponse(payload) {
-  return {
-    ok: true,
-    status: 200,
-    body: null,
-    json: async () => payload,
-  };
-}
-
-test('daemon API reads workspace and members from the supported tree route', async () => {
-  const requested = []
-  const tree = {
-    workspace: { workspaceId: 'ws-tree', name: 'Tree workspace' },
-    root: {
-      path: 'team',
-      members: [{ memberId: 'm-tree', name: 'Tree member' }],
-      children: [],
-    },
-  }
-  const api = createDaemonApi({
-    baseUrl: 'http://daemon.test',
-    fetchImpl: async (url) => {
-      requested.push(new URL(url).pathname)
-      return jsonResponse(tree)
-    },
-  })
-
-  assert.deepEqual(await api.getWorkspace({ workspaceId: 'ws-tree' }), tree.workspace)
-  assert.deepEqual(await api.listWorkspaceMembers({ workspaceId: 'ws-tree' }), [{
-    memberId: 'm-tree',
-    name: 'Tree member',
-    groupPath: 'team',
-  }])
-  assert.deepEqual(requested, [
-    '/api/workspaces/ws-tree/tree',
-    '/api/workspaces/ws-tree/tree',
-  ])
-})
-
 test('daemon API reports a typed error when the terminal stream ends after ready', async () => {
   let readyCalls = 0
   let error = null

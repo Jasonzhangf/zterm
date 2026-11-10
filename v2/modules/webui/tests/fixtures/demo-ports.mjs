@@ -146,8 +146,7 @@ export function createDemoPorts() {
   const forbiddenWorkspaces = new Set()
   const calls = {
     listWorkspaces: [],
-    getWorkspace: [],
-    listWorkspaceMembers: [],
+    getWorkspaceSnapshot: [],
     listTickets: [],
     createTicket: [],
     transitionTicket: [],
@@ -204,18 +203,15 @@ export function createDemoPorts() {
       if (authFailure) throw { code: 'AUTH_INVALID_TOKEN', category: 'auth', status: 401, message: 'Auth token is invalid' }
       return workspaces.map((workspace) => ({ ...workspace }))
     },
-    async getWorkspace({ workspaceId } = {}) {
-      calls.getWorkspace.push({ workspaceId })
+    async getWorkspaceSnapshot({ workspaceId } = {}) {
+      calls.getWorkspaceSnapshot.push({ workspaceId })
       await waitWorkspaceDelay(workspaceId)
       const workspace = assertWorkspaceAccess(workspaceId)
-      return { ...workspace }
-    },
-    async listWorkspaceMembers({ workspaceId } = {}) {
-      calls.listWorkspaceMembers.push({ workspaceId })
-      await waitWorkspaceDelay(workspaceId)
-      assertWorkspaceAccess(workspaceId)
       const members = membersByWorkspace.get(workspaceId) || []
-      return members.map((member) => ({ ...member }))
+      return {
+        workspace: { ...workspace },
+        members: members.map((member) => ({ ...member })),
+      }
     },
     async getMemberProperties({ memberId }) {
       if (authFailure) throw { code: 'AUTH_INVALID_TOKEN', category: 'auth', status: 401, message: 'Auth token is invalid' }

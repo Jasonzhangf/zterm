@@ -16,6 +16,28 @@ function loadWTerm() {
   return wtermModulePromise
 }
 
+// The wterm renderer parks its hidden textarea at one fixed screen coordinate.
+// With multiple panes every input overlaps, so a click in one pane focuses
+// another pane's stream. Anchor each input to its own renderer box instead.
+export function anchorWTermInput(container) {
+  if (!container || typeof container.querySelector !== "function") {
+    return null
+  }
+  const input = container.querySelector('[data-wterm-input="true"]')
+  if (!input || !input.style) {
+    return null
+  }
+  input.style.position = "absolute"
+  input.style.left = "0"
+  input.style.top = "0"
+  input.style.bottom = "auto"
+  input.style.width = "100%"
+  input.style.height = "100%"
+  input.style.transform = "none"
+  input.style.zIndex = "1"
+  return input
+}
+
 function typedError(code, message, details) {
   const error = new Error(message)
   error.code = code
@@ -282,6 +304,7 @@ export function createPaneTerminalClient({ api, attachTimeoutMs = ATTACH_TIMEOUT
           })
           terminal = wt
           await wt.init()
+          anchorWTermInput(container)
           terminalReady = true
           for (const chunk of backlog.splice(0, backlog.length)) {
             wt.write(chunk)

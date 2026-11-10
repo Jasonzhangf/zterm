@@ -174,8 +174,7 @@ export function createSessionController({
 
     if (
       !daemonApi ||
-      typeof daemonApi.getWorkspace !== 'function' ||
-      typeof daemonApi.listWorkspaceMembers !== 'function'
+      typeof daemonApi.getWorkspaceSnapshot !== 'function'
     ) {
       const typedError = normalizeTypedError({
         code: 'DAEMON_API_UNAVAILABLE',
@@ -192,8 +191,9 @@ export function createSessionController({
     let members
 
     try {
-      workspace = await daemonApi.getWorkspace({ workspaceId })
-      members = await daemonApi.listWorkspaceMembers({ workspaceId })
+      const workspaceSnapshot = await daemonApi.getWorkspaceSnapshot({ workspaceId })
+      workspace = workspaceSnapshot.workspace
+      members = workspaceSnapshot.members
     } catch (error) {
       if (isAuthError(error)) {
         setWorkspaceLoadable(null, error)
@@ -203,7 +203,7 @@ export function createSessionController({
       return snapshot()
     }
 
-    const memberArray = Array.isArray(members) ? members : members?.members ?? []
+    const memberArray = Array.isArray(members) ? members : []
     let layout
     try {
       layout = await ls.loadLayout(accountId, workspaceId, memberArray)

@@ -200,14 +200,13 @@ function makeSessionDeps({ members = [createMember('m-1'), createMember('m-2'), 
     async offerFileTransfer() { return { transferId: 't-1', state: 'offered' } },
   }
   const daemonApi = {
-    async getWorkspace({ workspaceId: requestedWorkspaceId = workspaceId } = {}) {
-      if (authError) throw { code: 'AUTH_INVALID_TOKEN', category: 'auth', status: 401, message: 'token' }
-      return { workspaceId: requestedWorkspaceId, name: `Workspace ${requestedWorkspaceId}` }
-    },
-    async listWorkspaceMembers({ workspaceId: requestedWorkspaceId = workspaceId } = {}) {
+    async getWorkspaceSnapshot({ workspaceId: requestedWorkspaceId = workspaceId } = {}) {
       if (authError) throw { code: 'AUTH_INVALID_TOKEN', category: 'auth', status: 401, message: 'token' }
       const memberList = membersByWorkspace?.get(requestedWorkspaceId) || members
-      return memberList.map((member) => ({ ...member, workspaceId: requestedWorkspaceId }))
+      return {
+        workspace: { workspaceId: requestedWorkspaceId, name: `Workspace ${requestedWorkspaceId}` },
+        members: memberList.map((member) => ({ ...member, workspaceId: requestedWorkspaceId })),
+      }
     },
   }
   return { terminalClient, terminalHandles, attachCalls, createCalls, disconnectCalls, suspendCalls, resumeCalls, layouts, layoutStore, deliveryClient, daemonApi }
