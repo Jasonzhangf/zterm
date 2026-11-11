@@ -673,36 +673,58 @@ async function runInstalledCli(scenario, registry, args, environment = {}) {
 function createServiceShim(scenario) {
   const marker = 'ZTERM_BLACKBOX_SERVICE_SHIM_UNEXPECTED_7d2e';
   const callLogPath = join(scenario.root, 'service-shim-calls.jsonl');
-  const realEntryPath = join(scenario.prefix, 'bin', 'zterm-daemon.blackbox-real');
-  const shimPath = join(scenario.shimBin, 'zterm-daemon');
+  const globalEntryPath = process.platform === 'win32'
+    ? join(scenario.prefix, 'zterm-daemon.cmd')
+    : join(scenario.prefix, 'bin', 'zterm-daemon');
+  const realEntryPath = process.platform === 'win32'
+    ? join(scenario.prefix, 'zterm-daemon.blackbox-real.cmd')
+    : join(scenario.prefix, 'bin', 'zterm-daemon.blackbox-real');
+  const shimPath = join(
+    scenario.shimBin,
+    process.platform === 'win32' ? 'zterm-daemon.cmd' : 'zterm-daemon',
+  );
+  const shimScriptPath = join(scenario.shimBin, 'zterm-daemon-service-shim.cjs');
   rmSync(callLogPath, { force: true });
+  const script = [
+    '#!/usr/bin/env node',
+    "'use strict';",
+    "const { spawnSync } = require('node:child_process');",
+    "const { writeFileSync } = require('node:fs');",
+    `const marker = ${JSON.stringify(marker)};`,
+    `const callLogPath = ${JSON.stringify(callLogPath)};`,
+    `const realEntryPath = ${JSON.stringify(realEntryPath)};`,
+    'const args = process.argv.slice(2);',
+    "if (args.length === 1 && args[0] === 'install-service') {",
+    `  writeFileSync(callLogPath, JSON.stringify({ argv: args, cwd: process.cwd(), timestamp: new Date().toISOString(), marker }) + '\\n', { flag: 'a', mode: 0o600 });`,
+    '  process.stderr.write(marker + \'\\n\');',
+    '  process.exit(23);',
+    '}',
+    'const result = spawnSync(realEntryPath, args, {',
+    "  stdio: 'inherit',",
+    '  env: process.env,',
+    "  shell: process.platform === 'win32',",
+    '});',
+    'if (result.error) {',
+    '  process.stderr.write(result.error.message + \'\\n\');',
+    '  process.exit(1);',
+    '}',
+    'process.exit(result.status === null ? 1 : result.status);',
+    '',
+  ].join('\n');
+  writeFileSync(shimScriptPath, script, { mode: 0o755 });
   writeFileSync(
     shimPath,
-    [
-      '#!/usr/bin/env node',
-      "'use strict';",
-      "const { spawnSync } = require('node:child_process');",
-      "const { writeFileSync } = require('node:fs');",
-      `const marker = ${JSON.stringify(marker)};`,
-      `const callLogPath = ${JSON.stringify(callLogPath)};`,
-      `const realEntryPath = ${JSON.stringify(realEntryPath)};`,
-      'const args = process.argv.slice(2);',
-      "if (args.length === 1 && args[0] === 'install-service') {",
-      `  writeFileSync(callLogPath, JSON.stringify({ argv: args, cwd: process.cwd(), timestamp: new Date().toISOString(), marker }) + '\\n', { flag: 'a', mode: 0o600 });`,
-      '  process.stderr.write(marker + \'\\n\');',
-      '  process.exit(23);',
-      '}',
-      'const result = spawnSync(realEntryPath, args, { stdio: \'inherit\', env: process.env });',
-      'if (result.error) {',
-      '  process.stderr.write(result.error.message + \'\\n\');',
-      '  process.exit(1);',
-      '}',
-      'process.exit(result.status === null ? 1 : result.status);',
-      '',
-    ].join('\n'),
+    process.platform === 'win32'
+      ? [
+          '@echo off\r',
+          `node ${JSON.stringify(shimScriptPath.replaceAll('\\', '/'))} %*\r`,
+          'exit /b %ERRORLEVEL%\r',
+          '',
+        ].join('\n')
+      : script,
     { mode: 0o755 },
   );
-  return { shimPath, callLogPath, realEntryPath, marker };
+  return { globalEntryPath, shimPath, callLogPath, realEntryPath, marker };
 }
 
 function createNpmEntryShim(scenario, serviceShim) {
@@ -728,8 +750,8 @@ function createNpmEntryShim(scenario, serviceShim) {
       '}',
       'if (result.status !== 0) process.exit(result.status === null ? 1 : result.status);',
       "if (args[0] === 'install' && args.includes('--global')) {",
-      `  renameSync(${JSON.stringify(join(scenario.prefix, 'bin', 'zterm-daemon'))}, ${JSON.stringify(serviceShim.realEntryPath)});`,
-      `  copyFileSync(${JSON.stringify(serviceShim.shimPath)}, ${JSON.stringify(join(scenario.prefix, 'bin', 'zterm-daemon'))});`,
+    `  renameSync(${JSON.stringify(serviceShim.globalEntryPath)}, ${JSON.stringify(serviceShim.realEntryPath)});`,
+    `  copyFileSync(${JSON.stringify(serviceShim.shimPath)}, ${JSON.stringify(serviceShim.globalEntryPath)});`,
       '}',
       '',
     ].join('\n'),
