@@ -367,9 +367,11 @@ export function assembleDaemonConfig(
     wsUrl: resolveV1WsUrl(v1WsUrl, v1Token),
     log,
   });
+  const machineLinks = new Map();
   const machineTerminal = createConnectionMachineTerminal({
     connectionManager,
     authorizationPort,
+    currentLinks: machineLinks,
     localMachineId: hostMachineId,
     terminal: terminalPort,
     log,
@@ -514,6 +516,7 @@ export function assembleDaemonConfig(
       machineService,
       machineAuthorization: authorizationPort,
       connectionManager,
+      machineLinks,
       admission: {
         auth: workspaceAuth,
         members,

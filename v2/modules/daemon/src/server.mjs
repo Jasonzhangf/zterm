@@ -138,6 +138,7 @@ export function createDaemon({
   machineService,
   machineAuthorization,
   connectionManager,
+  machineLinks = new Map(),
   goals,
   tickets,
   board,
@@ -161,8 +162,9 @@ export function createDaemon({
       })
     : null;
   const sessions = new Map();
-  // Account-scoped machine links owned by this daemon composition.
-  const machineLinks = new Map();
+  // Account-scoped machine links owned by this daemon composition. A
+  // composition may inject the same map into the machine terminal consumer so
+  // the connect route and the first terminal stream share one current link.
   const context = {
     terminal,
     admission: terminalAdmission,

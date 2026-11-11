@@ -519,6 +519,35 @@ test("a cached stale observation is discarded before resolving the current autho
   assert.equal(remote.ports[0].calls.input.length, 0);
 });
 
+test("forMachine reuses the caller's shared current link instead of opening a new generation", async (t) => {
+  const manager = createStubManager({ generation: 7 });
+  const remote = createRemoteFactories();
+  const currentLinks = new Map([
+    [
+      JSON.stringify(["account-current", "remote-machine"]),
+      { id: "link:remote-machine", machineId: "remote-machine", generation: 7 },
+    ],
+  ]);
+  const consumer = createConnectionMachineTerminal({
+    connectionManager: manager,
+    currentLinks,
+    authorizationPort: {
+      async authorizeCallerMachine(machineId) {
+        return { machineId, accountId: "account-current" };
+      },
+    },
+    createMuxClient: remote.createMuxClient,
+    createTerminalPort: remote.createTerminalPort,
+  });
+  const scoped = await consumer.forMachine({
+    machineId: "remote-machine",
+    accountsToken: "caller-token",
+  });
+  t.after(() => scoped.close());
+  assert.equal(scoped.linkGeneration, 7);
+  assert.equal(manager.calls.connect.length, 0);
+});
+
 test("close releases an owned remote adapter and link but never the shared local terminal", async () => {
   const manager = createStubManager();
   const local = createLocalTerminal();

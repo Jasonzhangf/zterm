@@ -17,12 +17,15 @@ export async function resolveAuthorizedTerminalDirectory({
   machineId,
   callerToken,
   verifiedAuthorization,
+  existingLink = null,
 }) {
-  const link = await connectionManager.connect(
+  const link = await acquireAuthorizedMachineLink({
+    connectionManager,
     machineId,
     callerToken,
     verifiedAuthorization,
-  );
+    existingLink,
+  });
   let entries;
   try {
     entries = await connectionManager.listSessions(link);
@@ -45,4 +48,37 @@ export async function resolveAuthorizedTerminalDirectory({
     openChannel: (kind, target) => connectionManager.openChannel(link, kind, target),
     close: () => connectionManager.closeOwnLink(link),
   };
+}
+
+/**
+ * Acquire the caller's current authorized link without superseding it.
+ *
+ * A caller may already hold the machine's current link (for example the link
+ * opened by the machine connect route). Reuse that link when it is still the
+ * current connected and fresh generation so the caller keeps one generation
+ * truth; only open a new physical link when no reusable current link exists.
+ */
+async function acquireAuthorizedMachineLink({
+  connectionManager,
+  machineId,
+  callerToken,
+  verifiedAuthorization,
+  existingLink,
+}) {
+  if (existingLink && existingLink.machineId === machineId) {
+    try {
+      const observation = connectionManager.observeLink(existingLink);
+      if (
+        observation.generation === existingLink.generation
+        && observation.status === "connected"
+        && observation.freshness === "fresh"
+      ) {
+        return existingLink;
+      }
+    } catch {
+      // A stale or unknown generation cannot be reused; fall through to a
+      // fresh authorized connect below.
+    }
+  }
+  return connectionManager.connect(machineId, callerToken, verifiedAuthorization);
 }

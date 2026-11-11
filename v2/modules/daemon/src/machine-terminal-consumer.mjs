@@ -42,6 +42,7 @@ export function createConnectionMachineTerminal({
   connectionManager,
   resolveDirectory = resolveAuthorizedTerminalDirectory,
   authorizationPort = null,
+  currentLinks = new Map(),
   terminal = null,
   localMachineId = "",
   createMuxClient = createTerminalMuxClient,
@@ -229,6 +230,7 @@ export function createConnectionMachineTerminal({
       connectionManager,
       machineId,
       callerToken,
+      existingLink: currentLinks.get(stateKey) ?? null,
     });
     const link = directory.link;
     const linkedAccountId = typeof link.accountId === "string" ? link.accountId.trim() : "";
@@ -236,6 +238,7 @@ export function createConnectionMachineTerminal({
       callerAccountId || linkedAccountId,
       machineId,
     );
+    currentLinks.set(linkedStateKey, link);
     const state = {
       key: linkedStateKey,
       directory,
