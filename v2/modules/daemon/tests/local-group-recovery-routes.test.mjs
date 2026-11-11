@@ -368,4 +368,3 @@ test("probe-free members composition refuses bind with a 503 before any downstre
   assert.equal(refused.response.status, 503);
   assert.equal(refused.body.error.code, "CONTROL_HOST_PROBE_UNCONFIGURED");
 });
-

@@ -322,4 +322,3 @@ test("owned daemon restart restores durable bindings and preserves typed recover
   assert.equal(stillRestorableB.response.status, 200);
   assert.equal(stillRestorableB.body.verification.generation, 2);
 });
-
