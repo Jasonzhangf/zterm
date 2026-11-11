@@ -549,12 +549,12 @@ export class ConnectionManager {
     };
   }
 
-  retryLateOpenClose(link: LinkRef, channelId: string): void {
+  retryLateOpenClose(link: LinkRef, channelId: string): boolean {
     const record = this.requireCurrent(link);
     if (!record.transport || record.status !== "connected") {
       throw new ConnectionError("link_closed", `link ${link.id} is not connected`, { machineId: link.machineId });
     }
-    record.transport.retryLateOpenClose(channelId);
+    return record.transport.retryLateOpenClose(channelId);
   }
 
   async listSessions(link: LinkRef): Promise<readonly SessionCatalogEntry[]> {

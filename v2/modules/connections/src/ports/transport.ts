@@ -55,8 +55,9 @@ export interface TransportHandle {
   /**
    * Retry releasing one late-open channel. The transport keeps the pending
    * release until the close frame is sent or the physical link closes.
+   * Returns true only when this call sent the matching close frame.
    */
-  retryLateOpenClose(channelId: string): void;
+  retryLateOpenClose(channelId: string): boolean;
 }
 
 export interface TransportOpenContext {
