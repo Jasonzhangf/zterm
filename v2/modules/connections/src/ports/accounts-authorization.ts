@@ -35,8 +35,16 @@ export interface AuthorizedMachineLink {
 
 export interface AccountsAuthorizationPort {
   /**
-   * Resolve and verify the caller authorization for the target machine.
+   * Resolve and verify the browser caller authorization for the target machine.
    * Implementations throw ConnectionError("unauthorized"|"directory_rejected").
+   */
+  authorizeCallerMachine(
+    machineId: string,
+    callerToken: string,
+  ): Promise<AuthorizedMachineLink>;
+  /**
+   * Resolve the explicit service authorization used by non-browser delivery
+   * targets. Browser machine actions must use authorizeCallerMachine.
    */
   authorizeMachine(machineId: string): Promise<AuthorizedMachineLink>;
 }

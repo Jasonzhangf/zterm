@@ -67,6 +67,50 @@ function hostProbeDouble(overrides = {}) {
   });
 }
 
+function delayedHostProbe(delayedCall, overrides = {}) {
+  const base = hostProbeDouble(overrides);
+  let calls = 0;
+  let releaseDelayed;
+  let markStarted;
+  const started = new Promise((resolve) => {
+    markStarted = resolve;
+  });
+
+  return Object.freeze({
+    get calls() {
+      return calls;
+    },
+    started,
+    async probe(input) {
+      calls += 1;
+      if (calls === delayedCall) {
+        await new Promise((resolve) => {
+          releaseDelayed = resolve;
+          markStarted();
+        });
+      }
+      return base.probe(input);
+    },
+    release() {
+      releaseDelayed?.();
+    },
+  });
+}
+
+function countingHostProbe(overrides = {}) {
+  const base = hostProbeDouble(overrides);
+  let calls = 0;
+  return Object.freeze({
+    get calls() {
+      return calls;
+    },
+    async probe(input) {
+      calls += 1;
+      return base.probe(input);
+    },
+  });
+}
+
 async function fixture({ hostProbe = hostProbeDouble() } = {}) {
   const orgFile = await tempFile('zterm-members-org-');
   const bindFile = await tempFile('zterm-members-binding-');
@@ -771,6 +815,31 @@ test('bindSession persists the observed terminalTarget, replaces it on rebind, a
   assert.equal((await clearedService.getRuntimeBinding(first.memberId)).terminalTarget, null);
 });
 
+test('restoreBinding accepts an unchanged null terminal target as still verified', async () => {
+  const { members, first } = await fixture({
+    hostProbe: hostProbeDouble({ terminalTarget: null }),
+  });
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+
+  const restored = await members.restoreBinding({ token: TOKENS.owner, memberId: first.memberId });
+  assert.equal(restored.restored, true);
+  assert.equal(restored.terminalTarget, null);
+});
+
 test('bindSession rejects a malformed terminalTarget before writing a binding', async () => {
   const { members, first } = await fixture();
   await members.configureRuntime({
@@ -1232,6 +1301,307 @@ test('the same target text on a different machine cannot pass verification', asy
     () => wrongMachine.verifyHost({ token: TOKENS.owner, memberId: ok.first.memberId }),
     (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH),
   );
+});
+
+test('binding-state read returns the retained generation after runtime invalidation', async () => {
+  const { bindFile, members, first } = await fixture();
+  const config = {
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  };
+  await members.configureRuntime(config);
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+
+  await members.configureRuntime({ ...config, launchProfileRef: 'lp-b' });
+
+  const bindingState = await members.queryBindingState({ token: TOKENS.owner, memberId: first.memberId });
+  assert.equal(bindingState.generation, 1);
+  assert.equal(bindingState.binding, null);
+  const stored = await readStore(bindFile);
+  assert.equal(stored.generations[first.memberId], 1);
+  assert.equal(stored.bindings[first.memberId], undefined);
+});
+
+test('a legitimate rebind advances the retained generation after invalidation', async () => {
+  const { bindFile, organization, members, first } = await fixture();
+  const config = {
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  };
+  await members.configureRuntime(config);
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+  await members.configureRuntime({ ...config, machineId: 'mac-2' });
+
+  const retained = await members.queryBindingState({ token: TOKENS.owner, memberId: first.memberId });
+  const onMac2 = createMembersService({
+    store: createBindingStore(bindFile),
+    auth,
+    organization,
+    hostProbe: hostProbeDouble({ machineId: 'mac-2' }),
+  });
+  const rebound = await onMac2.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-b',
+    anchor: 'pane:1',
+    expectedGeneration: retained.generation,
+  });
+
+  assert.equal(retained.binding, null);
+  assert.equal(retained.generation, 1);
+  assert.equal(rebound.generation, 2);
+  assert.equal((await onMac2.queryBindingState({ token: TOKENS.owner, memberId: first.memberId })).generation, 2);
+});
+
+test('restore rejects a stale expected generation before probing', async () => {
+  const probe = countingHostProbe();
+  const { bindFile, members, first } = await fixture({ hostProbe: probe });
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+  assert.equal(probe.calls, 1);
+
+  await assert.rejects(
+    () => members.restoreBinding({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      machineId: 'mac-1',
+      expectedGeneration: 0,
+    }),
+    (error) => isCode(error, ERROR_CODES.BINDING_GENERATION_STALE),
+  );
+  assert.equal(probe.calls, 1);
+  const stored = await readStore(bindFile);
+  assert.equal(stored.bindings[first.memberId].generation, 1);
+  assert.equal(stored.bindings[first.memberId].sessionId, 'sess-a');
+});
+
+test('restore rejects a stale binding after a delayed probe without reporting old success', async () => {
+  const probe = delayedHostProbe(2);
+  const { bindFile, organization, members, first } = await fixture({ hostProbe: probe });
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+
+  const pendingRestore = members.restoreBinding({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    expectedGeneration: 1,
+  });
+  await probe.started;
+
+  const reboundService = createMembersService({
+    store: createBindingStore(bindFile),
+    auth,
+    organization,
+    hostProbe: hostProbeDouble(),
+  });
+  await reboundService.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-b',
+    anchor: 'pane:1',
+    expectedGeneration: 1,
+  });
+  probe.release();
+
+  await assert.rejects(
+    () => pendingRestore,
+    (error) => isCode(error, ERROR_CODES.BINDING_GENERATION_STALE),
+  );
+  const current = await reboundService.queryBinding({ token: TOKENS.owner, memberId: first.memberId });
+  assert.equal(current.generation, 2);
+  assert.equal(current.sessionId, 'sess-b');
+});
+
+test('restore rejects a runtime change during a delayed probe without stale success', async () => {
+  const probe = delayedHostProbe(2);
+  const { bindFile, members, first } = await fixture({ hostProbe: probe });
+  const config = {
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  };
+  await members.configureRuntime(config);
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+
+  const pendingRestore = members.restoreBinding({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    expectedGeneration: 1,
+  });
+  await probe.started;
+  await members.configureRuntime({ ...config, agentKind: 'claude' });
+  probe.release();
+
+  await assert.rejects(
+    () => pendingRestore,
+    (error) => isCode(error, ERROR_CODES.BINDING_GENERATION_STALE),
+  );
+  const stored = await readStore(bindFile);
+  assert.equal(stored.runtimeConfigs[first.memberId].agentKind, 'claude');
+  assert.equal(stored.generations[first.memberId], 1);
+  assert.equal(stored.bindings[first.memberId], undefined);
+});
+
+test('bind rejects non-machine runtime identity changes during a delayed probe', async () => {
+  const probe = delayedHostProbe(1);
+  const { bindFile, members, first } = await fixture({ hostProbe: probe });
+  const config = {
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  };
+  await members.configureRuntime(config);
+
+  const pendingBind = members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+  await probe.started;
+  await members.configureRuntime({ ...config, agentKind: 'claude' });
+  probe.release();
+
+  await assert.rejects(
+    () => pendingBind,
+    (error) => isCode(error, ERROR_CODES.BINDING_GENERATION_STALE),
+  );
+  const stored = await readStore(bindFile);
+  assert.equal(stored.runtimeConfigs[first.memberId].agentKind, 'claude');
+  assert.equal(stored.generations[first.memberId], undefined);
+  assert.equal(stored.bindings[first.memberId], undefined);
+});
+
+test('restore rejects an asserted machine mismatch before probing and preserves state', async () => {
+  const probe = countingHostProbe();
+  const { bindFile, members, first } = await fixture({ hostProbe: probe });
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+  const before = await readStore(bindFile);
+  const probesBefore = probe.calls;
+
+  await assert.rejects(
+    () => members.restoreBinding({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      machineId: 'mac-2',
+      expectedGeneration: 1,
+    }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH),
+  );
+  assert.equal(probe.calls, probesBefore);
+  assert.deepEqual(await readStore(bindFile), before);
+});
+
+test('restore rejects a host-observed machine mismatch and preserves state', async () => {
+  const { bindFile, organization, members, first } = await fixture();
+  await members.configureRuntime({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    machineId: 'mac-1',
+    hostKind: 'tmux',
+    agentKind: 'codex',
+    launchProfileRef: 'lp-a',
+  });
+  await members.bindSession({
+    token: TOKENS.owner,
+    memberId: first.memberId,
+    sessionId: 'sess-a',
+    anchor: 'pane:0',
+    expectedGeneration: 0,
+  });
+  const before = await readStore(bindFile);
+
+  const wrongMachine = createMembersService({
+    store: createBindingStore(bindFile),
+    auth,
+    organization,
+    hostProbe: hostProbeDouble({ machineId: 'mac-2' }),
+  });
+  await assert.rejects(
+    () => wrongMachine.restoreBinding({
+      token: TOKENS.owner,
+      memberId: first.memberId,
+      machineId: 'mac-1',
+      expectedGeneration: 1,
+    }),
+    (error) => isCode(error, MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH),
+  );
+  assert.deepEqual(await readStore(bindFile), before);
 });
 
 test('host-adapters public probe is the real producer consumed by members bind and verify', async (t) => {

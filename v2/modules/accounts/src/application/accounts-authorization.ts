@@ -80,10 +80,18 @@ export interface AuthorizedMachineLink {
 
 export interface AccountsAuthorizationPort {
   authorizeMachine(machineId: string): Promise<AuthorizedMachineLink>
+  authorizeCallerMachine(
+    machineId: string,
+    callerToken: string,
+  ): Promise<AuthorizedMachineLink>
 }
 
 export interface AccountsAuthorizationOptions {
-  token: string
+  /**
+   * Explicit service credential for internal delivery-target authorization.
+   * Browser machine actions must use `authorizeCallerMachine` instead.
+   */
+  token?: string
   authService: AuthService
   machineService: MachineService
   routes: MachineRouteSource
@@ -147,10 +155,39 @@ export class AccountsAuthorizationAdapter implements AccountsAuthorizationPort {
     if (requestedMachineId.length === 0) {
       throw new AccountsError('INVALID_REQUEST', 400, 'machineId is required.')
     }
+    const serviceToken = nonEmpty(this.#token)
+    if (serviceToken.length === 0) {
+      throw new AccountsError(
+        'AUTHENTICATION_REQUIRED',
+        401,
+        'Service authorization is not configured.',
+      )
+    }
+    return this.#authorizeMachineWithToken(requestedMachineId, serviceToken)
+  }
 
-    const authContext = await this.#authService.verifySession(this.#token)
+  async authorizeCallerMachine(
+    machineId: string,
+    callerToken: string,
+  ): Promise<AuthorizedMachineLink> {
+    const token = nonEmpty(callerToken)
+    if (token.length === 0) {
+      throw new AccountsError('AUTHENTICATION_REQUIRED', 401)
+    }
+    const requestedMachineId = nonEmpty(machineId)
+    if (requestedMachineId.length === 0) {
+      throw new AccountsError('INVALID_REQUEST', 400, 'machineId is required.')
+    }
+    return this.#authorizeMachineWithToken(requestedMachineId, token)
+  }
+
+  async #authorizeMachineWithToken(
+    requestedMachineId: string,
+    token: string,
+  ): Promise<AuthorizedMachineLink> {
+    const authContext = await this.#authService.verifySession(token)
     const authorizedMachines = await this.#machineService.listAuthorizedMachines(
-      this.#token,
+      token,
     )
     const machine = authorizedMachines.find(
       (candidate) => candidate.machineId === requestedMachineId,

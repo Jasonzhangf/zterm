@@ -1,0 +1,322 @@
+{
+  "id": "machine.connection",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.machine_connection_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "校验调用者",
+      "operator": "accounts.session.authorize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_request"
+      ],
+      "output": {
+        "id": "arc.machine_connection_authorized",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "解析操作目标",
+      "operator": "accounts.machine.resolve",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_authorized"
+      ],
+      "output": {
+        "id": "arc.machine_connection_target",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "执行机器操作",
+      "operator": "connections.machine.execute",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_target"
+      ],
+      "output": {
+        "id": "arc.machine_connection_operation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "核验连接事实",
+      "operator": "connections.machine.verify",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_operation"
+      ],
+      "output": {
+        "id": "arc.machine_connection_fact",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录连接拒绝",
+      "operator": "accounts.session.reject",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_authorized"
+      ],
+      "output": {
+        "id": "arc.machine_connection_rejected",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录连接目标缺口",
+      "operator": "accounts.machine.reject",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_target"
+      ],
+      "output": {
+        "id": "arc.machine_connection_unresolved",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录连接失败",
+      "operator": "connections.machine.fail",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_operation"
+      ],
+      "output": {
+        "id": "arc.machine_connection_failed",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录连接未知",
+      "operator": "connections.machine.unknown",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_fact"
+      ],
+      "output": {
+        "id": "arc.machine_connection_unknown",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录连接取消",
+      "operator": "connections.machine.cancel",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_operation"
+      ],
+      "output": {
+        "id": "arc.machine_connection_cancelled",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "返回连接结果",
+      "operator": "daemon.machine_connection.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_connection_fact",
+        "arc.machine_connection_rejected",
+        "arc.machine_connection_unresolved",
+        "arc.machine_connection_failed",
+        "arc.machine_connection_unknown",
+        "arc.machine_connection_cancelled"
+      ],
+      "output": {
+        "id": "arc.machine_connection_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "校验调用者",
+      "to": "解析操作目标",
+      "arc_id": "arc.machine_connection_authorized"
+    },
+    {
+      "from": "校验调用者",
+      "to": "记录连接拒绝",
+      "arc_id": "arc.machine_connection_authorized"
+    },
+    {
+      "from": "解析操作目标",
+      "to": "执行机器操作",
+      "arc_id": "arc.machine_connection_target"
+    },
+    {
+      "from": "解析操作目标",
+      "to": "记录连接目标缺口",
+      "arc_id": "arc.machine_connection_target"
+    },
+    {
+      "from": "执行机器操作",
+      "to": "核验连接事实",
+      "arc_id": "arc.machine_connection_operation"
+    },
+    {
+      "from": "执行机器操作",
+      "to": "记录连接失败",
+      "arc_id": "arc.machine_connection_operation"
+    },
+    {
+      "from": "执行机器操作",
+      "to": "记录连接取消",
+      "arc_id": "arc.machine_connection_operation"
+    },
+    {
+      "from": "核验连接事实",
+      "to": "记录连接未知",
+      "arc_id": "arc.machine_connection_fact"
+    },
+    {
+      "from": "核验连接事实",
+      "to": "返回连接结果",
+      "arc_id": "arc.machine_connection_fact"
+    },
+    {
+      "from": "记录连接拒绝",
+      "to": "返回连接结果",
+      "arc_id": "arc.machine_connection_rejected"
+    },
+    {
+      "from": "记录连接目标缺口",
+      "to": "返回连接结果",
+      "arc_id": "arc.machine_connection_unresolved"
+    },
+    {
+      "from": "记录连接失败",
+      "to": "返回连接结果",
+      "arc_id": "arc.machine_connection_failed"
+    },
+    {
+      "from": "记录连接未知",
+      "to": "返回连接结果",
+      "arc_id": "arc.machine_connection_unknown"
+    },
+    {
+      "from": "记录连接取消",
+      "to": "返回连接结果",
+      "arc_id": "arc.machine_connection_cancelled"
+    }
+  ],
+  "outputs": [
+    "arc.machine_connection_result"
+  ]
+}

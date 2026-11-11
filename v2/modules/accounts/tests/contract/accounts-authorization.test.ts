@@ -300,6 +300,96 @@ test('machine authorization returns a canonical active link from typed route evi
   assert.notEqual(link.authorizationId, 'token-a')
 })
 
+test('caller machine authorization uses the caller session and does not use the service token', async () => {
+  const auth = createAuthService([session('acct-a', 'alice', 'token-a')])
+  const machineService = createMachineService(auth, {
+    'token-a': [machine('mach-a', 'acct-a', 'active')],
+  })
+  const routes = {
+    async get() {
+      return {
+        machineId: 'mach-a',
+        daemonHostId: 'daemon-a',
+        capabilities: { channelKinds: ['terminal'], transportKind: 'ws' },
+        target: {
+          bridgeHost: '127.0.0.1',
+          bridgePort: 47001,
+          daemonHostId: 'daemon-a',
+          transportMode: 'websocket',
+        },
+        settings: { transportMode: 'websocket' },
+      }
+    },
+  }
+  const port = createAccountsAuthorizationPort({
+    token: 'service-token',
+    authService: auth,
+    machineService,
+    routes,
+  })
+
+  const link = await port.authorizeCallerMachine('mach-a', 'token-a')
+  assert.equal(link.machineId, 'mach-a')
+  assert.equal(link.accountId, 'acct-a')
+  assert.equal(link.daemonHostId, 'daemon-a')
+})
+
+test('caller machine authorization rejects missing, cross-account, revoked, and inconsistent links', async () => {
+  const auth = createAuthService([
+    session('acct-a', 'alice', 'token-a'),
+    session('acct-b', 'bob', 'token-b'),
+  ])
+  const machineService = createMachineService(auth, {
+    'token-a': [
+      machine('mach-revoked', 'acct-a', 'revoked'),
+      machine('mach-mismatch', 'acct-a', 'active'),
+    ],
+    'token-b': [machine('mach-b', 'acct-b', 'active')],
+  })
+  const routes = {
+    async get(machineId: string) {
+      return {
+        machineId,
+        daemonHostId: machineId === 'mach-mismatch' ? 'daemon-a' : '',
+        capabilities: { channelKinds: ['terminal'], transportKind: 'ws' },
+        target: {
+          bridgeHost: '127.0.0.1',
+          bridgePort: 47002,
+          daemonHostId: 'daemon-other',
+        },
+        settings: { transportMode: 'websocket' },
+      }
+    },
+  }
+  const port = createAccountsAuthorizationPort({
+    token: 'service-token',
+    authService: auth,
+    machineService,
+    routes,
+  })
+
+  await assert.rejects(
+    port.authorizeCallerMachine('mach-b', ''),
+    expectError('AUTHENTICATION_REQUIRED', 401),
+  )
+  await assert.rejects(
+    port.authorizeCallerMachine('mach-b', '   '),
+    expectError('AUTHENTICATION_REQUIRED', 401),
+  )
+  await assert.rejects(
+    port.authorizeCallerMachine('mach-b', 'token-a'),
+    expectError('MACHINE_NOT_FOUND', 404),
+  )
+  await assert.rejects(
+    port.authorizeCallerMachine('mach-revoked', 'token-a'),
+    expectError('MACHINE_REVOKED', 403),
+  )
+  await assert.rejects(
+    port.authorizeCallerMachine('mach-mismatch', 'token-a'),
+    expectError('MACHINE_IDENTITY_UNVERIFIED', 403),
+  )
+})
+
 test('machine authorization separates revoked, unknown, cross-account, and missing identity proof', async () => {
   const auth = createAuthService([
     session('acct-a', 'alice', 'token-a'),

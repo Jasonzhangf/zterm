@@ -281,6 +281,8 @@ export function assembleDaemonConfig(
     actorResolver = null,
     credentialProvider = null,
     vikunjaClient = null,
+    createMuxClient,
+    createTerminalPort,
   } = {},
 ) {
   const server = requireSection(config, "server");
@@ -310,7 +312,14 @@ export function assembleDaemonConfig(
 
   const relayBaseUrl = requireText(accounts, "relayBaseUrl", "accounts");
   const authorizationStoreFile = requireText(accounts, "authorizationStoreFile", "accounts");
-  const machineAuthorizationToken = requireText(accounts, "machineAuthorizationToken", "accounts");
+  // Explicit service credential for delivery-target authorization only. Browser
+  // machine directory, connection, and terminal actions use the caller's
+  // accounts session through authorizeCallerMachine.
+  const deliveryAuthorizationToken = requireText(
+    accounts,
+    "machineAuthorizationToken",
+    "accounts",
+  );
 
   const organizationStoreFile = requireText(organizationConfig, "storeFile", "organization");
   const bindingStoreFile = requireText(membersConfig, "bindingStoreFile", "members");
@@ -328,7 +337,7 @@ export function assembleDaemonConfig(
     verifySession: (token) => authService.verifySession(token),
   });
   const authorizationPort = createAccountsAuthorizationPort({
-    token: machineAuthorizationToken,
+    token: deliveryAuthorizationToken,
     authService,
     machineService,
     routes: createStaticMachineRouteSource(connections.machineRoutes),
@@ -358,10 +367,16 @@ export function assembleDaemonConfig(
     wsUrl: resolveV1WsUrl(v1WsUrl, v1Token),
     log,
   });
+  const machineLinks = new Map();
   const machineTerminal = createConnectionMachineTerminal({
     connectionManager,
     authorizationPort,
+    currentLinks: machineLinks,
+    localMachineId: hostMachineId,
     terminal: terminalPort,
+    log,
+    ...(createMuxClient !== undefined ? { createMuxClient } : {}),
+    ...(createTerminalPort !== undefined ? { createTerminalPort } : {}),
   });
 
   const memberHostObserver = {
@@ -497,6 +512,11 @@ export function assembleDaemonConfig(
       tickets,
       board,
       memberHostObserver,
+      authService,
+      machineService,
+      machineAuthorization: authorizationPort,
+      connectionManager,
+      machineLinks,
       admission: {
         auth: workspaceAuth,
         members,

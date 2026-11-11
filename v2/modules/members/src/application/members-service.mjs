@@ -87,6 +87,10 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     return hostProbe;
   }
 
+  function hasHostProbe() {
+    return hostProbe !== null && typeof hostProbe.probe === 'function';
+  }
+
   // Single host-observation port for bind, verify and restore. The probe is the
   // host-adapters public producer. availability is mandatory; identity and
   // target are validated by the caller because bind and verify need different
@@ -177,9 +181,19 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
   }
 
   function sameTarget(left, right) {
+    if (!left && !right) {
+      return true;
+    }
     return Boolean(left && right)
       && left.backend === right.backend
       && left.stableId === right.stableId;
+  }
+
+  function sameRuntimeIdentity(left, right) {
+    return left.machineId === right.machineId
+      && left.hostKind === right.hostKind
+      && left.agentKind === right.agentKind
+      && left.launchProfileRef === right.launchProfileRef;
   }
 
   // Bindings and their targets are returned as copies; a caller mutation must
@@ -296,16 +310,16 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
           details: { memberId, expectedGeneration, currentGeneration },
         });
       }
-      // The host target above was observed for this runtime machine. A runtime
-      // identity change during the probe must not pair the old target with the
-      // new machine.
-      if (currentRuntime.machineId !== runtime.machineId) {
-        fail(ERROR_CODES.BINDING_GENERATION_STALE, 'runtime machine changed while the binding was observed', {
+      // The host target above was observed for this runtime identity. A change
+      // during the probe must not pair the old observation with a new host,
+      // agent, or launch profile.
+      if (!sameRuntimeIdentity(currentRuntime, runtime)) {
+        fail(ERROR_CODES.BINDING_GENERATION_STALE, 'runtime identity changed while the binding was observed', {
           owningModule: MODULE,
           details: {
             memberId,
-            observedMachineId: runtime.machineId,
-            currentMachineId: currentRuntime.machineId,
+            observedRuntime: { ...runtime },
+            currentRuntime: { ...currentRuntime },
           },
         });
       }
@@ -332,6 +346,22 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     const state = await store.read();
     const binding = state.bindings[memberId];
     return binding ? copyBinding(binding) : null;
+  }
+
+  // Authorized binding-state read. The generation survives invalidation and is
+  // returned from the same store snapshot as the binding, so a caller can use
+  // it for a legitimate rebind even when the current binding is absent.
+  async function queryBindingState({ token, memberId } = {}) {
+    const context = await authorize(token, READ_SCOPE);
+    requireString(memberId, 'memberId', MODULE);
+    const member = await requireMember(memberId);
+    assertWorkspaceAllowed(context, member.workspaceId);
+    assertMemberAllowed(context, memberId);
+    const state = await store.read();
+    return {
+      generation: state.generations[memberId] ?? 0,
+      binding: state.bindings[memberId] ? copyBinding(state.bindings[memberId]) : null,
+    };
   }
 
   function readRuntime(state, memberId) {
@@ -414,16 +444,72 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     };
   }
 
-  async function restoreBinding({ token, memberId } = {}) {
+  async function restoreBinding({ token, memberId, machineId, expectedGeneration } = {}) {
     const context = await authorize(token, WRITE_SCOPE);
     requireString(memberId, 'memberId', MODULE);
+    if (machineId !== undefined) {
+      requireString(machineId, 'machineId', MODULE);
+    }
+    if (expectedGeneration !== undefined
+      && (!Number.isInteger(expectedGeneration) || expectedGeneration < 0)) {
+      fail(ERROR_CODES.VALIDATION, 'expectedGeneration must be a non-negative integer', {
+        owningModule: MODULE,
+      });
+    }
     const member = await requireMember(memberId);
     assertWorkspaceAllowed(context, member.workspaceId);
     assertMemberAllowed(context, memberId);
     const state = await store.read();
     const { runtime, binding } = requireConsistentBinding(state, memberId, 'restore');
+    if (machineId !== undefined && runtime.machineId !== machineId) {
+      fail(MEMBER_ERROR_CODES.BINDING_HOST_MISMATCH, `runtime machine ${runtime.machineId} != requested machine ${machineId}`, {
+        owningModule: MODULE,
+        details: { memberId, requestedMachineId: machineId, configuredMachineId: runtime.machineId },
+      });
+    }
+    const snapshotGeneration = state.generations[memberId] ?? 0;
+    if (expectedGeneration !== undefined && expectedGeneration !== snapshotGeneration) {
+      fail(ERROR_CODES.BINDING_GENERATION_STALE, `binding generation ${snapshotGeneration} != expected ${expectedGeneration}`, {
+        owningModule: MODULE,
+        details: { memberId, expectedGeneration, currentGeneration: snapshotGeneration },
+      });
+    }
     // Restore re-verifies the recorded host; it never starts a process itself.
     const observation = await observeHost(runtime, binding);
+
+    // A probe can overlap a rebind or runtime change. Re-read and reject the old
+    // observation instead of returning it as current.
+    const postProbeState = await store.read();
+    const postRuntime = postProbeState.runtimeConfigs[memberId];
+    const postBinding = postProbeState.bindings[memberId];
+    const postGeneration = postProbeState.generations[memberId] ?? 0;
+    if (
+      !postRuntime
+      || !postBinding
+      || postGeneration !== binding.generation
+      || !sameRuntimeIdentity(postRuntime, runtime)
+      || postBinding.machineId !== binding.machineId
+      || postBinding.sessionId !== binding.sessionId
+      || postBinding.anchor !== binding.anchor
+      || !sameTarget(postBinding.terminalTarget, binding.terminalTarget)
+    ) {
+      fail(ERROR_CODES.BINDING_GENERATION_STALE, 'runtime or binding changed while the saved binding was verified', {
+        owningModule: MODULE,
+        details: {
+          memberId,
+          verifiedGeneration: binding.generation,
+          currentGeneration: postGeneration,
+          runtimeChanged: Boolean(postRuntime) && !sameRuntimeIdentity(postRuntime, runtime),
+          bindingChanged: Boolean(postBinding) && (
+            postBinding.machineId !== binding.machineId
+            || postBinding.sessionId !== binding.sessionId
+            || postBinding.anchor !== binding.anchor
+            || !sameTarget(postBinding.terminalTarget, binding.terminalTarget)
+          ),
+        },
+      });
+    }
+
     return {
       restored: true,
       memberId,
@@ -491,8 +577,10 @@ export function createMembersService({ store, auth, organization, hostProbe = nu
     restoreBinding,
     bindSession,
     queryBinding,
+    queryBindingState,
     getBinding,
     getRuntimeBinding,
+    hasHostProbe,
     resolveBindingTarget,
   });
 }

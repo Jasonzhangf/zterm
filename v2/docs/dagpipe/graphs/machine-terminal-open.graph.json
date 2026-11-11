@@ -1,0 +1,372 @@
+{
+  "id": "machine.terminal_open",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.machine_terminal_open_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "校验当前账号与资源范围",
+      "operator": "accounts.resource.authorize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_request"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_scope",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "解析稳定成员及当前绑定",
+      "operator": "members.binding.resolve",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_scope"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_binding",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "取得授权机器链路",
+      "operator": "connections.machine.link.acquire",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_binding"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_link",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "读取该链路目录",
+      "operator": "connections.machine.catalog.read",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_link"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_catalog",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "核验精确目标",
+      "operator": "terminal.target.admit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_catalog"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_target",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "打开该链路终端通道",
+      "operator": "connections.terminal_channel.open",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_target"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_channel",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "提交首个完整正文帧",
+      "operator": "terminal.frame.accept",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_channel"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_frame",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录打开拒绝",
+      "operator": "accounts.resource.reject",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_scope"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_rejected",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录打开失败",
+      "operator": "connections.terminal_channel.fail",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_channel"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_failed",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录首帧未知",
+      "operator": "terminal.frame.unknown",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_frame"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_unknown",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录打开取消",
+      "operator": "connections.terminal_channel.cancel",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_target"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_cancelled",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "返回打开结果",
+      "operator": "daemon.machine_terminal_open.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_open_frame",
+        "arc.machine_terminal_open_rejected",
+        "arc.machine_terminal_open_failed",
+        "arc.machine_terminal_open_unknown",
+        "arc.machine_terminal_open_cancelled"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_open_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "校验当前账号与资源范围",
+      "to": "解析稳定成员及当前绑定",
+      "arc_id": "arc.machine_terminal_open_scope"
+    },
+    {
+      "from": "校验当前账号与资源范围",
+      "to": "记录打开拒绝",
+      "arc_id": "arc.machine_terminal_open_scope"
+    },
+    {
+      "from": "解析稳定成员及当前绑定",
+      "to": "取得授权机器链路",
+      "arc_id": "arc.machine_terminal_open_binding"
+    },
+    {
+      "from": "取得授权机器链路",
+      "to": "读取该链路目录",
+      "arc_id": "arc.machine_terminal_open_link"
+    },
+    {
+      "from": "读取该链路目录",
+      "to": "核验精确目标",
+      "arc_id": "arc.machine_terminal_open_catalog"
+    },
+    {
+      "from": "核验精确目标",
+      "to": "打开该链路终端通道",
+      "arc_id": "arc.machine_terminal_open_target"
+    },
+    {
+      "from": "核验精确目标",
+      "to": "记录打开取消",
+      "arc_id": "arc.machine_terminal_open_target"
+    },
+    {
+      "from": "打开该链路终端通道",
+      "to": "提交首个完整正文帧",
+      "arc_id": "arc.machine_terminal_open_channel"
+    },
+    {
+      "from": "打开该链路终端通道",
+      "to": "记录打开失败",
+      "arc_id": "arc.machine_terminal_open_channel"
+    },
+    {
+      "from": "提交首个完整正文帧",
+      "to": "返回打开结果",
+      "arc_id": "arc.machine_terminal_open_frame"
+    },
+    {
+      "from": "提交首个完整正文帧",
+      "to": "记录首帧未知",
+      "arc_id": "arc.machine_terminal_open_frame"
+    },
+    {
+      "from": "记录打开拒绝",
+      "to": "返回打开结果",
+      "arc_id": "arc.machine_terminal_open_rejected"
+    },
+    {
+      "from": "记录打开失败",
+      "to": "返回打开结果",
+      "arc_id": "arc.machine_terminal_open_failed"
+    },
+    {
+      "from": "记录首帧未知",
+      "to": "返回打开结果",
+      "arc_id": "arc.machine_terminal_open_unknown"
+    },
+    {
+      "from": "记录打开取消",
+      "to": "返回打开结果",
+      "arc_id": "arc.machine_terminal_open_cancelled"
+    }
+  ],
+  "outputs": [
+    "arc.machine_terminal_open_result"
+  ]
+}

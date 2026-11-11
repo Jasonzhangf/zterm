@@ -99,6 +99,13 @@ function validateNonEmptyString(value, field, operationId) {
   return value;
 }
 
+function validateExpectedRevision(value, operationId) {
+  if (!Number.isInteger(value)) {
+    throw daemonError("CONTROL_INPUT_INVALID", operationId, "expectedRevision must be an integer.");
+  }
+  return value;
+}
+
 function redactWsUrl(value) {
   try {
     const url = new URL(value);
@@ -127,6 +134,11 @@ export function createDaemon({
   routing,
   memberHostObserver,
   terminalCatalog,
+  authService,
+  machineService,
+  machineAuthorization,
+  connectionManager,
+  machineLinks = new Map(),
   goals,
   tickets,
   board,
@@ -150,6 +162,9 @@ export function createDaemon({
       })
     : null;
   const sessions = new Map();
+  // Account-scoped machine links owned by this daemon composition. A
+  // composition may inject the same map into the machine terminal consumer so
+  // the connect route and the first terminal stream share one current link.
   const context = {
     terminal,
     admission: terminalAdmission,
@@ -165,6 +180,11 @@ export function createDaemon({
     routing,
     memberHostObserver,
     terminalCatalog,
+    authService,
+    machineService,
+    machineAuthorization,
+    connectionManager,
+    machineLinks,
     goals,
     tickets,
     board,
@@ -189,6 +209,14 @@ export function createDaemon({
   });
 
   server.on("close", () => {
+    for (const link of machineLinks.values()) {
+      try {
+        context.connectionManager?.closeOwnLink(link);
+      } catch {
+        // The physical link may already be closed or superseded.
+      }
+    }
+    machineLinks.clear();
     void terminal.close?.();
     void context.tickets?.closeStore?.();
   });
@@ -245,6 +273,18 @@ async function handleRequest({ request, response, context }) {
     return logout(request, response, context);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/accounts/login") {
+    return accountsLogin(request, response, context);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/accounts/session") {
+    return accountsSession(request, response, context);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/accounts/logout") {
+    return accountsLogout(request, response, context);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/sessions") {
     authenticate(request, context);
     const sessions = await context.terminal.listSessions();
@@ -254,14 +294,30 @@ async function handleRequest({ request, response, context }) {
     });
   }
 
+  const machineRoute = matchMachineRoute(url.pathname);
+  if (machineRoute) {
+    return handleMachineRoute({ request, response, context, route: machineRoute });
+  }
+
   if (request.method === "GET" && url.pathname === "/api/terminal/stream") {
     requireTerminalAdmission(context, "terminal.stream");
-    return streamTerminal(request, response, context, url, credentialHeader(request));
+    return streamTerminal(
+      request,
+      response,
+      context,
+      url,
+      accountsSessionHeader(request),
+    );
   }
 
   if (request.method === "POST" && url.pathname === "/api/terminal/input") {
     requireTerminalAdmission(context, "terminal.input");
-    return sendTerminalInput(request, response, context, credentialHeader(request));
+    return sendTerminalInput(
+      request,
+      response,
+      context,
+      accountsSessionHeader(request),
+    );
   }
 
   if (request.method === "GET" && url.pathname === "/api/workspaces") {
@@ -286,6 +342,312 @@ async function handleRequest({ request, response, context }) {
   sendJson(response, 404, {
     error: daemonError("ROUTE_NOT_FOUND", "route", "Route was not found.", url.pathname).toJSON(),
   });
+}
+
+function matchMachineRoute(pathname) {
+  if (pathname === "/api/machines") {
+    return { kind: "machine-list" };
+  }
+  const prefix = "/api/machines/";
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+  const parts = pathname.slice(prefix.length).split("/").filter(Boolean);
+  if (parts.length !== 2) {
+    return null;
+  }
+  const machineId = decodeURIComponent(parts[0]);
+  switch (parts[1]) {
+    case "connect":
+      return { kind: "machine-connect", machineId };
+    case "connection":
+      return { kind: "machine-connection", machineId };
+    case "recover":
+      return { kind: "machine-recover", machineId };
+    case "disconnect":
+      return { kind: "machine-disconnect", machineId };
+    case "sessions":
+      return { kind: "machine-sessions", machineId };
+    default:
+      return null;
+  }
+}
+
+async function handleMachineRoute({ request, response, context, route }) {
+  authenticate(request, context);
+  const accountsToken = accountsSessionHeader(request);
+
+  if (route.kind === "machine-list") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", "machine.list", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    requireMachineAccountsSession(accountsToken, "machine.list");
+    requireMachineService(context, "machine.list");
+    let machines;
+    try {
+      machines = await context.machineService.listAuthorizedMachines(accountsToken);
+    } catch (error) {
+      throw toControlTypedError(error, "machine.list");
+    }
+    return sendJson(response, 200, {
+      machines,
+      observation: observation("accounts", { machines: machines.length }),
+    });
+  }
+
+  const operationId = `machine.${route.kind.slice("machine-".length)}`;
+  requireConnectionManager(context, operationId);
+  requireMachineAccountsSession(accountsToken, operationId);
+  requireMachineAuthorization(context, operationId);
+
+  if (route.kind === "machine-connect" || route.kind === "machine-recover") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const authorization = await authorizeCallerMachine(
+      route.machineId,
+      accountsToken,
+      context,
+      operationId,
+    );
+    const link = await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.connect(
+        route.machineId,
+        accountsToken,
+        authorization,
+      ),
+    );
+    let connection;
+    try {
+      connection = await withTerminalAdmission(
+        operationId,
+        () => context.connectionManager.observeLink(link),
+      );
+    } catch (error) {
+      try {
+        context.connectionManager.closeOwnLink(link);
+      } catch {
+        // Preserve the original observation failure.
+      }
+      throw error;
+    }
+    context.machineLinks.set(machineLinkKey(authorization, route.machineId), link);
+    return sendJson(response, 200, {
+      connection,
+      observation: observation("connections", {
+        machineId: connection.machineId,
+        generation: connection.generation,
+        status: connection.status,
+        freshness: connection.freshness,
+      }),
+    });
+  }
+
+  if (route.kind === "machine-connection") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const authorization = await authorizeCallerMachine(
+      route.machineId,
+      accountsToken,
+      context,
+      operationId,
+    );
+    const link = context.machineLinks.get(
+      machineLinkKey(authorization, route.machineId),
+    );
+    if (!link) {
+      return sendJson(response, 200, {
+        connection: null,
+        status: "unavailable",
+        observation: observation("connections", {
+          machineId: route.machineId,
+          status: "unavailable",
+          freshness: "unavailable",
+        }),
+      });
+    }
+    const connection = await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.observeLink(link),
+    );
+    return sendJson(response, 200, {
+      connection,
+      status: connection.status,
+      observation: observation("connections", {
+        machineId: connection.machineId,
+        generation: connection.generation,
+        status: connection.status,
+        freshness: connection.freshness,
+      }),
+    });
+  }
+
+  if (route.kind === "machine-disconnect") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const authorization = await authorizeCallerMachine(
+      route.machineId,
+      accountsToken,
+      context,
+      operationId,
+    );
+    const linkKey = machineLinkKey(authorization, route.machineId);
+    const link = requireCurrentMachineLink(
+      linkKey,
+      route.machineId,
+      context,
+      operationId,
+    );
+    await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.closeOwnLink(link),
+    );
+    context.machineLinks.delete(linkKey);
+    return sendJson(response, 200, {
+      disconnected: true,
+      machineId: route.machineId,
+      connection: null,
+      status: "unavailable",
+      observation: observation("connections", {
+        machineId: route.machineId,
+        status: "unavailable",
+        freshness: "unavailable",
+      }),
+    });
+  }
+
+  if (route.kind === "machine-sessions") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const authorization = await authorizeCallerMachine(
+      route.machineId,
+      accountsToken,
+      context,
+      operationId,
+    );
+    const link = requireCurrentMachineLink(
+      machineLinkKey(authorization, route.machineId),
+      route.machineId,
+      context,
+      operationId,
+    );
+    const sessions = await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.listSessions(link),
+    );
+    return sendJson(response, 200, {
+      sessions,
+      observation: observation("connections", {
+        machineId: route.machineId,
+        generation: link.generation,
+        sessions: sessions.length,
+      }),
+    });
+  }
+
+  throw daemonError("ROUTE_NOT_FOUND", operationId, "Route was not found.", request.url);
+}
+
+function requireMachineService(context, operationId) {
+  if (!context.machineService || typeof context.machineService.listAuthorizedMachines !== "function") {
+    throw daemonError(
+      "MACHINE_SERVICE_UNCONFIGURED",
+      operationId,
+      "The accounts machine directory port is not configured.",
+    );
+  }
+}
+
+function requireMachineAccountsSession(token, operationId) {
+  if (!token) {
+    throw daemonError(
+      "MACHINE_ACCOUNT_SESSION_REQUIRED",
+      operationId,
+      "An accounts session credential is required.",
+    );
+  }
+  return token;
+}
+
+function requireMachineAuthorization(context, operationId) {
+  if (
+    !context.machineAuthorization
+    || typeof context.machineAuthorization.authorizeCallerMachine !== "function"
+    || typeof context.machineAuthorization.authorizeMachine !== "function"
+  ) {
+    throw daemonError(
+      "MACHINE_AUTHORIZATION_UNCONFIGURED",
+      operationId,
+      "The accounts machine authorization port is not configured.",
+    );
+  }
+}
+
+function requireConnectionManager(context, operationId) {
+  if (
+    !context.connectionManager
+    || typeof context.connectionManager.connect !== "function"
+    || typeof context.connectionManager.observeLink !== "function"
+    || typeof context.connectionManager.listSessions !== "function"
+    || typeof context.connectionManager.closeOwnLink !== "function"
+  ) {
+    throw daemonError(
+      "MACHINE_CONNECTIONS_UNCONFIGURED",
+      operationId,
+      "The connections manager is not configured.",
+    );
+  }
+}
+
+function requireCurrentMachineLink(linkKey, machineId, context, operationId) {
+  const link = context.machineLinks.get(linkKey);
+  if (!link) {
+    throw daemonError(
+      "MACHINE_NOT_CONNECTED",
+      operationId,
+      "The machine has no current connection in this caller scope.",
+      { machineId },
+    );
+  }
+  return link;
+}
+
+async function authorizeCallerMachine(machineId, accountsToken, context, operationId) {
+  try {
+    const authorization = await context.machineAuthorization.authorizeCallerMachine(
+      machineId,
+      accountsToken,
+    );
+    const accountId = typeof authorization?.accountId === "string"
+      ? authorization.accountId.trim()
+      : "";
+    if (!accountId) {
+      throw daemonError(
+        "MACHINE_ACCOUNT_SESSION_REQUIRED",
+        operationId,
+        "The accounts machine authorization has no account scope.",
+      );
+    }
+    if (authorization.machineId !== machineId) {
+      throw daemonError(
+        "machine_mismatch",
+        operationId,
+        "Machine authorization does not match the requested machine.",
+        machineId,
+      );
+    }
+    return authorization;
+  } catch (error) {
+    throw toControlTypedError(error, operationId);
+  }
+}
+
+function machineLinkKey(authorization, machineId) {
+  return JSON.stringify([authorization.accountId, machineId]);
 }
 
 function matchWorkspaceRoute(pathname) {
@@ -325,11 +687,23 @@ function matchWorkspaceRoute(pathname) {
   if (parts.length === 2 && parts[1] === "tree") {
     return { kind: "tree", workspaceId };
   }
+  if (parts.length === 2 && parts[1] === "groups") {
+    return { kind: "create-group", workspaceId };
+  }
+  if (parts.length === 2 && parts[1] === "members") {
+    return { kind: "create-member", workspaceId };
+  }
   if (parts.length === 2 && parts[1] === "resolve") {
     return { kind: "resolve", workspaceId };
   }
   if (parts.length === 4 && parts[1] === "members" && parts[3] === "runtime") {
     return { kind: "member-runtime", workspaceId, memberId: decodeURIComponent(parts[2]) };
+  }
+  if (parts.length === 4 && parts[1] === "members" && parts[3] === "binding") {
+    return { kind: "member-binding", workspaceId, memberId: decodeURIComponent(parts[2]) };
+  }
+  if (parts.length === 4 && parts[1] === "members" && parts[3] === "restore-binding") {
+    return { kind: "member-restore-binding", workspaceId, memberId: decodeURIComponent(parts[2]) };
   }
   return null;
 }
@@ -341,6 +715,47 @@ async function handleWorkspaceRoute({ request, response, context, route }) {
     return handleWorkTrackingRoute({ request, response, context, route, token, account });
   }
 
+  if (route.kind === "create-group") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.group.create", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const body = await readJson(request);
+    let group;
+    try {
+      group = await context.organization.createGroup({
+        token,
+        workspaceId: route.workspaceId,
+        name: requireBodyText(body, "name", "workspace.group.create"),
+        parentGroupId: body.parentGroupId ?? null,
+        expectedRevision: validateExpectedRevision(body.expectedRevision, "workspace.group.create"),
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.group.create");
+    }
+    return sendJson(response, 201, { group });
+  }
+
+  if (route.kind === "create-member") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.member.create", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const body = await readJson(request);
+    let member;
+    try {
+      member = await context.organization.addMember({
+        token,
+        workspaceId: route.workspaceId,
+        groupId: requireBodyText(body, "groupId", "workspace.member.create"),
+        name: requireBodyText(body, "name", "workspace.member.create"),
+        ...(body.managerMemberId !== undefined ? { managerMemberId: body.managerMemberId } : {}),
+        expectedRevision: validateExpectedRevision(body.expectedRevision, "workspace.member.create"),
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.member.create");
+    }
+    return sendJson(response, 201, { member });
+  }
+
   if (route.kind === "tree") {
     if (request.method !== "GET") {
       throw daemonError("METHOD_NOT_ALLOWED", "workspace.tree", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
@@ -350,11 +765,86 @@ async function handleWorkspaceRoute({ request, response, context, route }) {
   }
 
   if (route.kind === "member-runtime") {
-    if (request.method !== "GET") {
+    if (request.method === "GET") {
+      const member = await queryMemberControl(token, route.workspaceId, route.memberId, context);
+      return sendJson(response, 200, member);
+    }
+    if (request.method !== "POST") {
       throw daemonError("METHOD_NOT_ALLOWED", "workspace.member-runtime", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
     }
-    const member = await queryMemberControl(token, route.workspaceId, route.memberId, context);
-    return sendJson(response, 200, member);
+    await findAuthorizedMember(token, route.workspaceId, route.memberId, context, "workspace.member-runtime");
+    if (typeof context.members.configureRuntime !== "function") {
+      throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", "workspace.member-runtime", "The members runtime write port is not configured.");
+    }
+    const body = await readJson(request);
+    let runtime;
+    try {
+      runtime = await context.members.configureRuntime({
+        token,
+        memberId: route.memberId,
+        machineId: requireBodyText(body, "machineId", "workspace.member-runtime"),
+        hostKind: requireBodyText(body, "hostKind", "workspace.member-runtime"),
+        agentKind: requireBodyText(body, "agentKind", "workspace.member-runtime"),
+        launchProfileRef: requireBodyText(body, "launchProfileRef", "workspace.member-runtime"),
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.member-runtime");
+    }
+    return sendJson(response, 200, { runtime });
+  }
+
+  if (route.kind === "member-binding") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.member-binding", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    await findAuthorizedMember(token, route.workspaceId, route.memberId, context, "workspace.member-binding");
+    if (typeof context.members.bindSession !== "function") {
+      throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", "workspace.member-binding", "The members binding port is not configured.");
+    }
+    const body = await readJson(request);
+    if (!Number.isInteger(body.expectedGeneration) || body.expectedGeneration < 0) {
+      throw daemonError("CONTROL_INPUT_INVALID", "workspace.member-binding", "expectedGeneration must be a non-negative integer.");
+    }
+    let binding;
+    try {
+      binding = await context.members.bindSession({
+        token,
+        memberId: route.memberId,
+        sessionId: requireBodyText(body, "sessionId", "workspace.member-binding"),
+        anchor: requireBodyText(body, "anchor", "workspace.member-binding"),
+        expectedGeneration: body.expectedGeneration,
+        ...(body.terminalTarget !== undefined ? { terminalTarget: body.terminalTarget } : {}),
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.member-binding");
+    }
+    return sendJson(response, 200, { binding });
+  }
+
+  if (route.kind === "member-restore-binding") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.member-restore-binding", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    await findAuthorizedMember(token, route.workspaceId, route.memberId, context, "workspace.member-restore-binding");
+    if (typeof context.members.restoreBinding !== "function") {
+      throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", "workspace.member-restore-binding", "The members restore port is not configured.");
+    }
+    const body = await readJson(request);
+    if (!Number.isInteger(body.expectedGeneration) || body.expectedGeneration < 0) {
+      throw daemonError("CONTROL_INPUT_INVALID", "workspace.member-restore-binding", "expectedGeneration must be a non-negative integer.");
+    }
+    let verification;
+    try {
+      verification = await context.members.restoreBinding({
+        token,
+        memberId: route.memberId,
+        machineId: requireBodyText(body, "machineId", "workspace.member-restore-binding"),
+        expectedGeneration: body.expectedGeneration,
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.member-restore-binding");
+    }
+    return sendJson(response, 200, { verification });
   }
 
   if (route.kind === "resolve") {
@@ -654,7 +1144,7 @@ async function controlAuth(request, context) {
   if (!context.workspaceAuth || typeof context.workspaceAuth.verify !== "function") {
     throw daemonError("CONTROL_AUTH_UNCONFIGURED", "control.auth", "The control-plane workspace authorization adapter is not configured.");
   }
-  const token = controlToken(request);
+  const token = accountsSessionHeader(request) || controlToken(request);
   if (!token) {
     throw daemonError("CONTROL_CREDENTIAL_REQUIRED", "control.auth", "A control-plane credential is required.");
   }
@@ -680,11 +1170,30 @@ function requireControl(context, operationId) {
     }
     return;
   }
+  if (operationId === "create-group") {
+    if (!context.organization || typeof context.organization.createGroup !== "function") {
+      throw daemonError("CONTROL_ORGANIZATION_UNCONFIGURED", operationId, "The organization createGroup port is not configured.");
+    }
+    return;
+  }
+  if (operationId === "create-member") {
+    if (!context.organization || typeof context.organization.addMember !== "function") {
+      throw daemonError("CONTROL_ORGANIZATION_UNCONFIGURED", operationId, "The organization addMember port is not configured.");
+    }
+    return;
+  }
   if (!context.organization || typeof context.organization.queryTree !== "function") {
     throw daemonError("CONTROL_ORGANIZATION_UNCONFIGURED", operationId, "The organization tree port is not configured.");
   }
-  if (!context.members || typeof context.members.queryRuntime !== "function" || typeof context.members.queryBinding !== "function") {
+  if (!context.members
+    || typeof context.members.queryRuntime !== "function"
+    || typeof context.members.queryBindingState !== "function") {
     throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", operationId, "The members runtime/binding port is not configured.");
+  }
+  if (operationId === "member-binding" || operationId === "member-restore-binding") {
+    if (typeof context.members.hasHostProbe !== "function" || !context.members.hasHostProbe()) {
+      throw daemonError("CONTROL_HOST_PROBE_UNCONFIGURED", operationId, "The members host probe is not configured.");
+    }
   }
 }
 
@@ -810,25 +1319,31 @@ function collectGroups(node, result = []) {
 }
 
 async function queryMemberControl(token, workspaceId, memberId, context, options = {}) {
+  const { member, group } = await findAuthorizedMember(token, workspaceId, memberId, context, "workspace.member-runtime");
+  return projectMemberControl(token, { ...member, groupPath: group.path }, context, options);
+}
+
+async function findAuthorizedMember(token, workspaceId, memberId, context, operationId) {
   let tree;
   try {
     tree = await context.organization.queryTree({ token, workspaceId });
   } catch (error) {
-    throw toControlTypedError(error, "workspace.member-runtime");
+    throw toControlTypedError(error, operationId);
   }
   const group = collectGroups(tree.root)
     .find((candidate) => (candidate.members ?? []).some((member) => member.memberId === memberId));
   const member = group?.members?.find((candidate) => candidate.memberId === memberId);
   if (!group || !member) {
-    throw daemonError("CONTROL_MEMBER_NOT_FOUND", "workspace.member-runtime", "The member is not in the requested workspace.", `${memberId} in ${workspaceId}`);
+    throw daemonError("CONTROL_MEMBER_NOT_FOUND", operationId, "The member is not in the requested workspace.", `${memberId} in ${workspaceId}`);
   }
-  return projectMemberControl(token, { ...member, groupPath: group.path }, context, options);
+  return { member, group };
 }
 
 async function projectMemberControl(token, member, context, options = {}) {
   let runtime = null;
   let binding = null;
   let availability = null;
+  let bindingGeneration = 0;
   const memberId = member.memberId;
   try {
     runtime = await context.members.queryRuntime({ token, memberId });
@@ -842,14 +1357,14 @@ async function projectMemberControl(token, member, context, options = {}) {
   }
   if (runtime) {
     try {
-      binding = await context.members.queryBinding({ token, memberId });
+      const bindingState = await context.members.queryBindingState({ token, memberId });
+      bindingGeneration = bindingState.generation;
+      binding = bindingState.binding ?? null;
     } catch (error) {
       if (isControlTypedError(error) && error.code === MEMBER_ERROR_CODES.MEMBER_FORBIDDEN_MEMBER) {
         throw toControlTypedError(error, "workspace.member-runtime");
       }
-      if (!isControlTypedError(error) || error.code !== MEMBER_ERROR_CODES.MEMBER_BINDING_NOT_FOUND) {
-        throw toControlTypedError(error, "workspace.member-runtime");
-      }
+      throw toControlTypedError(error, "workspace.member-runtime");
     }
   }
   if (binding) {
@@ -871,8 +1386,15 @@ async function projectMemberControl(token, member, context, options = {}) {
     runtime,
     binding,
     availability,
+    bindingGeneration,
+    agentCapabilities: MEMBER_AGENT_CAPABILITIES,
   };
 }
+
+const MEMBER_AGENT_CAPABILITIES = Object.freeze({
+  start: "unsupported",
+  resume: "unsupported",
+});
 
 async function observeMemberAvailability(context, { memberId, runtime, binding }) {
   if (!context.memberHostObserver || typeof context.memberHostObserver.observe !== "function") {
@@ -986,6 +1508,11 @@ function credentialHeader(request) {
     return headerToken.trim();
   }
   return "";
+}
+
+function accountsSessionHeader(request) {
+  const value = request.headers["x-zterm-accounts-session"];
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function controlToken(request) {
@@ -1103,6 +1630,112 @@ function logout(request, response, context) {
   sendJson(response, 200, { ok: true });
 }
 
+function requireAccountsAuthService(context, operationId) {
+  if (
+    !context.authService
+    || typeof context.authService.login !== "function"
+    || typeof context.authService.verifySession !== "function"
+    || typeof context.authService.logout !== "function"
+  ) {
+    throw daemonError(
+      "ACCOUNTS_SERVICE_UNCONFIGURED",
+      operationId,
+      "The accounts session service is not configured.",
+    );
+  }
+}
+
+async function accountsLogin(request, response, context) {
+  authenticate(request, context);
+  if (!requestOriginAllowed(request)) {
+    throw daemonError("ORIGIN_NOT_ALLOWED", "accounts.login", "Cross-origin login is not allowed.");
+  }
+  requireAccountsAuthService(context, "accounts.login");
+  const body = await readJson(request);
+  const loginName = validateNonEmptyString(
+    body.loginName,
+    "loginName",
+    "accounts.login",
+  );
+  const credential = validateNonEmptyString(
+    body.credential,
+    "credential",
+    "accounts.login",
+  );
+  let result;
+  try {
+    result = await context.authService.login({ loginName, credential });
+  } catch (error) {
+    throw toControlTypedError(error, "accounts.login");
+  }
+  return sendJson(response, 200, {
+    token: result.token,
+    account: {
+      accountId: result.authContext.accountId,
+      loginName: result.authContext.loginName,
+    },
+  });
+}
+
+async function accountsSession(request, response, context) {
+  authenticate(request, context);
+  requireAccountsAuthService(context, "accounts.session");
+  let authContext;
+  try {
+    authContext = await context.authService.verifySession(
+      accountsSessionHeader(request),
+    );
+  } catch (error) {
+    throw toControlTypedError(error, "accounts.session");
+  }
+  return sendJson(response, 200, {
+    account: {
+      accountId: authContext.accountId,
+      loginName: authContext.loginName,
+    },
+  });
+}
+
+async function accountsLogout(request, response, context) {
+  authenticate(request, context);
+  requireAccountsAuthService(context, "accounts.logout");
+  const token = accountsSessionHeader(request);
+  let authContext;
+  try {
+    authContext = await context.authService.verifySession(token);
+  } catch (error) {
+    throw toControlTypedError(error, "accounts.logout");
+  }
+  await closeAccountMachineLinks(authContext.accountId, context, "accounts.logout");
+  try {
+    await context.authService.logout(token);
+  } catch (error) {
+    throw toControlTypedError(error, "accounts.logout");
+  }
+  return sendJson(response, 200, { ok: true });
+}
+
+async function closeAccountMachineLinks(accountId, context, operationId) {
+  const accountLinks = [];
+  for (const [key, link] of context.machineLinks) {
+    if (machineLinkAccountId(key) === accountId) {
+      accountLinks.push({ key, link });
+    }
+  }
+  for (const { key, link } of accountLinks) {
+    await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.closeOwnLink(link),
+    );
+    context.machineLinks.delete(key);
+  }
+}
+
+function machineLinkAccountId(key) {
+  const [accountId] = JSON.parse(key);
+  return accountId;
+}
+
 function constantTimeEqual(left, right) {
   const a = Buffer.from(String(left));
   const b = Buffer.from(String(right));
@@ -1121,6 +1754,8 @@ async function streamTerminal(request, response, context, url, callerToken) {
   let streamResolution = null;
   let target = null;
   requireTerminalAdmission(context, "terminal.stream");
+  authenticate(request, context);
+  requireMachineAccountsSession(callerToken, "terminal.stream");
   streamResolution = await withTerminalAdmission("terminal.stream", () => context.admission.admit({
     callerToken,
     workspaceId: url.searchParams.get("workspaceId"),
@@ -1265,12 +1900,53 @@ async function streamTerminal(request, response, context, url, callerToken) {
 
 async function sendTerminalInput(request, response, context, callerToken) {
   requireTerminalAdmission(context, "terminal.input");
+  authenticate(request, context);
+  requireMachineAccountsSession(callerToken, "terminal.input");
   const body = await readJson(request);
+  let machineId = body.machineId;
+  if (context.connectionManager || context.machineAuthorization) {
+    machineId = validateNonEmptyString(
+      body.machineId,
+      "machineId",
+      "terminal.input",
+    ).trim();
+    requireConnectionManager(context, "terminal.input");
+    requireMachineAuthorization(context, "terminal.input");
+    const authorization = await authorizeCallerMachine(
+      machineId,
+      callerToken,
+      context,
+      "terminal.input",
+    );
+    const link = requireCurrentMachineLink(
+      machineLinkKey(authorization, machineId),
+      machineId,
+      context,
+      "terminal.input",
+    );
+    const current = await withTerminalAdmission(
+      "terminal.input",
+      () => context.connectionManager.observeLink(link),
+    );
+    if (current.status !== "connected" || current.freshness !== "fresh") {
+      throw daemonError(
+        "TERMINAL_TARGET_BINDING_UNAVAILABLE",
+        "terminal.input",
+        "The machine has no connected and fresh UI link in this caller scope.",
+        {
+          reason: "machine-link-unavailable",
+          machineId,
+          status: current.status,
+          freshness: current.freshness,
+        },
+      );
+    }
+  }
   const result = await withTerminalAdmission("terminal.input", () => context.admission.forwardInput({
     callerToken,
     workspaceId: body.workspaceId,
     memberId: body.memberId,
-    machineId: body.machineId,
+    machineId,
     groupPath: body.groupPath,
     expectedGeneration: body.expectedGeneration,
     target: requireTarget(body.target, "terminal.input"),
@@ -1406,6 +2082,7 @@ function statusForError(error) {
     case "CONTROL_ORGANIZATION_UNCONFIGURED":
     case "CONTROL_MEMBERS_UNCONFIGURED":
     case "CONTROL_ROUTING_UNCONFIGURED":
+    case "CONTROL_HOST_PROBE_UNCONFIGURED":
       return 503;
     case "CONTROL_INPUT_INVALID":
     case "VALIDATION":
@@ -1432,6 +2109,8 @@ function statusForError(error) {
     case "GOAL_NAME_CONFLICT":
     case "GOAL_NOT_EMPTY":
     case "GOAL_REFERENCED":
+    case "GROUP_NAME_CONFLICT":
+    case "MEMBER_NAME_CONFLICT":
     case "BINDING_CONFLICT":
     case "OPERATION_CONFLICT":
     case "OPERATION_SUPERSEDED":
@@ -1469,11 +2148,13 @@ function statusForError(error) {
     case "BINDING_HOST_IDENTITY_UNAVAILABLE":
       return 503;
     case "V2_AUTH_UNCONFIGURED":
+    case "ACCOUNTS_SERVICE_UNCONFIGURED":
     case "TERMINAL_ADMISSION_REQUIRED":
       return 503;
     case "V2_CREDENTIAL_REQUIRED":
     case "V2_CREDENTIAL_INVALID":
     case "V2_SESSION_EXPIRED":
+    case "MACHINE_ACCOUNT_SESSION_REQUIRED":
       return 401;
     case "CSRF_REQUIRED":
     case "ORIGIN_NOT_ALLOWED":
@@ -1504,8 +2185,14 @@ function statusForError(error) {
     case "WORKSPACE_FORBIDDEN":
     case "MACHINE_REVOKED":
       return 403;
+    case "MACHINE_NOT_CONNECTED":
+      return 409;
     case "MACHINE_NOT_FOUND":
       return 404;
+    case "MACHINE_SERVICE_UNCONFIGURED":
+    case "MACHINE_AUTHORIZATION_UNCONFIGURED":
+    case "MACHINE_CONNECTIONS_UNCONFIGURED":
+      return 503;
     case "unauthorized":
     case "peer_identity_mismatch":
       return 401;

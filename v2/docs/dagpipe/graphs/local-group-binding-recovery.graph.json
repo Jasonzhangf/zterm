@@ -1,0 +1,366 @@
+{
+  "id": "workspace.local_group_binding_recovery",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.local_group_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "接收本地配置请求",
+      "operator": "daemon.local_group.receive",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.local_group_request"
+      ],
+      "output": {
+        "id": "arc.received_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "校验控制面凭据",
+      "operator": "daemon.control_plane.authorize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.received_request"
+      ],
+      "output": {
+        "id": "arc.authorized_context",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "选择配置操作",
+      "operator": "daemon.local_group.dispatch",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authorized_context"
+      ],
+      "output": {
+        "id": "arc.declared_operation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "提交组织节点变更",
+      "operator": "organization.structure.commit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.declared_operation"
+      ],
+      "output": {
+        "id": "arc.organization_receipt",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "更新成员运行配置",
+      "operator": "members.runtime.commit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.declared_operation"
+      ],
+      "output": {
+        "id": "arc.runtime_receipt",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "校验成员绑定意图",
+      "operator": "members.binding.authorize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.declared_operation"
+      ],
+      "output": {
+        "id": "arc.authorized_binding_intent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "探测绑定宿主",
+      "operator": "host_adapters.tmux.observe",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authorized_binding_intent"
+      ],
+      "output": {
+        "id": "arc.bind_observation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "提交成员绑定",
+      "operator": "members.binding.commit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.bind_observation"
+      ],
+      "output": {
+        "id": "arc.binding_receipt",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "校验恢复声明",
+      "operator": "members.restore.authorize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.declared_operation"
+      ],
+      "output": {
+        "id": "arc.authorized_restore_intent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "探测持久化宿主",
+      "operator": "host_adapters.tmux.observe_restore",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authorized_restore_intent"
+      ],
+      "output": {
+        "id": "arc.restore_observation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "重检恢复后事实",
+      "operator": "members.restore.recheck",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.restore_observation"
+      ],
+      "output": {
+        "id": "arc.restore_receipt",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "组装公开结果",
+      "operator": "daemon.local_group.result",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.organization_receipt",
+        "arc.runtime_receipt",
+        "arc.binding_receipt",
+        "arc.restore_receipt"
+      ],
+      "output": {
+        "id": "arc.public_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "接收本地配置请求",
+      "to": "校验控制面凭据",
+      "arc_id": "arc.received_request"
+    },
+    {
+      "from": "校验控制面凭据",
+      "to": "选择配置操作",
+      "arc_id": "arc.authorized_context"
+    },
+    {
+      "from": "选择配置操作",
+      "to": "提交组织节点变更",
+      "arc_id": "arc.declared_operation"
+    },
+    {
+      "from": "选择配置操作",
+      "to": "更新成员运行配置",
+      "arc_id": "arc.declared_operation"
+    },
+    {
+      "from": "选择配置操作",
+      "to": "校验成员绑定意图",
+      "arc_id": "arc.declared_operation"
+    },
+    {
+      "from": "选择配置操作",
+      "to": "校验恢复声明",
+      "arc_id": "arc.declared_operation"
+    },
+    {
+      "from": "校验成员绑定意图",
+      "to": "探测绑定宿主",
+      "arc_id": "arc.authorized_binding_intent"
+    },
+    {
+      "from": "探测绑定宿主",
+      "to": "提交成员绑定",
+      "arc_id": "arc.bind_observation"
+    },
+    {
+      "from": "校验恢复声明",
+      "to": "探测持久化宿主",
+      "arc_id": "arc.authorized_restore_intent"
+    },
+    {
+      "from": "探测持久化宿主",
+      "to": "重检恢复后事实",
+      "arc_id": "arc.restore_observation"
+    },
+    {
+      "from": "提交组织节点变更",
+      "to": "组装公开结果",
+      "arc_id": "arc.organization_receipt"
+    },
+    {
+      "from": "更新成员运行配置",
+      "to": "组装公开结果",
+      "arc_id": "arc.runtime_receipt"
+    },
+    {
+      "from": "提交成员绑定",
+      "to": "组装公开结果",
+      "arc_id": "arc.binding_receipt"
+    },
+    {
+      "from": "重检恢复后事实",
+      "to": "组装公开结果",
+      "arc_id": "arc.restore_receipt"
+    }
+  ],
+  "outputs": [
+    "arc.public_result"
+  ]
+}
