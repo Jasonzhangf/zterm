@@ -1454,9 +1454,52 @@ export const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES: readonly TerminalMuxLegac
   'close',
 ] as const;
 
+export const TERMINAL_MUX_CHANNEL_CLIENT_MESSAGE_TYPES = [
+  'resize',
+  'body-subscription',
+  'buffer-head-request',
+  'buffer-sync-request',
+  'schedule-list',
+  'schedule-upsert',
+  'schedule-delete',
+  'schedule-toggle',
+  'schedule-run-now',
+  'input',
+  'paste-image-start',
+  'paste-image',
+  'paste-image-from-upload',
+  'attach-file-start',
+  'remote-screenshot-request',
+  'remote-window-targets-request',
+  'remote-window-browser-user-agent-request',
+  'remote-window-stream-start-request',
+  'remote-window-stream-start-v2-request',
+  'remote-window-stream-answer-v2',
+  'remote-window-stream-update-focus',
+  'remote-window-stream-ice-candidate',
+  'remote-window-stream-stop-request',
+  'remote-window-close-request',
+  'remote-window-stream-quality-request',
+  'remote-window-input',
+  'file-list-request',
+  'file-create-directory-request',
+  'file-download-request',
+  'file-upload-start',
+  'file-upload-chunk',
+  'file-upload-end',
+] as const satisfies readonly TerminalMuxChannelClientMessage['type'][];
+
+type RegisteredTerminalMuxChannelClientMessageType = typeof TERMINAL_MUX_CHANNEL_CLIENT_MESSAGE_TYPES[number];
+type AssertTerminalMuxChannelClientMessageTypesRegistered = Exclude<
+  TerminalMuxChannelClientMessage['type'],
+  RegisteredTerminalMuxChannelClientMessageType
+> extends never ? true : never;
+const TERMINAL_MUX_CHANNEL_CLIENT_MESSAGE_TYPES_ARE_REGISTERED: AssertTerminalMuxChannelClientMessageTypesRegistered = true;
+
 const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES);
 const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES);
 const TERMINAL_MUX_DEBUG_CLIENT_MESSAGE_SET = new Set<string>(['debug-log', 'debug-snapshot']);
+const TERMINAL_MUX_CHANNEL_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_CHANNEL_CLIENT_MESSAGE_TYPES);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -1515,6 +1558,12 @@ export function isTerminalMuxDebugClientMessageType(type: string) {
   return TERMINAL_MUX_DEBUG_CLIENT_MESSAGE_SET.has(type);
 }
 
+export function isTerminalMuxChannelClientMessageType(
+  type: string,
+): type is RegisteredTerminalMuxChannelClientMessageType {
+  return TERMINAL_MUX_CHANNEL_CLIENT_MESSAGE_SET.has(type);
+}
+
 export function classifyTerminalMuxClientMessage(message: Pick<BridgeClientMessage, 'type'>) {
   if (isTerminalMuxDebugClientMessageType(message.type)) {
     return 'observability' as const;
@@ -1525,7 +1574,16 @@ export function classifyTerminalMuxClientMessage(message: Pick<BridgeClientMessa
   if (isTerminalMuxLegacyClientMessageType(message.type)) {
     return 'legacy' as const;
   }
-  return 'channel' as const;
+  if (isTerminalMuxChannelClientMessageType(message.type)) {
+    return 'channel' as const;
+  }
+  return 'invalid' as const;
+}
+
+export function isTerminalMuxChannelClientMessage(value: unknown): value is TerminalMuxChannelClientMessage {
+  return isRecord(value)
+    && typeof value.type === 'string'
+    && isTerminalMuxChannelClientMessageType(value.type);
 }
 
 export const TERMINAL_MUX_BULK_MESSAGE_TYPES = [
@@ -1676,8 +1734,18 @@ export function buildTerminalMuxChannelMessage(
   if (!normalizedChannelId) {
     throw new Error('terminal mux channelId is required');
   }
-  if (classifyTerminalMuxClientMessage(message) !== 'channel') {
-    throw new Error(`terminal mux channel message cannot carry ${message.type}`);
+  if (!isTerminalMuxChannelClientMessage(message)) {
+    const invalidMessage: unknown = message;
+    const invalidType = isRecord(invalidMessage) && typeof invalidMessage.type === 'string'
+      ? invalidMessage.type
+      : '<missing>';
+    const lane = invalidType === '<missing>'
+      ? 'invalid'
+      : classifyTerminalMuxClientMessage(invalidMessage as Pick<BridgeClientMessage, 'type'>);
+    if (lane !== 'invalid') {
+      throw new Error(`terminal mux channel message cannot carry ${invalidType}`);
+    }
+    throw new Error(`terminal mux channel message type ${invalidType} is not registered`);
   }
   return {
     type: 'mux-channel-message',

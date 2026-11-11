@@ -18,6 +18,7 @@ import {
   classifyTerminalMuxServerFrameLane,
   classifyTerminalMuxClientMessage,
   isTerminalMuxDebugClientMessageType,
+  isTerminalMuxChannelClientMessage,
   isTerminalMuxClientFrame,
   isTerminalMuxServerFrame,
   validateTerminalMuxChannelEnvelope,
@@ -324,6 +325,16 @@ describe('terminal mux protocol contract', () => {
     expect(classifyTerminalMuxClientMessage({ type: 'remote-window-input' })).toBe('channel');
     expect(classifyTerminalMuxClientMessage({ type: 'session-open' })).toBe('legacy');
     expect(classifyTerminalMuxClientMessage({ type: 'connect' })).toBe('legacy');
+    expect(classifyTerminalMuxClientMessage({ type: 'unknown-terminal-message' } as never)).toBe('invalid');
+  });
+
+  it('validates channel client messages through the registered protocol contract', () => {
+    expect(isTerminalMuxChannelClientMessage({ type: 'input', payload: 'x' })).toBe(true);
+    expect(isTerminalMuxChannelClientMessage({})).toBe(false);
+    expect(isTerminalMuxChannelClientMessage({ payload: 'x' })).toBe(false);
+    expect(isTerminalMuxChannelClientMessage({ type: 7, payload: 'x' })).toBe(false);
+    expect(isTerminalMuxChannelClientMessage({ type: 'unknown-terminal-message' })).toBe(false);
+    expect(isTerminalMuxChannelClientMessage(null)).toBe(false);
   });
 
   it('rejects debug observability messages from the mux channel without throwing from the frame predicate', () => {

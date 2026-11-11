@@ -50,6 +50,7 @@ let channelBinaryCount = 0;
 let channelMessageCount = 0;
 let lastChannelMessageFrame: { channelId: string; message: unknown } | null = null;
 let lastChannelBinaryFrame: { channelId: string; dataBase64: string } | null = null;
+let rawMuxFrames: unknown[] = [];
 
 class FailOnceLateOpenCloseWebSocket extends WebSocket {
   override send(data: RawData, options?: unknown, callback?: unknown): void {
@@ -129,6 +130,15 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
       socket.on("message", (raw) => {
         let parsed: unknown;
         try { parsed = JSON.parse(raw.toString()); } catch { return; }
+        if (
+          parsed
+          && typeof parsed === "object"
+          && "type" in parsed
+          && typeof parsed.type === "string"
+          && parsed.type.startsWith("mux-")
+        ) {
+          rawMuxFrames.push(parsed);
+        }
         if (!isTerminalMuxClientFrame(parsed)) return;
         if (parsed.type === "mux-channel-open") channelOpenCount += 1;
         if (parsed.type === "mux-channel-binary") channelBinaryCount += 1;
@@ -315,6 +325,7 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     channelMessageCount = 0;
     lastChannelMessageFrame = null;
     lastChannelBinaryFrame = null;
+    rawMuxFrames = [];
   });
 
   afterAll(async () => {
@@ -434,6 +445,46 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     });
     expect(channelMessageCount).toBe(1);
 
+    manager.closeChannel(channel);
+    manager.closeOwnLink(link);
+  });
+
+  it("rejects malformed and structurally invalid text without sending a mux frame", async () => {
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+    const channel = await manager.openChannel(link, "terminal", {
+      sessionName: KNOWN_SESSION,
+      backend: "tmux",
+    });
+
+    const invalidPayloads = [
+      ["malformed-json", "{"],
+      ["empty-object", "{}"],
+      ["missing-type", JSON.stringify({ payload: "x" })],
+      ["numeric-type", JSON.stringify({ type: 7, payload: "x" })],
+      ["unknown-type", JSON.stringify({ type: "unknown-terminal-message" })],
+    ] as const;
+    const failures: string[] = [];
+
+    for (const [name, payload] of invalidPayloads) {
+      const frameCount = rawMuxFrames.length;
+      try {
+        manager.sendChannel(channel, payload);
+        failures.push(`${name}: send did not throw`);
+      } catch (error) {
+        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "invalid_input") {
+          failures.push(`${name}: expected invalid_input`);
+        }
+      }
+      if (rawMuxFrames.length !== frameCount) {
+        failures.push(`${name}: sent ${rawMuxFrames.length - frameCount} mux frame(s)`);
+      }
+    }
+
+    expect(failures).toEqual([]);
     manager.closeChannel(channel);
     manager.closeOwnLink(link);
   });

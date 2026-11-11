@@ -22,10 +22,10 @@ import {
   buildTerminalMuxChannelOpen,
   buildTerminalMuxHello,
   buildTerminalMuxTargetMessage,
+  isTerminalMuxChannelClientMessage,
   isTerminalMuxServerFrame,
   TERMINAL_MUX_PROTOCOL_VERSION,
   type TerminalMuxCapabilities,
-  type TerminalMuxChannelClientMessage,
 } from "../../../../../packages/shared/src/connection/protocol.ts";
 import {
   TraversalRouteHealthCache,
@@ -655,10 +655,11 @@ export class V1TraversalTransport implements TransportPort {
         if (typeof data === "string") {
           let frame: ReturnType<typeof buildTerminalMuxChannelMessage>;
           try {
-            frame = buildTerminalMuxChannelMessage(
-              channelId,
-              JSON.parse(data) as TerminalMuxChannelClientMessage,
-            );
+            const message: unknown = JSON.parse(data);
+            if (!isTerminalMuxChannelClientMessage(message)) {
+              throw new Error("terminal channel text payload is not a registered client message");
+            }
+            frame = buildTerminalMuxChannelMessage(channelId, message);
           } catch (error) {
             throw new ConnectionError("invalid_input", "terminal channel text payload is not a valid mux message", {
               machineId: auth.machineId,
