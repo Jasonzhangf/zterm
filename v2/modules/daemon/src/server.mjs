@@ -161,8 +161,7 @@ export function createDaemon({
       })
     : null;
   const sessions = new Map();
-  // The current V2 credential is one daemon caller scope. Caller-bound
-  // accounts authorization remains outside this port.
+  // Account-scoped machine links owned by this daemon composition.
   const machineLinks = new Map();
   const context = {
     terminal,
@@ -1698,12 +1697,41 @@ async function accountsSession(request, response, context) {
 async function accountsLogout(request, response, context) {
   authenticate(request, context);
   requireAccountsAuthService(context, "accounts.logout");
+  const token = accountsSessionHeader(request);
+  let authContext;
   try {
-    await context.authService.logout(accountsSessionHeader(request));
+    authContext = await context.authService.verifySession(token);
+  } catch (error) {
+    throw toControlTypedError(error, "accounts.logout");
+  }
+  await closeAccountMachineLinks(authContext.accountId, context, "accounts.logout");
+  try {
+    await context.authService.logout(token);
   } catch (error) {
     throw toControlTypedError(error, "accounts.logout");
   }
   return sendJson(response, 200, { ok: true });
+}
+
+async function closeAccountMachineLinks(accountId, context, operationId) {
+  const accountLinks = [];
+  for (const [key, link] of context.machineLinks) {
+    if (machineLinkAccountId(key) === accountId) {
+      accountLinks.push({ key, link });
+    }
+  }
+  for (const { key, link } of accountLinks) {
+    await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.closeOwnLink(link),
+    );
+    context.machineLinks.delete(key);
+  }
+}
+
+function machineLinkAccountId(key) {
+  const [accountId] = JSON.parse(key);
+  return accountId;
 }
 
 function constantTimeEqual(left, right) {
