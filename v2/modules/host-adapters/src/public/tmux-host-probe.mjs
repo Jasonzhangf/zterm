@@ -5,11 +5,10 @@
 // lookup key; the returned stableId is the V1 tmux identity from the live
 // endpoint, never a name-derived or synthesized identifier.
 //
-// Authoritative machine identity has no source inside this host adapter yet.
-// Callers may inject an already verified identity. Without one the probe keeps
-// machineId null so members can surface BINDING_HOST_IDENTITY_UNAVAILABLE
-// instead of inventing an identifier.
+// The host adapter consumes a declared identity. It does not derive or invent
+// one, and construction fails when that declaration is absent.
 
+import { TypedError } from "../../../errors/src/public/index.mjs";
 import { TmuxAdapter } from "../tmux/tmux-adapter.mjs";
 
 const TMUX_STABLE_ID_PREFIX = "tmux:v1:";
@@ -31,7 +30,7 @@ function buildTmuxStableId({ socketPath, serverPid, sessionId, createdAt }) {
 export function createTmuxHostProbe({
   socketName,
   backend = "tmux",
-  machineId = null,
+  machineId,
   tmuxBin = "tmux",
 } = {}) {
   const resolvedSocketName = readText(socketName);
@@ -42,7 +41,16 @@ export function createTmuxHostProbe({
   if (resolvedBackend !== "tmux") {
     throw new TypeError("host probe only supports the tmux terminal backend");
   }
-  const authoritativeMachineId = readText(machineId) || null;
+  const authoritativeMachineId = readText(machineId);
+  if (!authoritativeMachineId) {
+    throw new TypedError({
+      code: "HOST_MACHINE_ID_REQUIRED",
+      owningModule: "host-adapters",
+      operationId: "createTmuxHostProbe",
+      cause: { field: "machineId" },
+      message: "tmux host probe requires a declared machineId.",
+    });
+  }
   const adapter = new TmuxAdapter({ socketName: resolvedSocketName, tmuxBin });
 
   async function probe({ sessionId, anchor } = {}) {

@@ -168,7 +168,13 @@ export function createTerminalAdmission({
   // The catalog and the dispatch must come from one machine-scoped terminal
   // consumer owned by the connections authorization link. A global terminal
   // port is never accepted as a substitute once a machine context is needed.
-  async function requireMachineTerminal({ machineId, memberId, bindingGeneration, operationId }) {
+  async function requireMachineTerminal({
+    machineId,
+    memberId,
+    bindingGeneration,
+    accountsToken,
+    operationId,
+  }) {
     if (!machineTerminal) {
       fail(
         "TERMINAL_TARGET_BINDING_UNAVAILABLE",
@@ -179,7 +185,12 @@ export function createTerminalAdmission({
     }
     let scoped;
     try {
-      scoped = await machineTerminal.forMachine({ machineId, memberId, bindingGeneration });
+      scoped = await machineTerminal.forMachine({
+        machineId,
+        memberId,
+        bindingGeneration,
+        accountsToken,
+      });
     } catch (error) {
       throw translateAdmissionError(error, operationId);
     }
@@ -347,6 +358,7 @@ export function createTerminalAdmission({
       machineId: resolution.machineId,
       memberId: resolution.memberId,
       bindingGeneration: resolution.bindingGeneration,
+      accountsToken: callerToken,
       operationId,
     });
     let sessions;
@@ -437,6 +449,7 @@ export function createTerminalAdmission({
       session,
       target: exactTarget,
       terminal: scopedTerminal,
+      accountsToken: callerToken,
       linkGeneration: scopedTerminal.linkGeneration,
       daemonHostId: scopedTerminal.daemonHostId,
     };
@@ -448,6 +461,7 @@ export function createTerminalAdmission({
       machineId: resolution.machineId,
       memberId: resolution.memberId,
       bindingGeneration: resolution.bindingGeneration,
+      accountsToken: admitted.accountsToken,
       operationId,
     });
     let currentBinding;

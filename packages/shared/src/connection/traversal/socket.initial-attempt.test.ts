@@ -307,6 +307,13 @@ function rtcSettings(clientInstanceId: string): TraversalSettingsSource {
   };
 }
 
+function relayRtcSettings(clientInstanceId: string): TraversalSettingsSource {
+  return {
+    ...rtcSettings(clientInstanceId),
+    rtcIceTransportPolicy: 'relay',
+  };
+}
+
 const rtcTarget: TraversalTargetSource = {
   bridgeHost: '',
   bridgePort: 3333,
@@ -389,6 +396,77 @@ describe('classifyInitialFailure', () => {
 });
 
 describe('bound-initial attempt executor', () => {
+  it('allows a relay candidate to open after 2500 ms and before the 8000 ms deadline', async () => {
+    clearTraversalPlanCache();
+    ControlledWebSocket.reset();
+    const timers = new ManualTimers();
+    const { events, port } = createPort();
+    const socket = boundInitialRtcSocket(
+      relayRtcSettings('relay-late-open-client'),
+      port,
+      timers,
+    );
+    await flushMicrotasks();
+
+    expect(timers.pendingDelays()).toContain(8000);
+    expect(timers.pendingDelays()).not.toContain(2500);
+    timers.runDelay(2500);
+    await flushMicrotasks();
+    expect(events.filter((event) => event.type === 'terminal')).toHaveLength(0);
+
+    const signaling = ControlledWebSocket.instances[0];
+    signaling.triggerOpen();
+    await flushMicrotasks();
+    const peerConnection = ControlledPeerConnection.instances[0]!;
+    peerConnection.setSelectedIcePair('relay', 'relay', 0.299);
+    peerConnection.channel.readyState = 'open';
+    peerConnection.channel.onopen?.();
+    await flushMicrotasks();
+
+    const currentId = beginIds(events)[0];
+    expect(currentId).toBe(1);
+    expect(socket.getDiagnostics().resolvedPath).toBe('rtc-relay');
+    expect(timers.pendingDelays()).not.toContain(8000);
+    expect(socket.confirmAttempt(currentId!)).toBe(true);
+    socket.close();
+  });
+
+  it('fails a relay candidate exactly once at the 8000 ms deadline when it never opens', async () => {
+    clearTraversalPlanCache();
+    ControlledWebSocket.reset();
+    const timers = new ManualTimers();
+    const { events, port } = createPort();
+    const socket = boundInitialRtcSocket(
+      relayRtcSettings('relay-deadline-client'),
+      port,
+      timers,
+    );
+    await flushMicrotasks();
+
+    expect(timers.pendingDelays()).toContain(8000);
+    expect(timers.pendingDelays()).not.toContain(2500);
+    timers.runDelay(2500);
+    await flushMicrotasks();
+    expect(events.filter((event) => event.type === 'terminal')).toHaveLength(0);
+
+    timers.runDelay(8000);
+    await flushMicrotasks();
+    expect(events.filter((event) => event.type === 'terminal')).toEqual([{
+      type: 'terminal',
+      attemptId: 1,
+      failure: {
+        stage: 'connect',
+        kind: 'timeout',
+        timer: 'connect',
+      },
+    }]);
+
+    timers.runDelay(8000);
+    await flushMicrotasks();
+    expect(events.filter((event) => event.type === 'terminal')).toHaveLength(1);
+    socket.close();
+  });
+
   it('isolates RTC signaling identities per client instance and monotonic attempt', async () => {
     clearTraversalPlanCache();
     ControlledWebSocket.reset();

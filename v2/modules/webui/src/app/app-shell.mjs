@@ -83,6 +83,22 @@ function preserveWorkTrackingError(error, fallbackCode) {
   return typed
 }
 
+function preserveLocalGroupError(error, fallbackCode) {
+  const typed = normalizeTypedError(error, fallbackCode)
+  if (!error || typeof error !== 'object') return typed
+  for (const field of [
+    'status',
+    'cause',
+    'details',
+    'owningModule',
+    'operationId',
+    'retryDisposition',
+  ]) {
+    if (error[field] !== undefined) typed[field] = error[field]
+  }
+  return typed
+}
+
 function retainWorkTrackingOperation(entry, {
   operation = null,
   operationId,
@@ -257,6 +273,120 @@ function unavailableLoadable(error) {
   }
 }
 
+function machineTypedError(error, fallbackCode = 'MACHINE_ACTION_FAILED') {
+  const typed = normalizeTypedError(error, fallbackCode)
+  if (!error || typeof error !== 'object') return typed
+  for (const field of ['owningModule', 'operationId', 'status']) {
+    if (error[field] !== undefined && error[field] !== null && error[field] !== '') {
+      typed[field] = error[field]
+    }
+  }
+  if (typeof error.category === 'string' && error.category !== '') {
+    typed.category = error.category
+  } else if (!typed.category || typed.category === 'session') {
+    typed.category = 'machine'
+  }
+  return typed
+}
+
+function accountsLoginRequiredError() {
+  return normalizeTypedError({
+    code: 'ACCOUNTS_LOGIN_REQUIRED',
+    category: 'auth',
+    message: 'Sign in with an accounts session before loading machines.',
+    retryable: false,
+  }, 'ACCOUNTS_LOGIN_REQUIRED')
+}
+
+function accountsTypedError(error, fallbackCode = 'ACCOUNTS_ACTION_FAILED') {
+  const typed = normalizeTypedError(error, fallbackCode)
+  if (!error || typeof error !== 'object') return typed
+  for (const field of ['owningModule', 'operationId', 'status', 'retryDisposition', 'cause', 'details']) {
+    if (error[field] !== undefined && error[field] !== null && error[field] !== '') {
+      typed[field] = error[field]
+    }
+  }
+  return typed
+}
+
+function projectAccountsSession(payload) {
+  const account = payload?.account
+  const accountId = typeof account?.accountId === 'string' ? account.accountId.trim() : ''
+  const loginName = typeof account?.loginName === 'string' ? account.loginName.trim() : ''
+  if (accountId === '' || loginName === '') {
+    throw accountsTypedError({
+      code: 'ACCOUNTS_SESSION_RESPONSE_INVALID',
+      category: 'protocol',
+      message: 'Accounts returned a malformed account projection.',
+    }, 'ACCOUNTS_SESSION_RESPONSE_INVALID')
+  }
+  return {
+    accountId,
+    loginName,
+  }
+}
+
+function projectMachineConnection(connection) {
+  if (!connection || typeof connection !== 'object' || Array.isArray(connection)) return null
+  const capabilities = connection.capabilities && typeof connection.capabilities === 'object'
+    ? connection.capabilities
+    : {}
+  const backpressure = connection.backpressure && typeof connection.backpressure === 'object'
+    ? connection.backpressure
+    : {}
+  const projected = {
+    machineId: String(connection.machineId ?? ''),
+    status: String(connection.status ?? 'unavailable'),
+    freshness: String(connection.freshness ?? 'unavailable'),
+    observedAt: typeof connection.observedAt === 'string' ? connection.observedAt : null,
+    transportKind: typeof connection.transportKind === 'string' ? connection.transportKind : null,
+    path: typeof connection.path === 'string' ? connection.path : null,
+    peerIdentityVerified: connection.peerIdentityVerified === true,
+    peerIdentity: connection.peerIdentityVerified === true && typeof connection.peerIdentity === 'string'
+      ? connection.peerIdentity
+      : null,
+    capabilities: {
+      channelKinds: Array.isArray(capabilities.channelKinds)
+        ? capabilities.channelKinds.filter((item) => typeof item === 'string')
+        : [],
+      transportKind: typeof capabilities.transportKind === 'string' ? capabilities.transportKind : null,
+    },
+    backpressure: {
+      queuedBytes: Number(backpressure.queuedBytes) || 0,
+      bufferedBytes: Number(backpressure.bufferedBytes) || 0,
+      backpressured: backpressure.backpressured === true,
+    },
+  }
+  if (connection.generation !== undefined && connection.generation !== null) {
+    projected.generation = connection.generation
+  }
+  return projected
+}
+
+function projectMachineObservation(observation) {
+  if (!observation || typeof observation !== 'object' || Array.isArray(observation)) return null
+  const value = observation.value && typeof observation.value === 'object' ? observation.value : {}
+  return {
+    source: typeof observation.source === 'string' ? observation.source : 'connections',
+    observedAt: typeof observation.observedAt === 'string' ? observation.observedAt : null,
+    value: {
+      machineId: typeof value.machineId === 'string' ? value.machineId : '',
+      generation: value.generation ?? null,
+      status: typeof value.status === 'string' ? value.status : 'unavailable',
+      freshness: typeof value.freshness === 'string' ? value.freshness : 'unavailable',
+      sessions: Number.isInteger(value.sessions) ? value.sessions : null,
+    },
+  }
+}
+
+function projectMachineSessionCatalog(sessions) {
+  return sessions.map((session) => ({
+    name: String(session?.name ?? ''),
+    backend: String(session?.backend ?? ''),
+    stableId: String(session?.stableId ?? ''),
+  }))
+}
+
 function buildHelpers() {
   return {
     renderStatusBadge,
@@ -377,10 +507,10 @@ export function createWebUIApp({
         transitionError: null,
         transitionPending: false,
         members: [],
+        groups: [],
         membersLoadable: loadingLoadable(),
         goalsLoadable: loadingLoadable(),
         ticketsLoadable: loadingLoadable(),
-        connectionsLoadable: loadingLoadable(),
         layout: null,
         selectedMemberId: null,
         ownerMemberSelected: false,
@@ -391,6 +521,12 @@ export function createWebUIApp({
         activeTicketFilter: 'all',
         openPropertyByWindow: {},
         overflowOpenByWindow: {},
+        machineFilter: '',
+        localGroupResults: {},
+        localGroupMemberResults: {},
+        localGroupPending: { group: false, member: false },
+        localGroupPendingByMemberId: {},
+        localGroupScopeEpoch: 0,
         receipts: [],
         transfers: [],
         requestSeq: 0,
@@ -410,12 +546,22 @@ export function createWebUIApp({
     mobileNavOpen: false,
     workspaces: [],
     workspacesLoadable: loadingLoadable(),
+    accountsSession: {
+      status: 'checking',
+      account: null,
+      error: null,
+      pending: false,
+    },
     activeWorkspaceId: parsedInitial.workspaceId ?? initialWorkspaceId ?? null,
     explicitRequestedWorkspaceId: parsedInitial.explicitWorkspace ? parsedInitial.workspaceId : (initialWorkspaceId ?? null),
     workspaceScopeError: null,
     members: [],
+    groups: [],
     membersLoadable: loadingLoadable(),
     connectionsLoadable: loadingLoadable(),
+    machineConnections: {},
+    machineSessions: {},
+    machineDirectoryObservation: null,
     layout: null,
     selectedMemberId: null,
     ownerMemberSelected: false,
@@ -437,12 +583,18 @@ export function createWebUIApp({
     overflowOpenByWindow: {},
     workspaceOverflowOpen: false,
     propertyLoading: false,
+    machineFilter: '',
+    localGroupResults: {},
+    localGroupMemberResults: {},
+    localGroupPending: { group: false, member: false },
+    localGroupPendingByMemberId: {},
     workspaceDataById,
     mountedRoot: null,
     document: null,
   }
 
   let initialized = false
+  let accountsSessionChecked = false
   let suppressHashListener = false
   const listeners = new Set()
 
@@ -486,6 +638,7 @@ export function createWebUIApp({
     if (!wsId) {
       state.workspaceScopeError = null
       state.members = []
+      state.groups = []
       state.layout = null
       state.selectedMemberId = null
       state.ownerMemberSelected = false
@@ -498,6 +651,11 @@ export function createWebUIApp({
       state.workTrackingOperations = []
       state.openPropertyByWindow = {}
       state.overflowOpenByWindow = {}
+      state.machineFilter = ''
+      state.localGroupResults = {}
+      state.localGroupMemberResults = {}
+      state.localGroupPending = { group: false, member: false }
+      state.localGroupPendingByMemberId = {}
       state.receipts = []
       state.transfers = []
       if (state.workspacesLoadable.status === 'unavailable') {
@@ -521,12 +679,10 @@ export function createWebUIApp({
     state.transitionError = entry.transitionError
     state.transitionPending = entry.transitionPending
     state.members = entry.members
+    state.groups = entry.groups
     state.membersLoadable = entry.membersLoadable
     state.goalsLoadable = entry.goalsLoadable
     state.ticketsLoadable = entry.ticketsLoadable
-    if (entry.connectionsLoadable.status !== 'loading' || state.connectionsLoadable.status === 'loading') {
-      state.connectionsLoadable = entry.connectionsLoadable
-    }
     state.layout = entry.layout
     state.selectedMemberId = entry.selectedMemberId
     state.ownerMemberSelected = entry.ownerMemberSelected
@@ -537,6 +693,11 @@ export function createWebUIApp({
     state.activeTicketFilter = entry.activeTicketFilter || 'all'
     state.openPropertyByWindow = entry.openPropertyByWindow
     state.overflowOpenByWindow = entry.overflowOpenByWindow
+    state.machineFilter = entry.machineFilter
+    state.localGroupResults = entry.localGroupResults
+    state.localGroupMemberResults = entry.localGroupMemberResults
+    state.localGroupPending = entry.localGroupPending
+    state.localGroupPendingByMemberId = entry.localGroupPendingByMemberId
     state.receipts = entry.receipts
     state.transfers = entry.transfers
   }
@@ -704,6 +865,8 @@ export function createWebUIApp({
         ...state,
         machinesLoadable: state.connectionsLoadable,
         machines: state.connectionsLoadable.value || [],
+        machineConnections: state.machineConnections,
+        machineSessions: state.machineSessions,
       }, helpers)
     }
     if (state.activeRoute === 'workspaces') {
@@ -711,6 +874,12 @@ export function createWebUIApp({
         ...state,
         workspacesLoadable: state.workspacesLoadable,
         membersLoadable: state.membersLoadable,
+        groups: state.groups,
+        machineFilter: state.machineFilter,
+        localGroupResults: state.localGroupResults,
+        localGroupMemberResults: state.localGroupMemberResults,
+        localGroupPending: state.localGroupPending,
+        localGroupPendingByMemberId: state.localGroupPendingByMemberId,
       }, helpers)
     }
     if (state.activeRoute === 'board') {
@@ -779,12 +948,15 @@ export function createWebUIApp({
       return `<button type="button" class="nav-item v2-nav-item${isCurrent ? ' active' : ''}" data-action="navigate" data-route="${item.route}" data-route-scope="global" aria-current="${isCurrent}"><span class="label">${esc(item.label)}</span></button>`
     }).join('')
 
-    const connReady = state.workspacesLoadable.status === 'ready' || state.connectionsLoadable.status === 'ready'
-    const connStatus = connReady ? 'online' : (state.workspacesLoadable.status === 'loading' ? 'loading' : 'unavailable')
+    const connReady = state.connectionsLoadable.status === 'ready'
+    const connStatus = state.connectionsLoadable.status
     const connDotClass = connReady ? 'dot-online' : (connStatus === 'loading' ? 'dot-busy' : 'dot-offline')
-    const connLabel = connReady
-      ? `${state.workspaces.length} Workspaces 已同步`
-      : (connStatus === 'loading' ? '正在同步连接...' : 'Daemon 端口未就绪 (Unavailable)')
+    const accountsStatus = state.accountsSession.status
+    const connLabel = accountsStatus !== 'authenticated'
+      ? (accountsStatus === 'checking' ? '正在检查 accounts 登录...' : 'Accounts 登录后可用')
+      : (connReady
+        ? `${state.connectionsLoadable.value?.length ?? 0} Machines 已同步`
+        : (connStatus === 'loading' ? '正在同步机器目录...' : '机器目录不可用 (Unavailable)'))
 
     const errors = state.lastError && !state.workspaceScopeError
       ? renderErrorNotice({ error: state.lastError }).html
@@ -1120,7 +1292,495 @@ export function createWebUIApp({
     }
   }
 
+  function isSameLocalGroupScope(entry, scope) {
+    return (
+      String(entry.workspaceId) === scope.workspaceId
+      && Number(entry.localGroupScopeEpoch) === scope.epoch
+      && String(entry.selectedMemberId ?? '') === scope.memberId
+    )
+  }
+
+  function makeLocalGroupScope(entry, memberId) {
+    return {
+      workspaceId: String(entry.workspaceId),
+      epoch: Number(entry.localGroupScopeEpoch),
+      memberId: String(memberId ?? entry.selectedMemberId ?? ''),
+    }
+  }
+
+  function setMemberLocalGroupPending(entry, memberId, operation, pending) {
+    if (!memberId) return
+    entry.localGroupPendingByMemberId = {
+      ...entry.localGroupPendingByMemberId,
+      [memberId]: {
+        ...entry.localGroupPendingByMemberId[memberId],
+        [operation]: pending === true,
+      },
+    }
+  }
+
+  async function loadMemberRuntimeProjection(workspaceId, memberId) {
+    if (!daemonApi || typeof daemonApi.getMemberRuntime !== 'function') return null
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const requestSeq = entry.requestSeq
+    const scope = makeLocalGroupScope(entry, memberId)
+    let runtimeProjection
+    try {
+      runtimeProjection = await daemonApi.getMemberRuntime({ workspaceId, memberId })
+    } catch {
+      // A missing projection blocks typed bind/verify operations but does not
+      // replace the last authoritative workspace snapshot.
+      return null
+    }
+    if (
+      entry.requestSeq !== requestSeq
+      || !isSameLocalGroupScope(entry, scope)
+      || state.activeWorkspaceId !== workspaceId
+    ) {
+      return null
+    }
+
+    const memberIndex = entry.members.findIndex((item) => item.memberId === memberId)
+    if (memberIndex === -1) return null
+    const current = entry.members[memberIndex]
+    const projectedMember = runtimeProjection.member || current
+    const updatedMember = {
+      ...current,
+      ...projectedMember,
+      groupId: projectedMember.groupId ?? current.groupId,
+      runtime: runtimeProjection.runtime ?? null,
+      binding: runtimeProjection.binding ?? null,
+      availability: runtimeProjection.availability ?? current.availability ?? null,
+      bindingGeneration: runtimeProjection.bindingGeneration,
+      agentCapabilities: runtimeProjection.agentCapabilities ?? current.agentCapabilities,
+    }
+    const members = entry.members.map((item) => (item.memberId === memberId ? updatedMember : item))
+    entry.members = members
+    if (entry.membersLoadable.status === 'ready') {
+      entry.membersLoadable = { ...entry.membersLoadable, value: members }
+    }
+    syncActiveWorkspaceProjection()
+    notify()
+    render()
+    return updatedMember
+  }
+
+  function ensureMachineState(machineId) {
+    const id = String(machineId || '').trim()
+    if (!id) return null
+    if (!state.machineConnections[id]) {
+      state.machineConnections[id] = {
+        machineId: id,
+        connection: null,
+        observation: null,
+        status: 'unavailable',
+        freshness: 'unavailable',
+        observedAt: null,
+        pending: false,
+        pendingAction: null,
+        error: null,
+      }
+    }
+    if (!state.machineSessions[id]) {
+      state.machineSessions[id] = {
+        machineId: id,
+        sessions: [],
+        observation: null,
+        loaded: false,
+        pending: false,
+        error: null,
+      }
+    }
+    return {
+      connection: state.machineConnections[id],
+      sessions: state.machineSessions[id],
+    }
+  }
+
+  function clearMachineState() {
+    state.machineConnections = {}
+    state.machineSessions = {}
+    state.machineDirectoryObservation = null
+    state.connectionsLoadable = unavailableLoadable(accountsLoginRequiredError())
+  }
+
+  async function loadAccountsSession() {
+    if (!daemonApi || typeof daemonApi.accountsSessionState !== 'function') {
+      state.accountsSession = {
+        status: 'error',
+        account: null,
+        error: daemonUnavailableError('Accounts session API port is not configured.'),
+        pending: false,
+      }
+      clearMachineState()
+      notify()
+      render()
+      return state.accountsSession
+    }
+
+    state.accountsSession = {
+      status: 'checking',
+      account: null,
+      error: null,
+      pending: true,
+    }
+    clearMachineState()
+    notify()
+    render()
+
+    try {
+      const payload = await daemonApi.accountsSessionState()
+      state.accountsSession = {
+        status: 'authenticated',
+        account: projectAccountsSession(payload),
+        error: null,
+        pending: false,
+      }
+    } catch (error) {
+      const typed = accountsTypedError(error, 'ACCOUNTS_SESSION_UNAVAILABLE')
+      const unauthenticated = typed.code === 'AUTHENTICATION_REQUIRED'
+        || typed.code === 'MACHINE_ACCOUNT_SESSION_REQUIRED'
+      state.accountsSession = {
+        status: unauthenticated ? 'unauthenticated' : 'error',
+        account: null,
+        error: unauthenticated ? null : typed,
+        pending: false,
+      }
+    }
+    notify()
+    render()
+    return state.accountsSession
+  }
+
+  async function ensureAccountsSession() {
+    if (!accountsSessionChecked) {
+      accountsSessionChecked = true
+      await loadAccountsSession()
+    }
+    return state.accountsSession
+  }
+
+  async function loginAccounts({ loginName, credential } = {}) {
+    if (!daemonApi || typeof daemonApi.accountsLogin !== 'function') {
+      const error = daemonUnavailableError('Accounts login API port is not configured.')
+      state.accountsSession = {
+        status: 'error',
+        account: null,
+        error,
+        pending: false,
+      }
+      notify()
+      render()
+      return { ok: false, error }
+    }
+    if (state.accountsSession.pending) {
+      return {
+        ok: false,
+        error: accountsTypedError({
+          code: 'ACCOUNTS_LOGIN_PENDING',
+          category: 'conflict',
+          message: 'An accounts login request is already pending.',
+        }, 'ACCOUNTS_LOGIN_PENDING'),
+      }
+    }
+
+    state.accountsSession = {
+      status: 'checking',
+      account: null,
+      error: null,
+      pending: true,
+    }
+    notify()
+    render()
+
+    let account
+    try {
+      const payload = await daemonApi.accountsLogin({
+        loginName,
+        credential,
+      })
+      account = projectAccountsSession(payload)
+    } catch (error) {
+      const typed = accountsTypedError(error, 'ACCOUNTS_LOGIN_FAILED')
+      state.accountsSession = {
+        status: 'error',
+        account: null,
+        error: typed,
+        pending: false,
+      }
+      clearMachineState()
+      return { ok: false, error: typed }
+    }
+
+    state.accountsSession = {
+      status: 'authenticated',
+      account,
+      error: null,
+      pending: false,
+    }
+    accountsSessionChecked = true
+    try {
+      await loadMachines()
+    } finally {
+      state.accountsSession.pending = false
+      notify()
+      render()
+    }
+    return { ok: true, account }
+  }
+
+  async function logoutAccounts() {
+    if (state.accountsSession.pending) {
+      return {
+        ok: false,
+        error: accountsTypedError({
+          code: 'ACCOUNTS_ACTION_PENDING',
+          category: 'conflict',
+          message: 'An accounts session action is already pending.',
+        }, 'ACCOUNTS_ACTION_PENDING'),
+      }
+    }
+    if (!daemonApi || typeof daemonApi.accountsLogout !== 'function') {
+      const error = daemonUnavailableError('Accounts logout API port is not configured.')
+      state.accountsSession = {
+        status: 'error',
+        account: null,
+        error,
+        pending: false,
+      }
+      clearMachineState()
+      notify()
+      render()
+      return { ok: false, error }
+    }
+
+    state.accountsSession.pending = true
+    notify()
+    render()
+
+    let error = null
+    try {
+      await daemonApi.accountsLogout()
+    } catch (logoutError) {
+      error = accountsTypedError(logoutError, 'ACCOUNTS_LOGOUT_FAILED')
+    } finally {
+      accountsSessionChecked = true
+      clearMachineState()
+      state.accountsSession = {
+        status: error ? 'error' : 'unauthenticated',
+        account: null,
+        error,
+        pending: false,
+      }
+      notify()
+      render()
+    }
+    return error ? { ok: false, error } : { ok: true }
+  }
+
+  function applyMachineConnectionPayload(machineId, payload) {
+    const entry = ensureMachineState(machineId)
+    if (!entry) return
+    const connection = projectMachineConnection(payload?.connection)
+    const observation = projectMachineObservation(payload?.observation)
+    const observationStatus = observation?.value?.status
+    entry.connection.connection = connection
+    entry.connection.observation = observation
+    entry.connection.status = typeof observationStatus === 'string' ? observationStatus : 'unavailable'
+    entry.connection.freshness = observation?.value?.freshness
+      || connection?.freshness
+      || 'unavailable'
+    entry.connection.observedAt = observation?.observedAt || connection?.observedAt || nowIso()
+    entry.connection.error = null
+    entry.sessions.sessions = []
+    entry.sessions.observation = null
+    entry.sessions.loaded = false
+    entry.sessions.error = null
+  }
+
+  async function loadMachines() {
+    if (state.accountsSession.status !== 'authenticated') {
+      state.connectionsLoadable = unavailableLoadable(accountsLoginRequiredError())
+      notify()
+      render()
+      return state.connectionsLoadable
+    }
+    if (!daemonApi || typeof daemonApi.listMachines !== 'function') {
+      state.connectionsLoadable = unavailableLoadable(
+        daemonUnavailableError('Machine directory API port is not configured.'),
+      )
+      notify()
+      render()
+      return state.connectionsLoadable
+    }
+
+    state.connectionsLoadable = loadingLoadable()
+    notify()
+    render()
+
+    try {
+      const payload = await daemonApi.listMachines()
+      if (!payload || !Array.isArray(payload.machines)) {
+        throw machineTypedError({
+          code: 'MACHINES_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Daemon returned a malformed machine directory.',
+        })
+      }
+      const observation = projectMachineObservation(payload.observation)
+      for (const machine of payload.machines) {
+        ensureMachineState(machine?.machineId)
+      }
+      state.machineDirectoryObservation = observation
+      state.connectionsLoadable = {
+        status: 'ready',
+        value: payload.machines,
+        observedAt: observation?.observedAt || nowIso(),
+        freshness: 'fresh',
+        error: null,
+      }
+    } catch (error) {
+      state.connectionsLoadable = unavailableLoadable(machineTypedError(error, 'MACHINES_UNAVAILABLE'))
+    }
+    notify()
+    render()
+    return state.connectionsLoadable
+  }
+
+  async function runMachineConnectionAction(machineId, action) {
+    const id = String(machineId || '').trim()
+    if (!id) {
+      return {
+        ok: false,
+        error: machineTypedError({
+          code: 'MACHINE_ID_REQUIRED',
+          category: 'validation',
+          message: 'A machineId is required.',
+        }, 'MACHINE_ID_REQUIRED'),
+      }
+    }
+
+    const entry = ensureMachineState(id)
+    if (entry.connection.pending || entry.sessions.pending) {
+      return {
+        ok: false,
+        error: machineTypedError({
+          code: 'MACHINE_ACTION_PENDING',
+          category: 'conflict',
+          message: 'A machine action is already pending.',
+        }, 'MACHINE_ACTION_PENDING'),
+      }
+    }
+
+    entry.connection.pending = true
+    entry.connection.pendingAction = action
+    entry.connection.error = null
+    notify()
+    render()
+
+    try {
+      if (action === 'connect-machine') {
+        const payload = await daemonApi.connectMachine({ machineId: id })
+        applyMachineConnectionPayload(id, payload)
+      } else if (action === 'recover-machine') {
+        const payload = await daemonApi.recoverMachine({ machineId: id })
+        applyMachineConnectionPayload(id, payload)
+      } else if (action === 'disconnect-machine') {
+        await daemonApi.disconnectMachine({ machineId: id })
+        entry.connection.connection = null
+        entry.connection.observation = projectMachineObservation({
+          source: 'connections',
+          observedAt: nowIso(),
+          value: { machineId: id, status: 'unavailable', freshness: 'unavailable' },
+        })
+        entry.connection.status = 'unavailable'
+        entry.connection.freshness = 'unavailable'
+        entry.connection.observedAt = entry.connection.observation.observedAt
+        entry.connection.error = null
+        entry.sessions.sessions = []
+        entry.sessions.observation = null
+        entry.sessions.loaded = false
+        entry.sessions.error = null
+      } else {
+        throw machineTypedError({
+          code: 'MACHINE_ACTION_UNSUPPORTED',
+          category: 'validation',
+          message: `Unsupported machine action ${action}.`,
+        }, 'MACHINE_ACTION_UNSUPPORTED')
+      }
+      return {
+        ok: true,
+        machineId: id,
+        status: entry.connection.status,
+        freshness: entry.connection.freshness,
+        connection: entry.connection.connection,
+      }
+    } catch (error) {
+      const typed = machineTypedError(error, action === 'connect-machine'
+        ? 'MACHINE_CONNECT_FAILED'
+        : action === 'recover-machine'
+          ? 'MACHINE_RECOVER_FAILED'
+          : 'MACHINE_DISCONNECT_FAILED')
+      entry.connection.error = typed
+      return { ok: false, machineId: id, error: typed }
+    } finally {
+      entry.connection.pending = false
+      entry.connection.pendingAction = null
+      notify()
+      render()
+    }
+  }
+
+  async function loadMachineSessions(machineId) {
+    const id = String(machineId || '').trim()
+    if (!id) {
+      return {
+        ok: false,
+        error: machineTypedError({
+          code: 'MACHINE_ID_REQUIRED',
+          category: 'validation',
+          message: 'A machineId is required.',
+        }, 'MACHINE_ID_REQUIRED'),
+      }
+    }
+
+    const entry = ensureMachineState(id)
+    if (entry.connection.pending || entry.sessions.pending) {
+      return {
+        ok: false,
+        error: machineTypedError({
+          code: 'MACHINE_ACTION_PENDING',
+          category: 'conflict',
+          message: 'A machine action is already pending.',
+        }, 'MACHINE_ACTION_PENDING'),
+      }
+    }
+
+    entry.sessions.pending = true
+    entry.sessions.error = null
+    notify()
+    render()
+
+    try {
+      const payload = await daemonApi.listMachineSessions({ machineId: id })
+      entry.sessions.sessions = projectMachineSessionCatalog(payload.sessions)
+      entry.sessions.observation = projectMachineObservation(payload.observation)
+      entry.sessions.loaded = true
+      return { ok: true, machineId: id, sessions: entry.sessions.sessions }
+    } catch (error) {
+      const typed = machineTypedError(error, 'MACHINE_SESSIONS_FAILED')
+      entry.sessions.error = typed
+      return { ok: false, machineId: id, error: typed }
+    } finally {
+      entry.sessions.pending = false
+      notify()
+      render()
+    }
+  }
+
   async function loadWorkspace(workspaceId) {
+    const previousWorkspaceId = state.activeWorkspaceId
+    const scopeChanged = String(workspaceId || '') !== String(previousWorkspaceId || '')
     state.activeWorkspaceId = workspaceId || null
     state.workspaceOverflowOpen = false
     state.mobileNavOpen = false
@@ -1137,6 +1797,9 @@ export function createWebUIApp({
     }
 
     const entry = ensureWorkspaceEntry(workspaceId)
+    if (scopeChanged) {
+      entry.localGroupScopeEpoch = Number(entry.localGroupScopeEpoch || 0) + 1
+    }
     const seq = ++entry.requestSeq
     entry.workspaceScopeError = null
     entry.lastError = entry.transitionError || null
@@ -1169,7 +1832,6 @@ export function createWebUIApp({
       const err = loadable.error || daemonUnavailableError()
       entry.members = []
       entry.membersLoadable = { status: 'unavailable', value: null, observedAt: loadable.observedAt, freshness: 'unavailable', error: err }
-      entry.connectionsLoadable = { ...entry.membersLoadable }
       entry.goalsLoadable = unavailableLoadable(err)
       entry.ticketsLoadable = unavailableLoadable(err)
       entry.boardLoadable = unavailableLoadable(err)
@@ -1187,12 +1849,28 @@ export function createWebUIApp({
 
     const value = loadable.value || {}
     entry.workspace = value.workspace || state.workspaces.find((ws) => ws.workspaceId === workspaceId) || null
+    if (entry.workspace) {
+      state.workspaces = state.workspaces.map((workspace) => (
+        String(workspace.workspaceId) === String(workspaceId)
+          ? { ...workspace, ...entry.workspace }
+          : workspace
+      ))
+      state.workspacesLoadable = {
+        ...state.workspacesLoadable,
+        value: state.workspaces,
+        observedAt: nowIso(),
+        freshness: 'fresh',
+        error: null,
+      }
+    }
     entry.members = value.members || []
+    entry.groups = Array.isArray(value.groups) ? value.groups : entry.groups
     entry.layout = value.layout || entry.layout
     entry.membersLoadable = { status: 'ready', value: entry.members, observedAt: nowIso(), freshness: 'fresh', error: null }
     entry.selectedMemberId = entry.selectedMemberId || entry.members[0]?.memberId || null
 
-    if (state.activeWorkspaceId === workspaceId) {
+    if (state.activeWorkspaceId === workspaceId && entry.selectedMemberId) {
+      await loadMemberRuntimeProjection(workspaceId, entry.selectedMemberId)
       syncActiveWorkspaceProjection()
       notify()
       render()
@@ -1202,33 +1880,6 @@ export function createWebUIApp({
       syncActiveWorkspaceProjection()
       notify()
       render()
-    }
-
-    if (daemonApi && typeof daemonApi.listConnections === 'function') {
-      try {
-        const connections = await daemonApi.listConnections({ workspaceId })
-        if (entry.requestSeq === seq) {
-          entry.connectionsLoadable = { status: 'ready', value: Array.isArray(connections) ? connections : [], observedAt: nowIso(), freshness: 'fresh', error: null }
-        }
-      } catch (error) {
-        if (entry.requestSeq === seq) {
-          entry.connectionsLoadable = unavailableLoadable(error)
-        }
-      }
-    } else if (entry.requestSeq === seq) {
-      entry.connectionsLoadable = {
-        status: 'ready',
-        value: state.workspaces.map((workspace) => ({
-          machineId: workspace.workspaceId,
-          name: workspace.name,
-          address: workspace.address || workspace.workspaceId,
-          status: workspace.status || 'unknown',
-          freshness: workspace.freshness || (workspace.status === 'online' ? 'fresh' : 'stale'),
-        })),
-        observedAt: nowIso(),
-        freshness: 'fresh',
-        error: null,
-      }
     }
 
     await loadWorkspaceScopedResources(workspaceId, seq)
@@ -1249,7 +1900,6 @@ export function createWebUIApp({
       const typed = daemonUnavailableError()
       state.workspaces = []
       state.workspacesLoadable = unavailableLoadable(typed)
-      state.connectionsLoadable = unavailableLoadable(typed)
       state.lastError = typed
       return
     }
@@ -1264,7 +1914,6 @@ export function createWebUIApp({
       const typed = normalizeTypedError(error, 'WORKSPACES_UNAVAILABLE')
       state.workspaces = []
       state.workspacesLoadable = unavailableLoadable(typed)
-      state.connectionsLoadable = unavailableLoadable(typed)
       state.lastError = typed
     }
   }
@@ -1287,6 +1936,12 @@ export function createWebUIApp({
     initialized = true
     await loadWorkspaces()
     await loadBootstrapSurface()
+    if (state.activeRoute === 'connections') {
+      await ensureAccountsSession()
+      if (state.accountsSession.status === 'authenticated') {
+        await loadMachines()
+      }
+    }
     await loadWorkspace(state.activeWorkspaceId)
     notify()
     render()
@@ -1326,6 +1981,12 @@ export function createWebUIApp({
     }
 
     setRoute(nextRoute, null)
+    if (nextRoute === 'connections' && state.connectionsLoadable.status !== 'ready') {
+      await ensureAccountsSession()
+      if (state.accountsSession.status === 'authenticated') {
+        await loadMachines()
+      }
+    }
     notify()
     render()
     return app
@@ -1795,6 +2456,416 @@ export function createWebUIApp({
     }
   }
 
+  function localGroupScopeChanged(entry, scope) {
+    return (
+      state.activeWorkspaceId !== scope.workspaceId
+      || Number(entry.localGroupScopeEpoch) !== scope.epoch
+      || (scope.memberId !== null && String(entry.selectedMemberId ?? '') !== scope.memberId)
+    )
+  }
+
+  function setWorkspaceLocalGroupResult(entry, operation, result) {
+    entry.localGroupResults = { ...entry.localGroupResults, [operation]: result }
+  }
+
+  function setMemberLocalGroupResult(entry, memberId, result) {
+    entry.localGroupMemberResults = {
+      ...entry.localGroupMemberResults,
+      [memberId]: result,
+    }
+  }
+
+  function organizationRevision(entry) {
+    const revision = Number(entry.workspace?.revision)
+    return Number.isInteger(revision) ? revision : null
+  }
+
+  async function createLocalGroupGroup(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.createGroup !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Group creation port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const scope = { workspaceId: String(workspaceId), epoch: Number(entry.localGroupScopeEpoch), memberId: null }
+    entry.localGroupPending = { ...entry.localGroupPending, group: true }
+    syncActiveWorkspaceProjection()
+    render()
+
+    try {
+      const expectedRevision = organizationRevision(entry)
+      if (!Number.isInteger(expectedRevision)) {
+        throw normalizeTypedError({
+          code: 'ORGANIZATION_REVISION_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative organization revision is not loaded.',
+          retryable: false,
+        }, 'ORGANIZATION_REVISION_UNAVAILABLE')
+      }
+      const receipt = await daemonApi.createGroup({
+        workspaceId,
+        name: detail.name,
+        parentGroupId: detail.parentGroupId ?? detail.groupParentId ?? null,
+        expectedRevision,
+      })
+      if (!receipt || typeof receipt !== 'object' || !receipt.groupId) {
+        throw normalizeTypedError({
+          code: 'GROUP_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Group creation did not return a stable group receipt.',
+          retryable: false,
+        }, 'GROUP_RESPONSE_INVALID')
+      }
+      if (!localGroupScopeChanged(entry, scope)) {
+        setWorkspaceLocalGroupResult(entry, 'group', { status: 'success', message: 'Group created.' })
+        await loadWorkspace(workspaceId)
+      }
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'GROUP_CREATION_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setWorkspaceLocalGroupResult(entry, 'group', {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      entry.localGroupPending = { ...entry.localGroupPending, group: false }
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
+  async function createLocalGroupMember(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.createMember !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Member creation port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const scope = { workspaceId: String(workspaceId), epoch: Number(entry.localGroupScopeEpoch), memberId: null }
+    entry.localGroupPending = { ...entry.localGroupPending, member: true }
+    syncActiveWorkspaceProjection()
+    render()
+
+    try {
+      const expectedRevision = organizationRevision(entry)
+      if (!Number.isInteger(expectedRevision)) {
+        throw normalizeTypedError({
+          code: 'ORGANIZATION_REVISION_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative organization revision is not loaded.',
+          retryable: false,
+        }, 'ORGANIZATION_REVISION_UNAVAILABLE')
+      }
+      const receipt = await daemonApi.createMember({
+        workspaceId,
+        groupId: detail.groupId || detail.memberGroupId,
+        name: detail.name,
+        expectedRevision,
+      })
+      if (!receipt || typeof receipt !== 'object' || !receipt.memberId) {
+        throw normalizeTypedError({
+          code: 'MEMBER_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Member creation did not return a stable member receipt.',
+          retryable: false,
+        }, 'MEMBER_RESPONSE_INVALID')
+      }
+      if (!localGroupScopeChanged(entry, scope)) {
+        setWorkspaceLocalGroupResult(entry, 'member', { status: 'success', message: 'Member created.' })
+        await loadWorkspace(workspaceId)
+      }
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'MEMBER_CREATION_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setWorkspaceLocalGroupResult(entry, 'member', {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      entry.localGroupPending = { ...entry.localGroupPending, member: false }
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
+  async function configureMemberRuntime(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.configureMemberRuntime !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Runtime configuration port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const memberId = detail.memberId || entry.selectedMemberId
+    if (!memberId) {
+      return { ok: false, error: normalizeTypedError({
+        code: 'MEMBER_SELECTION_REQUIRED',
+        category: 'validation',
+        message: 'Select a member before configuring its runtime.',
+        retryable: false,
+      }, 'MEMBER_SELECTION_REQUIRED') }
+    }
+
+    const scope = makeLocalGroupScope(entry, memberId)
+    setMemberLocalGroupPending(entry, memberId, 'runtime', true)
+    syncActiveWorkspaceProjection()
+    notify()
+    render()
+
+    try {
+      const receipt = await daemonApi.configureMemberRuntime({
+        workspaceId,
+        memberId,
+        machineId: detail.machineId,
+        hostKind: detail.hostKind,
+        agentKind: detail.agentKind,
+        launchProfileRef: detail.launchProfileRef,
+      })
+      if (!receipt || typeof receipt !== 'object' || receipt.memberId !== memberId) {
+        throw normalizeTypedError({
+          code: 'RUNTIME_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Runtime configuration did not return the selected member receipt.',
+          retryable: false,
+        }, 'RUNTIME_RESPONSE_INVALID')
+      }
+      if (!localGroupScopeChanged(entry, scope)) {
+        setMemberLocalGroupResult(entry, memberId, { status: 'success', message: 'Runtime configured.' })
+        await loadWorkspace(workspaceId)
+      }
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'RUNTIME_CONFIGURATION_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setMemberLocalGroupResult(entry, memberId, {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      setMemberLocalGroupPending(entry, memberId, 'runtime', false)
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
+  async function bindMemberSession(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.bindMemberSession !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Session binding port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const memberId = detail.memberId || entry.selectedMemberId
+    if (!memberId) {
+      return { ok: false, error: normalizeTypedError({
+        code: 'MEMBER_SELECTION_REQUIRED',
+        category: 'validation',
+        message: 'Select a member before binding a session.',
+        retryable: false,
+      }, 'MEMBER_SELECTION_REQUIRED') }
+    }
+
+    const scope = makeLocalGroupScope(entry, memberId)
+    setMemberLocalGroupPending(entry, memberId, 'binding', true)
+    syncActiveWorkspaceProjection()
+    notify()
+    render()
+
+    try {
+      const sessionId = String(detail.sessionId ?? '').trim()
+      const anchor = String(detail.anchor ?? '').trim()
+      if (sessionId === '' || anchor === '') {
+        throw normalizeTypedError({
+          code: 'BINDING_TARGET_REQUIRED',
+          category: 'validation',
+          message: 'Session ID and pane anchor are required.',
+          retryable: false,
+        }, 'BINDING_TARGET_REQUIRED')
+      }
+
+      const projection = await loadMemberRuntimeProjection(workspaceId, memberId)
+      if (localGroupScopeChanged(entry, scope)) {
+        return { ok: false, error: normalizeTypedError({
+          code: 'LOCAL_GROUP_SCOPE_CHANGED',
+          category: 'validation',
+          message: 'The selected workspace or member changed during this request.',
+          retryable: false,
+        }, 'LOCAL_GROUP_SCOPE_CHANGED') }
+      }
+      const expectedGeneration = projection?.bindingGeneration
+      if (!Number.isInteger(expectedGeneration)) {
+        throw normalizeTypedError({
+          code: 'BINDING_GENERATION_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative binding generation is not loaded.',
+          retryable: false,
+        }, 'BINDING_GENERATION_UNAVAILABLE')
+      }
+      const receipt = await daemonApi.bindMemberSession({
+        workspaceId,
+        memberId,
+        sessionId,
+        anchor,
+        expectedGeneration,
+        ...(detail.terminalTarget !== undefined ? { terminalTarget: detail.terminalTarget } : {}),
+      })
+      if (!receipt || typeof receipt !== 'object' || receipt.memberId !== memberId) {
+        throw normalizeTypedError({
+          code: 'BINDING_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Session binding did not return the selected member receipt.',
+          retryable: false,
+        }, 'BINDING_RESPONSE_INVALID')
+      }
+      setMemberLocalGroupResult(entry, memberId, { status: 'success', message: 'Session bound.' })
+      await loadWorkspace(workspaceId)
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'SESSION_BINDING_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setMemberLocalGroupResult(entry, memberId, {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      setMemberLocalGroupPending(entry, memberId, 'binding', false)
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
+  async function restoreMemberBinding(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.restoreMemberBinding !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Binding verification port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const memberId = detail.memberId || entry.selectedMemberId
+    if (!memberId) {
+      return { ok: false, error: normalizeTypedError({
+        code: 'MEMBER_SELECTION_REQUIRED',
+        category: 'validation',
+        message: 'Select a member before verifying its saved binding.',
+        retryable: false,
+      }, 'MEMBER_SELECTION_REQUIRED') }
+    }
+
+    const scope = makeLocalGroupScope(entry, memberId)
+    setMemberLocalGroupPending(entry, memberId, 'restore', true)
+    syncActiveWorkspaceProjection()
+    notify()
+    render()
+
+    try {
+      const projection = await loadMemberRuntimeProjection(workspaceId, memberId)
+      if (localGroupScopeChanged(entry, scope)) {
+        return { ok: false, error: normalizeTypedError({
+          code: 'LOCAL_GROUP_SCOPE_CHANGED',
+          category: 'validation',
+          message: 'The selected workspace or member changed during this request.',
+          retryable: false,
+        }, 'LOCAL_GROUP_SCOPE_CHANGED') }
+      }
+      if (!projection || !Number.isInteger(projection.bindingGeneration)) {
+        throw normalizeTypedError({
+          code: 'BINDING_GENERATION_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative binding generation is not loaded.',
+          retryable: false,
+        }, 'BINDING_GENERATION_UNAVAILABLE')
+      }
+      const machineId = projection.runtime?.machineId
+      if (typeof machineId !== 'string' || machineId === '') {
+        throw normalizeTypedError({
+          code: 'BINDING_MACHINE_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative runtime machine is not loaded.',
+          retryable: false,
+        }, 'BINDING_MACHINE_UNAVAILABLE')
+      }
+      const receipt = await daemonApi.restoreMemberBinding({
+        workspaceId,
+        memberId,
+        machineId,
+        expectedGeneration: projection.bindingGeneration,
+      })
+      if (!receipt || typeof receipt !== 'object' || receipt.restored !== true) {
+        throw normalizeTypedError({
+          code: 'RESTORE_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Binding verification did not return a verification receipt.',
+          retryable: false,
+        }, 'RESTORE_RESPONSE_INVALID')
+      }
+      setMemberLocalGroupResult(entry, memberId, { status: 'success', message: 'Binding verified.' })
+      await loadWorkspace(workspaceId)
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'BINDING_VERIFICATION_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setMemberLocalGroupResult(entry, memberId, {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      setMemberLocalGroupPending(entry, memberId, 'restore', false)
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
   async function dispatchAction(action, detail = {}) {
     switch (action) {
       case 'navigate':
@@ -1850,6 +2921,60 @@ export function createWebUIApp({
         await navigate('tickets', { workspaceId: targetWsId })
         return app
       }
+      case 'create-group':
+      case 'create-local-group':
+        return createLocalGroupGroup({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+        })
+      case 'create-member':
+      case 'create-local-member':
+        return createLocalGroupMember({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+        })
+      case 'configure-member-runtime':
+      case 'configure-runtime':
+        return configureMemberRuntime({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          memberId: detail.memberId || state.selectedMemberId,
+        })
+      case 'bind-member-session':
+      case 'bind-session':
+        return bindMemberSession({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          memberId: detail.memberId || state.selectedMemberId,
+        })
+      case 'restore-member-binding':
+      case 'verify-member-binding':
+        return restoreMemberBinding({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          memberId: detail.memberId || state.selectedMemberId,
+        })
+      case 'filter-members-by-machine': {
+        const filter = String(detail.machineId ?? detail.value ?? '')
+        state.machineFilter = filter
+        if (state.activeWorkspaceId) {
+          ensureWorkspaceEntry(state.activeWorkspaceId).machineFilter = filter
+        }
+        syncActiveWorkspaceProjection()
+        render()
+        return app
+      }
+      case 'start-agent':
+      case 'resume-agent':
+        return {
+          ok: false,
+          error: normalizeTypedError({
+            code: action === 'start-agent' ? 'AGENT_START_UNSUPPORTED' : 'AGENT_RESUME_UNSUPPORTED',
+            category: 'unsupported',
+            message: 'Agent start and resume are not supported by this daemon composition.',
+            retryable: false,
+          }, action === 'start-agent' ? 'AGENT_START_UNSUPPORTED' : 'AGENT_RESUME_UNSUPPORTED'),
+        }
       case 'create-goal':
       case 'create-workspace-goal':
         return createWorkspaceGoal({
@@ -1885,6 +3010,35 @@ export function createWebUIApp({
         return app
       case 'save-properties':
       case 'submit-form': {
+        if (detail.formId === 'accounts-login-form') {
+          return loginAccounts(detail)
+        }
+        if (detail.formId === 'workspace-group-create-form') {
+          return createLocalGroupGroup({
+            ...detail,
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          })
+        }
+        if (detail.formId === 'workspace-member-create-form') {
+          return createLocalGroupMember({
+            ...detail,
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          })
+        }
+        if (detail.formId === 'workspace-runtime-form') {
+          return configureMemberRuntime({
+            ...detail,
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+            memberId: detail.memberId || state.selectedMemberId,
+          })
+        }
+        if (detail.formId === 'workspace-binding-form') {
+          return bindMemberSession({
+            ...detail,
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+            memberId: detail.memberId || state.selectedMemberId,
+          })
+        }
         if (detail.formId === 'ticket-report-form') {
           return createOrReportTicket({
             workspaceId: detail.workspaceId || state.activeWorkspaceId,
@@ -2014,12 +3168,21 @@ export function createWebUIApp({
         return sendMessage(detail.memberId || detail.recipientMemberId, detail.body || '', { workspaceId: detail.workspaceId || state.activeWorkspaceId })
       case 'select-member':
       case 'toggle-member':
+        if (state.activeWorkspaceId) {
+          const entry = ensureWorkspaceEntry(state.activeWorkspaceId)
+          if (String(entry.selectedMemberId ?? '') !== String(detail.memberId ?? '')) {
+            entry.localGroupScopeEpoch = Number(entry.localGroupScopeEpoch || 0) + 1
+          }
+        }
         state.selectedMemberId = detail.memberId
         state.ownerMemberSelected = true
         if (state.activeWorkspaceId) {
           const entry = ensureWorkspaceEntry(state.activeWorkspaceId)
           entry.selectedMemberId = detail.memberId
           entry.ownerMemberSelected = true
+          if (detail.memberId) {
+            await loadMemberRuntimeProjection(state.activeWorkspaceId, detail.memberId)
+          }
           if (state.activeRoute === 'board') {
             const seq = ++entry.requestSeq
             await loadWorkspaceScopedResources(state.activeWorkspaceId, seq)
@@ -2042,6 +3205,14 @@ export function createWebUIApp({
         }
         render()
         return app
+      case 'connect-machine':
+      case 'recover-machine':
+      case 'disconnect-machine':
+        return runMachineConnectionAction(detail.machineId, action)
+      case 'list-machine-sessions':
+        return loadMachineSessions(detail.machineId)
+      case 'logout-accounts':
+        return logoutAccounts()
       case 'retry-error':
       case 'retry-form':
         state.lastError = null
@@ -2107,7 +3278,7 @@ export function createWebUIApp({
       if (!target) return
       const action = target.getAttribute('data-action')
       const detail = {}
-      for (const attr of ['windowId', 'memberId', 'workspaceId', 'route', 'ticketId', 'goalId', 'mode', 'mobileMode', 'formId', 'filter', 'status', 'transition']) {
+      for (const attr of ['windowId', 'memberId', 'workspaceId', 'route', 'ticketId', 'goalId', 'machineId', 'mode', 'mobileMode', 'formId', 'filter', 'status', 'transition']) {
         const key = attr.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`)
         const value = resolveAttr(target, `data-${key}`)
         if (value != null) detail[attr] = value
@@ -2120,6 +3291,11 @@ export function createWebUIApp({
         detail.ownerMemberId = formEl?.querySelector?.('[name="ticketOwnerMemberId"]')?.value || ''
         detail.priority = Number(formEl?.querySelector?.('[name="ticketPriority"]')?.value || 0)
       }
+      if (action === 'submit-form' && detail.formId === 'accounts-login-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#accounts-login-form')
+        detail.loginName = formEl?.querySelector?.('[name="loginName"]')?.value || ''
+        detail.credential = formEl?.querySelector?.('[name="credential"]')?.value || ''
+      }
       if (action === 'submit-form' && detail.formId === 'ticket-append-report-form') {
         const formEl = target.closest?.('form') || root.querySelector?.('#ticket-append-report-form')
         detail.body = formEl?.querySelector?.('[name="ticketReportBody"]')?.value || ''
@@ -2130,6 +3306,28 @@ export function createWebUIApp({
         detail.title = formEl?.querySelector?.('[name="goalTitle"]')?.value || ''
         detail.ownerMemberId = formEl?.querySelector?.('[name="goalOwnerMemberId"]')?.value || ''
       }
+      if (action === 'submit-form' && detail.formId === 'workspace-group-create-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#workspace-group-create-form')
+        detail.name = formEl?.querySelector?.('[name="groupName"]')?.value || ''
+        detail.parentGroupId = formEl?.querySelector?.('[name="groupParentId"]')?.value || null
+      }
+      if (action === 'submit-form' && detail.formId === 'workspace-member-create-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#workspace-member-create-form')
+        detail.name = formEl?.querySelector?.('[name="memberName"]')?.value || ''
+        detail.groupId = formEl?.querySelector?.('[name="memberGroupId"]')?.value || ''
+      }
+      if (action === 'submit-form' && detail.formId === 'workspace-runtime-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#workspace-runtime-form')
+        detail.machineId = formEl?.querySelector?.('[name="runtimeMachineId"]')?.value || ''
+        detail.hostKind = formEl?.querySelector?.('[name="runtimeHostKind"]')?.value || ''
+        detail.agentKind = formEl?.querySelector?.('[name="runtimeAgentKind"]')?.value || ''
+        detail.launchProfileRef = formEl?.querySelector?.('[name="runtimeLaunchProfileRef"]')?.value || ''
+      }
+      if (action === 'submit-form' && detail.formId === 'workspace-binding-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#workspace-binding-form')
+        detail.sessionId = formEl?.querySelector?.('[name="bindingSessionId"]')?.value || ''
+        detail.anchor = formEl?.querySelector?.('[name="bindingAnchor"]')?.value || ''
+      }
       event.preventDefault?.()
       void dispatchAction(action, detail)
     }
@@ -2137,6 +3335,10 @@ export function createWebUIApp({
     const onInput = (event) => {
       const target = event.target
       if (!target) return
+      if (target.getAttribute?.('data-action') === 'filter-members-by-machine') {
+        void dispatchAction('filter-members-by-machine', { value: target.value })
+        return
+      }
       const field = target.getAttribute?.('data-property-field') || target.getAttribute?.('data-field') || target.getAttribute?.('name')
       const memberId = resolveAttr(target, 'data-member-id')
       if (field && memberId && target.closest?.('[data-component="property-panel"]')) {
