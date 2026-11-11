@@ -1,6 +1,7 @@
 export { createConnectionManager } from "./link-port.ts";
 export { ConnectionError } from "./errors.ts";
 export { V1TraversalTransport } from "../adapters/v1-traversal.ts";
+export { createTerminalMuxClient } from "./terminal-mux-client.ts";
 
 /**
  * Resolve one member's machine-scoped authorized terminal directory.

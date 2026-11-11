@@ -257,6 +257,83 @@ function unavailableLoadable(error) {
   }
 }
 
+function machineTypedError(error, fallbackCode = 'MACHINE_ACTION_FAILED') {
+  const typed = normalizeTypedError(error, fallbackCode)
+  if (!error || typeof error !== 'object') return typed
+  for (const field of ['owningModule', 'operationId', 'status']) {
+    if (error[field] !== undefined && error[field] !== null && error[field] !== '') {
+      typed[field] = error[field]
+    }
+  }
+  if (typeof error.category === 'string' && error.category !== '') {
+    typed.category = error.category
+  } else if (!typed.category || typed.category === 'session') {
+    typed.category = 'machine'
+  }
+  return typed
+}
+
+function projectMachineConnection(connection) {
+  if (!connection || typeof connection !== 'object' || Array.isArray(connection)) return null
+  const capabilities = connection.capabilities && typeof connection.capabilities === 'object'
+    ? connection.capabilities
+    : {}
+  const backpressure = connection.backpressure && typeof connection.backpressure === 'object'
+    ? connection.backpressure
+    : {}
+  const projected = {
+    machineId: String(connection.machineId ?? ''),
+    status: String(connection.status ?? 'unavailable'),
+    freshness: String(connection.freshness ?? 'unavailable'),
+    observedAt: typeof connection.observedAt === 'string' ? connection.observedAt : null,
+    transportKind: typeof connection.transportKind === 'string' ? connection.transportKind : null,
+    path: typeof connection.path === 'string' ? connection.path : null,
+    peerIdentityVerified: connection.peerIdentityVerified === true,
+    peerIdentity: connection.peerIdentityVerified === true && typeof connection.peerIdentity === 'string'
+      ? connection.peerIdentity
+      : null,
+    capabilities: {
+      channelKinds: Array.isArray(capabilities.channelKinds)
+        ? capabilities.channelKinds.filter((item) => typeof item === 'string')
+        : [],
+      transportKind: typeof capabilities.transportKind === 'string' ? capabilities.transportKind : null,
+    },
+    backpressure: {
+      queuedBytes: Number(backpressure.queuedBytes) || 0,
+      bufferedBytes: Number(backpressure.bufferedBytes) || 0,
+      backpressured: backpressure.backpressured === true,
+    },
+  }
+  if (connection.generation !== undefined && connection.generation !== null) {
+    projected.generation = connection.generation
+  }
+  return projected
+}
+
+function projectMachineObservation(observation) {
+  if (!observation || typeof observation !== 'object' || Array.isArray(observation)) return null
+  const value = observation.value && typeof observation.value === 'object' ? observation.value : {}
+  return {
+    source: typeof observation.source === 'string' ? observation.source : 'connections',
+    observedAt: typeof observation.observedAt === 'string' ? observation.observedAt : null,
+    value: {
+      machineId: typeof value.machineId === 'string' ? value.machineId : '',
+      generation: value.generation ?? null,
+      status: typeof value.status === 'string' ? value.status : 'unavailable',
+      freshness: typeof value.freshness === 'string' ? value.freshness : 'unavailable',
+      sessions: Number.isInteger(value.sessions) ? value.sessions : null,
+    },
+  }
+}
+
+function projectMachineSessionCatalog(sessions) {
+  return sessions.map((session) => ({
+    name: String(session?.name ?? ''),
+    backend: String(session?.backend ?? ''),
+    stableId: String(session?.stableId ?? ''),
+  }))
+}
+
 function buildHelpers() {
   return {
     renderStatusBadge,
@@ -380,7 +457,6 @@ export function createWebUIApp({
         membersLoadable: loadingLoadable(),
         goalsLoadable: loadingLoadable(),
         ticketsLoadable: loadingLoadable(),
-        connectionsLoadable: loadingLoadable(),
         layout: null,
         selectedMemberId: null,
         ownerMemberSelected: false,
@@ -416,6 +492,9 @@ export function createWebUIApp({
     members: [],
     membersLoadable: loadingLoadable(),
     connectionsLoadable: loadingLoadable(),
+    machineConnections: {},
+    machineSessions: {},
+    machineDirectoryObservation: null,
     layout: null,
     selectedMemberId: null,
     ownerMemberSelected: false,
@@ -524,9 +603,6 @@ export function createWebUIApp({
     state.membersLoadable = entry.membersLoadable
     state.goalsLoadable = entry.goalsLoadable
     state.ticketsLoadable = entry.ticketsLoadable
-    if (entry.connectionsLoadable.status !== 'loading' || state.connectionsLoadable.status === 'loading') {
-      state.connectionsLoadable = entry.connectionsLoadable
-    }
     state.layout = entry.layout
     state.selectedMemberId = entry.selectedMemberId
     state.ownerMemberSelected = entry.ownerMemberSelected
@@ -704,6 +780,8 @@ export function createWebUIApp({
         ...state,
         machinesLoadable: state.connectionsLoadable,
         machines: state.connectionsLoadable.value || [],
+        machineConnections: state.machineConnections,
+        machineSessions: state.machineSessions,
       }, helpers)
     }
     if (state.activeRoute === 'workspaces') {
@@ -779,12 +857,12 @@ export function createWebUIApp({
       return `<button type="button" class="nav-item v2-nav-item${isCurrent ? ' active' : ''}" data-action="navigate" data-route="${item.route}" data-route-scope="global" aria-current="${isCurrent}"><span class="label">${esc(item.label)}</span></button>`
     }).join('')
 
-    const connReady = state.workspacesLoadable.status === 'ready' || state.connectionsLoadable.status === 'ready'
-    const connStatus = connReady ? 'online' : (state.workspacesLoadable.status === 'loading' ? 'loading' : 'unavailable')
+    const connReady = state.connectionsLoadable.status === 'ready'
+    const connStatus = state.connectionsLoadable.status
     const connDotClass = connReady ? 'dot-online' : (connStatus === 'loading' ? 'dot-busy' : 'dot-offline')
     const connLabel = connReady
-      ? `${state.workspaces.length} Workspaces 已同步`
-      : (connStatus === 'loading' ? '正在同步连接...' : 'Daemon 端口未就绪 (Unavailable)')
+      ? `${state.connectionsLoadable.value?.length ?? 0} Machines 已同步`
+      : (connStatus === 'loading' ? '正在同步机器目录...' : '机器目录不可用 (Unavailable)')
 
     const errors = state.lastError && !state.workspaceScopeError
       ? renderErrorNotice({ error: state.lastError }).html
@@ -1120,6 +1198,232 @@ export function createWebUIApp({
     }
   }
 
+  function ensureMachineState(machineId) {
+    const id = String(machineId || '').trim()
+    if (!id) return null
+    if (!state.machineConnections[id]) {
+      state.machineConnections[id] = {
+        machineId: id,
+        connection: null,
+        observation: null,
+        status: 'unavailable',
+        freshness: 'unavailable',
+        observedAt: null,
+        pending: false,
+        pendingAction: null,
+        error: null,
+      }
+    }
+    if (!state.machineSessions[id]) {
+      state.machineSessions[id] = {
+        machineId: id,
+        sessions: [],
+        observation: null,
+        loaded: false,
+        pending: false,
+        error: null,
+      }
+    }
+    return {
+      connection: state.machineConnections[id],
+      sessions: state.machineSessions[id],
+    }
+  }
+
+  function applyMachineConnectionPayload(machineId, payload) {
+    const entry = ensureMachineState(machineId)
+    if (!entry) return
+    const connection = projectMachineConnection(payload?.connection)
+    const observation = projectMachineObservation(payload?.observation)
+    const observationStatus = observation?.value?.status
+    entry.connection.connection = connection
+    entry.connection.observation = observation
+    entry.connection.status = typeof observationStatus === 'string' ? observationStatus : 'unavailable'
+    entry.connection.freshness = observation?.value?.freshness
+      || connection?.freshness
+      || 'unavailable'
+    entry.connection.observedAt = observation?.observedAt || connection?.observedAt || nowIso()
+    entry.connection.error = null
+    entry.sessions.sessions = []
+    entry.sessions.observation = null
+    entry.sessions.loaded = false
+    entry.sessions.error = null
+  }
+
+  async function loadMachines() {
+    if (!daemonApi || typeof daemonApi.listMachines !== 'function') {
+      state.connectionsLoadable = unavailableLoadable(
+        daemonUnavailableError('Machine directory API port is not configured.'),
+      )
+      notify()
+      render()
+      return state.connectionsLoadable
+    }
+
+    state.connectionsLoadable = loadingLoadable()
+    notify()
+    render()
+
+    try {
+      const payload = await daemonApi.listMachines()
+      if (!payload || !Array.isArray(payload.machines)) {
+        throw machineTypedError({
+          code: 'MACHINES_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Daemon returned a malformed machine directory.',
+        })
+      }
+      const observation = projectMachineObservation(payload.observation)
+      for (const machine of payload.machines) {
+        ensureMachineState(machine?.machineId)
+      }
+      state.machineDirectoryObservation = observation
+      state.connectionsLoadable = {
+        status: 'ready',
+        value: payload.machines,
+        observedAt: observation?.observedAt || nowIso(),
+        freshness: 'fresh',
+        error: null,
+      }
+    } catch (error) {
+      state.connectionsLoadable = unavailableLoadable(machineTypedError(error, 'MACHINES_UNAVAILABLE'))
+    }
+    notify()
+    render()
+    return state.connectionsLoadable
+  }
+
+  async function runMachineConnectionAction(machineId, action) {
+    const id = String(machineId || '').trim()
+    if (!id) {
+      return {
+        ok: false,
+        error: machineTypedError({
+          code: 'MACHINE_ID_REQUIRED',
+          category: 'validation',
+          message: 'A machineId is required.',
+        }, 'MACHINE_ID_REQUIRED'),
+      }
+    }
+
+    const entry = ensureMachineState(id)
+    if (entry.connection.pending || entry.sessions.pending) {
+      return {
+        ok: false,
+        error: machineTypedError({
+          code: 'MACHINE_ACTION_PENDING',
+          category: 'conflict',
+          message: 'A machine action is already pending.',
+        }, 'MACHINE_ACTION_PENDING'),
+      }
+    }
+
+    entry.connection.pending = true
+    entry.connection.pendingAction = action
+    entry.connection.error = null
+    notify()
+    render()
+
+    try {
+      if (action === 'connect-machine') {
+        const payload = await daemonApi.connectMachine({ machineId: id })
+        applyMachineConnectionPayload(id, payload)
+      } else if (action === 'recover-machine') {
+        const payload = await daemonApi.recoverMachine({ machineId: id })
+        applyMachineConnectionPayload(id, payload)
+      } else if (action === 'disconnect-machine') {
+        await daemonApi.disconnectMachine({ machineId: id })
+        entry.connection.connection = null
+        entry.connection.observation = projectMachineObservation({
+          source: 'connections',
+          observedAt: nowIso(),
+          value: { machineId: id, status: 'unavailable', freshness: 'unavailable' },
+        })
+        entry.connection.status = 'unavailable'
+        entry.connection.freshness = 'unavailable'
+        entry.connection.observedAt = entry.connection.observation.observedAt
+        entry.connection.error = null
+        entry.sessions.sessions = []
+        entry.sessions.observation = null
+        entry.sessions.loaded = false
+        entry.sessions.error = null
+      } else {
+        throw machineTypedError({
+          code: 'MACHINE_ACTION_UNSUPPORTED',
+          category: 'validation',
+          message: `Unsupported machine action ${action}.`,
+        }, 'MACHINE_ACTION_UNSUPPORTED')
+      }
+      return {
+        ok: true,
+        machineId: id,
+        status: entry.connection.status,
+        freshness: entry.connection.freshness,
+        connection: entry.connection.connection,
+      }
+    } catch (error) {
+      const typed = machineTypedError(error, action === 'connect-machine'
+        ? 'MACHINE_CONNECT_FAILED'
+        : action === 'recover-machine'
+          ? 'MACHINE_RECOVER_FAILED'
+          : 'MACHINE_DISCONNECT_FAILED')
+      entry.connection.error = typed
+      return { ok: false, machineId: id, error: typed }
+    } finally {
+      entry.connection.pending = false
+      entry.connection.pendingAction = null
+      notify()
+      render()
+    }
+  }
+
+  async function loadMachineSessions(machineId) {
+    const id = String(machineId || '').trim()
+    if (!id) {
+      return {
+        ok: false,
+        error: machineTypedError({
+          code: 'MACHINE_ID_REQUIRED',
+          category: 'validation',
+          message: 'A machineId is required.',
+        }, 'MACHINE_ID_REQUIRED'),
+      }
+    }
+
+    const entry = ensureMachineState(id)
+    if (entry.connection.pending || entry.sessions.pending) {
+      return {
+        ok: false,
+        error: machineTypedError({
+          code: 'MACHINE_ACTION_PENDING',
+          category: 'conflict',
+          message: 'A machine action is already pending.',
+        }, 'MACHINE_ACTION_PENDING'),
+      }
+    }
+
+    entry.sessions.pending = true
+    entry.sessions.error = null
+    notify()
+    render()
+
+    try {
+      const payload = await daemonApi.listMachineSessions({ machineId: id })
+      entry.sessions.sessions = projectMachineSessionCatalog(payload.sessions)
+      entry.sessions.observation = projectMachineObservation(payload.observation)
+      entry.sessions.loaded = true
+      return { ok: true, machineId: id, sessions: entry.sessions.sessions }
+    } catch (error) {
+      const typed = machineTypedError(error, 'MACHINE_SESSIONS_FAILED')
+      entry.sessions.error = typed
+      return { ok: false, machineId: id, error: typed }
+    } finally {
+      entry.sessions.pending = false
+      notify()
+      render()
+    }
+  }
+
   async function loadWorkspace(workspaceId) {
     state.activeWorkspaceId = workspaceId || null
     state.workspaceOverflowOpen = false
@@ -1169,7 +1473,6 @@ export function createWebUIApp({
       const err = loadable.error || daemonUnavailableError()
       entry.members = []
       entry.membersLoadable = { status: 'unavailable', value: null, observedAt: loadable.observedAt, freshness: 'unavailable', error: err }
-      entry.connectionsLoadable = { ...entry.membersLoadable }
       entry.goalsLoadable = unavailableLoadable(err)
       entry.ticketsLoadable = unavailableLoadable(err)
       entry.boardLoadable = unavailableLoadable(err)
@@ -1204,33 +1507,6 @@ export function createWebUIApp({
       render()
     }
 
-    if (daemonApi && typeof daemonApi.listConnections === 'function') {
-      try {
-        const connections = await daemonApi.listConnections({ workspaceId })
-        if (entry.requestSeq === seq) {
-          entry.connectionsLoadable = { status: 'ready', value: Array.isArray(connections) ? connections : [], observedAt: nowIso(), freshness: 'fresh', error: null }
-        }
-      } catch (error) {
-        if (entry.requestSeq === seq) {
-          entry.connectionsLoadable = unavailableLoadable(error)
-        }
-      }
-    } else if (entry.requestSeq === seq) {
-      entry.connectionsLoadable = {
-        status: 'ready',
-        value: state.workspaces.map((workspace) => ({
-          machineId: workspace.workspaceId,
-          name: workspace.name,
-          address: workspace.address || workspace.workspaceId,
-          status: workspace.status || 'unknown',
-          freshness: workspace.freshness || (workspace.status === 'online' ? 'fresh' : 'stale'),
-        })),
-        observedAt: nowIso(),
-        freshness: 'fresh',
-        error: null,
-      }
-    }
-
     await loadWorkspaceScopedResources(workspaceId, seq)
 
     if (entry.requestSeq === seq) {
@@ -1249,7 +1525,6 @@ export function createWebUIApp({
       const typed = daemonUnavailableError()
       state.workspaces = []
       state.workspacesLoadable = unavailableLoadable(typed)
-      state.connectionsLoadable = unavailableLoadable(typed)
       state.lastError = typed
       return
     }
@@ -1264,7 +1539,6 @@ export function createWebUIApp({
       const typed = normalizeTypedError(error, 'WORKSPACES_UNAVAILABLE')
       state.workspaces = []
       state.workspacesLoadable = unavailableLoadable(typed)
-      state.connectionsLoadable = unavailableLoadable(typed)
       state.lastError = typed
     }
   }
@@ -1287,6 +1561,7 @@ export function createWebUIApp({
     initialized = true
     await loadWorkspaces()
     await loadBootstrapSurface()
+    await loadMachines()
     await loadWorkspace(state.activeWorkspaceId)
     notify()
     render()
@@ -1326,6 +1601,9 @@ export function createWebUIApp({
     }
 
     setRoute(nextRoute, null)
+    if (nextRoute === 'connections' && state.connectionsLoadable.status !== 'ready') {
+      await loadMachines()
+    }
     notify()
     render()
     return app
@@ -2042,6 +2320,12 @@ export function createWebUIApp({
         }
         render()
         return app
+      case 'connect-machine':
+      case 'recover-machine':
+      case 'disconnect-machine':
+        return runMachineConnectionAction(detail.machineId, action)
+      case 'list-machine-sessions':
+        return loadMachineSessions(detail.machineId)
       case 'retry-error':
       case 'retry-form':
         state.lastError = null
@@ -2107,7 +2391,7 @@ export function createWebUIApp({
       if (!target) return
       const action = target.getAttribute('data-action')
       const detail = {}
-      for (const attr of ['windowId', 'memberId', 'workspaceId', 'route', 'ticketId', 'goalId', 'mode', 'mobileMode', 'formId', 'filter', 'status', 'transition']) {
+      for (const attr of ['windowId', 'memberId', 'workspaceId', 'route', 'ticketId', 'goalId', 'machineId', 'mode', 'mobileMode', 'formId', 'filter', 'status', 'transition']) {
         const key = attr.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`)
         const value = resolveAttr(target, `data-${key}`)
         if (value != null) detail[attr] = value

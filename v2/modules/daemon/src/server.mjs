@@ -127,6 +127,9 @@ export function createDaemon({
   routing,
   memberHostObserver,
   terminalCatalog,
+  machineService,
+  machineAuthorization,
+  connectionManager,
   goals,
   tickets,
   board,
@@ -150,6 +153,9 @@ export function createDaemon({
       })
     : null;
   const sessions = new Map();
+  // The current V2 credential is one daemon caller scope. Caller-bound
+  // accounts authorization remains outside this port.
+  const machineLinks = new Map();
   const context = {
     terminal,
     admission: terminalAdmission,
@@ -165,6 +171,10 @@ export function createDaemon({
     routing,
     memberHostObserver,
     terminalCatalog,
+    machineService,
+    machineAuthorization,
+    connectionManager,
+    machineLinks,
     goals,
     tickets,
     board,
@@ -189,6 +199,14 @@ export function createDaemon({
   });
 
   server.on("close", () => {
+    for (const link of machineLinks.values()) {
+      try {
+        context.connectionManager?.closeOwnLink(link);
+      } catch {
+        // The physical link may already be closed or superseded.
+      }
+    }
+    machineLinks.clear();
     void terminal.close?.();
     void context.tickets?.closeStore?.();
   });
@@ -254,6 +272,11 @@ async function handleRequest({ request, response, context }) {
     });
   }
 
+  const machineRoute = matchMachineRoute(url.pathname);
+  if (machineRoute) {
+    return handleMachineRoute({ request, response, context, route: machineRoute });
+  }
+
   if (request.method === "GET" && url.pathname === "/api/terminal/stream") {
     requireTerminalAdmission(context, "terminal.stream");
     return streamTerminal(request, response, context, url, credentialHeader(request));
@@ -286,6 +309,241 @@ async function handleRequest({ request, response, context }) {
   sendJson(response, 404, {
     error: daemonError("ROUTE_NOT_FOUND", "route", "Route was not found.", url.pathname).toJSON(),
   });
+}
+
+function matchMachineRoute(pathname) {
+  if (pathname === "/api/machines") {
+    return { kind: "machine-list" };
+  }
+  const prefix = "/api/machines/";
+  if (!pathname.startsWith(prefix)) {
+    return null;
+  }
+  const parts = pathname.slice(prefix.length).split("/").filter(Boolean);
+  if (parts.length !== 2) {
+    return null;
+  }
+  const machineId = decodeURIComponent(parts[0]);
+  switch (parts[1]) {
+    case "connect":
+      return { kind: "machine-connect", machineId };
+    case "connection":
+      return { kind: "machine-connection", machineId };
+    case "recover":
+      return { kind: "machine-recover", machineId };
+    case "disconnect":
+      return { kind: "machine-disconnect", machineId };
+    case "sessions":
+      return { kind: "machine-sessions", machineId };
+    default:
+      return null;
+  }
+}
+
+async function handleMachineRoute({ request, response, context, route }) {
+  authenticate(request, context);
+
+  if (route.kind === "machine-list") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", "machine.list", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    requireMachineService(context, "machine.list");
+    const token = credentialHeader(request);
+    if (!token) {
+      throw daemonError(
+        "MACHINE_ACCOUNT_SESSION_REQUIRED",
+        "machine.list",
+        "An accounts session credential is required.",
+      );
+    }
+    let machines;
+    try {
+      machines = await context.machineService.listAuthorizedMachines(token);
+    } catch (error) {
+      throw toControlTypedError(error, "machine.list");
+    }
+    return sendJson(response, 200, {
+      machines,
+      observation: observation("accounts", { machines: machines.length }),
+    });
+  }
+
+  const operationId = `machine.${route.kind.slice("machine-".length)}`;
+  requireConnectionManager(context, operationId);
+
+  if (route.kind === "machine-connect" || route.kind === "machine-recover") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    requireMachineAuthorization(context, operationId);
+    const authorization = await authorizeMachine(route.machineId, context, operationId);
+    const link = await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.connect(route.machineId, authorization),
+    );
+    let connection;
+    try {
+      connection = await withTerminalAdmission(
+        operationId,
+        () => context.connectionManager.observeLink(link),
+      );
+    } catch (error) {
+      try {
+        context.connectionManager.closeOwnLink(link);
+      } catch {
+        // Preserve the original observation failure.
+      }
+      throw error;
+    }
+    context.machineLinks.set(route.machineId, link);
+    return sendJson(response, 200, {
+      connection,
+      observation: observation("connections", {
+        machineId: connection.machineId,
+        generation: connection.generation,
+        status: connection.status,
+        freshness: connection.freshness,
+      }),
+    });
+  }
+
+  if (route.kind === "machine-connection") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const link = context.machineLinks.get(route.machineId);
+    if (!link) {
+      return sendJson(response, 200, {
+        connection: null,
+        status: "unavailable",
+        observation: observation("connections", {
+          machineId: route.machineId,
+          status: "unavailable",
+          freshness: "unavailable",
+        }),
+      });
+    }
+    const connection = await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.observeLink(link),
+    );
+    return sendJson(response, 200, {
+      connection,
+      status: connection.status,
+      observation: observation("connections", {
+        machineId: connection.machineId,
+        generation: connection.generation,
+        status: connection.status,
+        freshness: connection.freshness,
+      }),
+    });
+  }
+
+  if (route.kind === "machine-disconnect") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const link = requireCurrentMachineLink(route.machineId, context, operationId);
+    await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.closeOwnLink(link),
+    );
+    context.machineLinks.delete(route.machineId);
+    return sendJson(response, 200, {
+      disconnected: true,
+      machineId: route.machineId,
+      connection: null,
+      status: "unavailable",
+      observation: observation("connections", {
+        machineId: route.machineId,
+        status: "unavailable",
+        freshness: "unavailable",
+      }),
+    });
+  }
+
+  if (route.kind === "machine-sessions") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const link = requireCurrentMachineLink(route.machineId, context, operationId);
+    requireMachineAuthorization(context, operationId);
+    const authorization = await authorizeMachine(route.machineId, context, operationId);
+    if (authorization.machineId !== route.machineId) {
+      throw daemonError("machine_mismatch", operationId, "Machine authorization does not match the requested machine.", route.machineId);
+    }
+    const sessions = await withTerminalAdmission(
+      operationId,
+      () => context.connectionManager.listSessions(link),
+    );
+    return sendJson(response, 200, {
+      sessions,
+      observation: observation("connections", {
+        machineId: route.machineId,
+        generation: link.generation,
+        sessions: sessions.length,
+      }),
+    });
+  }
+
+  throw daemonError("ROUTE_NOT_FOUND", operationId, "Route was not found.", request.url);
+}
+
+function requireMachineService(context, operationId) {
+  if (!context.machineService || typeof context.machineService.listAuthorizedMachines !== "function") {
+    throw daemonError(
+      "MACHINE_SERVICE_UNCONFIGURED",
+      operationId,
+      "The accounts machine directory port is not configured.",
+    );
+  }
+}
+
+function requireMachineAuthorization(context, operationId) {
+  if (!context.machineAuthorization || typeof context.machineAuthorization.authorizeMachine !== "function") {
+    throw daemonError(
+      "MACHINE_AUTHORIZATION_UNCONFIGURED",
+      operationId,
+      "The accounts machine authorization port is not configured.",
+    );
+  }
+}
+
+function requireConnectionManager(context, operationId) {
+  if (
+    !context.connectionManager
+    || typeof context.connectionManager.connect !== "function"
+    || typeof context.connectionManager.observeLink !== "function"
+    || typeof context.connectionManager.listSessions !== "function"
+    || typeof context.connectionManager.closeOwnLink !== "function"
+  ) {
+    throw daemonError(
+      "MACHINE_CONNECTIONS_UNCONFIGURED",
+      operationId,
+      "The connections manager is not configured.",
+    );
+  }
+}
+
+function requireCurrentMachineLink(machineId, context, operationId) {
+  const link = context.machineLinks.get(machineId);
+  if (!link) {
+    throw daemonError(
+      "MACHINE_NOT_CONNECTED",
+      operationId,
+      "The machine has no current connection in this caller scope.",
+      { machineId },
+    );
+  }
+  return link;
+}
+
+async function authorizeMachine(machineId, context, operationId) {
+  try {
+    return await context.machineAuthorization.authorizeMachine(machineId);
+  } catch (error) {
+    throw toControlTypedError(error, operationId);
+  }
 }
 
 function matchWorkspaceRoute(pathname) {
@@ -1474,6 +1732,7 @@ function statusForError(error) {
     case "V2_CREDENTIAL_REQUIRED":
     case "V2_CREDENTIAL_INVALID":
     case "V2_SESSION_EXPIRED":
+    case "MACHINE_ACCOUNT_SESSION_REQUIRED":
       return 401;
     case "CSRF_REQUIRED":
     case "ORIGIN_NOT_ALLOWED":
@@ -1504,8 +1763,14 @@ function statusForError(error) {
     case "WORKSPACE_FORBIDDEN":
     case "MACHINE_REVOKED":
       return 403;
+    case "MACHINE_NOT_CONNECTED":
+      return 409;
     case "MACHINE_NOT_FOUND":
       return 404;
+    case "MACHINE_SERVICE_UNCONFIGURED":
+    case "MACHINE_AUTHORIZATION_UNCONFIGURED":
+    case "MACHINE_CONNECTIONS_UNCONFIGURED":
+      return 503;
     case "unauthorized":
     case "peer_identity_mismatch":
       return 401;

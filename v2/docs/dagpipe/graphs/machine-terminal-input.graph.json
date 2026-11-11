@@ -1,0 +1,316 @@
+{
+  "id": "machine.terminal_input",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.machine_terminal_input_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "复核当前调用者与权限",
+      "operator": "accounts.input.authorize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_request"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_scope",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "解析并复核绑定",
+      "operator": "members.binding.recheck",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_scope"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_binding",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "复核链路与通道代次",
+      "operator": "connections.terminal_channel.recheck",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_binding"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_channel",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "向精确目标提交输入",
+      "operator": "terminal.input.submit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_channel"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_written",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "确认本次输入受理",
+      "operator": "terminal.input.accept",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_written"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_accepted",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录输入拒绝",
+      "operator": "accounts.input.reject",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_scope"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_rejected",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录输入失败",
+      "operator": "terminal.input.fail",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_written"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_failed",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录输入未知",
+      "operator": "terminal.input.unknown",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_written"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_unknown",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "记录输入取消",
+      "operator": "terminal.input.cancel",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_written"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_cancelled",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "返回本次输入结果",
+      "operator": "daemon.machine_terminal_input.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.machine_terminal_input_accepted",
+        "arc.machine_terminal_input_rejected",
+        "arc.machine_terminal_input_failed",
+        "arc.machine_terminal_input_unknown",
+        "arc.machine_terminal_input_cancelled"
+      ],
+      "output": {
+        "id": "arc.machine_terminal_input_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "复核当前调用者与权限",
+      "to": "解析并复核绑定",
+      "arc_id": "arc.machine_terminal_input_scope"
+    },
+    {
+      "from": "复核当前调用者与权限",
+      "to": "记录输入拒绝",
+      "arc_id": "arc.machine_terminal_input_scope"
+    },
+    {
+      "from": "解析并复核绑定",
+      "to": "复核链路与通道代次",
+      "arc_id": "arc.machine_terminal_input_binding"
+    },
+    {
+      "from": "复核链路与通道代次",
+      "to": "向精确目标提交输入",
+      "arc_id": "arc.machine_terminal_input_channel"
+    },
+    {
+      "from": "向精确目标提交输入",
+      "to": "确认本次输入受理",
+      "arc_id": "arc.machine_terminal_input_written"
+    },
+    {
+      "from": "向精确目标提交输入",
+      "to": "记录输入失败",
+      "arc_id": "arc.machine_terminal_input_written"
+    },
+    {
+      "from": "向精确目标提交输入",
+      "to": "记录输入未知",
+      "arc_id": "arc.machine_terminal_input_written"
+    },
+    {
+      "from": "向精确目标提交输入",
+      "to": "记录输入取消",
+      "arc_id": "arc.machine_terminal_input_written"
+    },
+    {
+      "from": "确认本次输入受理",
+      "to": "返回本次输入结果",
+      "arc_id": "arc.machine_terminal_input_accepted"
+    },
+    {
+      "from": "记录输入拒绝",
+      "to": "返回本次输入结果",
+      "arc_id": "arc.machine_terminal_input_rejected"
+    },
+    {
+      "from": "记录输入失败",
+      "to": "返回本次输入结果",
+      "arc_id": "arc.machine_terminal_input_failed"
+    },
+    {
+      "from": "记录输入未知",
+      "to": "返回本次输入结果",
+      "arc_id": "arc.machine_terminal_input_unknown"
+    },
+    {
+      "from": "记录输入取消",
+      "to": "返回本次输入结果",
+      "arc_id": "arc.machine_terminal_input_cancelled"
+    }
+  ],
+  "outputs": [
+    "arc.machine_terminal_input_result"
+  ]
+}
