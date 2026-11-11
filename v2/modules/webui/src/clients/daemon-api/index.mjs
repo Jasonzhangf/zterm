@@ -150,6 +150,27 @@ function operationError(payload, fallbackCode, fallbackMessage) {
   return error;
 }
 
+function requireMachineId(machineId) {
+  const value = typeof machineId === "string" ? machineId.trim() : "";
+  if (value === "") {
+    throw new DaemonError({
+      code: "MACHINE_ID_REQUIRED",
+      message: "A machineId is required.",
+    }, 400);
+  }
+  return value;
+}
+
+function machinePath(machineId, suffix) {
+  return `/api/machines/${encodeURIComponent(requireMachineId(machineId))}/${suffix}`;
+}
+
+function responseMachineId(connection) {
+  return connection && typeof connection === "object"
+    ? String(connection.machineId ?? "")
+    : "";
+}
+
 function requireSuccessfulOperation(payload, action) {
   if (!payload || payload.operation?.state !== "succeeded") {
     throw operationError(payload, "TICKET_OPERATION_NOT_SUCCEEDED", `${action} did not complete successfully.`);
@@ -220,6 +241,86 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
         throw new DaemonError({ code: "WORKSPACES_RESPONSE_INVALID", message: "Daemon returned a malformed workspace list." }, 502);
       }
       return payload.workspaces;
+    },
+
+    async listMachines() {
+      const payload = await request("/api/machines");
+      if (!Array.isArray(payload.machines)) {
+        throw new DaemonError({
+          code: "MACHINES_RESPONSE_INVALID",
+          message: "Daemon returned a malformed machine directory.",
+        }, 502);
+      }
+      return {
+        machines: payload.machines,
+        observation: payload.observation ?? null,
+      };
+    },
+
+    async connectMachine({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "connect"), { method: "POST" });
+      if (responseMachineId(payload?.connection) !== requestedMachineId) {
+        throw new DaemonError({
+          code: "MACHINE_CONNECTION_RESPONSE_INVALID",
+          message: "Daemon returned a connection outside the requested machine scope.",
+        }, 502);
+      }
+      return payload;
+    },
+
+    async getMachineConnection({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "connection"));
+      if (payload?.connection !== null && (typeof payload?.connection !== "object" || Array.isArray(payload.connection))) {
+        throw new DaemonError({
+          code: "MACHINE_CONNECTION_RESPONSE_INVALID",
+          message: "Daemon returned a malformed connection observation.",
+        }, 502);
+      }
+      if (payload?.connection && responseMachineId(payload.connection) !== requestedMachineId) {
+        throw new DaemonError({
+          code: "MACHINE_CONNECTION_RESPONSE_INVALID",
+          message: "Daemon returned a connection outside the requested machine scope.",
+        }, 502);
+      }
+      return payload;
+    },
+
+    async recoverMachine({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "recover"), { method: "POST" });
+      if (responseMachineId(payload?.connection) !== requestedMachineId) {
+        throw new DaemonError({
+          code: "MACHINE_CONNECTION_RESPONSE_INVALID",
+          message: "Daemon returned a connection outside the requested machine scope.",
+        }, 502);
+      }
+      return payload;
+    },
+
+    async disconnectMachine({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "disconnect"), { method: "POST" });
+      if (String(payload?.machineId ?? "") !== requestedMachineId) {
+        throw new DaemonError({
+          code: "MACHINE_DISCONNECT_RESPONSE_INVALID",
+          message: "Daemon returned a disconnect result outside the requested machine scope.",
+        }, 502);
+      }
+      return payload;
+    },
+
+    async listMachineSessions({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "sessions"));
+      if (!Array.isArray(payload?.sessions)) {
+        throw new DaemonError({
+          code: "MACHINE_SESSIONS_RESPONSE_INVALID",
+          message: "Daemon returned a malformed machine session catalog.",
+        }, 502);
+      }
+      return payload;
     },
 
     async getWorkspaceSnapshot({ workspaceId } = {}) {

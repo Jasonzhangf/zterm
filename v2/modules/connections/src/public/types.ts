@@ -104,11 +104,21 @@ export interface LinkObservation {
   readonly errorCode?: string;
 }
 
+export interface LinkCloseInfo {
+  readonly code?: number;
+  readonly reason?: string;
+}
+
 export interface ChannelMessage {
   readonly kind: LinkKind;
   readonly channelId: string;
   readonly linkId: string;
   readonly data: string | ArrayBuffer;
+}
+
+export interface ChannelCloseInfo {
+  readonly reason?: string;
+  readonly code?: string;
 }
 
 export type ChannelEventHandler = (event: ChannelMessage) => void;

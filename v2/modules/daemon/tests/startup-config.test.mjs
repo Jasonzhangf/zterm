@@ -114,9 +114,21 @@ test("assembleDaemonConfig composes the real daemon ports from config", async ()
   const options = assembled.daemonOptions;
   assert.equal(options.v1WsUrl, config.terminal.v1WsUrl);
   assert.equal(options.v2Token, TOKEN);
-  for (const port of ["workspaceAuth", "organization", "members", "routing", "memberHostObserver"]) {
+  for (const port of [
+    "workspaceAuth",
+    "organization",
+    "members",
+    "routing",
+    "memberHostObserver",
+    "machineService",
+    "machineAuthorization",
+    "connectionManager",
+  ]) {
     assert.ok(options[port], `missing composed port ${port}`);
   }
+  assert.equal(typeof options.machineService.listAuthorizedMachines, "function");
+  assert.equal(typeof options.machineAuthorization.authorizeMachine, "function");
+  assert.equal(typeof options.connectionManager.connect, "function");
   for (const port of ["auth", "members", "routing", "machineTerminal", "resolveBindingTarget"]) {
     assert.ok(options.admission[port], `missing admission port ${port}`);
   }

@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { frameToText } from "../src/terminal-ansi-serializer.mjs";
 import { TerminalPort } from "../src/terminal-port.mjs";
 import { createV1MuxFixture } from "./v1-mux-fixture.mjs";
+import { createV1MuxClient } from "../src/v1-mux-client.mjs";
 
 const require = createRequire(import.meta.url);
 const { WebSocket: NodeWebSocket } = require("ws");
@@ -84,11 +85,16 @@ test("late-open close failure reaches the TerminalPort observer and retries one 
     }
   });
 
-  terminal = new TerminalPort({
+  const v1Client = createV1MuxClient({
     wsUrl: `ws://127.0.0.1:${port}/ws?token=${token}`,
     WebSocketImpl: FailingWebSocket,
     requestTimeoutMs: 40,
   });
+  const muxClient = {
+    ...v1Client,
+    openChannel: (input) => v1Client.openChannel({ ...input, waitMode: "bounded" }),
+  };
+  terminal = new TerminalPort({ muxClient });
 
   assert.equal(typeof terminal.onChannelCloseFailure, "function", "TerminalPort must expose the channel close failure outlet");
   assert.equal(typeof terminal.retryLateOpenClose, "function", "TerminalPort must expose the late-open retry action");
@@ -104,8 +110,10 @@ test("late-open close failure reaches the TerminalPort observer and retries one 
   assert.equal(fixture.openChannelCount, 1, "only session A owns an open channel before B is attempted");
 
   let timeoutError = null;
+  const subscriptionB = await terminal.subscribe(sessionB, () => {});
+  t.after(() => subscriptionB.close());
   try {
-    await terminal.subscribe(sessionB, () => {});
+    await subscriptionB.ready;
   } catch (error) {
     timeoutError = error;
   }

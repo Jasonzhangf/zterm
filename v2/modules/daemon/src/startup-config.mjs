@@ -281,6 +281,8 @@ export function assembleDaemonConfig(
     actorResolver = null,
     credentialProvider = null,
     vikunjaClient = null,
+    createMuxClient,
+    createTerminalPort,
   } = {},
 ) {
   const server = requireSection(config, "server");
@@ -361,7 +363,11 @@ export function assembleDaemonConfig(
   const machineTerminal = createConnectionMachineTerminal({
     connectionManager,
     authorizationPort,
+    localMachineId: hostMachineId,
     terminal: terminalPort,
+    log,
+    ...(createMuxClient !== undefined ? { createMuxClient } : {}),
+    ...(createTerminalPort !== undefined ? { createTerminalPort } : {}),
   });
 
   const memberHostObserver = {
@@ -497,6 +503,9 @@ export function assembleDaemonConfig(
       tickets,
       board,
       memberHostObserver,
+      machineService,
+      machineAuthorization: authorizationPort,
+      connectionManager,
       admission: {
         auth: workspaceAuth,
         members,
