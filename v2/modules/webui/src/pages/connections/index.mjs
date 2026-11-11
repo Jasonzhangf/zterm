@@ -39,6 +39,66 @@ function renderMachineError(helpers, error, title, machineId) {
   `
 }
 
+function renderAccountsError(helpers, error) {
+  if (!error) return ''
+  const notice = helpers.renderErrorNotice
+    ? helpers.renderErrorNotice({ error, title: 'Accounts login failed' }).html
+    : `<div class="v2-error-notice">${esc(error.message || error.code || 'Accounts login failed')}</div>`
+  return `
+    <div class="v2-accounts-error"
+      data-error-code="${esc(error.code)}"
+      data-owning-module="${esc(error.owningModule || '')}"
+      data-operation-id="${esc(error.operationId || '')}">
+      ${notice}
+    </div>
+  `
+}
+
+function renderAccountsLogin(accountsSession, helpers) {
+  const pending = accountsSession.status === 'checking' || accountsSession.pending === true
+  const fieldsDisabled = pending ? ' disabled' : ''
+  const submitLabel = pending ? 'Signing in...' : 'Sign in'
+
+  return `
+    <div class="v2-accounts-login" data-role="accounts-login-step">
+      <div class="v2-accounts-login-copy">
+        <div class="card-title">Accounts 登录</div>
+        <div class="card-sub">登录后读取当前账号已授权的机器目录。</div>
+      </div>
+      ${renderAccountsError(helpers, accountsSession.error)}
+      <form id="accounts-login-form" class="v2-form" data-role="accounts-login-form"
+        data-form-id="accounts-login-form" novalidate>
+        <label class="v2-field">
+          <span>Login name</span>
+          <input name="loginName" data-field="accounts-login-name"
+            autocomplete="username" spellcheck="false"${fieldsDisabled} />
+        </label>
+        <label class="v2-field">
+          <span>Credential</span>
+          <input name="credential" type="password" data-field="accounts-credential"
+            autocomplete="current-password"${fieldsDisabled} />
+        </label>
+        <button type="submit" class="btn btn-sm btn-primary"
+          data-action="submit-form" data-form-id="accounts-login-form"
+          data-pending="${pending ? 'true' : 'false'}"${pending ? ' disabled' : ''}>${esc(submitLabel)}</button>
+      </form>
+    </div>
+  `
+}
+
+function renderAccountsSession(accountsSession) {
+  if (accountsSession.status !== 'authenticated' || !accountsSession.account) return ''
+  const { accountId, loginName } = accountsSession.account
+  return `
+    <div class="v2-accounts-session" data-role="accounts-session"
+      data-account-id="${esc(accountId)}">
+      <span class="badge badge-neutral">Signed in: ${esc(loginName)}</span>
+      <button type="button" class="btn btn-sm"
+        data-action="logout-accounts"${accountsSession.pending === true ? ' disabled' : ''}>Sign out</button>
+    </div>
+  `
+}
+
 function actionButton({ action, machineId, label, disabled = false, pending = false }) {
   return `
     <button type="button" class="btn btn-sm v2-machine-action"
@@ -148,6 +208,7 @@ function renderSessionCatalog(machineId, sessionState) {
 
 export function renderConnectionsPage(state = {}, helpers = {}) {
   const {
+    accountsSession = { status: 'checking', account: null, error: null, pending: false },
     machinesLoadable = { status: 'loading', value: null, error: null },
     machineConnections = {},
     machineSessions = {},
@@ -219,14 +280,10 @@ export function renderConnectionsPage(state = {}, helpers = {}) {
     loadableHtml = `<ul class="v2-machine-list" data-role="connections-list">${itemsHtml}</ul>`
   }
 
-  const html = `
-    <section class="v2-page v2-page-connections" data-page="connections" data-page-id="connections" data-route-scope="global">
-      <div class="page-title-row">
-        <div>
-          <h1 class="v2-page-title">连接与机器恢复 (Connections &amp; Hosts)</h1>
-          <div class="v2-page-subtitle">当前账号已授权的机器目录、独立连接状态与 session catalog</div>
-        </div>
-      </div>
+  const authenticated = accountsSession.status === 'authenticated' && accountsSession.account
+  const accountsContentHtml = authenticated
+    ? `
+      ${renderAccountsSession(accountsSession)}
       <div class="v2-panel card">
         <div class="card-title-row">
           <div>
@@ -237,6 +294,18 @@ export function renderConnectionsPage(state = {}, helpers = {}) {
         </div>
         ${loadableHtml}
       </div>
+    `
+    : renderAccountsLogin(accountsSession, helpers)
+
+  const html = `
+    <section class="v2-page v2-page-connections" data-page="connections" data-page-id="connections" data-route-scope="global">
+      <div class="page-title-row">
+        <div>
+          <h1 class="v2-page-title">连接与机器恢复 (Connections &amp; Hosts)</h1>
+          <div class="v2-page-subtitle">当前账号已授权的机器目录、独立连接状态与 session catalog</div>
+        </div>
+      </div>
+      ${accountsContentHtml}
     </section>
   `
 
@@ -244,6 +313,7 @@ export function renderConnectionsPage(state = {}, helpers = {}) {
     html,
     model: {
       pageId: 'connections',
+      accountsSession,
       machinesLoadable,
       machines,
       machineConnections,

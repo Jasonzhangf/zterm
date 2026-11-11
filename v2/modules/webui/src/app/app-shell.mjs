@@ -289,6 +289,43 @@ function machineTypedError(error, fallbackCode = 'MACHINE_ACTION_FAILED') {
   return typed
 }
 
+function accountsLoginRequiredError() {
+  return normalizeTypedError({
+    code: 'ACCOUNTS_LOGIN_REQUIRED',
+    category: 'auth',
+    message: 'Sign in with an accounts session before loading machines.',
+    retryable: false,
+  }, 'ACCOUNTS_LOGIN_REQUIRED')
+}
+
+function accountsTypedError(error, fallbackCode = 'ACCOUNTS_ACTION_FAILED') {
+  const typed = normalizeTypedError(error, fallbackCode)
+  if (!error || typeof error !== 'object') return typed
+  for (const field of ['owningModule', 'operationId', 'status', 'retryDisposition', 'cause', 'details']) {
+    if (error[field] !== undefined && error[field] !== null && error[field] !== '') {
+      typed[field] = error[field]
+    }
+  }
+  return typed
+}
+
+function projectAccountsSession(payload) {
+  const account = payload?.account
+  const accountId = typeof account?.accountId === 'string' ? account.accountId.trim() : ''
+  const loginName = typeof account?.loginName === 'string' ? account.loginName.trim() : ''
+  if (accountId === '' || loginName === '') {
+    throw accountsTypedError({
+      code: 'ACCOUNTS_SESSION_RESPONSE_INVALID',
+      category: 'protocol',
+      message: 'Accounts returned a malformed account projection.',
+    }, 'ACCOUNTS_SESSION_RESPONSE_INVALID')
+  }
+  return {
+    accountId,
+    loginName,
+  }
+}
+
 function projectMachineConnection(connection) {
   if (!connection || typeof connection !== 'object' || Array.isArray(connection)) return null
   const capabilities = connection.capabilities && typeof connection.capabilities === 'object'
@@ -509,6 +546,12 @@ export function createWebUIApp({
     mobileNavOpen: false,
     workspaces: [],
     workspacesLoadable: loadingLoadable(),
+    accountsSession: {
+      status: 'checking',
+      account: null,
+      error: null,
+      pending: false,
+    },
     activeWorkspaceId: parsedInitial.workspaceId ?? initialWorkspaceId ?? null,
     explicitRequestedWorkspaceId: parsedInitial.explicitWorkspace ? parsedInitial.workspaceId : (initialWorkspaceId ?? null),
     workspaceScopeError: null,
@@ -551,6 +594,7 @@ export function createWebUIApp({
   }
 
   let initialized = false
+  let accountsSessionChecked = false
   let suppressHashListener = false
   const listeners = new Set()
 
@@ -907,9 +951,12 @@ export function createWebUIApp({
     const connReady = state.connectionsLoadable.status === 'ready'
     const connStatus = state.connectionsLoadable.status
     const connDotClass = connReady ? 'dot-online' : (connStatus === 'loading' ? 'dot-busy' : 'dot-offline')
-    const connLabel = connReady
-      ? `${state.connectionsLoadable.value?.length ?? 0} Machines 已同步`
-      : (connStatus === 'loading' ? '正在同步机器目录...' : '机器目录不可用 (Unavailable)')
+    const accountsStatus = state.accountsSession.status
+    const connLabel = accountsStatus !== 'authenticated'
+      ? (accountsStatus === 'checking' ? '正在检查 accounts 登录...' : 'Accounts 登录后可用')
+      : (connReady
+        ? `${state.connectionsLoadable.value?.length ?? 0} Machines 已同步`
+        : (connStatus === 'loading' ? '正在同步机器目录...' : '机器目录不可用 (Unavailable)'))
 
     const errors = state.lastError && !state.workspaceScopeError
       ? renderErrorNotice({ error: state.lastError }).html
@@ -1350,6 +1397,187 @@ export function createWebUIApp({
     }
   }
 
+  function clearMachineState() {
+    state.machineConnections = {}
+    state.machineSessions = {}
+    state.machineDirectoryObservation = null
+    state.connectionsLoadable = unavailableLoadable(accountsLoginRequiredError())
+  }
+
+  async function loadAccountsSession() {
+    if (!daemonApi || typeof daemonApi.accountsSessionState !== 'function') {
+      state.accountsSession = {
+        status: 'error',
+        account: null,
+        error: daemonUnavailableError('Accounts session API port is not configured.'),
+        pending: false,
+      }
+      clearMachineState()
+      notify()
+      render()
+      return state.accountsSession
+    }
+
+    state.accountsSession = {
+      status: 'checking',
+      account: null,
+      error: null,
+      pending: true,
+    }
+    clearMachineState()
+    notify()
+    render()
+
+    try {
+      const payload = await daemonApi.accountsSessionState()
+      state.accountsSession = {
+        status: 'authenticated',
+        account: projectAccountsSession(payload),
+        error: null,
+        pending: false,
+      }
+    } catch (error) {
+      const typed = accountsTypedError(error, 'ACCOUNTS_SESSION_UNAVAILABLE')
+      const unauthenticated = typed.code === 'AUTHENTICATION_REQUIRED'
+        || typed.code === 'MACHINE_ACCOUNT_SESSION_REQUIRED'
+      state.accountsSession = {
+        status: unauthenticated ? 'unauthenticated' : 'error',
+        account: null,
+        error: unauthenticated ? null : typed,
+        pending: false,
+      }
+    }
+    notify()
+    render()
+    return state.accountsSession
+  }
+
+  async function ensureAccountsSession() {
+    if (!accountsSessionChecked) {
+      accountsSessionChecked = true
+      await loadAccountsSession()
+    }
+    return state.accountsSession
+  }
+
+  async function loginAccounts({ loginName, credential } = {}) {
+    if (!daemonApi || typeof daemonApi.accountsLogin !== 'function') {
+      const error = daemonUnavailableError('Accounts login API port is not configured.')
+      state.accountsSession = {
+        status: 'error',
+        account: null,
+        error,
+        pending: false,
+      }
+      notify()
+      render()
+      return { ok: false, error }
+    }
+    if (state.accountsSession.pending) {
+      return {
+        ok: false,
+        error: accountsTypedError({
+          code: 'ACCOUNTS_LOGIN_PENDING',
+          category: 'conflict',
+          message: 'An accounts login request is already pending.',
+        }, 'ACCOUNTS_LOGIN_PENDING'),
+      }
+    }
+
+    state.accountsSession = {
+      status: 'checking',
+      account: null,
+      error: null,
+      pending: true,
+    }
+    notify()
+    render()
+
+    let account
+    try {
+      const payload = await daemonApi.accountsLogin({
+        loginName,
+        credential,
+      })
+      account = projectAccountsSession(payload)
+    } catch (error) {
+      const typed = accountsTypedError(error, 'ACCOUNTS_LOGIN_FAILED')
+      state.accountsSession = {
+        status: 'error',
+        account: null,
+        error: typed,
+        pending: false,
+      }
+      clearMachineState()
+      return { ok: false, error: typed }
+    }
+
+    state.accountsSession = {
+      status: 'authenticated',
+      account,
+      error: null,
+      pending: false,
+    }
+    accountsSessionChecked = true
+    try {
+      await loadMachines()
+    } finally {
+      state.accountsSession.pending = false
+      notify()
+      render()
+    }
+    return { ok: true, account }
+  }
+
+  async function logoutAccounts() {
+    if (state.accountsSession.pending) {
+      return {
+        ok: false,
+        error: accountsTypedError({
+          code: 'ACCOUNTS_ACTION_PENDING',
+          category: 'conflict',
+          message: 'An accounts session action is already pending.',
+        }, 'ACCOUNTS_ACTION_PENDING'),
+      }
+    }
+    if (!daemonApi || typeof daemonApi.accountsLogout !== 'function') {
+      const error = daemonUnavailableError('Accounts logout API port is not configured.')
+      state.accountsSession = {
+        status: 'error',
+        account: null,
+        error,
+        pending: false,
+      }
+      clearMachineState()
+      notify()
+      render()
+      return { ok: false, error }
+    }
+
+    state.accountsSession.pending = true
+    notify()
+    render()
+
+    let error = null
+    try {
+      await daemonApi.accountsLogout()
+    } catch (logoutError) {
+      error = accountsTypedError(logoutError, 'ACCOUNTS_LOGOUT_FAILED')
+    } finally {
+      accountsSessionChecked = true
+      clearMachineState()
+      state.accountsSession = {
+        status: error ? 'error' : 'unauthenticated',
+        account: null,
+        error,
+        pending: false,
+      }
+      notify()
+      render()
+    }
+    return error ? { ok: false, error } : { ok: true }
+  }
+
   function applyMachineConnectionPayload(machineId, payload) {
     const entry = ensureMachineState(machineId)
     if (!entry) return
@@ -1371,6 +1599,12 @@ export function createWebUIApp({
   }
 
   async function loadMachines() {
+    if (state.accountsSession.status !== 'authenticated') {
+      state.connectionsLoadable = unavailableLoadable(accountsLoginRequiredError())
+      notify()
+      render()
+      return state.connectionsLoadable
+    }
     if (!daemonApi || typeof daemonApi.listMachines !== 'function') {
       state.connectionsLoadable = unavailableLoadable(
         daemonUnavailableError('Machine directory API port is not configured.'),
@@ -1702,7 +1936,12 @@ export function createWebUIApp({
     initialized = true
     await loadWorkspaces()
     await loadBootstrapSurface()
-    await loadMachines()
+    if (state.activeRoute === 'connections') {
+      await ensureAccountsSession()
+      if (state.accountsSession.status === 'authenticated') {
+        await loadMachines()
+      }
+    }
     await loadWorkspace(state.activeWorkspaceId)
     notify()
     render()
@@ -1743,7 +1982,10 @@ export function createWebUIApp({
 
     setRoute(nextRoute, null)
     if (nextRoute === 'connections' && state.connectionsLoadable.status !== 'ready') {
-      await loadMachines()
+      await ensureAccountsSession()
+      if (state.accountsSession.status === 'authenticated') {
+        await loadMachines()
+      }
     }
     notify()
     render()
@@ -2768,6 +3010,9 @@ export function createWebUIApp({
         return app
       case 'save-properties':
       case 'submit-form': {
+        if (detail.formId === 'accounts-login-form') {
+          return loginAccounts(detail)
+        }
         if (detail.formId === 'workspace-group-create-form') {
           return createLocalGroupGroup({
             ...detail,
@@ -2966,6 +3211,8 @@ export function createWebUIApp({
         return runMachineConnectionAction(detail.machineId, action)
       case 'list-machine-sessions':
         return loadMachineSessions(detail.machineId)
+      case 'logout-accounts':
+        return logoutAccounts()
       case 'retry-error':
       case 'retry-form':
         state.lastError = null
@@ -3043,6 +3290,11 @@ export function createWebUIApp({
         detail.goalId = formEl?.querySelector?.('[name="ticketGoalId"]')?.value || ''
         detail.ownerMemberId = formEl?.querySelector?.('[name="ticketOwnerMemberId"]')?.value || ''
         detail.priority = Number(formEl?.querySelector?.('[name="ticketPriority"]')?.value || 0)
+      }
+      if (action === 'submit-form' && detail.formId === 'accounts-login-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#accounts-login-form')
+        detail.loginName = formEl?.querySelector?.('[name="loginName"]')?.value || ''
+        detail.credential = formEl?.querySelector?.('[name="credential"]')?.value || ''
       }
       if (action === 'submit-form' && detail.formId === 'ticket-append-report-form') {
         const formEl = target.closest?.('form') || root.querySelector?.('#ticket-append-report-form')

@@ -181,6 +181,7 @@ function requireSuccessfulOperation(payload, action) {
 export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
   let csrfToken = "";
   let authToken = "";
+  let accountsToken = "";
 
   function hasAuthorization() {
     return Boolean(authToken);
@@ -190,6 +191,9 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
     const headers = { ...(options.headers || {}) };
     if (authToken) {
       headers.authorization = `Bearer ${authToken}`;
+    }
+    if (accountsToken) {
+      headers["x-zterm-accounts-session"] = accountsToken;
     }
     const response = await fetchImpl(`${baseUrl}${path}`, {
       cache: "no-store",
@@ -228,6 +232,29 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       } finally {
         authToken = "";
         csrfToken = "";
+      }
+    },
+
+    async accountsLogin({ loginName, credential } = {}) {
+      accountsToken = "";
+      const payload = await request("/api/accounts/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ loginName, credential }),
+      });
+      accountsToken = typeof payload.token === "string" ? payload.token.trim() : "";
+      return payload;
+    },
+
+    async accountsSessionState() {
+      return request("/api/accounts/session");
+    },
+
+    async accountsLogout() {
+      try {
+        return await request("/api/accounts/logout", { method: "POST" });
+      } finally {
+        accountsToken = "";
       }
     },
 
@@ -720,7 +747,13 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       };
 
       (async () => {
-        const headers = authToken ? { authorization: `Bearer ${authToken}` } : {};
+        const headers = {};
+        if (authToken) {
+          headers.authorization = `Bearer ${authToken}`;
+        }
+        if (accountsToken) {
+          headers["x-zterm-accounts-session"] = accountsToken;
+        }
         let response;
         for (let attempt = 0; attempt < 20; attempt += 1) {
           try {

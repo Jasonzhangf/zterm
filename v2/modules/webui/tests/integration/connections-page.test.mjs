@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { JSDOM } from 'jsdom'
 
 import { createWebUIApp } from '../../src/app/app-shell.mjs'
 
@@ -64,6 +65,9 @@ function createMachineHarness(overrides = {}) {
   const calls = {
     listWorkspaces: [],
     getWorkspaceSnapshot: [],
+    accountsSessionState: [],
+    accountsLogin: [],
+    accountsLogout: [],
     listMachines: [],
     connectMachine: [],
     getMachineConnection: [],
@@ -72,6 +76,11 @@ function createMachineHarness(overrides = {}) {
     listMachineSessions: [],
   }
   const generationByMachine = new Map()
+  let accountsSignedIn = overrides.accountsSignedIn !== false
+  const account = {
+    accountId: 'account-current',
+    loginName: 'alice',
+  }
 
   function nextGeneration(machineId) {
     const next = (generationByMachine.get(machineId) || 0) + 1
@@ -81,6 +90,33 @@ function createMachineHarness(overrides = {}) {
 
   const daemonApi = {
     calls,
+    async accountsSessionState() {
+      calls.accountsSessionState.push({})
+      if (overrides.accountsSessionError) {
+        throw overrides.accountsSessionError
+      }
+      if (!accountsSignedIn) {
+        throw {
+          code: 'AUTHENTICATION_REQUIRED',
+          owningModule: 'accounts',
+          message: 'An accounts session is required.',
+        }
+      }
+      return { account }
+    },
+    async accountsLogin({ loginName, credential } = {}) {
+      calls.accountsLogin.push({ loginName, credential })
+      if (overrides.accountsLoginError) {
+        throw overrides.accountsLoginError
+      }
+      accountsSignedIn = true
+      return { token: 'accounts-token-fixture', account }
+    },
+    async accountsLogout() {
+      calls.accountsLogout.push({})
+      accountsSignedIn = false
+      return { ok: true }
+    },
     async listWorkspaces() {
       calls.listWorkspaces.push({})
       if (overrides.listWorkspacesError) {
@@ -196,6 +232,132 @@ test('connections loads the real machine directory and never projects workspaces
   assert.ok(page.html.includes('data-action="connect-machine"'))
   assert.ok(page.html.includes('data-machine-connection-state="unavailable"'))
   assert.ok(!page.html.includes('data-machine-connection-state="connected"'))
+})
+
+test('connections requires an accounts session before requesting the machine directory', async () => {
+  const harness = createMachineHarness({ accountsSignedIn: false })
+  const app = createMachineApp(harness)
+  await app.ready
+
+  assert.equal(harness.calls.accountsSessionState.length, 1)
+  assert.equal(harness.calls.listMachines.length, 0)
+  assert.equal(app.state.accountsSession.status, 'unauthenticated')
+  const page = app.renderPage()
+  assert.ok(page.html.includes('data-role="accounts-login-form"'))
+  assert.ok(page.html.includes('name="loginName"'))
+  assert.ok(page.html.includes('name="credential"'))
+  assert.ok(page.html.includes('type="password"'))
+  assert.ok(!page.html.includes('data-field="machine-address"'))
+  assert.ok(!page.html.includes('data-field="connection-token"'))
+  assert.ok(!page.html.includes(MACHINE_REMOTE))
+})
+
+test('accounts login loads one machine directory and logout clears all machine state', async () => {
+  const harness = createMachineHarness({ accountsSignedIn: false })
+  const app = createMachineApp(harness)
+  await app.ready
+
+  const login = await app.dispatchAction('submit-form', {
+    formId: 'accounts-login-form',
+    loginName: 'alice',
+    credential: 'credential-fixture',
+  })
+  assert.equal(login.ok, true)
+  assert.deepEqual(harness.calls.accountsLogin, [{
+    loginName: 'alice',
+    credential: 'credential-fixture',
+  }])
+  assert.equal(harness.calls.listMachines.length, 1)
+  assert.equal(app.state.accountsSession.status, 'authenticated')
+  assert.deepEqual(app.state.accountsSession.account, {
+    accountId: 'account-current',
+    loginName: 'alice',
+  })
+  assert.ok(app.renderPage().html.includes('data-role="accounts-session"'))
+  assert.ok(app.renderPage().html.includes('data-action="connect-machine"'))
+  assert.ok(app.renderPage().html.includes(MACHINE_REMOTE))
+
+  await app.dispatchAction('connect-machine', { machineId: MACHINE_REMOTE })
+  await app.dispatchAction('list-machine-sessions', { machineId: MACHINE_REMOTE })
+  assert.equal(app.state.machineConnections[MACHINE_REMOTE].status, 'connected')
+  assert.ok(app.state.machineSessions[MACHINE_REMOTE].sessions.length > 0)
+
+  const logout = await app.dispatchAction('logout-accounts')
+  assert.equal(logout.ok, true)
+  assert.equal(harness.calls.accountsLogout.length, 1)
+  assert.equal(app.state.accountsSession.status, 'unauthenticated')
+  assert.equal(app.state.connectionsLoadable.value, null)
+  assert.deepEqual(app.state.machineConnections, {})
+  assert.deepEqual(app.state.machineSessions, {})
+  assert.ok(app.renderPage().html.includes('data-role="accounts-login-form"'))
+  assert.ok(!app.renderPage().html.includes(MACHINE_REMOTE))
+})
+
+test('the mounted connections login form submits the typed accounts credential', async () => {
+  const harness = createMachineHarness({ accountsSignedIn: false })
+  const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
+    url: 'http://localhost/#/connections',
+  })
+  const app = createMachineApp(harness)
+  await app.ready
+  app.mount(dom.window.document.querySelector('#root'))
+
+  const root = dom.window.document.querySelector('#root')
+  const form = root.querySelector('[data-role="accounts-login-form"]')
+  form.querySelector('[name="loginName"]').value = 'alice'
+  form.querySelector('[name="credential"]').value = 'credential-fixture'
+
+  const loggedIn = new Promise((resolve) => {
+    const unsubscribe = app.subscribe(() => {
+      if (
+        app.state.accountsSession.status !== 'authenticated'
+        || app.state.connectionsLoadable.status !== 'ready'
+      ) return
+      unsubscribe()
+      resolve()
+    })
+  })
+  form.querySelector('button[data-form-id="accounts-login-form"]').click()
+  await loggedIn
+
+  assert.deepEqual(harness.calls.accountsLogin, [{
+    loginName: 'alice',
+    credential: 'credential-fixture',
+  }])
+  assert.equal(harness.calls.listMachines.length, 1)
+  assert.ok(root.querySelector('[data-role="accounts-session"]'))
+  assert.ok(root.querySelector('[data-action="connect-machine"]'))
+  assert.ok(!root.innerHTML.includes('accounts-token-fixture'))
+  app.destroy()
+  dom.window.close()
+})
+
+test('accounts login errors remain typed and never request machines', async () => {
+  const harness = createMachineHarness({
+    accountsSignedIn: false,
+    accountsLoginError: {
+      code: 'INVALID_CREDENTIALS',
+      owningModule: 'accounts',
+      message: 'The login name or credential is invalid.',
+    },
+  })
+  const app = createMachineApp(harness)
+  await app.ready
+
+  const login = await app.dispatchAction('submit-form', {
+    formId: 'accounts-login-form',
+    loginName: 'alice',
+    credential: 'wrong-credential',
+  })
+  assert.equal(login.ok, false)
+  assert.equal(login.error.code, 'INVALID_CREDENTIALS')
+  assert.equal(login.error.owningModule, 'accounts')
+  assert.equal(app.state.accountsSession.status, 'error')
+  assert.equal(app.state.accountsSession.error.code, 'INVALID_CREDENTIALS')
+  assert.equal(harness.calls.listMachines.length, 0)
+  const page = app.renderPage()
+  assert.ok(page.html.includes('INVALID_CREDENTIALS'))
+  assert.ok(page.html.includes('data-owning-module="accounts"'))
 })
 
 test('workspace load failure does not pollute the machine directory', async () => {
