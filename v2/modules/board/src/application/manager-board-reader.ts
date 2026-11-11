@@ -102,7 +102,7 @@ export class ManagerBoardReader {
     const token = requireString(input.token, 'token')
     const workspaceId = requireString(input.workspaceId, 'workspaceId')
     const managerId = requireString(input.managerId, 'managerId')
-    const actor = await this.#verifyActor(token)
+    const actor = await this.#verifyActor(token, workspaceId)
     const scope = await this.#authorizeScope(token, workspaceId, managerId)
     const goals = await this.#readGoals(token, workspaceId, managerId)
     const now = this.#now()
@@ -124,9 +124,9 @@ export class ManagerBoardReader {
     }
   }
 
-  async #verifyActor(token: string) {
+  async #verifyActor(token: string, workspaceId: string) {
     try {
-      return await this.#accounts.verifySession(token)
+      return await this.#accounts.verifySession(token, workspaceId)
     } catch (error) {
       if (errorCode(error) && AUTH_ERROR_CODES.has(errorCode(error)!)) {
         throw new BoardError('BOARD_UNAUTHORIZED', 'board query requires a verified session', { cause: error })

@@ -51,18 +51,23 @@ export function resolveV1WsUrl(baseUrl, token) {
 // Map a TypedError from the v2 errors module or from a module still using the
 // organization typed-error contract to the shared HTTP error shape.
 function toHttpTypedError(error, operationId) {
-  if (isControlTypedError(error)) {
+  if (isControlTypedError(error) || isComposedTypedError(error)) {
     const cause = error.cause instanceof Error
       ? error.cause.message
       : (error.cause ?? null);
     return {
       code: error.code,
-      owningModule: error.owningModule,
+      owningModule: error.owningModule ?? (error.name === "AccountsError" ? "accounts" : undefined),
       operationId: error.operationId ?? operationId,
       cause,
       message: error.message,
       retryDisposition: error.retryDisposition,
       details: error.details,
+      operationRef: error.operationRef,
+      providerStatus: error.providerStatus,
+      freshness: error.freshness,
+      observationStartedAt: error.observationStartedAt,
+      observationEndedAt: error.observationEndedAt,
     };
   }
   return asTypedError(error, {
@@ -71,6 +76,20 @@ function toHttpTypedError(error, operationId) {
     operationId,
     message: "The daemon control-plane request failed.",
   }).toJSON();
+}
+
+function isComposedTypedError(error) {
+  return Boolean(
+    error
+    && typeof error === "object"
+    && typeof error.code === "string"
+    && (
+      error.owningModule === "tickets"
+      || error.owningModule === "board"
+      || error.owningModule === "goals"
+      || error.name === "AccountsError"
+    ),
+  );
 }
 
 function validateNonEmptyString(value, field, operationId) {
@@ -108,6 +127,10 @@ export function createDaemon({
   routing,
   memberHostObserver,
   terminalCatalog,
+  goals,
+  tickets,
+  board,
+  resolveActor,
 } = {}) {
   const resolvedV1WsUrl = resolveV1WsUrl(v1WsUrl, v1Token);
   const terminal = terminalPort || createLazyTerminal({
@@ -142,6 +165,10 @@ export function createDaemon({
     routing,
     memberHostObserver,
     terminalCatalog,
+    goals,
+    tickets,
+    board,
+    resolveActor,
   };
 
   const server = createServer((request, response) => {
@@ -163,6 +190,7 @@ export function createDaemon({
 
   server.on("close", () => {
     void terminal.close?.();
+    void context.tickets?.closeStore?.();
   });
 
   return { server, terminal, resolvedV1WsUrl: redactWsUrl(resolvedV1WsUrl) };
@@ -270,6 +298,30 @@ function matchWorkspaceRoute(pathname) {
     return null;
   }
   const workspaceId = decodeURIComponent(parts[0]);
+  if (parts.length === 2 && parts[1] === "goals") {
+    return { kind: "work-goals", workspaceId };
+  }
+  if (parts.length === 3 && parts[1] === "goals") {
+    return { kind: "work-goal", workspaceId, goalId: decodeURIComponent(parts[2]) };
+  }
+  if (parts.length === 2 && parts[1] === "board") {
+    return { kind: "work-board", workspaceId };
+  }
+  if (parts.length === 2 && parts[1] === "tickets") {
+    return { kind: "work-tickets", workspaceId };
+  }
+  if (parts.length === 3 && parts[1] === "tickets") {
+    return { kind: "work-ticket", workspaceId, bindingId: decodeURIComponent(parts[2]) };
+  }
+  if (parts.length === 4 && parts[1] === "tickets" && parts[3] === "reports") {
+    return { kind: "work-ticket-report", workspaceId, bindingId: decodeURIComponent(parts[2]) };
+  }
+  if (parts.length === 4 && parts[1] === "tickets" && (parts[3] === "close" || parts[3] === "reopen")) {
+    return { kind: `work-ticket-${parts[3]}`, workspaceId, bindingId: decodeURIComponent(parts[2]) };
+  }
+  if (parts.length === 2 && parts[1] === "ticket-operations") {
+    return { kind: "work-ticket-operations", workspaceId };
+  }
   if (parts.length === 2 && parts[1] === "tree") {
     return { kind: "tree", workspaceId };
   }
@@ -283,8 +335,11 @@ function matchWorkspaceRoute(pathname) {
 }
 
 async function handleWorkspaceRoute({ request, response, context, route }) {
-  const { token } = await controlAuth(request, context);
+  const { token, account } = await controlAuth(request, context);
   requireControl(context, route.kind);
+  if (route.kind.startsWith("work-")) {
+    return handleWorkTrackingRoute({ request, response, context, route, token, account });
+  }
 
   if (route.kind === "tree") {
     if (request.method !== "GET") {
@@ -323,6 +378,275 @@ async function handleWorkspaceRoute({ request, response, context, route }) {
   throw daemonError("ROUTE_NOT_FOUND", "workspace.route", "Route was not found.", request.url);
 }
 
+function requireWorkTracking(context, operationId) {
+  if (!context.goals || !context.tickets || !context.board) {
+    throw daemonError(
+      "WORK_TRACKING_UNCONFIGURED",
+      operationId,
+      "Goals, tickets, and board are not configured.",
+    );
+  }
+}
+
+async function resolveWorkTrackingActor(context, token, account, workspaceId) {
+  const resolver = typeof context.tickets?.resolveActor === "function"
+    ? context.tickets.resolveActor.bind(context.tickets)
+    : (typeof context.resolveActor === "function" ? context.resolveActor : null);
+  if (!resolver) {
+    throw daemonError(
+      "WORK_TRACKING_ACTOR_UNCONFIGURED",
+      "work-tracking.auth",
+      "The verified account-to-member resolver is not configured.",
+    );
+  }
+  try {
+    return await resolver({ token, account, workspaceId });
+  } catch (error) {
+    throw toControlTypedError(error, "work-tracking.auth");
+  }
+}
+
+function parsePositiveInteger(value, field, fallback, operationId) {
+  if (value === undefined || value === null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw daemonError("CONTROL_INPUT_INVALID", operationId, `${field} must be a non-negative integer.`);
+  }
+  return parsed;
+}
+
+function optionalQueryText(url, name) {
+  const value = url.searchParams.get(name);
+  return value === null || value === "" ? undefined : value;
+}
+
+function requireBodyText(body, field, operationId) {
+  return validateNonEmptyString(body?.[field], field, operationId);
+}
+
+function projectTicketObservation(observation, allowedTransitions = []) {
+  if (!observation || typeof observation !== "object") return observation;
+  return {
+    ...observation,
+    allowedTransitions,
+  };
+}
+
+async function handleWorkTrackingRoute({ request, response, context, route, token, account }) {
+  requireWorkTracking(context, route.kind);
+  const url = new URL(request.url, "http://127.0.0.1");
+  const operationId = route.kind;
+
+  if (route.kind === "work-goals") {
+    if (request.method === "GET") {
+      const parentGoalId = optionalQueryText(url, "parentGoalId");
+      let goals;
+      try {
+        goals = await context.goals.listGoals({
+          token,
+          workspaceId: route.workspaceId,
+          ...(parentGoalId ? { parentGoalId } : {}),
+        });
+      } catch (error) {
+        throw toControlTypedError(error, operationId);
+      }
+      return sendJson(response, 200, { goals });
+    }
+    if (request.method === "POST") {
+      const body = await readJson(request);
+      let goal;
+      try {
+        goal = await context.goals.createGoal({
+          token,
+          workspaceId: route.workspaceId,
+          name: requireBodyText(body, "name", operationId),
+          ownerMemberId: requireBodyText(body, "ownerMemberId", operationId),
+          ...(body.parentGoalId !== undefined ? { parentGoalId: body.parentGoalId } : {}),
+          ...(body.status !== undefined ? { status: body.status } : {}),
+        });
+      } catch (error) {
+        throw toControlTypedError(error, operationId);
+      }
+      return sendJson(response, 200, { goal });
+    }
+    throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+  }
+
+  if (route.kind === "work-goal") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    let goal;
+    try {
+      goal = await context.goals.getGoal({
+        token,
+        workspaceId: route.workspaceId,
+        goalId: route.goalId,
+      });
+    } catch (error) {
+      throw toControlTypedError(error, operationId);
+    }
+    return sendJson(response, 200, { goal });
+  }
+
+  if (route.kind === "work-board") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const managerId = requireBodyText({ managerId: url.searchParams.get("managerId") }, "managerId", operationId);
+    let result;
+    try {
+      result = await context.board.queryManagerBoard({
+        token,
+        workspaceId: route.workspaceId,
+        managerId,
+      });
+    } catch (error) {
+      throw toControlTypedError(error, operationId);
+    }
+    return sendJson(response, 200, result);
+  }
+
+  const actor = await resolveWorkTrackingActor(context, token, account, route.workspaceId);
+
+  if (route.kind === "work-tickets") {
+    if (request.method === "GET") {
+      const status = optionalQueryText(url, "status") || "all";
+      if (status !== "all" && status !== "open" && status !== "closed") {
+        throw daemonError("CONTROL_INPUT_INVALID", operationId, "status must be all, open, or closed.");
+      }
+      let result;
+      try {
+        result = await context.tickets.list(actor, {
+          workspaceId: route.workspaceId,
+          ...(optionalQueryText(url, "goalId") ? { goalId: optionalQueryText(url, "goalId") } : {}),
+          status,
+          ...(optionalQueryText(url, "ownerMemberId") ? { ownerMemberId: optionalQueryText(url, "ownerMemberId") } : {}),
+          limit: parsePositiveInteger(url.searchParams.get("limit"), "limit", 50, operationId),
+          ...(optionalQueryText(url, "cursor") ? { cursor: optionalQueryText(url, "cursor") } : {}),
+        });
+      } catch (error) {
+        throw toControlTypedError(error, operationId);
+      }
+      const items = await Promise.all(result.items.map(async (item) => projectTicketObservation(
+        item,
+        await context.tickets.authorizedTransitions(actor, item),
+      )));
+      return sendJson(response, 200, { ...result, items });
+    }
+    if (request.method === "POST") {
+      const body = await readJson(request);
+      if (!["requirement", "bug", "report", "other"].includes(body.category)) {
+        throw daemonError("CONTROL_INPUT_INVALID", operationId, "category must be requirement, bug, report, or other.");
+      }
+      if (!Number.isSafeInteger(body.priority)) {
+        throw daemonError("CONTROL_INPUT_INVALID", operationId, "priority must be an integer.");
+      }
+      let result;
+      try {
+        result = await context.tickets.create(actor, {
+          operationId: requireBodyText(body, "operationId", operationId),
+          workspaceId: route.workspaceId,
+          goalId: requireBodyText(body, "goalId", operationId),
+          ownerMemberId: requireBodyText(body, "ownerMemberId", operationId),
+          category: body.category,
+          title: requireBodyText(body, "title", operationId),
+          description: typeof body.description === "string" ? body.description : "",
+          priority: body.priority,
+        });
+        if (result.operation?.state === "succeeded" && result.binding?.bindingId) {
+          const authoritative = await context.tickets.get(actor, { bindingId: result.binding.bindingId });
+          result = {
+            ...result,
+            ticket: projectTicketObservation(
+              authoritative,
+              await context.tickets.authorizedTransitions(actor, authoritative),
+            ),
+          };
+        }
+      } catch (error) {
+        throw toControlTypedError(error, operationId);
+      }
+      return sendJson(response, 200, result);
+    }
+    throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+  }
+
+  if (route.kind === "work-ticket") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    let observation;
+    try {
+      observation = await context.tickets.getInWorkspace(actor, route.workspaceId, route.bindingId);
+    } catch (error) {
+      throw toControlTypedError(error, operationId);
+    }
+    return sendJson(response, 200, projectTicketObservation(
+      observation,
+      await context.tickets.authorizedTransitions(actor, observation),
+    ));
+  }
+
+  if (route.kind === "work-ticket-report") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const body = await readJson(request);
+    if (!["status", "result", "blocker", "note"].includes(body.reportKind)) {
+      throw daemonError("CONTROL_INPUT_INVALID", operationId, "reportKind must be status, result, blocker, or note.");
+    }
+    let result;
+    try {
+      const input = {
+        operationId: requireBodyText(body, "operationId", operationId),
+        bindingId: route.bindingId,
+        actorMemberId: requireBodyText(body, "actorMemberId", operationId),
+        ...(body.executingMemberId !== undefined ? { executingMemberId: body.executingMemberId } : {}),
+        reportKind: body.reportKind,
+        body: requireBodyText(body, "body", operationId),
+      };
+      result = await context.tickets.appendReportInWorkspace(actor, route.workspaceId, input);
+    } catch (error) {
+      throw toControlTypedError(error, operationId);
+    }
+    return sendJson(response, 200, result);
+  }
+
+  if (route.kind === "work-ticket-close" || route.kind === "work-ticket-reopen") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const body = await readJson(request);
+    let result;
+    try {
+      const method = route.kind === "work-ticket-close" ? "close" : "reopen";
+      result = await context.tickets[`${method}InWorkspace`](actor, route.workspaceId, {
+        operationId: requireBodyText(body, "operationId", operationId),
+        bindingId: route.bindingId,
+      });
+    } catch (error) {
+      throw toControlTypedError(error, operationId);
+    }
+    return sendJson(response, 200, result);
+  }
+
+  if (route.kind === "work-ticket-operations") {
+    if (request.method !== "GET") {
+      throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    let operations;
+    try {
+      operations = await context.tickets.listPendingWrites(actor, route.workspaceId);
+    } catch (error) {
+      throw toControlTypedError(error, operationId);
+    }
+    return sendJson(response, 200, { operations: context.tickets.operationsView(operations) });
+  }
+
+  throw daemonError("ROUTE_NOT_FOUND", operationId, "Route was not found.", request.url);
+}
+
 async function controlAuth(request, context) {
   if (!requestOriginAllowed(request)) {
     throw daemonError("ORIGIN_NOT_ALLOWED", "control.auth", "Cross-origin request is not allowed.");
@@ -347,6 +671,9 @@ async function controlAuth(request, context) {
 }
 
 function requireControl(context, operationId) {
+  if (String(operationId).startsWith("work-")) {
+    return;
+  }
   if (operationId === "resolve") {
     if (!context.routing || typeof context.routing.resolve !== "function") {
       throw daemonError("CONTROL_ROUTING_UNCONFIGURED", operationId, "The routing port is not configured.");
@@ -589,6 +916,14 @@ function toControlTypedError(error, operationId) {
   typed.owningModule = payload.owningModule;
   typed.retryDisposition = payload.retryDisposition;
   typed.details = payload.details;
+  typed.operationRef = payload.operationRef;
+  typed.providerStatus = payload.providerStatus;
+  typed.toJSON = () => Object.fromEntries(
+    Object.entries(payload).filter(([, value]) => value !== undefined),
+  );
+  if (Number.isInteger(error?.status)) {
+    typed.status = error.status;
+  }
   return typed;
 }
 
@@ -1059,6 +1394,9 @@ function sendJson(response, status, payload) {
 }
 
 function statusForError(error) {
+  if (Number.isInteger(error.status)) {
+    return error.status;
+  }
   switch (error.code) {
     case "CONTROL_CREDENTIAL_REQUIRED":
     case "CONTROL_AUTH_INVALID":
@@ -1071,7 +1409,41 @@ function statusForError(error) {
       return 503;
     case "CONTROL_INPUT_INVALID":
     case "VALIDATION":
+    case "GOAL_INVALID_NAME":
+    case "GOAL_PARENT_INVALID":
+    case "GOAL_OWNER_INVALID":
+    case "BOARD_INVALID_REQUEST":
+    case "INVALID_REQUEST":
+    case "PROVIDER_VALIDATION_FAILED":
       return 400;
+    case "TICKET_SCOPE_FORBIDDEN":
+    case "TICKET_REPORT_DELEGATION_FORBIDDEN":
+    case "GOAL_FORBIDDEN":
+    case "BOARD_SCOPE_FORBIDDEN":
+    case "BOARD_UNAUTHORIZED":
+    case "PROVIDER_UNAUTHORIZED": {
+      return error.code === "BOARD_UNAUTHORIZED" || error.code === "PROVIDER_UNAUTHORIZED" ? 401 : 403;
+    }
+    case "GOAL_WORKSPACE_NOT_FOUND":
+    case "GOAL_NOT_FOUND":
+    case "BOARD_NOT_FOUND":
+    case "PROVIDER_NOT_FOUND":
+      return 404;
+    case "GOAL_NAME_CONFLICT":
+    case "GOAL_NOT_EMPTY":
+    case "GOAL_REFERENCED":
+    case "BINDING_CONFLICT":
+    case "OPERATION_CONFLICT":
+    case "OPERATION_SUPERSEDED":
+    case "WRITE_OUTCOME_UNKNOWN":
+      return 409;
+    case "GOAL_REFERENCE_UNAVAILABLE":
+    case "PROVIDER_UNAVAILABLE":
+    case "WORK_TRACKING_UNCONFIGURED":
+    case "WORK_TRACKING_ACTOR_UNCONFIGURED":
+      return 503;
+    case "BOARD_INVALID_RESPONSE":
+      return 502;
     case "ORGANIZATION_FORBIDDEN":
     case "ROUTE_FORBIDDEN":
     case "MEMBER_FORBIDDEN_SCOPE":

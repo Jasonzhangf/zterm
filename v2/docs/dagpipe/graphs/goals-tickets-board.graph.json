@@ -1,0 +1,332 @@
+{
+  "id": "goals.tickets.board",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.work_tracking_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "接收工作追踪请求",
+      "operator": "daemon.work_tracking.receive",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.work_tracking_request"
+      ],
+      "output": {
+        "id": "arc.received_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "校验账号与映射成员",
+      "operator": "accounts.verified_actor.resolve",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.received_request"
+      ],
+      "output": {
+        "id": "arc.verified_actor",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "分发已声明操作",
+      "operator": "daemon.work_tracking.dispatch",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.verified_actor"
+      ],
+      "output": {
+        "id": "arc.declared_operation",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "执行目标读写",
+      "operator": "goals.public.readwrite",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.declared_operation"
+      ],
+      "output": {
+        "id": "arc.goal_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "校验票据范围与绑定",
+      "operator": "tickets.public.ticket_rules",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.declared_operation"
+      ],
+      "output": {
+        "id": "arc.authorized_ticket_intent",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "执行提供方请求",
+      "operator": "tickets.vikunja.request",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authorized_ticket_intent"
+      ],
+      "output": {
+        "id": "arc.provider_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "提交绑定与操作结果",
+      "operator": "tickets.binding.commit",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.provider_result"
+      ],
+      "output": {
+        "id": "arc.ticket_operation_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "读取经理看板投影",
+      "operator": "board.manager.read",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.declared_operation"
+      ],
+      "output": {
+        "id": "arc.manager_board_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "序列化类型结果并投影界面",
+      "operator": "daemon.webui.serialize",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.goal_result",
+        "arc.ticket_operation_result",
+        "arc.manager_board_result"
+      ],
+      "output": {
+        "id": "arc.typed_projection",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "释放请求资源",
+      "operator": "daemon.request.release",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.typed_projection"
+      ],
+      "output": {
+        "id": "arc.released_request",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "返回唯一结果",
+      "operator": "daemon.result.publish",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.released_request"
+      ],
+      "output": {
+        "id": "arc.work_tracking_outcome",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "接收工作追踪请求",
+      "to": "校验账号与映射成员",
+      "arc_id": "arc.received_request"
+    },
+    {
+      "from": "校验账号与映射成员",
+      "to": "分发已声明操作",
+      "arc_id": "arc.verified_actor"
+    },
+    {
+      "from": "分发已声明操作",
+      "to": "执行目标读写",
+      "arc_id": "arc.declared_operation"
+    },
+    {
+      "from": "分发已声明操作",
+      "to": "校验票据范围与绑定",
+      "arc_id": "arc.declared_operation"
+    },
+    {
+      "from": "分发已声明操作",
+      "to": "读取经理看板投影",
+      "arc_id": "arc.declared_operation"
+    },
+    {
+      "from": "校验票据范围与绑定",
+      "to": "执行提供方请求",
+      "arc_id": "arc.authorized_ticket_intent"
+    },
+    {
+      "from": "执行提供方请求",
+      "to": "提交绑定与操作结果",
+      "arc_id": "arc.provider_result"
+    },
+    {
+      "from": "执行目标读写",
+      "to": "序列化类型结果并投影界面",
+      "arc_id": "arc.goal_result"
+    },
+    {
+      "from": "提交绑定与操作结果",
+      "to": "序列化类型结果并投影界面",
+      "arc_id": "arc.ticket_operation_result"
+    },
+    {
+      "from": "读取经理看板投影",
+      "to": "序列化类型结果并投影界面",
+      "arc_id": "arc.manager_board_result"
+    },
+    {
+      "from": "序列化类型结果并投影界面",
+      "to": "释放请求资源",
+      "arc_id": "arc.typed_projection"
+    },
+    {
+      "from": "释放请求资源",
+      "to": "返回唯一结果",
+      "arc_id": "arc.released_request"
+    }
+  ],
+  "outputs": [
+    "arc.work_tracking_outcome"
+  ]
+}

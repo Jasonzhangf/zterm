@@ -566,11 +566,14 @@ test('ticket-list: status filtering and selection', () => {
   assert.equal(all.model.items.length, 3);
   assert.equal(all.model.items[1].selected, true);
 
-  const review = renderTicketList({ ticketsLoadable: tickets, activeStatusFilter: 'review' });
-  assert.equal(review.model.filteredCount, 1);
-  assert.equal(review.model.items[0].ticketId, 't2');
-  assert.ok(review.html.includes('data-active="true"'));
-  assert.ok(review.html.includes('data-ticket-id="t2"'));
+  const open = renderTicketList({ ticketsLoadable: tickets, activeStatusFilter: 'open' });
+  assert.equal(open.model.filteredCount, 1);
+  assert.equal(open.model.items[0].ticketId, 't1');
+  assert.ok(open.html.includes('data-active="true"'));
+  assert.ok(open.html.includes('data-ticket-id="t1"'));
+  const chipFilters = [...open.html.matchAll(/<button type="button" class="v2-ticket-filter"[^>]*data-filter="([^"]+)"/g)]
+    .map((match) => match[1]);
+  assert.deepEqual(chipFilters, ['all', 'open', 'closed']);
 
   const unavailable = renderTicketList({ ticketsLoadable: createUnavailable({ code: 'E', message: 'x' }) });
   assert.equal(unavailable.model.status, 'unavailable');
@@ -597,8 +600,8 @@ test('ticket-detail: transitions and explicit invalid-transition error', () => {
   assert.equal(ready.model.allowedTransitions[0].to, 'review');
   assert.equal(ready.model.allowedTransitions[1].label, 'Block');
   assert.ok(ready.html.includes('data-action="transition-ticket"'));
-  assert.ok(ready.html.includes('data-transition-to="review"'));
-  assert.ok(ready.html.includes('data-transition-to="blocked"'));
+  assert.ok(ready.html.includes('data-transition="review"'));
+  assert.ok(ready.html.includes('data-transition="blocked"'));
 
   const errored = renderTicketDetail({
     ticketLoadable: ticket,

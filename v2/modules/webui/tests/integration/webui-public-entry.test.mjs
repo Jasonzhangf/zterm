@@ -185,16 +185,17 @@ test('per-workspace Board and Tickets isolate queries, filters, creation, and tr
     workspaceId: 'ws-beta',
     title: 'Beta: New scoped ticket',
     description: 'Scoped to ws-beta only',
+    ownerMemberId: 'b-1',
   })
   assert.equal(created.ok, true)
   assert.equal(created.ticket.workspaceId, 'ws-beta')
   assert.equal(ports.daemonApi.calls.createTicket.at(-1).workspaceId, 'ws-beta')
 
-  await app.dispatchAction('filter-tickets', { workspaceId: 'ws-beta', filter: 'blocked' })
+  await app.dispatchAction('filter-tickets', { workspaceId: 'ws-beta', filter: 'open' })
   assert.equal(ports.daemonApi.calls.listTickets.at(-1).workspaceId, 'ws-beta')
-  assert.equal(ports.daemonApi.calls.listTickets.at(-1).status, 'blocked')
+  assert.equal(ports.daemonApi.calls.listTickets.at(-1).status, 'open')
   ticketsPage = app.renderPage()
-  assert.ok(ticketsPage.html.includes('T-202'))
+  assert.ok(ticketsPage.html.includes('T-201'))
 
   // Switch back to ws-alpha: ws-alpha tickets are untouched and filter is independent
   await app.dispatchAction('select-workspace', { workspaceId: 'ws-alpha' })
@@ -580,6 +581,8 @@ test('ticket and goal write paths reject missing ports, incomplete authority fie
   const createTicketRes = await appMissingWritePorts.dispatchAction('create-ticket', {
     workspaceId: 'ws-alpha',
     title: 'Should not locally fabricate',
+    goalId: 'goal-alpha-webui',
+    ownerMemberId: 'm-1',
   })
   assert.equal(createTicketRes.ok, false)
   assert.equal(createTicketRes.error.code, 'DAEMON_API_UNAVAILABLE')
@@ -589,6 +592,7 @@ test('ticket and goal write paths reject missing ports, incomplete authority fie
   const createGoalRes = await appMissingWritePorts.dispatchAction('create-goal', {
     workspaceId: 'ws-alpha',
     title: 'Should not locally fabricate goal',
+    ownerMemberId: 'm-1',
   })
   assert.equal(createGoalRes.ok, false)
   assert.equal(createGoalRes.error.code, 'DAEMON_API_UNAVAILABLE')
@@ -623,6 +627,8 @@ test('ticket and goal write paths reject missing ports, incomplete authority fie
   const invalidCreateRes = await appMalformed.dispatchAction('create-ticket', {
     workspaceId: 'ws-alpha',
     title: 'Incomplete response test',
+    goalId: 'goal-alpha-webui',
+    ownerMemberId: 'm-1',
   })
   assert.equal(invalidCreateRes.ok, false)
   assert.equal(invalidCreateRes.error.code, 'TICKET_RESPONSE_INVALID')
@@ -647,6 +653,8 @@ test('ticket and goal write paths reject missing ports, incomplete authority fie
   const mismatchTicketRes = await appMalformed.dispatchAction('create-ticket', {
     workspaceId: 'ws-alpha',
     title: 'Mismatched workspace ticket',
+    goalId: 'goal-alpha-webui',
+    ownerMemberId: 'm-1',
   })
   assert.equal(mismatchTicketRes.ok, false)
   assert.equal(mismatchTicketRes.error.code, 'WORKSPACE_SCOPE_MISMATCH')
@@ -656,6 +664,7 @@ test('ticket and goal write paths reject missing ports, incomplete authority fie
   const mismatchGoalRes = await appMalformed.dispatchAction('create-goal', {
     workspaceId: 'ws-alpha',
     title: 'Mismatched workspace goal',
+    ownerMemberId: 'm-1',
   })
   assert.equal(mismatchGoalRes.ok, false)
   assert.equal(mismatchGoalRes.error.code, 'WORKSPACE_SCOPE_MISMATCH')
@@ -696,6 +705,7 @@ test('late write resolution or rejection from previous workspace stays isolated 
   const pendingCreate = app.dispatchAction('create-ticket', {
     workspaceId: 'ws-alpha',
     title: 'Delayed Alpha Ticket',
+    ownerMemberId: 'm-1',
   })
   const pendingReject = app.dispatchAction('transition-ticket', {
     workspaceId: 'ws-alpha',

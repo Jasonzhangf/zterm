@@ -73,6 +73,66 @@ function projectSnapshotMember(member) {
   };
 }
 
+function projectGoal(goal) {
+  if (!goal || typeof goal !== "object") return goal;
+  const projected = { ...goal };
+  delete projected.name;
+  return {
+    ...projected,
+    title: String(goal.title ?? goal.name ?? ""),
+    rawGoal: goal,
+  };
+}
+
+function projectTicketObservation(observation) {
+  if (!observation || typeof observation !== "object") return observation;
+  const binding = observation.binding ?? {};
+  const ticket = observation.ticket ?? {};
+  const done = ticket.done === true;
+  return {
+    ticketId: String(binding.bindingId ?? ""),
+    workspaceId: binding.workspaceId ?? "",
+    goalId: binding.goalId ?? "",
+    ownerMemberId: binding.ownerMemberId ?? "",
+    assigneeId: binding.ownerMemberId ?? "",
+    title: String(ticket.title ?? binding.bindingId ?? ""),
+    description: String(ticket.description ?? ""),
+    priority: ticket.priority ?? null,
+    status: done ? "closed" : "open",
+    freshness: observation.freshness ?? "unavailable",
+    allowedTransitions: Array.isArray(observation.allowedTransitions) ? observation.allowedTransitions : [],
+    errorRef: observation.errorRef,
+    rawObservation: observation,
+  };
+}
+
+function daemonTicketStatus(status) {
+  if (status === "open" || status === "in-progress" || status === "blocked" || status === "review") {
+    return "open";
+  }
+  return status;
+}
+
+function operationError(payload, fallbackCode, fallbackMessage) {
+  const operation = payload?.operation;
+  const error = new DaemonError({
+    code: operation?.errorRef?.code || fallbackCode,
+    owningModule: operation?.errorRef?.owningModule,
+    operationId: operation?.operationRef?.operationId,
+    message: operation?.errorRef?.message || fallbackMessage,
+  }, 409);
+  error.operation = operation;
+  error.operationRef = operation?.operationRef;
+  return error;
+}
+
+function requireSuccessfulOperation(payload, action) {
+  if (!payload || payload.operation?.state !== "succeeded") {
+    throw operationError(payload, "TICKET_OPERATION_NOT_SUCCEEDED", `${action} did not complete successfully.`);
+  }
+  return payload;
+}
+
 export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
   let csrfToken = "";
   let authToken = "";
@@ -168,6 +228,144 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
 
     async getWorkspaceTree({ workspaceId } = {}) {
       return request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/tree`);
+    },
+
+    async listGoals({ workspaceId, parentGoalId } = {}) {
+      const query = new URLSearchParams();
+      if (parentGoalId !== undefined && parentGoalId !== null && parentGoalId !== "") {
+        query.set("parentGoalId", String(parentGoalId));
+      }
+      const suffix = query.size > 0 ? `?${query.toString()}` : "";
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/goals${suffix}`);
+      if (!Array.isArray(payload.goals)) {
+        throw new DaemonError({ code: "GOALS_RESPONSE_INVALID", message: "Daemon returned a malformed goal list." }, 502);
+      }
+      return payload.goals.map(projectGoal);
+    },
+
+    async createGoal({ workspaceId, title, ownerMemberId, parentGoalId } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/goals`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: String(title ?? ""),
+          ownerMemberId,
+          ...(parentGoalId !== undefined ? { parentGoalId } : {}),
+        }),
+      });
+      if (!payload.goal || typeof payload.goal !== "object") {
+        throw new DaemonError({ code: "GOAL_RESPONSE_INVALID", message: "Daemon returned a malformed goal." }, 502);
+      }
+      return projectGoal(payload.goal);
+    },
+
+    async getGoal({ workspaceId, goalId } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/goals/${encodeURIComponent(String(goalId))}`);
+      if (!payload.goal || typeof payload.goal !== "object") {
+        throw new DaemonError({ code: "GOAL_RESPONSE_INVALID", message: "Daemon returned a malformed goal." }, 502);
+      }
+      return projectGoal(payload.goal);
+    },
+
+    async queryManagerBoard({ workspaceId, managerId } = {}) {
+      const query = new URLSearchParams({ managerId: String(managerId ?? "") });
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/board?${query.toString()}`);
+      if (!Array.isArray(payload.goals) || !Array.isArray(payload.memberStatuses)) {
+        throw new DaemonError({ code: "BOARD_RESPONSE_INVALID", message: "Daemon returned a malformed manager board." }, 502);
+      }
+      return {
+        ...payload,
+        rawBoard: payload,
+        goals: payload.goals.map((section) => ({
+          ...section,
+          goal: { ...section.goal, title: String(section.goal?.title ?? section.goal?.name ?? "") },
+          tickets: {
+            ...section.tickets,
+            items: Array.isArray(section.tickets?.items)
+              ? section.tickets.items.map(projectTicketObservation)
+              : [],
+          },
+        })),
+      };
+    },
+
+    async listTickets({ workspaceId, goalId, status, ownerMemberId, limit, cursor } = {}) {
+      const query = new URLSearchParams();
+      if (goalId) query.set("goalId", String(goalId));
+      if (status) query.set("status", daemonTicketStatus(String(status)));
+      if (ownerMemberId) query.set("ownerMemberId", String(ownerMemberId));
+      if (limit !== undefined && limit !== null) query.set("limit", String(limit));
+      if (cursor) query.set("cursor", String(cursor));
+      const suffix = query.size > 0 ? `?${query.toString()}` : "";
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/tickets${suffix}`);
+      if (!Array.isArray(payload.items)) {
+        throw new DaemonError({ code: "TICKETS_RESPONSE_INVALID", message: "Daemon returned a malformed ticket list." }, 502);
+      }
+      const records = payload.items.map(projectTicketObservation);
+      records.observation = payload;
+      records.freshness = payload.freshness ?? "unavailable";
+      records.nextCursor = payload.nextCursor;
+      return records;
+    },
+
+    async getTicket({ workspaceId, ticketId } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/tickets/${encodeURIComponent(String(ticketId))}`);
+      return projectTicketObservation(payload);
+    },
+
+    async createTicket({ workspaceId, operationId, goalId, ownerMemberId, category, title, description, priority } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/tickets`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operationId, goalId, ownerMemberId, category, title, description, priority }),
+      });
+      requireSuccessfulOperation(payload, "Ticket creation");
+      if (payload.ticket) return projectTicketObservation(payload.ticket);
+      if (payload.binding?.bindingId) {
+        return this.getTicket({ workspaceId, ticketId: payload.binding.bindingId });
+      }
+      throw new DaemonError({ code: "TICKET_RESPONSE_INVALID", message: "Successful ticket creation returned no authoritative ticket." }, 502);
+    },
+
+    async appendReport({ workspaceId, ticketId, operationId, actorMemberId, executingMemberId, reportKind, body } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/tickets/${encodeURIComponent(String(ticketId))}/reports`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          operationId,
+          actorMemberId,
+          ...(executingMemberId !== undefined ? { executingMemberId } : {}),
+          reportKind,
+          body,
+        }),
+      });
+      return requireSuccessfulOperation(payload, "Ticket report");
+    },
+
+    async transitionTicket({ workspaceId, ticketId, operationId, transition } = {}) {
+      const action = transition === "close" || transition === "closed" || transition === "done"
+        ? "close"
+        : transition === "reopen" || transition === "open"
+          ? "reopen"
+          : null;
+      if (!action) {
+        throw new DaemonError({ code: "TICKET_TRANSITION_INVALID", message: "Ticket transition must be close or reopen." }, 400);
+      }
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/tickets/${encodeURIComponent(String(ticketId))}/${action}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ operationId }),
+      });
+      requireSuccessfulOperation(payload, "Ticket transition");
+      return this.getTicket({ workspaceId, ticketId });
+    },
+
+    async listPendingWrites({ workspaceId } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/ticket-operations`);
+      if (!Array.isArray(payload.operations)) {
+        throw new DaemonError({ code: "TICKET_OPERATIONS_RESPONSE_INVALID", message: "Daemon returned a malformed operation list." }, 502);
+      }
+      return payload.operations;
     },
 
     async getMemberRuntime({ workspaceId, memberId } = {}) {

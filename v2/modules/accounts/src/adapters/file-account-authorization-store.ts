@@ -10,17 +10,33 @@ import {
   type AccountAuthorizationGrantInput,
   type NormalizedAccountAuthorizationGrant,
 } from '../domain/authorization.ts'
+import {
+  normalizeAccountMemberIdentityBinding,
+  requireConcreteWorkspaceId,
+  requirePositiveRevision,
+  requireStableId,
+  type AccountMemberIdentityBinding,
+  type RevokeMemberIdentityStoreInput,
+  type SetMemberIdentityStoreInput,
+} from '../domain/member-identity.ts'
 import type { AccountAuthorizationStore } from '../ports/account-authorization-store.ts'
 import { AccountsError } from '../public/errors.ts'
 
+// Version 2 added grant generation counters. Version 3 adds the explicit
+// accounts-owned account/member identity collection. Version 3 is written only
+// when an identity mutation occurs so an older reader fails explicitly instead
+// of rewriting the finer format.
+type AuthorizationStoreVersion = 2 | 3
+
 interface AuthorizationStoreState {
-  version: 2
+  version: AuthorizationStoreVersion
   grants: Record<string, NormalizedAccountAuthorizationGrant>
   generations: Record<string, number>
+  identities: Record<string, Record<string, AccountMemberIdentityBinding>>
 }
 
 function emptyState(): AuthorizationStoreState {
-  return { version: 2, grants: {}, generations: {} }
+  return { version: 2, grants: {}, generations: {}, identities: {} }
 }
 
 function requiredAccountId(accountId: unknown): string {
@@ -50,7 +66,7 @@ function parseState(text: string): AuthorizationStoreState {
   }
 
   const version = 'version' in value ? value.version : undefined
-  if (version !== 1 && version !== 2) {
+  if (version !== 1 && version !== 2 && version !== 3) {
     throw new AccountsError('INVALID_REQUEST', 400, 'Account authorization store is invalid.')
   }
   const generations: Record<string, number> = {}
@@ -84,7 +100,55 @@ function parseState(text: string): AuthorizationStoreState {
       grant.authorizationGeneration,
     )
   }
-  return { version: 2, grants, generations }
+
+  const identities: Record<string, Record<string, AccountMemberIdentityBinding>> = {}
+  // A stable member may have at most one active owner across the whole store.
+  // Detect a malformed or imported ambiguity at load instead of choosing one.
+  const activeMemberOwner = new Map<string, string>()
+  if ('identities' in value && value.identities !== undefined) {
+    if (
+      !value.identities ||
+      typeof value.identities !== 'object' ||
+      Array.isArray(value.identities)
+    ) {
+      throw new AccountsError('INVALID_REQUEST', 400, 'Account authorization store is invalid.')
+    }
+    for (const [storedAccountId, storedWorkspaces] of Object.entries(value.identities)) {
+      const normalizedAccountId = requiredAccountId(storedAccountId)
+      if (
+        !storedWorkspaces ||
+        typeof storedWorkspaces !== 'object' ||
+        Array.isArray(storedWorkspaces)
+      ) {
+        throw new AccountsError('INVALID_REQUEST', 400, 'Account authorization store is invalid.')
+      }
+      const byWorkspace: Record<string, AccountMemberIdentityBinding> = {}
+      for (const [storedWorkspaceId, storedBinding] of Object.entries(storedWorkspaces)) {
+        const binding = normalizeAccountMemberIdentityBinding(storedBinding)
+        if (
+          binding.accountId !== normalizedAccountId ||
+          binding.workspaceId !== storedWorkspaceId
+        ) {
+          throw new AccountsError('INVALID_REQUEST', 400, 'Account authorization store is invalid.')
+        }
+        if (binding.state === 'active') {
+          const key = `${normalizedAccountId}\u0000${storedWorkspaceId}`
+          if (activeMemberOwner.has(binding.memberId) && activeMemberOwner.get(binding.memberId) !== key) {
+            throw new AccountsError('INVALID_REQUEST', 400, 'Account authorization store is invalid.')
+          }
+          activeMemberOwner.set(binding.memberId, key)
+        }
+        byWorkspace[binding.workspaceId] = binding
+      }
+      identities[normalizedAccountId] = byWorkspace
+    }
+  }
+
+  return { version: version === 3 ? 3 : 2, grants, generations, identities }
+}
+
+function identityConflict(message: string, details: Readonly<Record<string, unknown>>): AccountsError {
+  return new AccountsError('ACCOUNT_MEMBER_IDENTITY_CONFLICT', 409, message, details)
 }
 
 export function createFileAccountAuthorizationStore(file: string): AccountAuthorizationStore {
@@ -211,8 +275,141 @@ export function createFileAccountAuthorizationStore(file: string): AccountAuthor
           }
         }
         delete state.grants[normalizedAccountId]
+        // Revoking the management/grant record revokes the account's active
+        // identity records in the same serialized mutation. A later grant must
+        // not silently reactivate them.
+        const accountIdentities = state.identities[normalizedAccountId]
+        if (accountIdentities) {
+          for (const [workspaceId, binding] of Object.entries(accountIdentities)) {
+            if (binding.state === 'active') {
+              accountIdentities[workspaceId] = {
+                ...binding,
+                state: 'revoked',
+                revision: binding.revision + 1,
+              }
+              state.version = 3
+            }
+          }
+        }
         return current ? { ...current } : undefined
       })
+    },
+
+    async getMemberIdentity(
+      accountId: string,
+      workspaceId: string,
+    ): Promise<AccountMemberIdentityBinding | undefined> {
+      const state = await read()
+      const binding =
+        state.identities[requiredAccountId(accountId)]?.[requireConcreteWorkspaceId(workspaceId)]
+      return binding ? { ...binding } : undefined
+    },
+
+    async putMemberIdentity(
+      input: SetMemberIdentityStoreInput,
+    ): Promise<AccountMemberIdentityBinding> {
+      if (!input || typeof input !== 'object') {
+        throw new AccountsError('INVALID_REQUEST', 400, 'Member identity input is required.')
+      }
+      const accountId = requireStableId(input.accountId, 'accountId')
+      const workspaceId = requireConcreteWorkspaceId(input.workspaceId)
+      const memberId = requireStableId(input.memberId, 'memberId')
+      const expectedRevision = input.expectedRevision
+      if (expectedRevision !== null) {
+        requirePositiveRevision(expectedRevision, 'expectedRevision')
+      }
+      return await update((state) => {
+        const current = state.identities[accountId]?.[workspaceId]
+        if (expectedRevision === null) {
+          if (current) {
+            throw identityConflict(
+              'An account/member identity binding already exists for this workspace.',
+              { accountId, workspaceId },
+            )
+          }
+        } else if (!current || current.revision !== expectedRevision) {
+          throw identityConflict('Member identity revision is stale.', {
+            accountId,
+            workspaceId,
+            expectedRevision,
+            currentRevision: current?.revision ?? null,
+          })
+        }
+        for (const [otherAccountId, byWorkspace] of Object.entries(state.identities)) {
+          for (const [otherWorkspaceId, binding] of Object.entries(byWorkspace)) {
+            if (binding.state !== 'active' || binding.memberId !== memberId) continue
+            if (otherAccountId === accountId && otherWorkspaceId === workspaceId) continue
+            throw identityConflict('The member already has an active account owner.', {
+              memberId,
+            })
+          }
+        }
+        const saved: AccountMemberIdentityBinding = {
+          accountId,
+          workspaceId,
+          memberId,
+          state: 'active',
+          revision: current ? current.revision + 1 : 1,
+        }
+        const byWorkspace =
+          state.identities[accountId] ?? (state.identities[accountId] = {})
+        byWorkspace[workspaceId] = saved
+        state.version = 3
+        return { ...saved }
+      })
+    },
+
+    async revokeMemberIdentity(
+      input: RevokeMemberIdentityStoreInput,
+    ): Promise<AccountMemberIdentityBinding> {
+      if (!input || typeof input !== 'object') {
+        throw new AccountsError('INVALID_REQUEST', 400, 'Member identity input is required.')
+      }
+      const accountId = requireStableId(input.accountId, 'accountId')
+      const workspaceId = requireConcreteWorkspaceId(input.workspaceId)
+      const expectedRevision = requirePositiveRevision(input.expectedRevision, 'expectedRevision')
+      return await update((state) => {
+        const current = state.identities[accountId]?.[workspaceId]
+        if (!current) {
+          throw new AccountsError(
+            'ACCOUNT_MEMBER_IDENTITY_REQUIRED',
+            403,
+            'No account/member identity binding exists for this workspace.',
+            { accountId, workspaceId },
+          )
+        }
+        if (current.revision !== expectedRevision) {
+          throw identityConflict('Member identity revision is stale.', {
+            accountId,
+            workspaceId,
+            expectedRevision,
+            currentRevision: current.revision,
+          })
+        }
+        const saved: AccountMemberIdentityBinding = {
+          ...current,
+          state: 'revoked',
+          revision: current.revision + 1,
+        }
+        state.identities[accountId][workspaceId] = saved
+        state.version = 3
+        return { ...saved }
+      })
+    },
+
+    async findActiveMemberIdentityByMember(
+      memberId: string,
+    ): Promise<AccountMemberIdentityBinding | undefined> {
+      const normalized = requireStableId(memberId, 'memberId')
+      const state = await read()
+      for (const byWorkspace of Object.values(state.identities)) {
+        for (const binding of Object.values(byWorkspace)) {
+          if (binding.state === 'active' && binding.memberId === normalized) {
+            return { ...binding }
+          }
+        }
+      }
+      return undefined
     },
   })
 }

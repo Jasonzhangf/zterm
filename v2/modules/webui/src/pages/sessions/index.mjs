@@ -290,6 +290,7 @@ export function renderSessionsPage(state = {}, helpers = {}) {
       terminalBodiesByMember,
       propertyPanelsByWindow,
       renderFrame: frameFor,
+      availableWidth: Math.max(0, Number(viewportWidth || 0) - 16),
     }).html
   } else if (viewportMode === 'mobile') {
     contentHtml = renderPreviewFn({

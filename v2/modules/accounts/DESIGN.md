@@ -24,9 +24,12 @@ accounts/
 │   ├── application/workspace-authorization.ts # verify/bindCreatedWorkspace
 │   ├── application/accounts-authorization.ts  # authorizeMachine adapter
 │   ├── application/accounts-authority-runtime.ts # public authority lifecycle
+│   ├── application/management-authority.ts    # shared all-workspaces org:write rule
+│   ├── application/member-identity.ts         # explicit identity + resolver
 │   ├── application/machine-service.ts # enroll/list/possession/revoke
 │   ├── ports/account-directory.ts   # account-scoped directory read
 │   ├── ports/account-authorization-store.ts # 授权策略持久化边界
+│   ├── ports/member-identity-directory.ts # read-only organization member lookup
 │   ├── ports/machine-registration.ts # machine challenge/verify/revoke
 │   ├── ports/relay-authority.ts     # auth authority boundary
 │   ├── adapters/v1-relay.ts         # V1 relay HTTP adapter
@@ -50,7 +53,10 @@ accounts/
   token 的复核和机器操作返回 `AUTHENTICATION_REQUIRED`。
 - `createFileAccountAuthorizationStore` 提供 accounts-owned 持久授权策略的
   `getGrant` / `putGrant` / `deleteGrant`。记录以稳定 `accountId` 为主体，以稳定
-  workspace/member ID 为资源；不保存密码、relay session 副本或机器 token。
+  workspace/member ID 为资源；不保存密码、relay session 副本或机器 token。它同时
+  持久化显式 `AccountMemberIdentityBinding` collection（逻辑键
+  `(accountId, workspaceId)`，正反唯一性，单调 revision）；`deleteGrant` 在同一
+  serialized mutation 中撤销该账号全部 active identity，不迁移旧 grant。
 - `createWorkspaceAuthorization` 的 `verify(token)` 先复核 relay session，再读取当前
   账号授权记录。无有效 session 返回 `AUTHENTICATION_REQUIRED`；无授权记录返回
   `WORKSPACE_AUTHORIZATION_REQUIRED`；上下文与 `AuthContext` 分开返回，包含
@@ -59,6 +65,20 @@ accounts/
   `allWorkspaces` 管理授权的账号绑定新建 workspace。它把稳定 workspace ID 写入
   accounts-owned 记录；普通账号或缺失该管理授权返回 `WORKSPACE_FORBIDDEN`，不
   自动授予全部 workspace。
+- `createMemberIdentityService({ authService, store, members })` 提供显式账号到
+  workspace 成员的 designation 与 resolver。`members` 是 organization
+  `getMember` 的只读投影端口；成员存在性和归属仍由 organization 决定。
+  `setMemberIdentity` / `revokeMemberIdentity` 复用 relay 复核 + 当前
+  `allWorkspaces` + `org:write` 管理授权；`accountId` 只来自复核后的会话，不接受
+  请求自报目标账号。revision、正向与反向唯一性由 store 在 serialized mutation
+  中原子执行。`resolveWorkspaceActor({ token, workspaceId })` 先复核 bearer，再检
+  查当前 workspace 授权、显式 active binding、唯一 active owner 和成员归属，返回
+  `{ sessionId, accountId, workspaceId, memberId, credentialState: 'active' }`。
+  空缺 workspace、wildcard、无 binding、已撤销和成员跨 workspace 分别返回
+  `INVALID_REQUEST` / `ACCOUNT_MEMBER_IDENTITY_REQUIRED` /
+  `ACCOUNT_MEMBER_IDENTITY_REVOKED` / `ACCOUNT_MEMBER_IDENTITY_CONFLICT` /
+  `ACCOUNT_MEMBER_IDENTITY_INVALID`。不回退到 allowlist、请求字段、manager 或
+  group；结果由组合端内部使用，不得序列化进响应或证据。
 - `createAccountsAuthorizationPort` 在已验证账号范围内调用
   `MachineService.listAuthorizedMachines`，只接受 canonical active machine，并从
   typed `MachineRouteSource` 取得 endpoint/settings。只有 route 与 target 的非空

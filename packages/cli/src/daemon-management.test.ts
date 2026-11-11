@@ -35,6 +35,13 @@ function result(command: string, args: string[]): ProcessResult {
   };
 }
 
+function invokesServiceLifecycle(command: string, args: string[]): boolean {
+  const lifecycleCommand = new Set(['install-service', 'launchctl', 'start', 'stop', 'restart']);
+  const commandName = command.split(/[\\/]/).at(-1);
+  return Boolean(commandName && lifecycleCommand.has(commandName))
+    || args.some((arg) => lifecycleCommand.has(arg));
+}
+
 function expectedDaemonInvocation(
   prefix: string,
   subcommand: 'status' | 'config',
@@ -237,7 +244,6 @@ describe('daemon management package adapter', () => {
       nodeAbi: '127',
       stagingDir,
       runner,
-      startService: false,
     });
 
     expect(installResult).toMatchObject({
@@ -259,14 +265,12 @@ describe('daemon management package adapter', () => {
     expect(firstNativeCheck).toBeGreaterThan(-1);
     expect(firstNativeCheck).toBeLessThan(globalInstall);
     expect(
-      calls.some(({ command, args }) =>
-        [command, ...args].join(' ').match(/start|stop|restart|install-service|launchctl/i),
-      ),
+      calls.some(({ command, args }) => invokesServiceLifecycle(command, args)),
     ).toBe(false);
     expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
   });
 
-  it('starts the installed service by default through the official daemon entry', async () => {
+  it('returns verified installation without activating a service by default', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'zterm-daemon-home-'));
     const prefix = mkdtempSync(join(tmpdir(), 'zterm-daemon-prefix-'));
     const stagingDir = join(homeDir, '.zterm', 'staging', 'daemon-install-service');
@@ -304,24 +308,19 @@ describe('daemon management package adapter', () => {
 
     const entryPath = daemonGlobalEntryPath(prefix, 'darwin');
     expect(installResult).toMatchObject({
-      phase: 'activate-service',
+      phase: 'verify',
       installedVersion: '0.1.2',
+      payloadPackage: daemonPayloadPackageName('darwin', 'arm64'),
       commandAvailable: true,
-      serviceActivation: {
-        state: 'started',
-        command: entryPath,
-        args: ['install-service'],
-      },
     });
-    expect(calls).toContainEqual({
-      command: entryPath,
-      args: ['install-service'],
-    });
-    expect(calls.findIndex(({ args }) => args[0] === 'install-service'))
-      .toBeGreaterThan(calls.findIndex(({ args }) => args[0] === '--version'));
+    expect(Object.hasOwn(installResult, 'serviceActivation')).toBe(false);
+    expect(calls).toContainEqual({ command: entryPath, args: ['--version'] });
+    expect(
+      calls.some(({ command, args }) => invokesServiceLifecycle(command, args)),
+    ).toBe(false);
   });
 
-  it('keeps Linux installation successful when no service owner is supported', async () => {
+  it('keeps Linux installation successful with verification only', async () => {
     const homeDir = mkdtempSync(join(tmpdir(), 'zterm-daemon-home-'));
     const prefix = mkdtempSync(join(tmpdir(), 'zterm-daemon-prefix-'));
     const stagingDir = join(homeDir, '.zterm', 'staging', 'daemon-install-linux');
@@ -344,13 +343,6 @@ describe('daemon management package adapter', () => {
       if (args[0] === '--version') {
         return { ...result(command, args), stdout: '0.1.2\n' };
       }
-      if (args[0] === 'install-service') {
-        return {
-          ...result(command, args),
-          exitCode: 2,
-          stderr: 'Linux service management is not provided by this payload runner\n',
-        };
-      }
       return result(command, args);
     });
 
@@ -369,67 +361,10 @@ describe('daemon management package adapter', () => {
       phase: 'verify',
       installedVersion: '0.1.2',
       commandAvailable: true,
-      serviceActivation: {
-        state: 'skipped',
-        reason: 'platform_unsupported',
-      },
     });
+    expect(Object.hasOwn(installResult, 'serviceActivation')).toBe(false);
     expect(installResult.error).toBeUndefined();
     expect(calls.some(({ args }) => args[0] === 'install-service')).toBe(false);
-  });
-
-  it('preserves the service activation error after a successful macOS install', async () => {
-    const homeDir = mkdtempSync(join(tmpdir(), 'zterm-daemon-home-'));
-    const prefix = mkdtempSync(join(tmpdir(), 'zterm-daemon-prefix-'));
-    const stagingDir = join(homeDir, '.zterm', 'staging', 'daemon-install-service-error');
-    const runner: ProcessRunner = vi.fn(async (command, args) => {
-      if (args[0] === 'install' && !args.includes('--global')) {
-        writeStagedPackages(stagingDir);
-      }
-      if (args[0] === 'pack') {
-        return {
-          ...result(command, args),
-          stdout: `${join(stagingDir, 'jsonstudio-zterm-daemon-0.1.2.tgz')}\n`,
-        };
-      }
-      if (args[0] === 'install' && args.includes('--global')) {
-        writeGlobalPackages(prefix);
-      }
-      if (args[0] === '--version') {
-        return { ...result(command, args), stdout: '0.1.2\n' };
-      }
-      if (args[0] === 'install-service') {
-        return {
-          ...result(command, args),
-          exitCode: 1,
-          stderr: 'launchctl bootstrap failed\n',
-        };
-      }
-      return result(command, args);
-    });
-
-    const installResult = await installDaemon({
-      homeDir,
-      prefix,
-      platform: 'darwin',
-      arch: 'arm64',
-      nodeVersion: '22.22.2',
-      nodeAbi: '127',
-      stagingDir,
-      runner,
-    });
-
-    expect(installResult).toMatchObject({
-      phase: 'activate-service',
-      installedVersion: '0.1.2',
-      commandAvailable: true,
-      serviceActivation: { state: 'skipped' },
-      error: {
-        code: 'daemon_service_install_failed',
-        message: 'launchctl bootstrap failed',
-      },
-    });
-    expect(installResult.filesWritten).toContain(daemonPackageRoot(prefix, 'darwin'));
   });
 
   it('fails explicitly when the staged public package has no local payload', async () => {

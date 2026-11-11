@@ -9,7 +9,7 @@ export interface OrganizationAuthorizedManagerInput {
 }
 
 export interface BoardAuthReader {
-  verifySession(token: string): Promise<BoardAuthContext>
+  verifySession(token: string, workspaceId: string): Promise<BoardAuthContext>
 }
 
 export interface ManagerScope {

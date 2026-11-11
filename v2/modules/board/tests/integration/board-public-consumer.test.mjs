@@ -39,11 +39,17 @@ const ALLOWLISTED_TO_A = 'allowlisted-to-a-token'
 
 function boardAuth(auth, memberByToken) {
   return {
-    async verifySession(token) {
+    async verifySession(token, workspaceId) {
       const context = await auth.verify(token)
       const memberId = memberByToken[token]
       if (!memberId) {
         throw Object.assign(new Error('board member binding is missing'), {
+          name: 'BoardAuthError',
+          code: 'UNAUTHENTICATED',
+        })
+      }
+      if (typeof workspaceId !== 'string' || workspaceId.length === 0) {
+        throw Object.assign(new Error('board workspace is missing'), {
           name: 'BoardAuthError',
           code: 'UNAUTHENTICATED',
         })

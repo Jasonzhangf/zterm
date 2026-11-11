@@ -82,12 +82,12 @@ export function memberStatus(memberId: string, value: 'busy' | 'idle' = 'idle'):
 }
 
 export class FakeAuthReader implements BoardAuthReader {
-  calls = 0
+  calls: Array<{ token: string; workspaceId: string }> = []
   error: unknown
   context: VerifiedAuthContext = actor()
 
-  async verifySession(): Promise<VerifiedAuthContext> {
-    this.calls += 1
+  async verifySession(token: string, workspaceId: string): Promise<VerifiedAuthContext> {
+    this.calls.push({ token, workspaceId })
     if (this.error) throw this.error
     return this.context
   }

@@ -63,7 +63,7 @@ This document provides the complete from-zero installation steps for a blank sup
    - **Step 3**: Standard `TMUX_TMPDIR` directory and shell profile export (`~/.tmux/run`).
    - **Step 4**: `@jsonstudio/zterm-cli@0.1.4` and `@jsonstudio/zterm-daemon@0.1.3` (`zterm daemon install --version 0.1.3`).
    - **Step 5**: `AppSDK` (`v0.1.0015` / `@jsonstudio/appsdk@0.1.15`), `DAGPipe` (`0.1.0`), and `Collab` (`0.2.x` via `scripts/install-global-collab.sh` from `Jasonzhangf/appsdk` on macOS/Linux).
-   - **Step 6**: On macOS, verify the daemon service started by `zterm daemon install` (or run `zterm-daemon install-service` after direct tarball installation). Linux and Windows currently install without a verified autostart owner, so verify the direct daemon entry instead, then verify `collab context` in the target project checkout.
+   - **Step 6**: `zterm daemon install` only installs and verifies the daemon package. If a running or autostart daemon is required, use the separate formal service lifecycle after installation, then verify its service state. Linux and Windows can verify the direct daemon entry before any explicit start. Finish by verifying `collab context` in the target project checkout.
 
 ---
 
@@ -126,23 +126,32 @@ npm install --global \
   "${RELEASE_URL}/jsonstudio-zterm-daemon-0.1.3.tgz"
 ```
 
-#### Step 4: Verify `zterm` & `zterm-daemon` and Daemon Service
+#### Step 4: Verify `zterm` and the Daemon Package
 
 ```bash
 zterm --version
 zterm-daemon --help
 zterm daemon config
 
-# Start a baseline tmux session under ~/.tmux/run
-tmux new-session -d -s main || true
-
-# On macOS, Option A already activated the service through `zterm daemon install`.
-# Option B must run: zterm-daemon install-service
+# Observe the current service state; installation does not activate it.
 zterm-daemon service-status
 zterm daemon status
 ```
 
-#### Step 5: Install `AppSDK`, `DAGPipe`, and `Collab` (macOS/Linux Interoperability)
+#### Step 5: Explicitly Start tmux and Activate the Daemon Service
+
+Run this section only when the host should provide a daemon now. Package
+installation does not start or restart tmux, daemon, or Relay.
+
+```bash
+# Create a baseline tmux session under ~/.tmux/run.
+tmux new-session -d -s main || true
+
+# Register and start the package-owned macOS service when autostart is needed.
+zterm-daemon install-service
+```
+
+#### Step 6: Install `AppSDK`, `DAGPipe`, and `Collab` (macOS/Linux Interoperability)
 
 `Collab` (`collab` and `collab-mcp`) is distributed from the `Jasonzhangf/appsdk` source repository (`scripts/install-global-collab.sh`) and requires Rust/Cargo:
 

@@ -60,5 +60,6 @@ I0→I1→I2；I3可在accounts/organization/goals/tickets基础端口具备后�
 ## DAG与执行记录
 
 member-delivery/member-status当前design-unbound图可复用拓扑输入，不能冒充运行gate。I0标V1 consumer边界；I1组织提交、I2连接恢复、I3provider写入分别补schema/operator和闭合结果。成功/拒绝/失败/unknown可观测。Jenny落实，不每文件造gate。
+I3正式执行图：`v2/docs/dagpipe/graphs/goals-tickets-board.graph.json`（`goals.tickets.board@0.1`）。静态校验通过不替代真实入口、actor映射和Vikunja v2.7.1验收。
 
 每任务填实际绝对证据路径。大型日志截图留任务附件，v2/docs/mvp/acceptance.md只引用有效结果；回收Disposable Store前交到可靠载体。接口/配置/实现未变的有效证据复用，失败只停真实下游，不以“所有模块还没完成”阻断集成。

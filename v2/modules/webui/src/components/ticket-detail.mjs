@@ -50,7 +50,7 @@ export function renderTicketDetail({
         allowedTransitions.map((t) =>
           `<button type="button" class="v2-ticket-transition"` +
           ` data-action="transition-ticket"` +
-          ` data-transition-to="${escapeHtml(t.to)}"` +
+          ` data-transition="${escapeHtml(t.to)}"` +
           `${pending ? ' disabled' : ''}>${escapeHtml(t.label)}</button>`
         ).join('') +
         `</div>`

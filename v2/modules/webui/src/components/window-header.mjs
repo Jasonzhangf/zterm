@@ -107,6 +107,8 @@ function renderWorkStatusHtml(view) {
  * Hard contract:
  * - The header is always single line with `heightPx === 28` (<= 32px).
  * - `title + status + primaryAction` are always visible.
+ * - `workStatus` is degradable chrome. On mobile viewport mode the CSS drops
+ *   it from the inline row so it never crowds the always-visible set.
  * - `availableWidth < 260`: hide `machine` from the inline row and move all
  *   secondary actions into the overflow menu.
  * - `availableWidth < 200`: hide `role` from the inline row (into overflow

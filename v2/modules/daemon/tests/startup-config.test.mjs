@@ -129,6 +129,64 @@ test("assembleDaemonConfig composes the real daemon ports from config", async ()
   }
 });
 
+test("startup config leaves work tracking absent without blocking unrelated daemon startup", async () => {
+  const config = await validConfig();
+  const assembled = assembleDaemonConfig(config, { createTransport: stubTransport, log: () => {} });
+  assert.equal(assembled.daemonOptions.goals, null);
+  assert.equal(assembled.daemonOptions.tickets, null);
+  assert.equal(assembled.daemonOptions.board, null);
+
+  const daemon = createDaemon({ ...assembled.daemonOptions, terminalPort: stubTerminalPort() });
+  try {
+    assert.ok(daemon.server, "unrelated daemon startup must remain available");
+  } finally {
+    await new Promise((resolve) => daemon.server.close(resolve));
+  }
+});
+
+test("startup config composes supplied work tracking through the public facade", async () => {
+  const config = await validConfig();
+  config.workTracking = {
+    goalsStoreFile: join(await configRoot(), "goals.json"),
+    ticketsStoreFile: join(await configRoot(), "tickets.sqlite"),
+    providerInstances: [],
+    workspaceProviders: [],
+  };
+  const assembled = assembleDaemonConfig(config, {
+    createTransport: stubTransport,
+    log: () => {},
+    actorResolver: {
+      async resolve({ account }) {
+        return { sessionId: "session-1", accountId: account.accountId, memberId: "member-1", credentialState: "active" };
+      },
+    },
+    credentialProvider: {
+      async getCredential() {
+        return { token: "unused" };
+      },
+    },
+  });
+  assert.equal(typeof assembled.daemonOptions.goals.listGoals, "function");
+  assert.equal(typeof assembled.daemonOptions.tickets.resolveActor, "function");
+  assert.equal(typeof assembled.daemonOptions.tickets.getInWorkspace, "function");
+  assert.equal(typeof assembled.daemonOptions.board.queryManagerBoard, "function");
+  try {
+    await assembled.daemonOptions.tickets.ready();
+  } finally {
+    assembled.daemonOptions.tickets.closeStore();
+  }
+});
+
+test("startup config rejects a supplied malformed work-tracking section before listen", async () => {
+  const config = await validConfig();
+  config.workTracking = {
+    goalsStoreFile: join(await configRoot(), "goals.json"),
+    ticketsStoreFile: join(await configRoot(), "tickets.sqlite"),
+    workspaceProviders: [],
+  };
+  expectConfigError(() => assembleDaemonConfig(config, { createTransport: stubTransport }));
+});
+
 test("loadStartupConfig rejects unreadable and invalid JSON config files", async () => {
   const root = await configRoot();
   await assert.rejects(

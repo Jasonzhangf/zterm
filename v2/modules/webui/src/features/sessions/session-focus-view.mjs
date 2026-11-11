@@ -64,7 +64,14 @@ export function exitMemberFocusToPreview(layout) {
   };
 }
 
-export function renderSessionFocusView({ layout, membersById = {}, terminalBodiesByMember = {}, propertyPanelsByWindow = {}, renderFrame = null } = {}) {
+export function renderSessionFocusView({
+  layout,
+  membersById = {},
+  terminalBodiesByMember = {},
+  propertyPanelsByWindow = {},
+  renderFrame = null,
+  availableWidth = null,
+} = {}) {
   if (!layout) {
     throw new Error('layout is required');
   }
@@ -83,6 +90,7 @@ export function renderSessionFocusView({ layout, membersById = {}, terminalBodie
       title: member.name || member.displayName || focusedMemberId,
       status: member.status || '',
       primary: focusedMemberId === layout.primaryMemberId,
+      availableWidth: Number.isFinite(Number(availableWidth)) ? Number(availableWidth) : undefined,
       terminalBodyHtml: terminalBodiesByMember[focusedMemberId] || '',
       propertyPanelHtml: propertyPanelsByWindow[windowId] || '',
       propertyOpen: layout.openPropertyByWindow?.[windowId] === true,

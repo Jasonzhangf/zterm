@@ -87,6 +87,14 @@ test('success projects direct goals, ticket sections and member observations', a
   assert.deepEqual(harness.members.calls, ['member-1', 'member-2'])
 })
 
+test('actor verification receives the query workspace', async () => {
+  const harness = makeHarness()
+
+  await service(harness).queryManagerBoard(queryInput())
+
+  assert.deepEqual(harness.auth.calls, [{ token: 'token-1', workspaceId: 'ws-1' }])
+})
+
 test('authentication failure rejects the whole query before scope reads', async () => {
   const harness = makeHarness()
   harness.auth.error = Object.assign(new Error('missing token'), {
