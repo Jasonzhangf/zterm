@@ -237,6 +237,7 @@ describe('daemon management package adapter', () => {
       nodeAbi: '127',
       stagingDir,
       runner,
+      startService: false,
     });
 
     expect(installResult).toMatchObject({
@@ -263,6 +264,172 @@ describe('daemon management package adapter', () => {
       ),
     ).toBe(false);
     expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
+  });
+
+  it('starts the installed service by default through the official daemon entry', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'zterm-daemon-home-'));
+    const prefix = mkdtempSync(join(tmpdir(), 'zterm-daemon-prefix-'));
+    const stagingDir = join(homeDir, '.zterm', 'staging', 'daemon-install-service');
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const runner: ProcessRunner = vi.fn(async (command, args) => {
+      calls.push({ command, args });
+      if (args[0] === 'install' && !args.includes('--global')) {
+        writeStagedPackages(stagingDir);
+      }
+      if (args[0] === 'pack') {
+        return {
+          ...result(command, args),
+          stdout: `${join(stagingDir, 'jsonstudio-zterm-daemon-0.1.2.tgz')}\n`,
+        };
+      }
+      if (args[0] === 'install' && args.includes('--global')) {
+        writeGlobalPackages(prefix);
+      }
+      if (args[0] === '--version') {
+        return { ...result(command, args), stdout: '0.1.2\n' };
+      }
+      return result(command, args);
+    });
+
+    const installResult = await installDaemon({
+      homeDir,
+      prefix,
+      platform: 'darwin',
+      arch: 'arm64',
+      nodeVersion: '22.22.2',
+      nodeAbi: '127',
+      stagingDir,
+      runner,
+    });
+
+    const entryPath = daemonGlobalEntryPath(prefix, 'darwin');
+    expect(installResult).toMatchObject({
+      phase: 'activate-service',
+      installedVersion: '0.1.2',
+      commandAvailable: true,
+      serviceActivation: {
+        state: 'started',
+        command: entryPath,
+        args: ['install-service'],
+      },
+    });
+    expect(calls).toContainEqual({
+      command: entryPath,
+      args: ['install-service'],
+    });
+    expect(calls.findIndex(({ args }) => args[0] === 'install-service'))
+      .toBeGreaterThan(calls.findIndex(({ args }) => args[0] === '--version'));
+  });
+
+  it('keeps Linux installation successful when no service owner is supported', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'zterm-daemon-home-'));
+    const prefix = mkdtempSync(join(tmpdir(), 'zterm-daemon-prefix-'));
+    const stagingDir = join(homeDir, '.zterm', 'staging', 'daemon-install-linux');
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const linuxPayload = payloadManifest(undefined, { platform: 'linux', arch: 'x64' });
+    const runner: ProcessRunner = vi.fn(async (command, args) => {
+      calls.push({ command, args });
+      if (args[0] === 'install' && !args.includes('--global')) {
+        writeStagedPackages(stagingDir, { payloadManifest: linuxPayload });
+      }
+      if (args[0] === 'pack') {
+        return {
+          ...result(command, args),
+          stdout: `${join(stagingDir, 'jsonstudio-zterm-daemon-0.1.2.tgz')}\n`,
+        };
+      }
+      if (args[0] === 'install' && args.includes('--global')) {
+        writeGlobalPackages(prefix, { platform: 'linux', arch: 'x64' });
+      }
+      if (args[0] === '--version') {
+        return { ...result(command, args), stdout: '0.1.2\n' };
+      }
+      if (args[0] === 'install-service') {
+        return {
+          ...result(command, args),
+          exitCode: 2,
+          stderr: 'Linux service management is not provided by this payload runner\n',
+        };
+      }
+      return result(command, args);
+    });
+
+    const installResult = await installDaemon({
+      homeDir,
+      prefix,
+      platform: 'linux',
+      arch: 'x64',
+      nodeVersion: '22.22.2',
+      nodeAbi: '127',
+      stagingDir,
+      runner,
+    });
+
+    expect(installResult).toMatchObject({
+      phase: 'verify',
+      installedVersion: '0.1.2',
+      commandAvailable: true,
+      serviceActivation: {
+        state: 'skipped',
+        reason: 'platform_unsupported',
+      },
+    });
+    expect(installResult.error).toBeUndefined();
+    expect(calls.some(({ args }) => args[0] === 'install-service')).toBe(false);
+  });
+
+  it('preserves the service activation error after a successful macOS install', async () => {
+    const homeDir = mkdtempSync(join(tmpdir(), 'zterm-daemon-home-'));
+    const prefix = mkdtempSync(join(tmpdir(), 'zterm-daemon-prefix-'));
+    const stagingDir = join(homeDir, '.zterm', 'staging', 'daemon-install-service-error');
+    const runner: ProcessRunner = vi.fn(async (command, args) => {
+      if (args[0] === 'install' && !args.includes('--global')) {
+        writeStagedPackages(stagingDir);
+      }
+      if (args[0] === 'pack') {
+        return {
+          ...result(command, args),
+          stdout: `${join(stagingDir, 'jsonstudio-zterm-daemon-0.1.2.tgz')}\n`,
+        };
+      }
+      if (args[0] === 'install' && args.includes('--global')) {
+        writeGlobalPackages(prefix);
+      }
+      if (args[0] === '--version') {
+        return { ...result(command, args), stdout: '0.1.2\n' };
+      }
+      if (args[0] === 'install-service') {
+        return {
+          ...result(command, args),
+          exitCode: 1,
+          stderr: 'launchctl bootstrap failed\n',
+        };
+      }
+      return result(command, args);
+    });
+
+    const installResult = await installDaemon({
+      homeDir,
+      prefix,
+      platform: 'darwin',
+      arch: 'arm64',
+      nodeVersion: '22.22.2',
+      nodeAbi: '127',
+      stagingDir,
+      runner,
+    });
+
+    expect(installResult).toMatchObject({
+      phase: 'activate-service',
+      installedVersion: '0.1.2',
+      commandAvailable: true,
+      serviceActivation: { state: 'skipped' },
+      error: {
+        code: 'daemon_service_install_failed',
+        message: 'launchctl bootstrap failed',
+      },
+    });
+    expect(installResult.filesWritten).toContain(daemonPackageRoot(prefix, 'darwin'));
   });
 
   it('fails explicitly when the staged public package has no local payload', async () => {

@@ -559,6 +559,7 @@ function createScenario(baseRoot, name) {
     cache: join(root, 'npm-cache'),
     userConfig: join(root, 'npmrc'),
     outside: join(root, 'outside-source'),
+    shimBin: join(root, 'shim-bin'),
   };
   for (const directory of [
     scenario.home,
@@ -566,6 +567,7 @@ function createScenario(baseRoot, name) {
     scenario.cliPrefix,
     scenario.cache,
     scenario.outside,
+    scenario.shimBin,
   ]) {
     makeDirectory(directory);
   }
@@ -612,13 +614,18 @@ function writePrivateConfig(scenario) {
 }
 
 function scenarioEnvironment(scenario, registryUrl, prefix = scenario.prefix) {
-  return npmProjectEnvironment(
+  const env = npmProjectEnvironment(
     scenario.root,
     prefix,
     scenario.cache,
     scenario.userConfig,
     registryUrl,
   );
+  const pathSeparator = process.platform === 'win32' ? ';' : ':';
+  return {
+    ...env,
+    PATH: `${scenario.shimBin}${pathSeparator}${env.PATH}`,
+  };
 }
 
 async function installCli(scenario, registry, cliTarball) {
@@ -646,7 +653,7 @@ async function installCli(scenario, registry, cliTarball) {
   );
 }
 
-async function runInstalledCli(scenario, registry, args) {
+async function runInstalledCli(scenario, registry, args, environment = {}) {
   const invocation = formalCliInvocation(
     installedCliBin(scenario.cliPrefix),
     args,
@@ -655,9 +662,101 @@ async function runInstalledCli(scenario, registry, args) {
   return runProcess(invocation.command, invocation.args, {
     windowsVerbatimArguments: invocation.windowsVerbatimArguments,
     cwd: scenario.outside,
-    env: scenarioEnvironment(scenario, registry.url),
+    env: {
+      ...scenarioEnvironment(scenario, registry.url),
+      ...environment,
+    },
     timeoutMs: 180_000,
   });
+}
+
+function createServiceShim(scenario, failActivation) {
+  const marker = failActivation
+    ? 'ZTERM_BLACKBOX_SERVICE_SHIM_FAILURE_7d2e'
+    : 'ZTERM_BLACKBOX_SERVICE_SHIM_OK_9b6c';
+  const callLogPath = join(scenario.root, 'service-shim-calls.jsonl');
+  const realEntryPath = join(scenario.prefix, 'bin', 'zterm-daemon.blackbox-real');
+  const shimPath = join(scenario.shimBin, 'zterm-daemon');
+  rmSync(callLogPath, { force: true });
+  writeFileSync(
+    shimPath,
+    [
+      '#!/usr/bin/env node',
+      "'use strict';",
+      "const { spawnSync } = require('node:child_process');",
+      "const { writeFileSync } = require('node:fs');",
+      `const marker = ${JSON.stringify(marker)};`,
+      `const callLogPath = ${JSON.stringify(callLogPath)};`,
+      `const realEntryPath = ${JSON.stringify(realEntryPath)};`,
+      'const args = process.argv.slice(2);',
+      "if (args.length === 1 && args[0] === '--version') {",
+      '  const result = spawnSync(realEntryPath, args, { stdio: \'inherit\', env: process.env });',
+      '  if (result.error) {',
+      '    process.stderr.write(result.error.message + \'\\n\');',
+      '    process.exit(1);',
+      '  }',
+      '  process.exit(result.status === null ? 1 : result.status);',
+      '}',
+      "if (args.length === 1 && args[0] === 'install-service') {",
+      `  writeFileSync(callLogPath, JSON.stringify({ argv: args, cwd: process.cwd(), timestamp: new Date().toISOString(), marker }) + '\\n', { flag: 'a', mode: 0o600 });`,
+      ...(failActivation
+        ? [
+            '  process.stderr.write(marker + \'\\n\');',
+            '  process.exit(23);',
+          ]
+        : [
+            '  process.stdout.write(marker + \'\\n\');',
+            '  process.exit(0);',
+          ]),
+      '}',
+      "process.stderr.write('controlled zterm-daemon shim rejected argv: ' + JSON.stringify(args) + '\\n');",
+      'process.exit(64);',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  return { shimPath, callLogPath, realEntryPath, marker };
+}
+
+function createNpmEntryShim(scenario, serviceShim) {
+  const npmPath = join(scenario.shimBin, 'npm-cli.js');
+  const parentEnvironment = { ...process.env };
+  delete parentEnvironment.npm_execpath;
+  const npmInvocation = resolveNpmInvocation([], {
+    npmCommand: process.env.NPM_COMMAND || 'npm',
+    env: parentEnvironment,
+  });
+  writeFileSync(
+    npmPath,
+    [
+      '#!/usr/bin/env node',
+      "'use strict';",
+      "const { spawnSync } = require('node:child_process');",
+      "const { copyFileSync, renameSync } = require('node:fs');",
+      'const args = process.argv.slice(2);',
+      `const result = spawnSync(${JSON.stringify(npmInvocation.command)}, [...${JSON.stringify(npmInvocation.args)}, ...args], { stdio: 'inherit', env: process.env });`,
+      'if (result.error) {',
+      '  process.stderr.write(result.error.message + \'\\n\');',
+      '  process.exit(1);',
+      '}',
+      'if (result.status !== 0) process.exit(result.status === null ? 1 : result.status);',
+      "if (args[0] === 'install' && args.includes('--global')) {",
+      `  renameSync(${JSON.stringify(join(scenario.prefix, 'bin', 'zterm-daemon'))}, ${JSON.stringify(serviceShim.realEntryPath)});`,
+      `  copyFileSync(${JSON.stringify(serviceShim.shimPath)}, ${JSON.stringify(join(scenario.prefix, 'bin', 'zterm-daemon'))});`,
+      '}',
+      '',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  return npmPath;
+}
+
+function readServiceShimCalls(callLogPath) {
+  if (!existsSync(callLogPath)) return [];
+  return readFileSync(callLogPath, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 function daemonPrefixPackageRoot(prefix) {
@@ -898,7 +997,12 @@ function recordsWithReplacement(daemonRecords, replacement) {
   ));
 }
 
-async function runDaemonInstallStage(scenario, registry, version) {
+async function runDaemonInstallStage(
+  scenario,
+  registry,
+  version,
+  { noStart = false, environment = {} } = {},
+) {
   return runInstalledCli(scenario, registry, [
     'daemon',
     'install',
@@ -906,7 +1010,8 @@ async function runDaemonInstallStage(scenario, registry, version) {
     version,
     '--registry',
     registry.url,
-  ]);
+    ...(noStart ? ['--no-start'] : []),
+  ], environment);
 }
 
 async function withScenario(baseRoot, name, records, callback) {
@@ -936,7 +1041,12 @@ async function runPositiveStage(options, daemon, dependencyRecords, baseRoot) {
       ])];
       const serviceBefore = await readServiceSnapshot();
       await installCli(scenario, registry, options.cliTarball);
-      const install = await runDaemonInstallStage(scenario, registry, daemon.version);
+      const install = await runDaemonInstallStage(
+        scenario,
+        registry,
+        daemon.version,
+        { noStart: true },
+      );
       requireSuccess(install, 'zterm daemon install');
       const serviceAfter = await readServiceSnapshot();
       const serviceObserved = serviceBefore.available && serviceAfter.available;
@@ -966,10 +1076,8 @@ async function runPositiveStage(options, daemon, dependencyRecords, baseRoot) {
         );
       }
       assert(
-        !/\b(?:daemon|service)\s+(?:started|running)\b/iu.test(
-          `${install.stdout}\n${install.stderr}`,
-        ),
-        'daemon install output incorrectly reported a daemon/service start',
+        /未启动 autostart 服务/u.test(`${install.stdout}\n${install.stderr}`),
+        'daemon install --no-start did not report the skipped autostart service',
       );
       return {
         status: 'passed',
@@ -993,6 +1101,97 @@ async function runPositiveStage(options, daemon, dependencyRecords, baseRoot) {
           stdout: configResult.stdout.trim(),
           stderr: configResult.stderr.trim(),
         },
+      };
+    },
+  );
+}
+
+async function runDefaultActivationStage({
+  baseRoot,
+  name,
+  daemon,
+  dependencyRecords,
+  cliTarball,
+  failActivation,
+}) {
+  return withScenario(
+    baseRoot,
+    name,
+    [...daemon.packages, ...dependencyRecords],
+    async (scenario, registry) => {
+      const config = writePrivateConfig(scenario);
+      const serviceBefore = await readServiceSnapshot();
+      await installCli(scenario, registry, cliTarball);
+      const serviceShim = createServiceShim(scenario, failActivation);
+      const npmEntry = createNpmEntryShim(scenario, serviceShim);
+      const install = await runDaemonInstallStage(
+        scenario,
+        registry,
+        daemon.version,
+        { environment: { npm_execpath: npmEntry } },
+      );
+      const serviceAfter = await readServiceSnapshot();
+      const calls = readServiceShimCalls(serviceShim.callLogPath);
+      const stage = stageSnapshot(scenario);
+      const installed = installedSnapshot(scenario);
+      const output = `${install.stdout}\n${install.stderr}`;
+      assert(
+        JSON.stringify(serviceBefore) === JSON.stringify(serviceAfter),
+        `${name} changed the pre-existing user service state`,
+      );
+      assert(
+        readFileSync(config.path, 'utf8') === config.body,
+        `${name} changed shared config bytes`,
+      );
+      assert(stage.visible, `${name} left no visible installer stage`);
+      assert(installed.publicPackagePresent, `${name} lost the installed public package`);
+      assert(installed.payloadPresent, `${name} lost the installed target payload`);
+      assert(installed.entryPresent, `${name} lost the installed daemon entry`);
+      if (failActivation) {
+        assert(
+          install.exitCode !== 0 || install.signal || install.error,
+          `${name} unexpectedly succeeded`,
+        );
+        assert(
+          install.stderr.includes(serviceShim.marker),
+          `${name} did not preserve the service shim stderr marker`,
+        );
+      } else {
+        requireSuccess(install, name);
+        assert(
+          install.stdout.includes('autostart 服务已启动'),
+          `${name} did not report successful autostart activation`,
+        );
+        assert(
+          !output.includes(serviceShim.marker),
+          `${name} leaked controlled service shim output into CLI output`,
+        );
+      }
+      assert(
+        calls.length === 1,
+        `${name} expected one install-service call, found ${calls.length}`,
+      );
+      assert(
+        JSON.stringify(calls[0].argv) === JSON.stringify(['install-service']),
+        `${name} recorded unexpected service argv: ${JSON.stringify(calls[0].argv)}`,
+      );
+      return {
+        status: 'passed',
+        exitCode: install.exitCode,
+        signal: install.signal,
+        stdout: install.stdout.trim(),
+        stderr: install.stderr.trim(),
+        activationReported: !failActivation,
+        failureMarkerPreserved: failActivation,
+        serviceShim: {
+          callCount: calls.length,
+          call: calls[0],
+          marker: serviceShim.marker,
+        },
+        stage,
+        installed,
+        configBytesPreserved: true,
+        serviceStateUnchanged: serviceBefore.available && serviceAfter.available,
       };
     },
   );
@@ -1127,6 +1326,33 @@ async function main() {
       dependencyRecords,
       baseRoot,
     );
+    if (process.platform === 'darwin') {
+      summary.stages['default-activation'] = await runDefaultActivationStage({
+        baseRoot,
+        name: 'default-activation',
+        daemon,
+        dependencyRecords,
+        cliTarball: options.cliTarball,
+        failActivation: false,
+      });
+      summary.stages['default-activation-failure'] = await runDefaultActivationStage({
+        baseRoot,
+        name: 'default-activation-failure',
+        daemon,
+        dependencyRecords,
+        cliTarball: options.cliTarball,
+        failActivation: true,
+      });
+    } else {
+      summary.stages['default-activation'] = {
+        status: 'not_executed',
+        reason: 'macOS-only activation shim',
+      };
+      summary.stages['default-activation-failure'] = {
+        status: 'not_executed',
+        reason: 'macOS-only activation shim',
+      };
+    }
 
     summary.stages['registry-error'] = await runNegativeStage({
       baseRoot,

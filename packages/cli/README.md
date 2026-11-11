@@ -570,6 +570,7 @@ the previous entry is still healthy.
 
 ```sh
 zterm daemon install
+zterm daemon install --no-start
 zterm daemon status
 zterm daemon config
 zterm daemon config tmux set <name> --socket <path>
@@ -603,12 +604,19 @@ Installs the `@jsonstudio/zterm-daemon` package that matches the current host
 platform manifest. Installation uses a temporary staging prefix, verifies the
 package and runtime components, installs the staged tarball into the same npm
 global prefix, and asks the package-owned shim installer to publish the user
-command.
+command. On macOS, after entry verification, it activates the installed
+autostart service through the formal `zterm-daemon install-service` owner.
+Linux and Windows have no verified formal service owner yet, so installation
+succeeds and reports service activation as unsupported.
+
+Use `--no-start` to install the package without activating the service. In
+that mode the command prints `未启动 autostart 服务`. The normal macOS activation
+path prints `autostart 服务已启动`; an unsupported platform prints the explicit
+unsupported message instead.
 
 This command does not:
 
-- start, stop, or restart the daemon
-- install an autostart service
+- stop or restart an already running daemon
 - write `~/.zterm/config.json`
 - execute package lifecycle scripts during staging
 
