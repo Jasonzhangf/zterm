@@ -62,7 +62,10 @@ export function renderTicketList({
     }
   }
 
-  const filters = [FILTER_ALL, 'open', 'in_progress', 'review', 'done', 'blocked'];
+  // The daemon ticket contract only accepts all/open/closed. These chips are a
+  // status projection on the already-filtered list and must not expose statuses
+  // that the daemon rejects or that would always project to an empty list.
+  const filters = [FILTER_ALL, 'open', 'closed'];
   const filterChipsHtml = filters.map((f) => {
     const active = f === (activeStatusFilter || FILTER_ALL);
     return `<button type="button" class="v2-ticket-filter" data-action="filter-tickets" data-filter="${escapeHtml(f)}" data-active="${active}">${escapeHtml(f)}</button>`;

@@ -342,6 +342,22 @@ test('renderSessionFocusView renders one focused window and explicit controls', 
   assert.strictEqual(result.model.total, 3);
 });
 
+test('focus view forwards the real header width so mobile layout matches the rendered frame', () => {
+  const layout = createDefaultSessionLayout({ members: ['m1', 'm2'] });
+  const focused = enterMemberFocus(layout, 'm1');
+  const rendered = [];
+  renderSessionFocusView({
+    layout: focused,
+    renderFrame: (props) => {
+      rendered.push(props);
+      return { html: '<section class="v2-window-frame"></section>' };
+    },
+    availableWidth: 372,
+  });
+  assert.strictEqual(rendered.length, 1);
+  assert.strictEqual(rendered[0].availableWidth, 372);
+});
+
 test('workspace quick switch keeps active pill and overflows the rest', () => {
   const workspaces = ['ws1', 'ws2', 'ws3', 'ws4', 'ws5'].map((workspaceId) => ({ workspaceId, name: workspaceId.toUpperCase() }));
   const result = renderWorkspaceQuickSwitch({

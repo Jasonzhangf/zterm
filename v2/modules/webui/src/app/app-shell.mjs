@@ -40,6 +40,11 @@ import { renderSessionsPage } from '../pages/sessions/index.mjs'
 import { renderBoardPage } from '../pages/board/index.mjs'
 import { renderTicketsPage } from '../pages/tickets/index.mjs'
 
+// The daemon ticket contract accepts only all/open/closed. The WebUI must not
+// dispatch any other status, even if a stale control or programmatic caller
+// supplies one. Unsupported values are ignored before touching state or wire.
+const SUPPORTED_TICKET_FILTERS = Object.freeze(['all', 'open', 'closed'])
+
 function esc(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -1819,8 +1824,10 @@ export function createWebUIApp({
       case 'filter-tickets': {
         const targetWsId = detail.workspaceId || state.activeWorkspaceId
         if (!targetWsId) return app
+        const requestedFilter = detail.filter || detail.status || 'all'
+        if (!SUPPORTED_TICKET_FILTERS.includes(requestedFilter)) return app
         const entry = ensureWorkspaceEntry(targetWsId)
-        entry.activeTicketFilter = detail.filter || detail.status || 'all'
+        entry.activeTicketFilter = requestedFilter
         if (state.activeWorkspaceId === targetWsId) {
           state.activeTicketFilter = entry.activeTicketFilter
         }

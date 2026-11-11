@@ -191,11 +191,11 @@ test('per-workspace Board and Tickets isolate queries, filters, creation, and tr
   assert.equal(created.ticket.workspaceId, 'ws-beta')
   assert.equal(ports.daemonApi.calls.createTicket.at(-1).workspaceId, 'ws-beta')
 
-  await app.dispatchAction('filter-tickets', { workspaceId: 'ws-beta', filter: 'blocked' })
+  await app.dispatchAction('filter-tickets', { workspaceId: 'ws-beta', filter: 'open' })
   assert.equal(ports.daemonApi.calls.listTickets.at(-1).workspaceId, 'ws-beta')
-  assert.equal(ports.daemonApi.calls.listTickets.at(-1).status, 'blocked')
+  assert.equal(ports.daemonApi.calls.listTickets.at(-1).status, 'open')
   ticketsPage = app.renderPage()
-  assert.ok(ticketsPage.html.includes('T-202'))
+  assert.ok(ticketsPage.html.includes('T-201'))
 
   // Switch back to ws-alpha: ws-alpha tickets are untouched and filter is independent
   await app.dispatchAction('select-workspace', { workspaceId: 'ws-alpha' })

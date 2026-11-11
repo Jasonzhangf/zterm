@@ -10,9 +10,6 @@ function esc(value) {
 const TICKET_FILTERS = Object.freeze([
   { id: 'all', label: '全部' },
   { id: 'open', label: '待处理' },
-  { id: 'in-progress', label: '进行中' },
-  { id: 'blocked', label: '阻塞' },
-  { id: 'review', label: '待审查' },
   { id: 'closed', label: '已关闭' },
 ])
 
