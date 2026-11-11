@@ -189,11 +189,13 @@ export function createSessionController({
 
     let workspace
     let members
+    let groups
 
     try {
       const workspaceSnapshot = await daemonApi.getWorkspaceSnapshot({ workspaceId })
       workspace = workspaceSnapshot.workspace
       members = workspaceSnapshot.members
+      groups = workspaceSnapshot.groups
     } catch (error) {
       if (isAuthError(error)) {
         setWorkspaceLoadable(null, error)
@@ -224,7 +226,12 @@ export function createSessionController({
 
     layout.members = memberArray
     layoutByWorkspace.set(workspaceId, layout)
-    setWorkspaceLoadable({ workspace, members: memberArray, layout })
+    setWorkspaceLoadable({
+      workspace,
+      members: memberArray,
+      groups: Array.isArray(groups) ? groups : [],
+      layout,
+    })
 
     return snapshot()
   }

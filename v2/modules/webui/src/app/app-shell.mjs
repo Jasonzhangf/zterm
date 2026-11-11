@@ -83,6 +83,22 @@ function preserveWorkTrackingError(error, fallbackCode) {
   return typed
 }
 
+function preserveLocalGroupError(error, fallbackCode) {
+  const typed = normalizeTypedError(error, fallbackCode)
+  if (!error || typeof error !== 'object') return typed
+  for (const field of [
+    'status',
+    'cause',
+    'details',
+    'owningModule',
+    'operationId',
+    'retryDisposition',
+  ]) {
+    if (error[field] !== undefined) typed[field] = error[field]
+  }
+  return typed
+}
+
 function retainWorkTrackingOperation(entry, {
   operation = null,
   operationId,
@@ -377,6 +393,7 @@ export function createWebUIApp({
         transitionError: null,
         transitionPending: false,
         members: [],
+        groups: [],
         membersLoadable: loadingLoadable(),
         goalsLoadable: loadingLoadable(),
         ticketsLoadable: loadingLoadable(),
@@ -391,6 +408,12 @@ export function createWebUIApp({
         activeTicketFilter: 'all',
         openPropertyByWindow: {},
         overflowOpenByWindow: {},
+        machineFilter: '',
+        localGroupResults: {},
+        localGroupMemberResults: {},
+        localGroupPending: { group: false, member: false },
+        localGroupPendingByMemberId: {},
+        localGroupScopeEpoch: 0,
         receipts: [],
         transfers: [],
         requestSeq: 0,
@@ -414,6 +437,7 @@ export function createWebUIApp({
     explicitRequestedWorkspaceId: parsedInitial.explicitWorkspace ? parsedInitial.workspaceId : (initialWorkspaceId ?? null),
     workspaceScopeError: null,
     members: [],
+    groups: [],
     membersLoadable: loadingLoadable(),
     connectionsLoadable: loadingLoadable(),
     layout: null,
@@ -437,6 +461,11 @@ export function createWebUIApp({
     overflowOpenByWindow: {},
     workspaceOverflowOpen: false,
     propertyLoading: false,
+    machineFilter: '',
+    localGroupResults: {},
+    localGroupMemberResults: {},
+    localGroupPending: { group: false, member: false },
+    localGroupPendingByMemberId: {},
     workspaceDataById,
     mountedRoot: null,
     document: null,
@@ -486,6 +515,7 @@ export function createWebUIApp({
     if (!wsId) {
       state.workspaceScopeError = null
       state.members = []
+      state.groups = []
       state.layout = null
       state.selectedMemberId = null
       state.ownerMemberSelected = false
@@ -498,6 +528,11 @@ export function createWebUIApp({
       state.workTrackingOperations = []
       state.openPropertyByWindow = {}
       state.overflowOpenByWindow = {}
+      state.machineFilter = ''
+      state.localGroupResults = {}
+      state.localGroupMemberResults = {}
+      state.localGroupPending = { group: false, member: false }
+      state.localGroupPendingByMemberId = {}
       state.receipts = []
       state.transfers = []
       if (state.workspacesLoadable.status === 'unavailable') {
@@ -521,6 +556,7 @@ export function createWebUIApp({
     state.transitionError = entry.transitionError
     state.transitionPending = entry.transitionPending
     state.members = entry.members
+    state.groups = entry.groups
     state.membersLoadable = entry.membersLoadable
     state.goalsLoadable = entry.goalsLoadable
     state.ticketsLoadable = entry.ticketsLoadable
@@ -537,6 +573,11 @@ export function createWebUIApp({
     state.activeTicketFilter = entry.activeTicketFilter || 'all'
     state.openPropertyByWindow = entry.openPropertyByWindow
     state.overflowOpenByWindow = entry.overflowOpenByWindow
+    state.machineFilter = entry.machineFilter
+    state.localGroupResults = entry.localGroupResults
+    state.localGroupMemberResults = entry.localGroupMemberResults
+    state.localGroupPending = entry.localGroupPending
+    state.localGroupPendingByMemberId = entry.localGroupPendingByMemberId
     state.receipts = entry.receipts
     state.transfers = entry.transfers
   }
@@ -711,6 +752,12 @@ export function createWebUIApp({
         ...state,
         workspacesLoadable: state.workspacesLoadable,
         membersLoadable: state.membersLoadable,
+        groups: state.groups,
+        machineFilter: state.machineFilter,
+        localGroupResults: state.localGroupResults,
+        localGroupMemberResults: state.localGroupMemberResults,
+        localGroupPending: state.localGroupPending,
+        localGroupPendingByMemberId: state.localGroupPendingByMemberId,
       }, helpers)
     }
     if (state.activeRoute === 'board') {
@@ -1120,7 +1167,82 @@ export function createWebUIApp({
     }
   }
 
+  function isSameLocalGroupScope(entry, scope) {
+    return (
+      String(entry.workspaceId) === scope.workspaceId
+      && Number(entry.localGroupScopeEpoch) === scope.epoch
+      && String(entry.selectedMemberId ?? '') === scope.memberId
+    )
+  }
+
+  function makeLocalGroupScope(entry, memberId) {
+    return {
+      workspaceId: String(entry.workspaceId),
+      epoch: Number(entry.localGroupScopeEpoch),
+      memberId: String(memberId ?? entry.selectedMemberId ?? ''),
+    }
+  }
+
+  function setMemberLocalGroupPending(entry, memberId, operation, pending) {
+    if (!memberId) return
+    entry.localGroupPendingByMemberId = {
+      ...entry.localGroupPendingByMemberId,
+      [memberId]: {
+        ...entry.localGroupPendingByMemberId[memberId],
+        [operation]: pending === true,
+      },
+    }
+  }
+
+  async function loadMemberRuntimeProjection(workspaceId, memberId) {
+    if (!daemonApi || typeof daemonApi.getMemberRuntime !== 'function') return null
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const requestSeq = entry.requestSeq
+    const scope = makeLocalGroupScope(entry, memberId)
+    let runtimeProjection
+    try {
+      runtimeProjection = await daemonApi.getMemberRuntime({ workspaceId, memberId })
+    } catch {
+      // A missing projection blocks typed bind/verify operations but does not
+      // replace the last authoritative workspace snapshot.
+      return null
+    }
+    if (
+      entry.requestSeq !== requestSeq
+      || !isSameLocalGroupScope(entry, scope)
+      || state.activeWorkspaceId !== workspaceId
+    ) {
+      return null
+    }
+
+    const memberIndex = entry.members.findIndex((item) => item.memberId === memberId)
+    if (memberIndex === -1) return null
+    const current = entry.members[memberIndex]
+    const projectedMember = runtimeProjection.member || current
+    const updatedMember = {
+      ...current,
+      ...projectedMember,
+      groupId: projectedMember.groupId ?? current.groupId,
+      runtime: runtimeProjection.runtime ?? null,
+      binding: runtimeProjection.binding ?? null,
+      availability: runtimeProjection.availability ?? current.availability ?? null,
+      bindingGeneration: runtimeProjection.bindingGeneration,
+      agentCapabilities: runtimeProjection.agentCapabilities ?? current.agentCapabilities,
+    }
+    const members = entry.members.map((item) => (item.memberId === memberId ? updatedMember : item))
+    entry.members = members
+    if (entry.membersLoadable.status === 'ready') {
+      entry.membersLoadable = { ...entry.membersLoadable, value: members }
+    }
+    syncActiveWorkspaceProjection()
+    notify()
+    render()
+    return updatedMember
+  }
+
   async function loadWorkspace(workspaceId) {
+    const previousWorkspaceId = state.activeWorkspaceId
+    const scopeChanged = String(workspaceId || '') !== String(previousWorkspaceId || '')
     state.activeWorkspaceId = workspaceId || null
     state.workspaceOverflowOpen = false
     state.mobileNavOpen = false
@@ -1137,6 +1259,9 @@ export function createWebUIApp({
     }
 
     const entry = ensureWorkspaceEntry(workspaceId)
+    if (scopeChanged) {
+      entry.localGroupScopeEpoch = Number(entry.localGroupScopeEpoch || 0) + 1
+    }
     const seq = ++entry.requestSeq
     entry.workspaceScopeError = null
     entry.lastError = entry.transitionError || null
@@ -1187,12 +1312,28 @@ export function createWebUIApp({
 
     const value = loadable.value || {}
     entry.workspace = value.workspace || state.workspaces.find((ws) => ws.workspaceId === workspaceId) || null
+    if (entry.workspace) {
+      state.workspaces = state.workspaces.map((workspace) => (
+        String(workspace.workspaceId) === String(workspaceId)
+          ? { ...workspace, ...entry.workspace }
+          : workspace
+      ))
+      state.workspacesLoadable = {
+        ...state.workspacesLoadable,
+        value: state.workspaces,
+        observedAt: nowIso(),
+        freshness: 'fresh',
+        error: null,
+      }
+    }
     entry.members = value.members || []
+    entry.groups = Array.isArray(value.groups) ? value.groups : entry.groups
     entry.layout = value.layout || entry.layout
     entry.membersLoadable = { status: 'ready', value: entry.members, observedAt: nowIso(), freshness: 'fresh', error: null }
     entry.selectedMemberId = entry.selectedMemberId || entry.members[0]?.memberId || null
 
-    if (state.activeWorkspaceId === workspaceId) {
+    if (state.activeWorkspaceId === workspaceId && entry.selectedMemberId) {
+      await loadMemberRuntimeProjection(workspaceId, entry.selectedMemberId)
       syncActiveWorkspaceProjection()
       notify()
       render()
@@ -1795,6 +1936,416 @@ export function createWebUIApp({
     }
   }
 
+  function localGroupScopeChanged(entry, scope) {
+    return (
+      state.activeWorkspaceId !== scope.workspaceId
+      || Number(entry.localGroupScopeEpoch) !== scope.epoch
+      || (scope.memberId !== null && String(entry.selectedMemberId ?? '') !== scope.memberId)
+    )
+  }
+
+  function setWorkspaceLocalGroupResult(entry, operation, result) {
+    entry.localGroupResults = { ...entry.localGroupResults, [operation]: result }
+  }
+
+  function setMemberLocalGroupResult(entry, memberId, result) {
+    entry.localGroupMemberResults = {
+      ...entry.localGroupMemberResults,
+      [memberId]: result,
+    }
+  }
+
+  function organizationRevision(entry) {
+    const revision = Number(entry.workspace?.revision)
+    return Number.isInteger(revision) ? revision : null
+  }
+
+  async function createLocalGroupGroup(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.createGroup !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Group creation port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const scope = { workspaceId: String(workspaceId), epoch: Number(entry.localGroupScopeEpoch), memberId: null }
+    entry.localGroupPending = { ...entry.localGroupPending, group: true }
+    syncActiveWorkspaceProjection()
+    render()
+
+    try {
+      const expectedRevision = organizationRevision(entry)
+      if (!Number.isInteger(expectedRevision)) {
+        throw normalizeTypedError({
+          code: 'ORGANIZATION_REVISION_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative organization revision is not loaded.',
+          retryable: false,
+        }, 'ORGANIZATION_REVISION_UNAVAILABLE')
+      }
+      const receipt = await daemonApi.createGroup({
+        workspaceId,
+        name: detail.name,
+        parentGroupId: detail.parentGroupId ?? detail.groupParentId ?? null,
+        expectedRevision,
+      })
+      if (!receipt || typeof receipt !== 'object' || !receipt.groupId) {
+        throw normalizeTypedError({
+          code: 'GROUP_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Group creation did not return a stable group receipt.',
+          retryable: false,
+        }, 'GROUP_RESPONSE_INVALID')
+      }
+      if (!localGroupScopeChanged(entry, scope)) {
+        setWorkspaceLocalGroupResult(entry, 'group', { status: 'success', message: 'Group created.' })
+        await loadWorkspace(workspaceId)
+      }
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'GROUP_CREATION_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setWorkspaceLocalGroupResult(entry, 'group', {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      entry.localGroupPending = { ...entry.localGroupPending, group: false }
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
+  async function createLocalGroupMember(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.createMember !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Member creation port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const scope = { workspaceId: String(workspaceId), epoch: Number(entry.localGroupScopeEpoch), memberId: null }
+    entry.localGroupPending = { ...entry.localGroupPending, member: true }
+    syncActiveWorkspaceProjection()
+    render()
+
+    try {
+      const expectedRevision = organizationRevision(entry)
+      if (!Number.isInteger(expectedRevision)) {
+        throw normalizeTypedError({
+          code: 'ORGANIZATION_REVISION_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative organization revision is not loaded.',
+          retryable: false,
+        }, 'ORGANIZATION_REVISION_UNAVAILABLE')
+      }
+      const receipt = await daemonApi.createMember({
+        workspaceId,
+        groupId: detail.groupId || detail.memberGroupId,
+        name: detail.name,
+        expectedRevision,
+      })
+      if (!receipt || typeof receipt !== 'object' || !receipt.memberId) {
+        throw normalizeTypedError({
+          code: 'MEMBER_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Member creation did not return a stable member receipt.',
+          retryable: false,
+        }, 'MEMBER_RESPONSE_INVALID')
+      }
+      if (!localGroupScopeChanged(entry, scope)) {
+        setWorkspaceLocalGroupResult(entry, 'member', { status: 'success', message: 'Member created.' })
+        await loadWorkspace(workspaceId)
+      }
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'MEMBER_CREATION_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setWorkspaceLocalGroupResult(entry, 'member', {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      entry.localGroupPending = { ...entry.localGroupPending, member: false }
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
+  async function configureMemberRuntime(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.configureMemberRuntime !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Runtime configuration port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const memberId = detail.memberId || entry.selectedMemberId
+    if (!memberId) {
+      return { ok: false, error: normalizeTypedError({
+        code: 'MEMBER_SELECTION_REQUIRED',
+        category: 'validation',
+        message: 'Select a member before configuring its runtime.',
+        retryable: false,
+      }, 'MEMBER_SELECTION_REQUIRED') }
+    }
+
+    const scope = makeLocalGroupScope(entry, memberId)
+    setMemberLocalGroupPending(entry, memberId, 'runtime', true)
+    syncActiveWorkspaceProjection()
+    notify()
+    render()
+
+    try {
+      const receipt = await daemonApi.configureMemberRuntime({
+        workspaceId,
+        memberId,
+        machineId: detail.machineId,
+        hostKind: detail.hostKind,
+        agentKind: detail.agentKind,
+        launchProfileRef: detail.launchProfileRef,
+      })
+      if (!receipt || typeof receipt !== 'object' || receipt.memberId !== memberId) {
+        throw normalizeTypedError({
+          code: 'RUNTIME_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Runtime configuration did not return the selected member receipt.',
+          retryable: false,
+        }, 'RUNTIME_RESPONSE_INVALID')
+      }
+      if (!localGroupScopeChanged(entry, scope)) {
+        setMemberLocalGroupResult(entry, memberId, { status: 'success', message: 'Runtime configured.' })
+        await loadWorkspace(workspaceId)
+      }
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'RUNTIME_CONFIGURATION_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setMemberLocalGroupResult(entry, memberId, {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      setMemberLocalGroupPending(entry, memberId, 'runtime', false)
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
+  async function bindMemberSession(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.bindMemberSession !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Session binding port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const memberId = detail.memberId || entry.selectedMemberId
+    if (!memberId) {
+      return { ok: false, error: normalizeTypedError({
+        code: 'MEMBER_SELECTION_REQUIRED',
+        category: 'validation',
+        message: 'Select a member before binding a session.',
+        retryable: false,
+      }, 'MEMBER_SELECTION_REQUIRED') }
+    }
+
+    const scope = makeLocalGroupScope(entry, memberId)
+    setMemberLocalGroupPending(entry, memberId, 'binding', true)
+    syncActiveWorkspaceProjection()
+    notify()
+    render()
+
+    try {
+      const sessionId = String(detail.sessionId ?? '').trim()
+      const anchor = String(detail.anchor ?? '').trim()
+      if (sessionId === '' || anchor === '') {
+        throw normalizeTypedError({
+          code: 'BINDING_TARGET_REQUIRED',
+          category: 'validation',
+          message: 'Session ID and pane anchor are required.',
+          retryable: false,
+        }, 'BINDING_TARGET_REQUIRED')
+      }
+
+      const projection = await loadMemberRuntimeProjection(workspaceId, memberId)
+      if (localGroupScopeChanged(entry, scope)) {
+        return { ok: false, error: normalizeTypedError({
+          code: 'LOCAL_GROUP_SCOPE_CHANGED',
+          category: 'validation',
+          message: 'The selected workspace or member changed during this request.',
+          retryable: false,
+        }, 'LOCAL_GROUP_SCOPE_CHANGED') }
+      }
+      const expectedGeneration = projection?.bindingGeneration
+      if (!Number.isInteger(expectedGeneration)) {
+        throw normalizeTypedError({
+          code: 'BINDING_GENERATION_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative binding generation is not loaded.',
+          retryable: false,
+        }, 'BINDING_GENERATION_UNAVAILABLE')
+      }
+      const receipt = await daemonApi.bindMemberSession({
+        workspaceId,
+        memberId,
+        sessionId,
+        anchor,
+        expectedGeneration,
+        ...(detail.terminalTarget !== undefined ? { terminalTarget: detail.terminalTarget } : {}),
+      })
+      if (!receipt || typeof receipt !== 'object' || receipt.memberId !== memberId) {
+        throw normalizeTypedError({
+          code: 'BINDING_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Session binding did not return the selected member receipt.',
+          retryable: false,
+        }, 'BINDING_RESPONSE_INVALID')
+      }
+      setMemberLocalGroupResult(entry, memberId, { status: 'success', message: 'Session bound.' })
+      await loadWorkspace(workspaceId)
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'SESSION_BINDING_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setMemberLocalGroupResult(entry, memberId, {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      setMemberLocalGroupPending(entry, memberId, 'binding', false)
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
+  async function restoreMemberBinding(detail = {}) {
+    const workspaceId = detail.workspaceId || state.activeWorkspaceId
+    if (!workspaceId) {
+      return { ok: false, error: workspaceSelectionRequiredError() }
+    }
+    if (!daemonApi || typeof daemonApi.restoreMemberBinding !== 'function') {
+      return { ok: false, error: daemonUnavailableError('Binding verification port is not configured.') }
+    }
+
+    const entry = ensureWorkspaceEntry(workspaceId)
+    const memberId = detail.memberId || entry.selectedMemberId
+    if (!memberId) {
+      return { ok: false, error: normalizeTypedError({
+        code: 'MEMBER_SELECTION_REQUIRED',
+        category: 'validation',
+        message: 'Select a member before verifying its saved binding.',
+        retryable: false,
+      }, 'MEMBER_SELECTION_REQUIRED') }
+    }
+
+    const scope = makeLocalGroupScope(entry, memberId)
+    setMemberLocalGroupPending(entry, memberId, 'restore', true)
+    syncActiveWorkspaceProjection()
+    notify()
+    render()
+
+    try {
+      const projection = await loadMemberRuntimeProjection(workspaceId, memberId)
+      if (localGroupScopeChanged(entry, scope)) {
+        return { ok: false, error: normalizeTypedError({
+          code: 'LOCAL_GROUP_SCOPE_CHANGED',
+          category: 'validation',
+          message: 'The selected workspace or member changed during this request.',
+          retryable: false,
+        }, 'LOCAL_GROUP_SCOPE_CHANGED') }
+      }
+      if (!projection || !Number.isInteger(projection.bindingGeneration)) {
+        throw normalizeTypedError({
+          code: 'BINDING_GENERATION_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative binding generation is not loaded.',
+          retryable: false,
+        }, 'BINDING_GENERATION_UNAVAILABLE')
+      }
+      const machineId = projection.runtime?.machineId
+      if (typeof machineId !== 'string' || machineId === '') {
+        throw normalizeTypedError({
+          code: 'BINDING_MACHINE_UNAVAILABLE',
+          category: 'validation',
+          message: 'The authoritative runtime machine is not loaded.',
+          retryable: false,
+        }, 'BINDING_MACHINE_UNAVAILABLE')
+      }
+      const receipt = await daemonApi.restoreMemberBinding({
+        workspaceId,
+        memberId,
+        machineId,
+        expectedGeneration: projection.bindingGeneration,
+      })
+      if (!receipt || typeof receipt !== 'object' || receipt.restored !== true) {
+        throw normalizeTypedError({
+          code: 'RESTORE_RESPONSE_INVALID',
+          category: 'protocol',
+          message: 'Binding verification did not return a verification receipt.',
+          retryable: false,
+        }, 'RESTORE_RESPONSE_INVALID')
+      }
+      setMemberLocalGroupResult(entry, memberId, { status: 'success', message: 'Binding verified.' })
+      await loadWorkspace(workspaceId)
+      return { ok: true, receipt }
+    } catch (error) {
+      const typed = preserveLocalGroupError(error, 'BINDING_VERIFICATION_FAILED')
+      if (!localGroupScopeChanged(entry, scope)) {
+        setMemberLocalGroupResult(entry, memberId, {
+          status: 'error',
+          message: typed.message,
+          error: typed,
+        })
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    } finally {
+      setMemberLocalGroupPending(entry, memberId, 'restore', false)
+      syncActiveWorkspaceProjection()
+      notify()
+      render()
+    }
+  }
+
   async function dispatchAction(action, detail = {}) {
     switch (action) {
       case 'navigate':
@@ -1850,6 +2401,60 @@ export function createWebUIApp({
         await navigate('tickets', { workspaceId: targetWsId })
         return app
       }
+      case 'create-group':
+      case 'create-local-group':
+        return createLocalGroupGroup({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+        })
+      case 'create-member':
+      case 'create-local-member':
+        return createLocalGroupMember({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+        })
+      case 'configure-member-runtime':
+      case 'configure-runtime':
+        return configureMemberRuntime({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          memberId: detail.memberId || state.selectedMemberId,
+        })
+      case 'bind-member-session':
+      case 'bind-session':
+        return bindMemberSession({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          memberId: detail.memberId || state.selectedMemberId,
+        })
+      case 'restore-member-binding':
+      case 'verify-member-binding':
+        return restoreMemberBinding({
+          ...detail,
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          memberId: detail.memberId || state.selectedMemberId,
+        })
+      case 'filter-members-by-machine': {
+        const filter = String(detail.machineId ?? detail.value ?? '')
+        state.machineFilter = filter
+        if (state.activeWorkspaceId) {
+          ensureWorkspaceEntry(state.activeWorkspaceId).machineFilter = filter
+        }
+        syncActiveWorkspaceProjection()
+        render()
+        return app
+      }
+      case 'start-agent':
+      case 'resume-agent':
+        return {
+          ok: false,
+          error: normalizeTypedError({
+            code: action === 'start-agent' ? 'AGENT_START_UNSUPPORTED' : 'AGENT_RESUME_UNSUPPORTED',
+            category: 'unsupported',
+            message: 'Agent start and resume are not supported by this daemon composition.',
+            retryable: false,
+          }, action === 'start-agent' ? 'AGENT_START_UNSUPPORTED' : 'AGENT_RESUME_UNSUPPORTED'),
+        }
       case 'create-goal':
       case 'create-workspace-goal':
         return createWorkspaceGoal({
@@ -1885,6 +2490,32 @@ export function createWebUIApp({
         return app
       case 'save-properties':
       case 'submit-form': {
+        if (detail.formId === 'workspace-group-create-form') {
+          return createLocalGroupGroup({
+            ...detail,
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          })
+        }
+        if (detail.formId === 'workspace-member-create-form') {
+          return createLocalGroupMember({
+            ...detail,
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          })
+        }
+        if (detail.formId === 'workspace-runtime-form') {
+          return configureMemberRuntime({
+            ...detail,
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+            memberId: detail.memberId || state.selectedMemberId,
+          })
+        }
+        if (detail.formId === 'workspace-binding-form') {
+          return bindMemberSession({
+            ...detail,
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+            memberId: detail.memberId || state.selectedMemberId,
+          })
+        }
         if (detail.formId === 'ticket-report-form') {
           return createOrReportTicket({
             workspaceId: detail.workspaceId || state.activeWorkspaceId,
@@ -2014,12 +2645,21 @@ export function createWebUIApp({
         return sendMessage(detail.memberId || detail.recipientMemberId, detail.body || '', { workspaceId: detail.workspaceId || state.activeWorkspaceId })
       case 'select-member':
       case 'toggle-member':
+        if (state.activeWorkspaceId) {
+          const entry = ensureWorkspaceEntry(state.activeWorkspaceId)
+          if (String(entry.selectedMemberId ?? '') !== String(detail.memberId ?? '')) {
+            entry.localGroupScopeEpoch = Number(entry.localGroupScopeEpoch || 0) + 1
+          }
+        }
         state.selectedMemberId = detail.memberId
         state.ownerMemberSelected = true
         if (state.activeWorkspaceId) {
           const entry = ensureWorkspaceEntry(state.activeWorkspaceId)
           entry.selectedMemberId = detail.memberId
           entry.ownerMemberSelected = true
+          if (detail.memberId) {
+            await loadMemberRuntimeProjection(state.activeWorkspaceId, detail.memberId)
+          }
           if (state.activeRoute === 'board') {
             const seq = ++entry.requestSeq
             await loadWorkspaceScopedResources(state.activeWorkspaceId, seq)
@@ -2130,6 +2770,28 @@ export function createWebUIApp({
         detail.title = formEl?.querySelector?.('[name="goalTitle"]')?.value || ''
         detail.ownerMemberId = formEl?.querySelector?.('[name="goalOwnerMemberId"]')?.value || ''
       }
+      if (action === 'submit-form' && detail.formId === 'workspace-group-create-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#workspace-group-create-form')
+        detail.name = formEl?.querySelector?.('[name="groupName"]')?.value || ''
+        detail.parentGroupId = formEl?.querySelector?.('[name="groupParentId"]')?.value || null
+      }
+      if (action === 'submit-form' && detail.formId === 'workspace-member-create-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#workspace-member-create-form')
+        detail.name = formEl?.querySelector?.('[name="memberName"]')?.value || ''
+        detail.groupId = formEl?.querySelector?.('[name="memberGroupId"]')?.value || ''
+      }
+      if (action === 'submit-form' && detail.formId === 'workspace-runtime-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#workspace-runtime-form')
+        detail.machineId = formEl?.querySelector?.('[name="runtimeMachineId"]')?.value || ''
+        detail.hostKind = formEl?.querySelector?.('[name="runtimeHostKind"]')?.value || ''
+        detail.agentKind = formEl?.querySelector?.('[name="runtimeAgentKind"]')?.value || ''
+        detail.launchProfileRef = formEl?.querySelector?.('[name="runtimeLaunchProfileRef"]')?.value || ''
+      }
+      if (action === 'submit-form' && detail.formId === 'workspace-binding-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#workspace-binding-form')
+        detail.sessionId = formEl?.querySelector?.('[name="bindingSessionId"]')?.value || ''
+        detail.anchor = formEl?.querySelector?.('[name="bindingAnchor"]')?.value || ''
+      }
       event.preventDefault?.()
       void dispatchAction(action, detail)
     }
@@ -2137,6 +2799,10 @@ export function createWebUIApp({
     const onInput = (event) => {
       const target = event.target
       if (!target) return
+      if (target.getAttribute?.('data-action') === 'filter-members-by-machine') {
+        void dispatchAction('filter-members-by-machine', { value: target.value })
+        return
+      }
       const field = target.getAttribute?.('data-property-field') || target.getAttribute?.('data-field') || target.getAttribute?.('name')
       const memberId = resolveAttr(target, 'data-member-id')
       if (field && memberId && target.closest?.('[data-component="property-panel"]')) {

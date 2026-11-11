@@ -5,6 +5,9 @@ export class DaemonError extends Error {
     this.code = error.code || "DAEMON_REQUEST_FAILED";
     this.owningModule = error.owningModule;
     this.operationId = error.operationId;
+    this.cause = error.cause;
+    this.retryDisposition = error.retryDisposition;
+    this.details = error.details;
     this.status = status;
   }
 }
@@ -53,6 +56,27 @@ function flattenTree(root) {
   };
   visit(root);
   return members;
+}
+
+function flattenGroups(root) {
+  const groups = [];
+  const visit = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    groups.push({
+      groupId: node.groupId,
+      workspaceId: node.workspaceId,
+      parentGroupId: node.parentGroupId ?? null,
+      name: node.name,
+      path: node.path,
+    });
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  };
+  visit(root);
+  return groups;
 }
 
 function projectSnapshotMember(member) {
@@ -223,7 +247,13 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
           throw new DaemonError({ code: "WORKSPACE_SCOPE_MISMATCH", message: "Daemon returned a member outside the requested workspace." }, 502);
         }
       }
-      return { workspace: tree.workspace, members: members.map(projectSnapshotMember) };
+      return {
+        workspace: tree.workspace,
+        root: tree.root,
+        groups: flattenGroups(tree.root),
+        members: members.map(projectSnapshotMember),
+        observation: tree.observation ?? null,
+      };
     },
 
     async getWorkspaceTree({ workspaceId } = {}) {
@@ -370,6 +400,94 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
 
     async getMemberRuntime({ workspaceId, memberId } = {}) {
       return request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/runtime`);
+    },
+
+    async createGroup({ workspaceId, name, parentGroupId, expectedRevision } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/groups`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, parentGroupId: parentGroupId ?? null, expectedRevision }),
+      });
+      if (!payload.group || typeof payload.group !== "object") {
+        throw new DaemonError({ code: "GROUP_RESPONSE_INVALID", message: "Daemon returned a malformed group receipt." }, 502);
+      }
+      return payload.group;
+    },
+
+    async createMember({ workspaceId, groupId, name, expectedRevision } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/members`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ groupId, name, expectedRevision }),
+      });
+      if (!payload.member || typeof payload.member !== "object") {
+        throw new DaemonError({ code: "MEMBER_RESPONSE_INVALID", message: "Daemon returned a malformed member receipt." }, 502);
+      }
+      return payload.member;
+    },
+
+    async configureMemberRuntime({
+      workspaceId,
+      memberId,
+      machineId,
+      hostKind,
+      agentKind,
+      launchProfileRef,
+    } = {}) {
+      const payload = await request(
+        `/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/runtime`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ machineId, hostKind, agentKind, launchProfileRef }),
+        },
+      );
+      if (!payload.runtime || typeof payload.runtime !== "object") {
+        throw new DaemonError({ code: "RUNTIME_RESPONSE_INVALID", message: "Daemon returned a malformed runtime receipt." }, 502);
+      }
+      return payload.runtime;
+    },
+
+    async bindMemberSession({
+      workspaceId,
+      memberId,
+      sessionId,
+      anchor,
+      expectedGeneration,
+      terminalTarget,
+    } = {}) {
+      const payload = await request(
+        `/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/binding`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            anchor,
+            expectedGeneration,
+            ...(terminalTarget !== undefined ? { terminalTarget } : {}),
+          }),
+        },
+      );
+      if (!payload.binding || typeof payload.binding !== "object") {
+        throw new DaemonError({ code: "BINDING_RESPONSE_INVALID", message: "Daemon returned a malformed binding receipt." }, 502);
+      }
+      return payload.binding;
+    },
+
+    async restoreMemberBinding({ workspaceId, memberId, machineId, expectedGeneration } = {}) {
+      const payload = await request(
+        `/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/restore-binding`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ machineId, expectedGeneration }),
+        },
+      );
+      if (!payload.verification || typeof payload.verification !== "object") {
+        throw new DaemonError({ code: "RESTORE_RESPONSE_INVALID", message: "Daemon returned a malformed restore receipt." }, 502);
+      }
+      return payload.verification;
     },
 
     async resolveTerminalAdmission(session = {}) {

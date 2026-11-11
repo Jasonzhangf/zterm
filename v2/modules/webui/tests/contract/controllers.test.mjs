@@ -107,7 +107,7 @@ test('property-controller surfaces DAEMON_API_UNAVAILABLE when daemonApi is miss
   assert.equal(controller.getMemberState('m-1').draft.description, 'draft-kept')
 })
 
-function makeSessionDeps({ members = [createMember('m-1'), createMember('m-2'), createMember('m-3')], membersByWorkspace = null, workspaceId = 'ws-1', authError = false, deliveryFail = false, attachGateByMemberId = null, attachFailureByMemberId = null } = {}) {
+function makeSessionDeps({ members = [createMember('m-1'), createMember('m-2'), createMember('m-3')], membersByWorkspace = null, groups = [], workspaceId = 'ws-1', authError = false, deliveryFail = false, attachGateByMemberId = null, attachFailureByMemberId = null } = {}) {
   const terminalHandles = new Map()
   const attachCalls = []
   const createCalls = []
@@ -206,6 +206,7 @@ function makeSessionDeps({ members = [createMember('m-1'), createMember('m-2'), 
       return {
         workspace: { workspaceId: requestedWorkspaceId, name: `Workspace ${requestedWorkspaceId}` },
         members: memberList.map((member) => ({ ...member, workspaceId: requestedWorkspaceId })),
+        groups,
       }
     },
   }
@@ -278,6 +279,36 @@ test('session-controller initial load keeps terminal attach focus-bound', async 
     assert.equal(controller.getTerminalHandle(memberId), null, `${memberId} must stay unattached`)
   }
   assert.equal(controller.getTerminalHandle('m-3').status, 'attached')
+})
+
+test('session-controller preserves workspace groups in the loadable projection', async () => {
+  const groups = [
+    {
+      groupId: 'g-root',
+      workspaceId: 'ws-1',
+      parentGroupId: null,
+      name: 'Root',
+      path: '/Root',
+    },
+    {
+      groupId: 'g-child',
+      workspaceId: 'ws-1',
+      parentGroupId: 'g-root',
+      name: 'Child',
+      path: '/Root/Child',
+    },
+  ]
+  const deps = makeSessionDeps({ groups })
+  const controller = createSessionController({
+    daemonApi: deps.daemonApi,
+    terminalClient: deps.terminalClient,
+    deliveryClient: deps.deliveryClient,
+    layoutStore: deps.layoutStore,
+  })
+
+  await controller.loadWorkspaceSessions('ws-1')
+
+  assert.deepEqual(controller.getWorkspaceLoadable().value.groups, groups)
 })
 
 test('session-controller attaches the primary and four visible peers without opening hidden members', async () => {

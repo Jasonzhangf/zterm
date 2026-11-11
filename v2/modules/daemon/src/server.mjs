@@ -99,6 +99,13 @@ function validateNonEmptyString(value, field, operationId) {
   return value;
 }
 
+function validateExpectedRevision(value, operationId) {
+  if (!Number.isInteger(value)) {
+    throw daemonError("CONTROL_INPUT_INVALID", operationId, "expectedRevision must be an integer.");
+  }
+  return value;
+}
+
 function redactWsUrl(value) {
   try {
     const url = new URL(value);
@@ -325,11 +332,23 @@ function matchWorkspaceRoute(pathname) {
   if (parts.length === 2 && parts[1] === "tree") {
     return { kind: "tree", workspaceId };
   }
+  if (parts.length === 2 && parts[1] === "groups") {
+    return { kind: "create-group", workspaceId };
+  }
+  if (parts.length === 2 && parts[1] === "members") {
+    return { kind: "create-member", workspaceId };
+  }
   if (parts.length === 2 && parts[1] === "resolve") {
     return { kind: "resolve", workspaceId };
   }
   if (parts.length === 4 && parts[1] === "members" && parts[3] === "runtime") {
     return { kind: "member-runtime", workspaceId, memberId: decodeURIComponent(parts[2]) };
+  }
+  if (parts.length === 4 && parts[1] === "members" && parts[3] === "binding") {
+    return { kind: "member-binding", workspaceId, memberId: decodeURIComponent(parts[2]) };
+  }
+  if (parts.length === 4 && parts[1] === "members" && parts[3] === "restore-binding") {
+    return { kind: "member-restore-binding", workspaceId, memberId: decodeURIComponent(parts[2]) };
   }
   return null;
 }
@@ -341,6 +360,47 @@ async function handleWorkspaceRoute({ request, response, context, route }) {
     return handleWorkTrackingRoute({ request, response, context, route, token, account });
   }
 
+  if (route.kind === "create-group") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.group.create", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const body = await readJson(request);
+    let group;
+    try {
+      group = await context.organization.createGroup({
+        token,
+        workspaceId: route.workspaceId,
+        name: requireBodyText(body, "name", "workspace.group.create"),
+        parentGroupId: body.parentGroupId ?? null,
+        expectedRevision: validateExpectedRevision(body.expectedRevision, "workspace.group.create"),
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.group.create");
+    }
+    return sendJson(response, 201, { group });
+  }
+
+  if (route.kind === "create-member") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.member.create", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    const body = await readJson(request);
+    let member;
+    try {
+      member = await context.organization.addMember({
+        token,
+        workspaceId: route.workspaceId,
+        groupId: requireBodyText(body, "groupId", "workspace.member.create"),
+        name: requireBodyText(body, "name", "workspace.member.create"),
+        ...(body.managerMemberId !== undefined ? { managerMemberId: body.managerMemberId } : {}),
+        expectedRevision: validateExpectedRevision(body.expectedRevision, "workspace.member.create"),
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.member.create");
+    }
+    return sendJson(response, 201, { member });
+  }
+
   if (route.kind === "tree") {
     if (request.method !== "GET") {
       throw daemonError("METHOD_NOT_ALLOWED", "workspace.tree", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
@@ -350,11 +410,86 @@ async function handleWorkspaceRoute({ request, response, context, route }) {
   }
 
   if (route.kind === "member-runtime") {
-    if (request.method !== "GET") {
+    if (request.method === "GET") {
+      const member = await queryMemberControl(token, route.workspaceId, route.memberId, context);
+      return sendJson(response, 200, member);
+    }
+    if (request.method !== "POST") {
       throw daemonError("METHOD_NOT_ALLOWED", "workspace.member-runtime", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
     }
-    const member = await queryMemberControl(token, route.workspaceId, route.memberId, context);
-    return sendJson(response, 200, member);
+    await findAuthorizedMember(token, route.workspaceId, route.memberId, context, "workspace.member-runtime");
+    if (typeof context.members.configureRuntime !== "function") {
+      throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", "workspace.member-runtime", "The members runtime write port is not configured.");
+    }
+    const body = await readJson(request);
+    let runtime;
+    try {
+      runtime = await context.members.configureRuntime({
+        token,
+        memberId: route.memberId,
+        machineId: requireBodyText(body, "machineId", "workspace.member-runtime"),
+        hostKind: requireBodyText(body, "hostKind", "workspace.member-runtime"),
+        agentKind: requireBodyText(body, "agentKind", "workspace.member-runtime"),
+        launchProfileRef: requireBodyText(body, "launchProfileRef", "workspace.member-runtime"),
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.member-runtime");
+    }
+    return sendJson(response, 200, { runtime });
+  }
+
+  if (route.kind === "member-binding") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.member-binding", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    await findAuthorizedMember(token, route.workspaceId, route.memberId, context, "workspace.member-binding");
+    if (typeof context.members.bindSession !== "function") {
+      throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", "workspace.member-binding", "The members binding port is not configured.");
+    }
+    const body = await readJson(request);
+    if (!Number.isInteger(body.expectedGeneration) || body.expectedGeneration < 0) {
+      throw daemonError("CONTROL_INPUT_INVALID", "workspace.member-binding", "expectedGeneration must be a non-negative integer.");
+    }
+    let binding;
+    try {
+      binding = await context.members.bindSession({
+        token,
+        memberId: route.memberId,
+        sessionId: requireBodyText(body, "sessionId", "workspace.member-binding"),
+        anchor: requireBodyText(body, "anchor", "workspace.member-binding"),
+        expectedGeneration: body.expectedGeneration,
+        ...(body.terminalTarget !== undefined ? { terminalTarget: body.terminalTarget } : {}),
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.member-binding");
+    }
+    return sendJson(response, 200, { binding });
+  }
+
+  if (route.kind === "member-restore-binding") {
+    if (request.method !== "POST") {
+      throw daemonError("METHOD_NOT_ALLOWED", "workspace.member-restore-binding", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
+    }
+    await findAuthorizedMember(token, route.workspaceId, route.memberId, context, "workspace.member-restore-binding");
+    if (typeof context.members.restoreBinding !== "function") {
+      throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", "workspace.member-restore-binding", "The members restore port is not configured.");
+    }
+    const body = await readJson(request);
+    if (!Number.isInteger(body.expectedGeneration) || body.expectedGeneration < 0) {
+      throw daemonError("CONTROL_INPUT_INVALID", "workspace.member-restore-binding", "expectedGeneration must be a non-negative integer.");
+    }
+    let verification;
+    try {
+      verification = await context.members.restoreBinding({
+        token,
+        memberId: route.memberId,
+        machineId: requireBodyText(body, "machineId", "workspace.member-restore-binding"),
+        expectedGeneration: body.expectedGeneration,
+      });
+    } catch (error) {
+      throw toControlTypedError(error, "workspace.member-restore-binding");
+    }
+    return sendJson(response, 200, { verification });
   }
 
   if (route.kind === "resolve") {
@@ -680,11 +815,30 @@ function requireControl(context, operationId) {
     }
     return;
   }
+  if (operationId === "create-group") {
+    if (!context.organization || typeof context.organization.createGroup !== "function") {
+      throw daemonError("CONTROL_ORGANIZATION_UNCONFIGURED", operationId, "The organization createGroup port is not configured.");
+    }
+    return;
+  }
+  if (operationId === "create-member") {
+    if (!context.organization || typeof context.organization.addMember !== "function") {
+      throw daemonError("CONTROL_ORGANIZATION_UNCONFIGURED", operationId, "The organization addMember port is not configured.");
+    }
+    return;
+  }
   if (!context.organization || typeof context.organization.queryTree !== "function") {
     throw daemonError("CONTROL_ORGANIZATION_UNCONFIGURED", operationId, "The organization tree port is not configured.");
   }
-  if (!context.members || typeof context.members.queryRuntime !== "function" || typeof context.members.queryBinding !== "function") {
+  if (!context.members
+    || typeof context.members.queryRuntime !== "function"
+    || typeof context.members.queryBindingState !== "function") {
     throw daemonError("CONTROL_MEMBERS_UNCONFIGURED", operationId, "The members runtime/binding port is not configured.");
+  }
+  if (operationId === "member-binding" || operationId === "member-restore-binding") {
+    if (typeof context.members.hasHostProbe !== "function" || !context.members.hasHostProbe()) {
+      throw daemonError("CONTROL_HOST_PROBE_UNCONFIGURED", operationId, "The members host probe is not configured.");
+    }
   }
 }
 
@@ -810,25 +964,31 @@ function collectGroups(node, result = []) {
 }
 
 async function queryMemberControl(token, workspaceId, memberId, context, options = {}) {
+  const { member, group } = await findAuthorizedMember(token, workspaceId, memberId, context, "workspace.member-runtime");
+  return projectMemberControl(token, { ...member, groupPath: group.path }, context, options);
+}
+
+async function findAuthorizedMember(token, workspaceId, memberId, context, operationId) {
   let tree;
   try {
     tree = await context.organization.queryTree({ token, workspaceId });
   } catch (error) {
-    throw toControlTypedError(error, "workspace.member-runtime");
+    throw toControlTypedError(error, operationId);
   }
   const group = collectGroups(tree.root)
     .find((candidate) => (candidate.members ?? []).some((member) => member.memberId === memberId));
   const member = group?.members?.find((candidate) => candidate.memberId === memberId);
   if (!group || !member) {
-    throw daemonError("CONTROL_MEMBER_NOT_FOUND", "workspace.member-runtime", "The member is not in the requested workspace.", `${memberId} in ${workspaceId}`);
+    throw daemonError("CONTROL_MEMBER_NOT_FOUND", operationId, "The member is not in the requested workspace.", `${memberId} in ${workspaceId}`);
   }
-  return projectMemberControl(token, { ...member, groupPath: group.path }, context, options);
+  return { member, group };
 }
 
 async function projectMemberControl(token, member, context, options = {}) {
   let runtime = null;
   let binding = null;
   let availability = null;
+  let bindingGeneration = 0;
   const memberId = member.memberId;
   try {
     runtime = await context.members.queryRuntime({ token, memberId });
@@ -842,14 +1002,14 @@ async function projectMemberControl(token, member, context, options = {}) {
   }
   if (runtime) {
     try {
-      binding = await context.members.queryBinding({ token, memberId });
+      const bindingState = await context.members.queryBindingState({ token, memberId });
+      bindingGeneration = bindingState.generation;
+      binding = bindingState.binding ?? null;
     } catch (error) {
       if (isControlTypedError(error) && error.code === MEMBER_ERROR_CODES.MEMBER_FORBIDDEN_MEMBER) {
         throw toControlTypedError(error, "workspace.member-runtime");
       }
-      if (!isControlTypedError(error) || error.code !== MEMBER_ERROR_CODES.MEMBER_BINDING_NOT_FOUND) {
-        throw toControlTypedError(error, "workspace.member-runtime");
-      }
+      throw toControlTypedError(error, "workspace.member-runtime");
     }
   }
   if (binding) {
@@ -871,8 +1031,15 @@ async function projectMemberControl(token, member, context, options = {}) {
     runtime,
     binding,
     availability,
+    bindingGeneration,
+    agentCapabilities: MEMBER_AGENT_CAPABILITIES,
   };
 }
+
+const MEMBER_AGENT_CAPABILITIES = Object.freeze({
+  start: "unsupported",
+  resume: "unsupported",
+});
 
 async function observeMemberAvailability(context, { memberId, runtime, binding }) {
   if (!context.memberHostObserver || typeof context.memberHostObserver.observe !== "function") {
@@ -1406,6 +1573,7 @@ function statusForError(error) {
     case "CONTROL_ORGANIZATION_UNCONFIGURED":
     case "CONTROL_MEMBERS_UNCONFIGURED":
     case "CONTROL_ROUTING_UNCONFIGURED":
+    case "CONTROL_HOST_PROBE_UNCONFIGURED":
       return 503;
     case "CONTROL_INPUT_INVALID":
     case "VALIDATION":
@@ -1432,6 +1600,8 @@ function statusForError(error) {
     case "GOAL_NAME_CONFLICT":
     case "GOAL_NOT_EMPTY":
     case "GOAL_REFERENCED":
+    case "GROUP_NAME_CONFLICT":
+    case "MEMBER_NAME_CONFLICT":
     case "BINDING_CONFLICT":
     case "OPERATION_CONFLICT":
     case "OPERATION_SUPERSEDED":
