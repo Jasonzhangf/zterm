@@ -1142,7 +1142,7 @@ async function controlAuth(request, context) {
   if (!context.workspaceAuth || typeof context.workspaceAuth.verify !== "function") {
     throw daemonError("CONTROL_AUTH_UNCONFIGURED", "control.auth", "The control-plane workspace authorization adapter is not configured.");
   }
-  const token = controlToken(request);
+  const token = accountsSessionHeader(request) || controlToken(request);
   if (!token) {
     throw daemonError("CONTROL_CREDENTIAL_REQUIRED", "control.auth", "A control-plane credential is required.");
   }
