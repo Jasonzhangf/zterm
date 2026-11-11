@@ -10,6 +10,7 @@ import {
 } from '../domain/authorization.ts'
 import { AccountsError } from '../public/errors.ts'
 import { AuthService } from './auth-service.ts'
+import { requireManagementGrant as requireManagementGrantHelper } from './management-authority.ts'
 
 export interface LoginRequest {
   readonly loginName: string
@@ -122,21 +123,8 @@ export function createAccountsAuthorityRuntime(options: {
   const relay = options.relay
   const store = options.store
 
-  async function requireManagementGrant(token: string) {
-    const authContext = await authService.verifySession(token)
-    const adminGrant = await store.getGrant(authContext.accountId)
-    if (
-      !adminGrant ||
-      !adminGrant.allWorkspaces ||
-      !adminGrant.scopes.includes('org:write')
-    ) {
-      throw new AccountsError(
-        'WORKSPACE_AUTHORIZATION_REQUIRED',
-        403,
-        'A currently verified all-workspaces org:write management grant is required.',
-      )
-    }
-    return { authContext, adminGrant }
+  function requireManagementGrant(token: string) {
+    return requireManagementGrantHelper({ authService, store, token })
   }
 
   async function login(request: LoginRequest): Promise<LoginResponse> {

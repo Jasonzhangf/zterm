@@ -13,7 +13,10 @@ export function renderBoardPage(state = {}, helpers = {}) {
     workspacesLoadable = null,
     goalsLoadable = { status: 'loading', value: [], error: null },
     ticketsLoadable = { status: 'loading', value: [], error: null },
+    boardLoadable = { status: 'loading', value: null, error: null },
     membersLoadable = { status: 'loading', value: [], error: null },
+    selectedMemberId = null,
+    ownerMemberSelected = false,
     activeWorkspaceId = null,
     activeWorkspace = null,
     workspaceScopeError = null,
@@ -26,10 +29,10 @@ export function renderBoardPage(state = {}, helpers = {}) {
   const resolvedWorkspace = activeWorkspace || workspaces.find((ws) => ws.workspaceId === activeWorkspaceId) || null
   const workspaceName = resolvedWorkspace?.name || activeWorkspaceId || '未选择 Workspace'
   const workspacePath = resolvedWorkspace?.path || workspaceName
-  const managerName = resolvedWorkspace?.managerName
-    || (membersLoadable.status === 'ready' && Array.isArray(membersLoadable.value)
-      ? (membersLoadable.value.find((m) => m.role === 'primary' || /manager/i.test(String(m.role || '')))?.name || membersLoadable.value[0]?.name || 'Workspace Manager')
-      : 'Workspace Manager')
+  const selectedManager = ownerMemberSelected && membersLoadable.status === 'ready' && Array.isArray(membersLoadable.value)
+    ? membersLoadable.value.find((member) => String(member.memberId) === String(selectedMemberId))
+    : null
+  const managerName = selectedManager?.name || (ownerMemberSelected ? selectedMemberId : 'Select Manager')
 
   if (workspaceScopeError) {
     const errHtml = helpers.renderErrorNotice
@@ -105,20 +108,32 @@ export function renderBoardPage(state = {}, helpers = {}) {
     }
   }
 
-  const rawGoals = goalsLoadable.status === 'ready' ? (goalsLoadable.value || []) : []
-  const goals = rawGoals.filter((goal) => !goal.workspaceId || goal.workspaceId === activeWorkspaceId)
-  const scopedGoalsLoadable = goalsLoadable.status === 'ready'
-    ? { ...goalsLoadable, value: goals }
-    : goalsLoadable
-
-  const rawTickets = ticketsLoadable.status === 'ready' ? (ticketsLoadable.value || []) : []
-  const tickets = rawTickets.filter((ticket) => !ticket.workspaceId || ticket.workspaceId === activeWorkspaceId)
+  const board = boardLoadable.status === 'ready' ? boardLoadable.value : null
+  const boardGoals = board && Array.isArray(board.goals)
+    ? board.goals.map((section) => ({
+        ...section.goal,
+        ownerMemberId: section.goal.managerId,
+        ticketCount: section.tickets?.items?.length ?? 0,
+        tickets: section.tickets?.items ?? [],
+        ticketFreshness: section.tickets?.freshness ?? 'unavailable',
+        ticketErrorRef: section.tickets?.errorRef ?? null,
+      }))
+    : []
+  const goals = boardGoals
+  const scopedGoalsLoadable = boardLoadable.status === 'ready'
+    ? { ...boardLoadable, value: boardGoals, error: boardLoadable.error ?? null }
+    : boardLoadable
+  const tickets = boardGoals.flatMap((goal) => goal.tickets ?? [])
 
   const rawMembers = membersLoadable.status === 'ready' ? (membersLoadable.value || []) : []
   const members = rawMembers.filter((member) => !member.workspaceId || member.workspaceId === activeWorkspaceId)
   const scopedMembersLoadable = membersLoadable.status === 'ready'
     ? { ...membersLoadable, value: members }
     : membersLoadable
+  const goalOwnerOptions = members.map((member) => {
+    const memberId = String(member.memberId ?? '')
+    return `<option value="${esc(memberId)}"${memberId === String(selectedMemberId ?? '') ? ' selected' : ''}>${esc(member.name ?? memberId)}</option>`
+  }).join('')
 
   const effectiveWorkspacesLoadable = workspacesLoadable || (
     membersLoadable.status === 'unavailable'
@@ -141,22 +156,9 @@ export function renderBoardPage(state = {}, helpers = {}) {
     ? helpers.renderGoalTicketList({ goalsLoadable: scopedGoalsLoadable, selectedGoalId }).html
     : `<div class="v2-goal-ticket-list" data-role="goal-ticket-list">${goals.map((goal) => `<div class="v2-goal-item" data-goal-id="${esc(goal.goalId)}">${esc(goal.title || goal.goalId)} ${esc(goal.status || '')}</div>`).join('')}</div>`
 
-  const associatedTicketsHtml = tickets.length > 0
-    ? `
-      <div class="board-associated-tickets" data-role="board-associated-tickets" data-workspace-id="${esc(activeWorkspaceId)}">
-        <div class="card-sub" style="margin-bottom:6px;">当前 Workspace 关联 Tickets（${tickets.length}）</div>
-        <div class="ticket-mini-list">
-          ${tickets.map((t) => `
-            <div class="ticket-mini-row" data-action="open-workspace-ticket" data-workspace-id="${esc(activeWorkspaceId)}" data-ticket-id="${esc(t.ticketId)}">
-              <span class="mono">${esc(t.ticketId)}</span>
-              <span class="title">${esc(t.title || t.ticketId)}</span>
-              <span class="badge badge-neutral">${esc(t.status || 'open')}</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    `
-    : `<div class="card-sub" data-role="board-associated-tickets-empty">当前 Workspace (${esc(activeWorkspaceId)}) 暂无关联 Tickets</div>`
+  const associatedTicketsHtml = boardLoadable.status === 'unavailable'
+    ? `<div class="card-sub" data-role="board-associated-tickets-unavailable">${esc(boardLoadable.error?.message || 'Manager board unavailable')}</div>`
+    : `<div class="card-sub" data-role="board-associated-tickets-count">每个 Goal 显示授权后的前五项（${tickets.length}）</div>`
 
   const html = `
     <section class="v2-page v2-page-board board-shell" data-page="board" data-page-id="board" data-workspace-id="${esc(activeWorkspaceId)}" data-workspace-scope="per-workspace">
@@ -168,7 +170,7 @@ export function renderBoardPage(state = {}, helpers = {}) {
           </div>
           <div class="row-actions">
             <span class="badge badge-accent" data-role="board-workspace-badge" data-workspace-id="${esc(activeWorkspaceId)}">Workspace: ${esc(activeWorkspaceId)}</span>
-            <button type="button" class="btn btn-sm" data-action="navigate" data-route="tickets" data-workspace-id="${esc(activeWorkspaceId)}">查看当前工作区 Tickets (${tickets.length})</button>
+            <button type="button" class="btn btn-sm" data-action="navigate" data-route="tickets" data-workspace-id="${esc(activeWorkspaceId)}">查看当前工作区 Tickets</button>
           </div>
         </div>
       </div>
@@ -187,6 +189,10 @@ export function renderBoardPage(state = {}, helpers = {}) {
             <label class="v2-field">
               <span>在 ${esc(workspaceName)} 新建 Goal 标题</span>
               <input name="goalTitle" data-field="goal-title" placeholder="输入当前 Workspace 目标..." />
+            </label>
+            <label class="v2-field">
+              <span>Goal Owner</span>
+              <select name="goalOwnerMemberId" data-field="goal-owner-member-id">${goalOwnerOptions}</select>
             </label>
             <div class="v2-form-actions">
               <button type="button" class="btn btn-primary btn-sm" data-action="create-workspace-goal" data-workspace-id="${esc(activeWorkspaceId)}">+ 新建当前工作区 Goal</button>

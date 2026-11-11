@@ -7,6 +7,7 @@ import {
   V1RelayAdapter,
   createAccountsAuthorizationPort,
   createFileAccountAuthorizationStore,
+  createMemberIdentityService,
   createWorkspaceAuthorization,
 } from "../../accounts/src/public/contracts.ts";
 import { createOrganizationService, createOrganizationStore } from "../../organization/src/public/index.mjs";
@@ -15,6 +16,13 @@ import { createBindingStore, createMembersService, resolveBindingTarget } from "
 import { createConnectionManager, V1TraversalTransport } from "../../connections/src/public/index.mjs";
 import { createTmuxHostProbe } from "../../host-adapters/src/public/index.mjs";
 import { TerminalPort } from "../../terminal/src/public/index.mjs";
+import { createFileGoalStore, createGoalService } from "../../goals/src/public/index.mjs";
+import { createTicketComposition } from "../../tickets/src/public/contracts.ts";
+import {
+  GoalsPublicAdapter,
+  ManagerBoardReader,
+  OrganizationPublicAdapter,
+} from "../../board/src/public/contracts.ts";
 import { resolveV1WsUrl } from "./server.mjs";
 import { createConnectionMachineTerminal } from "./machine-terminal-consumer.mjs";
 
@@ -74,6 +82,120 @@ function optionalPort(section, field, fallback) {
     );
   }
   return value;
+}
+
+function optionalSection(config, name) {
+  const section = config && typeof config === "object" ? config[name] : undefined;
+  if (section === undefined || section === null) {
+    return null;
+  }
+  if (!section || typeof section !== "object" || Array.isArray(section)) {
+    fail("DAEMON_STARTUP_CONFIG_INVALID", `startup config section "${name}" must be an object when provided.`, { section: name });
+  }
+  return section;
+}
+
+function requireArray(section, field, sectionName) {
+  const value = section[field];
+  if (!Array.isArray(value)) {
+    fail(
+      "DAEMON_STARTUP_CONFIG_INVALID",
+      `startup config requires ${sectionName}.${field} to be an array.`,
+      { section: sectionName, field },
+    );
+  }
+  return value;
+}
+
+function requirePositiveInteger(section, field, sectionName) {
+  const value = section[field];
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    fail(
+      "DAEMON_STARTUP_CONFIG_INVALID",
+      `startup config requires ${sectionName}.${field} to be a positive integer.`,
+      { section: sectionName, field },
+    );
+  }
+  return value;
+}
+
+function requireProviderStatus(value, sectionName, field) {
+  if (value === undefined || value === null) return "active";
+  if (value !== "active" && value !== "disabled" && value !== "credential-invalid") {
+    fail(
+      "DAEMON_STARTUP_CONFIG_INVALID",
+      `startup config requires ${sectionName}.${field} to be active, disabled, or credential-invalid.`,
+      { section: sectionName, field, value },
+    );
+  }
+  return value;
+}
+
+function createEnvironmentCredentialProvider(providerInstances) {
+  return {
+    async getCredential(providerInstanceId) {
+      const instance = providerInstances.find((candidate) => candidate.providerInstanceId === providerInstanceId);
+      const credentialRef = instance?.credentialRef;
+      if (!credentialRef) {
+        throw Object.assign(new Error(`provider instance ${providerInstanceId} has no credential reference`), {
+          code: "PROVIDER_UNAVAILABLE",
+          owningModule: "tickets",
+        });
+      }
+      const token = process.env[credentialRef];
+      if (typeof token !== "string" || token.length === 0) {
+        throw Object.assign(new Error(`environment credential ${credentialRef} is not set`), {
+          code: "PROVIDER_UNAUTHORIZED",
+          owningModule: "tickets",
+        });
+      }
+      return { token };
+    },
+  };
+}
+
+function createUnresolvedActorResolver() {
+  return {
+    async resolve() {
+      throw Object.assign(new Error("verified account-to-member actor mapping is not configured"), {
+        code: "TICKET_SCOPE_FORBIDDEN",
+        owningModule: "tickets",
+      });
+    },
+  };
+}
+
+function createMemberActorResolver({ authService, accountStore, organization }) {
+  if (
+    !authService
+    || !accountStore
+    || !organization
+    || typeof organization.getMember !== "function"
+  ) {
+    return createUnresolvedActorResolver();
+  }
+  const memberIdentity = createMemberIdentityService({
+    authService,
+    store: accountStore,
+    members: {
+      getMember(memberId) {
+        return organization.getMember(memberId);
+      },
+    },
+  });
+  return {
+    async resolve({ token, workspaceId }) {
+      return memberIdentity.resolveWorkspaceActor({ token, workspaceId });
+    },
+  };
+}
+
+function createBoardAccountsReader({ actorResolver }) {
+  return {
+    async verifySession(token, workspaceId) {
+      return actorResolver.resolve({ token, workspaceId });
+    },
+  };
 }
 
 function validateMachineRoute(route, machineId) {
@@ -151,7 +273,16 @@ function createStaticMachineRouteSource(routesConfig) {
  *   Production defaults to the connections-owned V1TraversalTransport public
  *   export; tests may inject a stub without reaching the real network.
  */
-export function assembleDaemonConfig(config, { log = () => {}, createTransport = () => new V1TraversalTransport() } = {}) {
+export function assembleDaemonConfig(
+  config,
+  {
+    log = () => {},
+    createTransport = () => new V1TraversalTransport(),
+    actorResolver = null,
+    credentialProvider = null,
+    vikunjaClient = null,
+  } = {},
+) {
   const server = requireSection(config, "server");
   const auth = requireSection(config, "auth");
   const terminalConfig = requireSection(config, "terminal");
@@ -160,6 +291,7 @@ export function assembleDaemonConfig(config, { log = () => {}, createTransport =
   const membersConfig = requireSection(config, "members");
   const hostAdapter = requireSection(config, "hostAdapter");
   const connections = requireSection(config, "connections");
+  const workTrackingConfig = optionalSection(config, "workTracking");
   if (typeof createTransport !== "function") {
     fail(
       "DAEMON_STARTUP_CONFIG_INVALID",
@@ -254,6 +386,100 @@ export function assembleDaemonConfig(config, { log = () => {}, createTransport =
     },
   };
 
+  let goals = null;
+  let tickets = null;
+  let board = null;
+  if (workTrackingConfig) {
+    const goalsStoreFile = requireText(workTrackingConfig, "goalsStoreFile", "workTracking");
+    const ticketsStoreFile = requireText(workTrackingConfig, "ticketsStoreFile", "workTracking");
+    const rawProviderInstances = requireArray(workTrackingConfig, "providerInstances", "workTracking");
+    const rawWorkspaceProviders = requireArray(workTrackingConfig, "workspaceProviders", "workTracking");
+    const providerInstances = rawProviderInstances.map((instance) => ({
+      providerInstanceId: requireText(instance, "providerInstanceId", "workTracking.providerInstances"),
+      baseUrl: requireText(instance, "baseUrl", "workTracking.providerInstances"),
+      credentialRef: requireText(instance, "credentialRef", "workTracking.providerInstances"),
+      status: requireProviderStatus(instance.status, "workTracking.providerInstances", "status"),
+    }));
+    const providerIds = new Set(providerInstances.map((instance) => instance.providerInstanceId));
+    const workspaceProviders = rawWorkspaceProviders.map((provider) => {
+      const providerInstanceId = requireText(provider, "providerInstanceId", "workTracking.workspaceProviders");
+      if (!providerIds.has(providerInstanceId)) {
+        fail(
+          "DAEMON_STARTUP_CONFIG_INVALID",
+          "startup config workTracking.workspaceProviders references an unknown provider instance.",
+          { section: "workTracking.workspaceProviders", providerInstanceId },
+        );
+      }
+      return {
+        workspaceId: requireText(provider, "workspaceId", "workTracking.workspaceProviders"),
+        providerInstanceId,
+        externalProjectId: requirePositiveInteger(provider, "externalProjectId", "workTracking.workspaceProviders"),
+        authority: requireText(provider, "authority", "workTracking.workspaceProviders"),
+      };
+    });
+    const resolvedActorResolver = actorResolver || createMemberActorResolver({
+      authService,
+      accountStore,
+      organization,
+    });
+    const resolvedCredentialProvider = credentialProvider || createEnvironmentCredentialProvider(providerInstances);
+
+    // The goals service accepts the tickets facade before tickets is assigned;
+    // any goal deletion call reaches this reader only after startup completes.
+    let ticketsFacade = null;
+    const ticketReferences = {
+      hasTicketReference(...args) {
+        if (!ticketsFacade) {
+          return Promise.reject(new Error("tickets facade is not ready"));
+        }
+        return ticketsFacade.hasGoalReference(...args);
+      },
+    };
+    goals = createGoalService({
+      store: createFileGoalStore(goalsStoreFile),
+      auth: workspaceAuth,
+      organization,
+      references: ticketReferences,
+    });
+    tickets = createTicketComposition({
+      storeFile: ticketsStoreFile,
+      providerInstances,
+      workspaceProviders,
+      credentialProvider: resolvedCredentialProvider,
+      ...(vikunjaClient ? { vikunjaClient } : {}),
+      accountReader: {
+        async readAuthorization(token) {
+          return workspaceAuth.verify(token);
+        },
+      },
+      organization,
+      goals,
+      actorResolver: resolvedActorResolver,
+    });
+    ticketsFacade = tickets;
+    board = new ManagerBoardReader({
+      accounts: createBoardAccountsReader({ actorResolver: resolvedActorResolver }),
+      organization: new OrganizationPublicAdapter(organization),
+      goals: new GoalsPublicAdapter(goals),
+      tickets: {
+        listForGoalTopFive(actor, workspaceId, goalId) {
+          return tickets.listForGoalTopFive(actor, workspaceId, goalId);
+        },
+      },
+      members: {
+        async observeMember({ actor, workspaceId, memberId }) {
+          return {
+            subjectRef: { kind: "member", workspaceId, memberId },
+            source: "status-provider-unconfigured",
+            observedAt: new Date().toISOString(),
+            freshness: "unknown",
+            value: "unknown",
+          };
+        },
+      },
+    });
+  }
+
   return {
     server: { host, port, webuiDir },
     daemonOptions: {
@@ -267,6 +493,9 @@ export function assembleDaemonConfig(config, { log = () => {}, createTransport =
       organization,
       members,
       routing,
+      goals,
+      tickets,
+      board,
       memberHostObserver,
       admission: {
         auth: workspaceAuth,

@@ -24,7 +24,12 @@ export function renderTicketsPage(state = {}, helpers = {}) {
     activeWorkspace = null,
     workspaceScopeError = null,
     ticketsLoadable = { status: 'loading', value: [], error: null },
+    goalsLoadable = { status: 'loading', value: [], error: null },
+    membersLoadable = { status: 'loading', value: [], error: null },
     selectedTicketId = null,
+    selectedGoalId = null,
+    selectedMemberId = null,
+    ownerMemberSelected = false,
     activeFilter = 'all',
     transitionPending = false,
     transitionError = null,
@@ -149,6 +154,21 @@ export function renderTicketsPage(state = {}, helpers = {}) {
       }).html
     : `<div class="v2-ticket-detail" data-role="ticket-detail" data-ticket-id="${esc(selectedTicket?.ticketId ?? '')}">${selectedTicket ? esc(selectedTicket.description || selectedTicket.title || '') : 'No ticket selected'}</div>`
 
+  const goalOptions = goalsLoadable.status === 'ready' && Array.isArray(goalsLoadable.value)
+    ? goalsLoadable.value
+    : []
+  const memberOptions = membersLoadable.status === 'ready' && Array.isArray(membersLoadable.value)
+    ? membersLoadable.value
+    : []
+  const goalSelectHtml = goalOptions.map((goal) => {
+    const goalId = String(goal.goalId ?? '')
+    return `<option value="${esc(goalId)}"${goalId === String(selectedGoalId ?? '') ? ' selected' : ''}>${esc(goal.title ?? goal.name ?? goalId)}</option>`
+  }).join('')
+  const ownerSelectHtml = memberOptions.map((member) => {
+    const memberId = String(member.memberId ?? '')
+    return `<option value="${esc(memberId)}"${ownerMemberSelected && memberId === String(selectedMemberId ?? '') ? ' selected' : ''}>${esc(member.name ?? memberId)}</option>`
+  }).join('')
+
   const errorHtml = lastError
     ? (helpers.renderErrorNotice ? helpers.renderErrorNotice({ error: lastError }).html : '')
     : ''
@@ -159,6 +179,15 @@ export function renderTicketsPage(state = {}, helpers = {}) {
         pending: transitionPending,
         error: transitionError,
         submitLabel: `在 ${workspaceName} 提报 Ticket`,
+        cancelLabel: '取消',
+      }).html
+    : ''
+  const appendReportHtml = selectedTicket && helpers.renderFormActions
+    ? helpers.renderFormActions({
+        formId: 'ticket-append-report-form',
+        pending: transitionPending,
+        error: transitionError,
+        submitLabel: `为 ${selectedTicket.ticketId} 追加 Report`,
         cancelLabel: '取消',
       }).html
     : ''
@@ -208,8 +237,25 @@ export function renderTicketsPage(state = {}, helpers = {}) {
         </div>
         <label class="v2-field"><span>Ticket 标题</span><input name="ticketTitle" data-field="ticket-title" placeholder="输入工单标题..." /></label>
         <label class="v2-field"><span>描述与验收条件</span><textarea name="ticketDescription" data-field="ticket-description" placeholder="说明进度、阻塞或验收证据..."></textarea></label>
+        <label class="v2-field"><span>目标</span><select name="ticketGoalId" data-field="ticket-goal-id">${goalSelectHtml}</select></label>
+        <label class="v2-field"><span>Zterm Owner</span><select name="ticketOwnerMemberId" data-field="ticket-owner-member-id">${ownerSelectHtml}</select></label>
+        <label class="v2-field"><span>优先级</span><input name="ticketPriority" data-field="ticket-priority" type="number" value="0" /></label>
         ${formHtml}
       </form>
+      ${selectedTicket ? `
+        <form id="ticket-append-report-form" class="v2-form card" data-role="ticket-append-report-form" data-workspace-id="${esc(activeWorkspaceId)}" data-ticket-id="${esc(selectedTicket.ticketId)}">
+          <label class="v2-field"><span>Report 类型</span>
+            <select name="ticketReportKind" data-field="ticket-report-kind">
+              <option value="status">status</option>
+              <option value="result">result</option>
+              <option value="blocker">blocker</option>
+              <option value="note">note</option>
+            </select>
+          </label>
+          <label class="v2-field"><span>Report 内容</span><textarea name="ticketReportBody" data-field="ticket-report-body"></textarea></label>
+          ${appendReportHtml}
+        </form>
+      ` : ''}
     </section>
   `
 

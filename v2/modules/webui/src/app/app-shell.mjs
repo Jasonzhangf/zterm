@@ -53,6 +53,59 @@ function nowIso() {
   return new Date().toISOString()
 }
 
+function newOperationId(prefix) {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return `${prefix}-${globalThis.crypto.randomUUID()}`
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function workTrackingOperationId(error) {
+  return error?.operation?.operationRef?.operationId
+    || error?.operationRef?.operationId
+    || error?.operationId
+    || null
+}
+
+function preserveWorkTrackingError(error, fallbackCode) {
+  const typed = normalizeTypedError(error, fallbackCode)
+  if (!error || typeof error !== 'object') return typed
+  const operationId = workTrackingOperationId(error)
+  if (operationId) typed.operationId = operationId
+  for (const field of ['operation', 'operationRef', 'operationId', 'owningModule', 'providerStatus', 'retryDisposition']) {
+    if (error[field] !== undefined) typed[field] = error[field]
+  }
+  return typed
+}
+
+function retainWorkTrackingOperation(entry, {
+  operation = null,
+  operationId,
+  kind,
+  ticketId = null,
+  state = 'pending',
+} = {}) {
+  const resolvedOperationId = operation?.operationRef?.operationId || operationId
+  if (!resolvedOperationId) return
+  const record = {
+    operationId: resolvedOperationId,
+    operationRef: operation?.operationRef ?? entry.workTrackingOperations.find((item) => item.operationId === resolvedOperationId)?.operationRef ?? null,
+    kind: operation?.kind ?? kind,
+    ticketId: operation?.bindingId ?? ticketId,
+    state: operation?.state ?? state,
+    observedAt: operation?.observedAt ?? Date.now(),
+    operation,
+  }
+  const index = entry.workTrackingOperations.findIndex((item) => item.operationId === resolvedOperationId)
+  if (index === -1) entry.workTrackingOperations.push(record)
+  else entry.workTrackingOperations[index] = record
+}
+
+function clearWorkTrackingOperation(entry, operationId) {
+  if (!operationId) return
+  entry.workTrackingOperations = entry.workTrackingOperations.filter((item) => item.operationId !== operationId)
+}
+
 function memoryStorage() {
   const values = new Map()
   return {
@@ -129,6 +182,15 @@ function workspaceSelectionRequiredError(message = 'Please select or create a wo
     message,
     retryable: false,
   }, 'WORKSPACE_SELECTION_REQUIRED')
+}
+
+function managerSelectionRequiredError(message = 'Select a manager before loading the board.') {
+  return normalizeTypedError({
+    code: 'BOARD_MANAGER_REQUIRED',
+    category: 'validation',
+    message,
+    retryable: false,
+  }, 'BOARD_MANAGER_REQUIRED')
 }
 
 function validateWorkspaceScopedRecord(
@@ -316,8 +378,11 @@ export function createWebUIApp({
         connectionsLoadable: loadingLoadable(),
         layout: null,
         selectedMemberId: null,
+        ownerMemberSelected: false,
         selectedGoalId: null,
         selectedTicketId: null,
+        boardLoadable: loadingLoadable(),
+        workTrackingOperations: [],
         activeTicketFilter: 'all',
         openPropertyByWindow: {},
         overflowOpenByWindow: {},
@@ -348,8 +413,11 @@ export function createWebUIApp({
     connectionsLoadable: loadingLoadable(),
     layout: null,
     selectedMemberId: null,
+    ownerMemberSelected: false,
     selectedGoalId: null,
     selectedTicketId: null,
+    boardLoadable: loadingLoadable(),
+    workTrackingOperations: [],
     activeTicketFilter: 'all',
     transitionPending: false,
     transitionError: null,
@@ -415,11 +483,14 @@ export function createWebUIApp({
       state.members = []
       state.layout = null
       state.selectedMemberId = null
+      state.ownerMemberSelected = false
       state.selectedGoalId = null
       state.selectedTicketId = null
       state.activeTicketFilter = 'all'
       state.transitionPending = false
       state.transitionError = null
+      state.boardLoadable = loadingLoadable()
+      state.workTrackingOperations = []
       state.openPropertyByWindow = {}
       state.overflowOpenByWindow = {}
       state.receipts = []
@@ -453,8 +524,11 @@ export function createWebUIApp({
     }
     state.layout = entry.layout
     state.selectedMemberId = entry.selectedMemberId
+    state.ownerMemberSelected = entry.ownerMemberSelected
     state.selectedGoalId = entry.selectedGoalId
     state.selectedTicketId = entry.selectedTicketId
+    state.boardLoadable = entry.boardLoadable
+    state.workTrackingOperations = entry.workTrackingOperations
     state.activeTicketFilter = entry.activeTicketFilter || 'all'
     state.openPropertyByWindow = entry.openPropertyByWindow
     state.overflowOpenByWindow = entry.overflowOpenByWindow
@@ -643,6 +717,7 @@ export function createWebUIApp({
         goalsLoadable: state.goalsLoadable,
         ticketsLoadable: state.ticketsLoadable,
         membersLoadable: state.membersLoadable,
+        boardLoadable: state.boardLoadable,
         selectedGoalId: state.selectedGoalId,
       }, helpers)
     }
@@ -991,6 +1066,48 @@ export function createWebUIApp({
       }
     }
 
+    // 3. Manager board. The manager must be an explicit member selection.
+    if (!daemonApi || typeof daemonApi.queryManagerBoard !== 'function') {
+      if (entry.requestSeq === seq) {
+        entry.boardLoadable = unavailableLoadable(daemonUnavailableError('Manager board port is not configured.'))
+      }
+    } else if (!entry.ownerMemberSelected || !entry.selectedMemberId) {
+      if (entry.requestSeq === seq) {
+        entry.boardLoadable = unavailableLoadable(managerSelectionRequiredError())
+      }
+    } else {
+      try {
+        const board = await daemonApi.queryManagerBoard({
+          workspaceId,
+          managerId: entry.selectedMemberId,
+        })
+        if (entry.requestSeq === seq) {
+          validateWorkspaceScopedRecord(board, workspaceId, [], 'BOARD_RESPONSE_INVALID')
+          if (!Array.isArray(board.goals) || !Array.isArray(board.memberStatuses)) {
+            throw normalizeTypedError({
+              code: 'BOARD_RESPONSE_INVALID',
+              category: 'protocol',
+              message: 'queryManagerBoard did not return goal and member status arrays.',
+              retryable: false,
+            }, 'BOARD_RESPONSE_INVALID')
+          }
+          entry.boardLoadable = {
+            status: 'ready',
+            value: board,
+            observedAt: new Date(board.observedAt).toISOString(),
+            freshness: 'fresh',
+            error: null,
+          }
+        }
+      } catch (error) {
+        if (entry.requestSeq === seq) {
+          const typed = normalizeTypedError(error, 'BOARD_UNAVAILABLE')
+          entry.boardLoadable = unavailableLoadable(typed)
+          entry.lastError = typed
+        }
+      }
+    }
+
     if (entry.requestSeq === seq && state.activeWorkspaceId === workspaceId) {
       syncActiveWorkspaceProjection()
       notify()
@@ -1027,6 +1144,9 @@ export function createWebUIApp({
     if (entry.ticketsLoadable.status !== 'ready') {
       entry.ticketsLoadable = loadingLoadable()
     }
+    if (entry.boardLoadable.status !== 'ready') {
+      entry.boardLoadable = loadingLoadable()
+    }
 
     // Immediately switch active projection to target workspace (never flash previous workspace's data)
     syncActiveWorkspaceProjection()
@@ -1047,6 +1167,7 @@ export function createWebUIApp({
       entry.connectionsLoadable = { ...entry.membersLoadable }
       entry.goalsLoadable = unavailableLoadable(err)
       entry.ticketsLoadable = unavailableLoadable(err)
+      entry.boardLoadable = unavailableLoadable(err)
       entry.lastError = err
       if (isWorkspaceScopeErrorCode(err.code)) {
         entry.workspaceScopeError = err
@@ -1318,7 +1439,14 @@ export function createWebUIApp({
     }
   }
 
-  async function createOrReportTicket({ workspaceId = state.activeWorkspaceId, title, description, priority = 'medium' } = {}) {
+  async function createOrReportTicket({
+    workspaceId = state.activeWorkspaceId,
+    title,
+    description,
+    priority = 0,
+    goalId = state.selectedGoalId,
+    ownerMemberId = state.ownerMemberSelected ? state.selectedMemberId : null,
+  } = {}) {
     if (!workspaceId) {
       const err = workspaceSelectionRequiredError()
       state.lastError = err
@@ -1327,7 +1455,23 @@ export function createWebUIApp({
       return { ok: false, error: err }
     }
     const entry = ensureWorkspaceEntry(workspaceId)
-    if (!daemonApi || (typeof daemonApi.createTicket !== 'function' && typeof daemonApi.reportTicket !== 'function')) {
+    if (!goalId || !ownerMemberId) {
+      const err = normalizeTypedError({
+        code: 'TICKET_SELECTION_REQUIRED',
+        category: 'validation',
+        message: 'Select a goal and an owner before creating a ticket.',
+        retryable: false,
+      }, 'TICKET_SELECTION_REQUIRED')
+      entry.lastError = err
+      entry.transitionError = err
+      if (state.activeWorkspaceId === workspaceId) {
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: err }
+    }
+    if (!daemonApi || typeof daemonApi.createTicket !== 'function') {
       const err = daemonUnavailableError('Ticket write port is not configured.')
       entry.lastError = err
       entry.transitionError = err
@@ -1338,10 +1482,16 @@ export function createWebUIApp({
       }
       return { ok: false, error: err }
     }
+    let operationId = null
     try {
-      const fn = daemonApi.createTicket || daemonApi.reportTicket
-      const created = await fn.call(daemonApi, {
+      operationId = newOperationId('ticket-create')
+      retainWorkTrackingOperation(entry, { operationId, kind: 'create', state: 'pending' })
+      const created = await daemonApi.createTicket({
         workspaceId,
+        operationId,
+        goalId,
+        ownerMemberId,
+        category: 'requirement',
         title: String(title || ''),
         description: String(description || ''),
         priority,
@@ -1367,6 +1517,9 @@ export function createWebUIApp({
       entry.selectedTicketId = record.ticketId
       entry.lastError = null
       entry.transitionError = null
+      clearWorkTrackingOperation(entry, operationId)
+      const seq = ++entry.requestSeq
+      await loadWorkspaceScopedResources(workspaceId, seq)
       if (state.activeWorkspaceId === workspaceId) {
         syncActiveWorkspaceProjection()
         notify()
@@ -1374,7 +1527,87 @@ export function createWebUIApp({
       }
       return { ok: true, ticket: record }
     } catch (error) {
-      const typed = normalizeTypedError(error, 'TICKET_REPORT_FAILED')
+      const typed = preserveWorkTrackingError(error, 'TICKET_REPORT_FAILED')
+      const operation = typed.operation ?? null
+      const operationState = operation?.state
+      const failedOperationId = workTrackingOperationId(typed)
+      if (operationState === 'failed' || operationState === 'superseded') {
+        clearWorkTrackingOperation(entry, failedOperationId)
+      } else {
+        retainWorkTrackingOperation(entry, {
+          operation,
+          operationId: failedOperationId || operationId,
+          kind: 'create',
+          state: operationState === 'pending' ? 'pending' : 'unknown',
+        })
+      }
+      entry.lastError = typed
+      entry.transitionError = typed
+      if (state.activeWorkspaceId === workspaceId) {
+        syncActiveWorkspaceProjection()
+        notify()
+        render()
+      }
+      return { ok: false, error: typed }
+    }
+  }
+
+  async function appendWorkspaceTicketReport({
+    workspaceId = state.activeWorkspaceId,
+    ticketId = state.selectedTicketId,
+    body,
+    reportKind = 'status',
+    actorMemberId = state.ownerMemberSelected ? state.selectedMemberId : null,
+  } = {}) {
+    if (!workspaceId || !ticketId || !actorMemberId) {
+      return { ok: false, error: normalizeTypedError({
+        code: 'TICKET_REPORT_SELECTION_REQUIRED',
+        category: 'validation',
+        message: 'Select a ticket and owner before appending a report.',
+        retryable: false,
+      }, 'TICKET_REPORT_SELECTION_REQUIRED') }
+    }
+    const entry = ensureWorkspaceEntry(workspaceId)
+    if (!daemonApi || typeof daemonApi.appendReport !== 'function') {
+      const error = daemonUnavailableError('Ticket report port is not configured.')
+      entry.lastError = error
+      entry.transitionError = error
+      return { ok: false, error }
+    }
+    let operationId = null
+    try {
+      operationId = newOperationId('ticket-report')
+      retainWorkTrackingOperation(entry, { operationId, kind: 'appendReport', ticketId, state: 'pending' })
+      const payload = await daemonApi.appendReport({
+        workspaceId,
+        ticketId,
+        operationId,
+        actorMemberId,
+        reportKind,
+        body: String(body || ''),
+      })
+      entry.lastError = null
+      entry.transitionError = null
+      clearWorkTrackingOperation(entry, operationId)
+      const seq = ++entry.requestSeq
+      await loadWorkspaceScopedResources(workspaceId, seq)
+      return { ok: true, operation: payload.operation }
+    } catch (error) {
+      const typed = preserveWorkTrackingError(error, 'TICKET_REPORT_FAILED')
+      const operation = typed.operation ?? null
+      const operationState = operation?.state
+      const failedOperationId = workTrackingOperationId(typed)
+      if (operationState === 'failed' || operationState === 'superseded') {
+        clearWorkTrackingOperation(entry, failedOperationId)
+      } else {
+        retainWorkTrackingOperation(entry, {
+          operation,
+          operationId: failedOperationId || operationId,
+          kind: 'appendReport',
+          ticketId,
+          state: operationState === 'pending' ? 'pending' : 'unknown',
+        })
+      }
       entry.lastError = typed
       entry.transitionError = typed
       if (state.activeWorkspaceId === workspaceId) {
@@ -1407,8 +1640,16 @@ export function createWebUIApp({
       }
       return { ok: false, error: err }
     }
+    let operationId = null
     try {
-      const updated = await daemonApi.transitionTicket({ workspaceId, ticketId, transition: requestedTransition })
+      operationId = newOperationId(`ticket-${requestedTransition || 'transition'}`)
+      retainWorkTrackingOperation(entry, { operationId, kind: requestedTransition || 'transition', ticketId, state: 'pending' })
+      const updated = await daemonApi.transitionTicket({
+        workspaceId,
+        ticketId,
+        operationId,
+        transition: requestedTransition,
+      })
       validateWorkspaceScopedRecord(updated, workspaceId, ['ticketId', 'title', 'status'], 'TICKET_RESPONSE_INVALID')
       if (!Array.isArray(updated.allowedTransitions)) {
         throw normalizeTypedError({
@@ -1439,6 +1680,9 @@ export function createWebUIApp({
       entry.ticketsLoadable = { status: 'ready', value: nextList, observedAt: nowIso(), freshness: 'fresh', error: null }
       entry.lastError = null
       entry.transitionError = null
+      clearWorkTrackingOperation(entry, operationId)
+      const seq = ++entry.requestSeq
+      await loadWorkspaceScopedResources(workspaceId, seq)
       if (state.activeWorkspaceId === workspaceId) {
         syncActiveWorkspaceProjection()
         notify()
@@ -1446,7 +1690,21 @@ export function createWebUIApp({
       }
       return { ok: true, ticket: record }
     } catch (error) {
-      const typed = normalizeTypedError(error, 'TICKET_TRANSITION_FAILED')
+      const typed = preserveWorkTrackingError(error, 'TICKET_TRANSITION_FAILED')
+      const operation = typed.operation ?? null
+      const operationState = operation?.state
+      const failedOperationId = workTrackingOperationId(typed)
+      if (operationState === 'failed' || operationState === 'superseded') {
+        clearWorkTrackingOperation(entry, failedOperationId)
+      } else {
+        retainWorkTrackingOperation(entry, {
+          operation,
+          operationId: failedOperationId || operationId,
+          kind: requestedTransition || 'transition',
+          ticketId,
+          state: operationState === 'pending' ? 'pending' : 'unknown',
+        })
+      }
       entry.lastError = typed
       entry.transitionError = typed
       if (state.activeWorkspaceId === workspaceId) {
@@ -1458,7 +1716,17 @@ export function createWebUIApp({
     }
   }
 
-  async function createWorkspaceGoal({ workspaceId = state.activeWorkspaceId, title } = {}) {
+  function explicitOwnerMemberId(workspaceId) {
+    if (!workspaceId) return null
+    const target = ensureWorkspaceEntry(workspaceId)
+    return target.ownerMemberSelected ? target.selectedMemberId : null
+  }
+
+  async function createWorkspaceGoal({
+    workspaceId = state.activeWorkspaceId,
+    title,
+    ownerMemberId = explicitOwnerMemberId(workspaceId),
+  } = {}) {
     if (!workspaceId) {
       const err = workspaceSelectionRequiredError()
       state.lastError = err
@@ -1478,7 +1746,19 @@ export function createWebUIApp({
       return { ok: false, error: err }
     }
     try {
-      const created = await daemonApi.createGoal({ workspaceId, title: String(title || '') })
+      if (!ownerMemberId) {
+        throw normalizeTypedError({
+          code: 'GOAL_OWNER_REQUIRED',
+          category: 'validation',
+          message: 'Select an owner before creating a goal.',
+          retryable: false,
+        }, 'GOAL_OWNER_REQUIRED')
+      }
+      const created = await daemonApi.createGoal({
+        workspaceId,
+        title: String(title || ''),
+        ownerMemberId,
+      })
       validateWorkspaceScopedRecord(created, workspaceId, ['goalId', 'title', 'status'], 'GOAL_RESPONSE_INVALID')
       const existing = entry.goalsLoadable.status === 'ready' && Array.isArray(entry.goalsLoadable.value)
         ? entry.goalsLoadable.value
@@ -1490,6 +1770,8 @@ export function createWebUIApp({
       entry.goalsLoadable = { status: 'ready', value: [record, ...existing.filter((g) => g.goalId !== record.goalId)], observedAt: nowIso(), freshness: 'fresh', error: null }
       entry.selectedGoalId = record.goalId
       entry.lastError = null
+      const seq = ++entry.requestSeq
+      await loadWorkspaceScopedResources(workspaceId, seq)
       if (state.activeWorkspaceId === workspaceId) {
         syncActiveWorkspaceProjection()
         notify()
@@ -1563,13 +1845,27 @@ export function createWebUIApp({
       }
       case 'create-goal':
       case 'create-workspace-goal':
-        return createWorkspaceGoal({ workspaceId: detail.workspaceId || state.activeWorkspaceId, title: detail.title || 'Workspace Milestone Goal' })
+        return createWorkspaceGoal({
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          title: detail.title || 'Workspace Milestone Goal',
+          ownerMemberId: detail.ownerMemberId,
+        })
       case 'report-ticket':
       case 'create-ticket':
         return createOrReportTicket({
           workspaceId: detail.workspaceId || state.activeWorkspaceId,
           title: detail.title || 'Workspace ticket',
           description: detail.description || '',
+          priority: detail.priority ?? 0,
+          goalId: detail.goalId || state.selectedGoalId,
+          ownerMemberId: detail.ownerMemberId || (state.ownerMemberSelected ? state.selectedMemberId : null),
+        })
+      case 'append-ticket-report':
+        return appendWorkspaceTicketReport({
+          workspaceId: detail.workspaceId || state.activeWorkspaceId,
+          ticketId: detail.ticketId || state.selectedTicketId,
+          body: detail.body || '',
+          reportKind: detail.reportKind || 'status',
         })
       case 'transition-ticket':
         return transitionWorkspaceTicket({
@@ -1587,6 +1883,17 @@ export function createWebUIApp({
             workspaceId: detail.workspaceId || state.activeWorkspaceId,
             title: detail.title || 'Reported ticket',
             description: detail.description || '',
+            goalId: detail.goalId || state.selectedGoalId,
+            ownerMemberId: detail.ownerMemberId,
+            priority: detail.priority ?? 0,
+          })
+        }
+        if (detail.formId === 'ticket-append-report-form') {
+          return appendWorkspaceTicketReport({
+            workspaceId: detail.workspaceId || state.activeWorkspaceId,
+            ticketId: detail.ticketId || state.selectedTicketId,
+            body: detail.body || '',
+            reportKind: detail.reportKind || 'status',
           })
         }
         const resolvedMemberId = detail.memberId
@@ -1701,8 +2008,16 @@ export function createWebUIApp({
       case 'select-member':
       case 'toggle-member':
         state.selectedMemberId = detail.memberId
+        state.ownerMemberSelected = true
         if (state.activeWorkspaceId) {
-          ensureWorkspaceEntry(state.activeWorkspaceId).selectedMemberId = detail.memberId
+          const entry = ensureWorkspaceEntry(state.activeWorkspaceId)
+          entry.selectedMemberId = detail.memberId
+          entry.ownerMemberSelected = true
+          if (state.activeRoute === 'board') {
+            const seq = ++entry.requestSeq
+            await loadWorkspaceScopedResources(state.activeWorkspaceId, seq)
+            return app
+          }
         }
         render()
         return app
@@ -1794,10 +2109,19 @@ export function createWebUIApp({
         const formEl = target.closest?.('form') || root.querySelector?.('#ticket-report-form')
         detail.title = formEl?.querySelector?.('[name="ticketTitle"]')?.value || ''
         detail.description = formEl?.querySelector?.('[name="ticketDescription"]')?.value || ''
+        detail.goalId = formEl?.querySelector?.('[name="ticketGoalId"]')?.value || ''
+        detail.ownerMemberId = formEl?.querySelector?.('[name="ticketOwnerMemberId"]')?.value || ''
+        detail.priority = Number(formEl?.querySelector?.('[name="ticketPriority"]')?.value || 0)
+      }
+      if (action === 'submit-form' && detail.formId === 'ticket-append-report-form') {
+        const formEl = target.closest?.('form') || root.querySelector?.('#ticket-append-report-form')
+        detail.body = formEl?.querySelector?.('[name="ticketReportBody"]')?.value || ''
+        detail.reportKind = formEl?.querySelector?.('[name="ticketReportKind"]')?.value || 'status'
       }
       if (action === 'create-workspace-goal') {
         const formEl = target.closest?.('form') || root.querySelector?.('#board-goal-form')
         detail.title = formEl?.querySelector?.('[name="goalTitle"]')?.value || ''
+        detail.ownerMemberId = formEl?.querySelector?.('[name="goalOwnerMemberId"]')?.value || ''
       }
       event.preventDefault?.()
       void dispatchAction(action, detail)

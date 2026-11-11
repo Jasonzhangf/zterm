@@ -597,8 +597,8 @@ test('ticket-detail: transitions and explicit invalid-transition error', () => {
   assert.equal(ready.model.allowedTransitions[0].to, 'review');
   assert.equal(ready.model.allowedTransitions[1].label, 'Block');
   assert.ok(ready.html.includes('data-action="transition-ticket"'));
-  assert.ok(ready.html.includes('data-transition-to="review"'));
-  assert.ok(ready.html.includes('data-transition-to="blocked"'));
+  assert.ok(ready.html.includes('data-transition="review"'));
+  assert.ok(ready.html.includes('data-transition="blocked"'));
 
   const errored = renderTicketDetail({
     ticketLoadable: ticket,

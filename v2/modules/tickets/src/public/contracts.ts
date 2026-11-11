@@ -61,3 +61,10 @@ export type {
   MutateTicketStateInput,
   TicketServiceOptions,
 } from '../application/ticket-service.ts'
+export { createTicketComposition } from '../composition/ticket-composition.ts'
+export type {
+  TicketComposition,
+  TicketCompositionOptions,
+  TicketCompositionProviderInstance,
+  TicketCompositionWorkspaceProvider,
+} from '../composition/ticket-composition.ts'

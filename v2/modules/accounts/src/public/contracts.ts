@@ -7,6 +7,11 @@ export type {
   AccountAuthorizationGrant,
   WorkspaceAuthorizationContext,
 } from '../domain/authorization.ts'
+export type {
+  AccountMemberIdentityBinding,
+  RevokeMemberIdentityStoreInput,
+  SetMemberIdentityStoreInput,
+} from '../domain/member-identity.ts'
 export type { LoginSessionRecord } from '../domain/login-sessions.ts'
 export type { MachineRef, MachineRecord } from '../domain/machines.ts'
 
@@ -18,6 +23,10 @@ export type {
   RelayAccountDirectory,
   RelayDirectoryDevice,
 } from '../ports/account-directory.ts'
+export type {
+  MemberIdentityDirectoryMember,
+  MemberIdentityDirectoryPort,
+} from '../ports/member-identity-directory.ts'
 export type {
   MachineIdentity,
   MachineProof,
@@ -49,6 +58,17 @@ export {
 export {
   createAccountsAuthorityRuntime,
 } from '../application/accounts-authority-runtime.ts'
+export {
+  MemberIdentityService,
+  createMemberIdentityService,
+} from '../application/member-identity.ts'
+export type {
+  MemberIdentityServiceOptions,
+  ResolveWorkspaceActorInput,
+  ResolvedWorkspaceActor,
+  RevokeMemberIdentityInput,
+  SetMemberIdentityInput,
+} from '../application/member-identity.ts'
 export type {
   AccountsAuthorizationOptions,
   AccountsAuthorizationPort,

@@ -35,6 +35,10 @@ export async function startDaemon({
   routing,
   memberHostObserver,
   terminalCatalog,
+  goals,
+  tickets,
+  board,
+  resolveActor,
 } = {}) {
   assertBindIsAllowed(host);
 
@@ -53,6 +57,10 @@ export async function startDaemon({
     routing,
     memberHostObserver,
     terminalCatalog,
+    goals,
+    tickets,
+    board,
+    resolveActor,
   });
 
   await new Promise((resolve, reject) => {
