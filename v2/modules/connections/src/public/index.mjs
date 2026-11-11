@@ -15,9 +15,14 @@ export { createTerminalMuxClient } from "./terminal-mux-client.ts";
 export async function resolveAuthorizedTerminalDirectory({
   connectionManager,
   machineId,
+  callerToken,
   verifiedAuthorization,
 }) {
-  const link = await connectionManager.connect(machineId, verifiedAuthorization);
+  const link = await connectionManager.connect(
+    machineId,
+    callerToken,
+    verifiedAuthorization,
+  );
   let entries;
   try {
     entries = await connectionManager.listSessions(link);

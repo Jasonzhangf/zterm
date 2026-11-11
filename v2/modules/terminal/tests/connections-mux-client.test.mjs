@@ -80,7 +80,7 @@ test("TerminalPort consumes a connections LinkRef adapter without a second physi
     authorizationPort: { authorizeMachine: async () => authFor("machine-a") },
     transport: { open: async () => fake.handle },
   });
-  const link = await manager.connect("machine-a");
+  const link = await manager.connect("machine-a", undefined, authFor("machine-a"));
   const muxClient = createTerminalMuxClient({ connectionManager: manager, link });
   const terminal = new TerminalPort({ muxClient, log: () => {} });
   t.after(() => terminal.close());

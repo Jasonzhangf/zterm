@@ -146,11 +146,22 @@ export class ConnectionManager {
     this.now = options.now ?? (() => Date.now());
   }
 
-  async connect(machineId: string, verifiedAuthorization?: AuthorizedMachineLink): Promise<LinkRef> {
+  async connect(
+    machineId: string,
+    callerToken?: string,
+    verifiedAuthorization?: AuthorizedMachineLink,
+  ): Promise<LinkRef> {
     if (!machineId.trim()) {
       throw new ConnectionError("invalid_input", "machineId is required");
     }
-    const auth = verifiedAuthorization ?? (await this.authorizationPort.authorizeMachine(machineId));
+    const token = typeof callerToken === "string" ? callerToken.trim() : "";
+    if (!verifiedAuthorization && !token) {
+      throw new ConnectionError("unauthorized", "callerToken is required", {
+        machineId,
+      });
+    }
+    const auth = verifiedAuthorization
+      ?? (await this.authorizationPort.authorizeCallerMachine(machineId, token));
     if (auth.machineId !== machineId) {
       throw new ConnectionError(
         "machine_mismatch",

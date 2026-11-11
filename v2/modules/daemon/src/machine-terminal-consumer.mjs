@@ -64,9 +64,12 @@ export function createConnectionMachineTerminal({
       "machine terminal consumer requires the connections resolveAuthorizedTerminalDirectory public entry",
     );
   }
-  if (authorizationPort !== null && typeof authorizationPort.authorizeMachine !== "function") {
+  if (
+    authorizationPort !== null
+    && typeof authorizationPort.authorizeCallerMachine !== "function"
+  ) {
     throw new TypeError(
-      "machine terminal consumer requires an authorization port with authorizeMachine(machineId)",
+      "machine terminal consumer requires an authorization port with authorizeCallerMachine(machineId, callerToken)",
     );
   }
   if (typeof createMuxClient !== "function") {
@@ -108,6 +111,11 @@ export function createConnectionMachineTerminal({
 
   const machineStates = new Map();
 
+  function machineStateKey(accountId, machineId) {
+    const scope = typeof accountId === "string" ? accountId.trim() : "";
+    return scope ? JSON.stringify([scope, machineId]) : machineId;
+  }
+
   function releaseState(state) {
     if (state.released) {
       return;
@@ -143,7 +151,7 @@ export function createConnectionMachineTerminal({
   }
 
   function assertScopedCurrent(state, operationId) {
-    if (state.released || machineStates.get(state.link.machineId) !== state) {
+    if (state.released || machineStates.get(state.key) !== state) {
       staleGeneration(
         operationId,
         "The machine terminal adapter is no longer the current authorized link.",
@@ -154,12 +162,12 @@ export function createConnectionMachineTerminal({
     try {
       observation = connectionManager.observeLink(state.link);
     } catch (error) {
-      machineStates.delete(state.link.machineId);
+      machineStates.delete(state.key);
       releaseState(state);
       throw error;
     }
     if (observation.generation !== state.link.generation) {
-      machineStates.delete(state.link.machineId);
+      machineStates.delete(state.key);
       releaseState(state);
       staleGeneration(
         operationId,
@@ -172,7 +180,7 @@ export function createConnectionMachineTerminal({
       );
     }
     if (observation.status !== "connected" || observation.freshness !== "fresh") {
-      machineStates.delete(state.link.machineId);
+      machineStates.delete(state.key);
       releaseState(state);
       failUnavailable(
         "TERMINAL_TARGET_BINDING_UNAVAILABLE",
@@ -188,22 +196,23 @@ export function createConnectionMachineTerminal({
     state.observation = observation;
   }
 
-  async function currentState(machineId) {
-    const existing = machineStates.get(machineId);
+  async function currentState(machineId, callerToken, callerAccountId) {
+    const stateKey = machineStateKey(callerAccountId, machineId);
+    const existing = machineStates.get(stateKey);
     if (existing) {
       let observation;
       try {
         observation = connectionManager.observeLink(existing.link);
       } catch (error) {
-        machineStates.delete(machineId);
+        machineStates.delete(stateKey);
         releaseState(existing);
         throw error;
       }
       if (observation.generation !== existing.link.generation) {
-        machineStates.delete(machineId);
+        machineStates.delete(stateKey);
         releaseState(existing);
       } else if (observation.status !== "connected" || observation.freshness !== "fresh") {
-        machineStates.delete(machineId);
+        machineStates.delete(stateKey);
         releaseState(existing);
       } else {
         existing.observation = observation;
@@ -211,9 +220,19 @@ export function createConnectionMachineTerminal({
       }
     }
 
-    const directory = await resolveDirectory({ connectionManager, machineId });
+    const directory = await resolveDirectory({
+      connectionManager,
+      machineId,
+      callerToken,
+    });
     const link = directory.link;
+    const linkedAccountId = typeof link.accountId === "string" ? link.accountId.trim() : "";
+    const linkedStateKey = machineStateKey(
+      callerAccountId || linkedAccountId,
+      machineId,
+    );
     const state = {
+      key: linkedStateKey,
       directory,
       link,
       observation: null,
@@ -236,7 +255,7 @@ export function createConnectionMachineTerminal({
       releaseState(state);
       return null;
     }
-    machineStates.set(machineId, state);
+    machineStates.set(linkedStateKey, state);
     return state;
   }
 
@@ -244,12 +263,36 @@ export function createConnectionMachineTerminal({
     machineId,
     memberId,
     bindingGeneration,
+    accountsToken,
     operationId = "machine-terminal.forMachine",
   } = {}) {
     requireText(machineId, "machineId", operationId);
+    let callerAccountId = "";
     if (authorizationPort) {
+      const token = typeof accountsToken === "string" ? accountsToken.trim() : "";
+      if (!token) {
+        throw new TypedError({
+          code: "MACHINE_ACCOUNT_SESSION_REQUIRED",
+          owningModule: MODULE,
+          operationId,
+          cause: { machineId },
+          message: "An accounts session credential is required.",
+        });
+      }
       try {
-        await authorizationPort.authorizeMachine(machineId);
+        const authorization = await authorizationPort.authorizeCallerMachine(machineId, token);
+        callerAccountId = typeof authorization?.accountId === "string"
+          ? authorization.accountId.trim()
+          : "";
+        if (!callerAccountId) {
+          throw new TypedError({
+            code: "MACHINE_ACCOUNT_SESSION_REQUIRED",
+            owningModule: MODULE,
+            operationId,
+            cause: { machineId },
+            message: "The accounts machine authorization has no account scope.",
+          });
+        }
       } catch (error) {
         throw new TypedError({
           code: typeof error?.code === "string" ? error.code : "MACHINE_REVOKED",
@@ -261,7 +304,7 @@ export function createConnectionMachineTerminal({
       }
     }
 
-    const state = await currentState(machineId);
+    const state = await currentState(machineId, accountsToken, callerAccountId);
     const observation = state && state.observation;
     if (!state || !observation) {
       failUnavailable(
@@ -280,7 +323,7 @@ export function createConnectionMachineTerminal({
       || typeof observation.peerIdentity !== "string"
       || observation.peerIdentity.trim() === ""
     ) {
-      machineStates.delete(machineId);
+      machineStates.delete(state.key);
       releaseState(state);
       failUnavailable(
         "peer_identity_mismatch",
@@ -293,7 +336,7 @@ export function createConnectionMachineTerminal({
     try {
       ensureTerminalPort(state);
     } catch (error) {
-      machineStates.delete(machineId);
+      machineStates.delete(state.key);
       releaseState(state);
       throw error;
     }
@@ -323,8 +366,8 @@ export function createConnectionMachineTerminal({
       input,
       subscribe,
       close: () => {
-        if (machineStates.get(machineId) === state) {
-          machineStates.delete(machineId);
+        if (machineStates.get(state.key) === state) {
+          machineStates.delete(state.key);
         }
         releaseState(state);
       },

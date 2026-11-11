@@ -26,8 +26,8 @@ function createStubManager({
 
   const manager = {
     calls,
-    async connect(machineId) {
-      calls.connect.push(machineId);
+    async connect(machineId, callerToken) {
+      calls.connect.push({ machineId, callerToken });
       const link = { id: `link:${machineId}`, machineId, generation: currentGeneration };
       links.set(machineId, link);
       return link;
@@ -281,8 +281,9 @@ test("forMachine checks machine authorization before terminal access", async () 
   const manager = createStubManager();
   const local = createLocalTerminal();
   const authorizationPort = {
-    async authorizeMachine(machineId) {
-      calls.push(machineId);
+    async authorizeCallerMachine(machineId, accountsToken) {
+      calls.push({ machineId, accountsToken });
+      return { machineId, accountId: "account-current" };
     },
   };
   const consumer = createConnectionMachineTerminal({
@@ -293,17 +294,89 @@ test("forMachine checks machine authorization before terminal access", async () 
     createMuxClient: createRemoteFactories().createMuxClient,
     createTerminalPort: createRemoteFactories().createTerminalPort,
   });
-  await consumer.forMachine({ machineId: "remote-machine" });
-  assert.deepEqual(calls, ["remote-machine"]);
+  await consumer.forMachine({
+    machineId: "remote-machine",
+    accountsToken: "caller-token",
+  });
+  assert.deepEqual(calls, [
+    { machineId: "remote-machine", accountsToken: "caller-token" },
+  ]);
   assert.equal(manager.calls.connect.length, 1);
   assert.equal(local.calls.input.length, 0);
+});
+
+test("forMachine uses the caller-bound machine authorization and rejects a missing accounts session", async () => {
+  const calls = [];
+  const manager = createStubManager();
+  const consumer = createConnectionMachineTerminal({
+    connectionManager: manager,
+    authorizationPort: {
+      async authorizeCallerMachine(machineId, accountsToken) {
+        calls.push({ machineId, accountsToken });
+        return { machineId, accountId: "account-current" };
+      },
+      async authorizeMachine() {
+        throw new Error("service authorization must not be used");
+      },
+    },
+  });
+
+  await consumer.forMachine({ machineId: "remote-machine", accountsToken: "caller-token" });
+  assert.deepEqual(calls, [
+    { machineId: "remote-machine", accountsToken: "caller-token" },
+  ]);
+
+  await assert.rejects(
+    () => consumer.forMachine({ machineId: "remote-machine" }),
+    (error) => {
+      assert.equal(error.code, "MACHINE_ACCOUNT_SESSION_REQUIRED");
+      assert.equal(error.owningModule, "daemon");
+      return true;
+    },
+  );
+});
+
+test("machine terminal state is scoped by the caller accounts session", async () => {
+  const manager = createStubManager();
+  const remote = createRemoteFactories();
+  const consumer = createConnectionMachineTerminal({
+    connectionManager: manager,
+    authorizationPort: {
+      async authorizeCallerMachine(machineId, accountsToken) {
+        return {
+          machineId,
+          accountId: accountsToken === "caller-token-a" ? "account-a" : "account-b",
+        };
+      },
+    },
+    createMuxClient: remote.createMuxClient,
+    createTerminalPort: remote.createTerminalPort,
+  });
+
+  const first = await consumer.forMachine({
+    machineId: "remote-machine",
+    accountsToken: "caller-token-a",
+  });
+  const second = await consumer.forMachine({
+    machineId: "remote-machine",
+    accountsToken: "caller-token-b",
+  });
+
+  assert.deepEqual(manager.calls.connect, [
+    { machineId: "remote-machine", callerToken: "caller-token-a" },
+    { machineId: "remote-machine", callerToken: "caller-token-b" },
+  ]);
+  assert.equal(remote.ports.length, 2);
+
+  first.close();
+  second.close();
 });
 
 test("forMachine surfaces accounts-owned authorization refusal without terminal side effects", async () => {
   const manager = createStubManager();
   const local = createLocalTerminal();
   const authorizationPort = {
-    async authorizeMachine() {
+    async authorizeCallerMachine() {
       throw Object.assign(new Error("machine revoked"), { code: "MACHINE_REVOKED" });
     },
   };
@@ -314,7 +387,10 @@ test("forMachine surfaces accounts-owned authorization refusal without terminal 
     terminal: local,
   });
   await assert.rejects(
-    () => consumer.forMachine({ machineId: "remote-machine" }),
+    () => consumer.forMachine({
+      machineId: "remote-machine",
+      accountsToken: "caller-token",
+    }),
     (error) => {
       assert.equal(error.code, "MACHINE_REVOKED");
       assert.equal(error.owningModule, "accounts");

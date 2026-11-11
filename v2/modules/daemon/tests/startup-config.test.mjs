@@ -116,6 +116,7 @@ test("assembleDaemonConfig composes the real daemon ports from config", async ()
   assert.equal(options.v2Token, TOKEN);
   for (const port of [
     "workspaceAuth",
+    "authService",
     "organization",
     "members",
     "routing",
@@ -126,6 +127,9 @@ test("assembleDaemonConfig composes the real daemon ports from config", async ()
   ]) {
     assert.ok(options[port], `missing composed port ${port}`);
   }
+  assert.equal(typeof options.authService.login, "function");
+  assert.equal(typeof options.authService.verifySession, "function");
+  assert.equal(typeof options.authService.logout, "function");
   assert.equal(typeof options.machineService.listAuthorizedMachines, "function");
   assert.equal(typeof options.machineAuthorization.authorizeMachine, "function");
   assert.equal(typeof options.connectionManager.connect, "function");

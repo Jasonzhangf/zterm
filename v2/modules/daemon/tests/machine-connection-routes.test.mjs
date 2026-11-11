@@ -5,6 +5,8 @@ import { TypedError } from "../../errors/src/public/index.mjs";
 import { createDaemon } from "../src/server.mjs";
 
 const V2_TOKEN = "machine-v2-token";
+const ACCOUNTS_TOKEN = "machine-accounts-token";
+const OTHER_ACCOUNTS_TOKEN = "machine-other-accounts-token";
 const MACHINE_ID = "machine-remote";
 const OTHER_MACHINE_ID = "machine-other";
 
@@ -56,13 +58,14 @@ async function fixture(overrides = {}) {
   const calls = {
     listAuthorizedMachines: [],
     authorizeMachine: [],
+    authorizeCallerMachine: [],
     connect: [],
     observeLink: [],
     listSessions: [],
     closeOwnLink: [],
     terminal: [],
   };
-  let activeLink = null;
+  const activeLinks = new Map();
   let generation = 0;
   let now = 1000;
 
@@ -86,6 +89,9 @@ async function fixture(overrides = {}) {
   const machineService = {
     async listAuthorizedMachines(token) {
       calls.listAuthorizedMachines.push(token);
+      if (token !== ACCOUNTS_TOKEN) {
+        return [];
+      }
       if (overrides.listMachines) {
         return overrides.listMachines(token);
       }
@@ -118,19 +124,49 @@ async function fixture(overrides = {}) {
         },
       };
     },
+    async authorizeCallerMachine(machineId, token) {
+      calls.authorizeCallerMachine.push({ machineId, token });
+      if (![ACCOUNTS_TOKEN, OTHER_ACCOUNTS_TOKEN].includes(token)) {
+        throw typedError("AUTHENTICATION_REQUIRED", "accounts", "machine.authorize", 401);
+      }
+      if (overrides.authorizeMachine) {
+        return overrides.authorizeMachine(machineId, token);
+      }
+      return {
+        machineId,
+        daemonHostId: "daemon-remote",
+        accountId: token === ACCOUNTS_TOKEN ? "account-current" : "account-other",
+        authorizationId: "authz-secret",
+        capabilities: {
+          channelKinds: ["terminal"],
+          transportKind: "websocket",
+        },
+        target: {
+          bridgeHost: "127.0.0.1",
+          bridgePort: 49997,
+          authToken: "bridge-secret",
+          daemonHostId: "daemon-remote",
+        },
+        settings: {
+          signalUrl: "ws://127.0.0.1:49998/signal",
+        },
+      };
+    },
   };
   const connectionManager = {
-    async connect(machineId, authorization) {
-      calls.connect.push({ machineId, authorization });
+    async connect(machineId, callerToken, authorization) {
+      calls.connect.push({ machineId, callerToken, authorization });
       generation += 1;
-      activeLink = { id: `link:${machineId}`, machineId, generation };
-      return activeLink;
+      const link = { id: `link:${machineId}`, machineId, callerToken, generation };
+      activeLinks.set(`${callerToken}:${machineId}`, link);
+      return link;
     },
     observeLink(link) {
       calls.observeLink.push(link);
       if (overrides.observeLink) {
         return overrides.observeLink(link);
       }
+      const activeLink = activeLinks.get(`${link.callerToken}:${link.machineId}`);
       if (!activeLink || activeLink.id !== link.id || activeLink.generation !== link.generation) {
         throw connectionError("stale_generation");
       }
@@ -142,6 +178,7 @@ async function fixture(overrides = {}) {
       if (overrides.listSessions) {
         return overrides.listSessions(link);
       }
+      const activeLink = activeLinks.get(`${link.callerToken}:${link.machineId}`);
       if (!activeLink || activeLink.generation !== link.generation) {
         throw connectionError("stale_generation");
       }
@@ -158,8 +195,9 @@ async function fixture(overrides = {}) {
       if (overrides.closeOwnLink) {
         return overrides.closeOwnLink(link);
       }
-      if (activeLink?.generation === link.generation) {
-        activeLink = null;
+      const key = `${link.callerToken}:${link.machineId}`;
+      if (activeLinks.get(key)?.generation === link.generation) {
+        activeLinks.delete(key);
       }
     },
   };
@@ -199,10 +237,18 @@ async function fixture(overrides = {}) {
   };
 }
 
-async function requestJson(base, path, { token = V2_TOKEN, method = "GET", body } = {}) {
+async function requestJson(base, path, {
+  token = V2_TOKEN,
+  accountsToken = ACCOUNTS_TOKEN,
+  method = "GET",
+  body,
+} = {}) {
   const headers = {};
   if (token !== null) {
     headers.authorization = `Bearer ${token}`;
+  }
+  if (accountsToken !== null) {
+    headers["x-zterm-accounts-session"] = accountsToken;
   }
   if (body !== undefined) {
     headers["content-type"] = "application/json";
@@ -237,7 +283,77 @@ test("machines directory requires V2 authentication and forwards only the caller
     result.body.machines.map((machine) => machine.machineId),
     [MACHINE_ID, OTHER_MACHINE_ID],
   );
-  assert.deepEqual(app.calls.listAuthorizedMachines, [V2_TOKEN]);
+  assert.deepEqual(app.calls.listAuthorizedMachines, [ACCOUNTS_TOKEN]);
+  assert.equal(app.calls.connect.length, 0);
+});
+
+test("machine links are scoped by the accounts caller session", async (t) => {
+  const app = await fixture();
+  t.after(() => app.close());
+
+  const first = await requestJson(
+    app.base,
+    `/api/machines/${MACHINE_ID}/connect`,
+    { method: "POST" },
+  );
+  assert.equal(first.response.status, 200);
+
+  const otherCaller = await requestJson(
+    app.base,
+    `/api/machines/${MACHINE_ID}/connection`,
+    { accountsToken: OTHER_ACCOUNTS_TOKEN },
+  );
+  assert.equal(otherCaller.response.status, 200);
+  assert.equal(otherCaller.body.connection, null);
+  assert.equal(otherCaller.body.status, "unavailable");
+
+  const firstCaller = await requestJson(
+    app.base,
+    `/api/machines/${MACHINE_ID}/connection`,
+  );
+  assert.equal(firstCaller.response.status, 200);
+  assert.equal(firstCaller.body.connection.generation, first.body.connection.generation);
+
+  const second = await requestJson(
+    app.base,
+    `/api/machines/${MACHINE_ID}/connect`,
+    { method: "POST", accountsToken: OTHER_ACCOUNTS_TOKEN },
+  );
+  assert.equal(second.response.status, 200);
+  assert.notEqual(
+    second.body.connection.generation,
+    first.body.connection.generation,
+  );
+  assert.equal(app.calls.connect.length, 2);
+});
+
+test("machine routes keep the V2 gate and accounts session credentials separate", async (t) => {
+  const app = await fixture();
+  t.after(() => app.close());
+
+  const missingAccountsSession = await requestJson(
+    app.base,
+    "/api/machines",
+    { accountsToken: null },
+  );
+  assert.equal(missingAccountsSession.response.status, 401);
+  assert.equal(
+    missingAccountsSession.body.error.code,
+    "MACHINE_ACCOUNT_SESSION_REQUIRED",
+  );
+  assert.equal(app.calls.listAuthorizedMachines.length, 0);
+
+  const v2TokenOnly = await requestJson(
+    app.base,
+    `/api/machines/${MACHINE_ID}/connect`,
+    { method: "POST", accountsToken: null },
+  );
+  assert.equal(v2TokenOnly.response.status, 401);
+  assert.equal(
+    v2TokenOnly.body.error.code,
+    "MACHINE_ACCOUNT_SESSION_REQUIRED",
+  );
+  assert.equal(app.calls.authorizeCallerMachine.length, 0);
   assert.equal(app.calls.connect.length, 0);
 });
 
@@ -281,8 +397,11 @@ test("connect authorizes, stores a non-secret link observation, and repeated con
   assert.equal(first.body.connection.bridgeHost, undefined);
   assert.equal(first.body.connection.signalUrl, undefined);
   assert.equal(first.body.connection.authorizationId, undefined);
-  assert.deepEqual(app.calls.authorizeMachine, [MACHINE_ID]);
+  assert.deepEqual(app.calls.authorizeCallerMachine, [
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+  ]);
   assert.equal(app.calls.connect[0].authorization.authorizationId, "authz-secret");
+  assert.equal(app.calls.connect[0].callerToken, ACCOUNTS_TOKEN);
 
   const second = await requestJson(
     app.base,
@@ -291,7 +410,10 @@ test("connect authorizes, stores a non-secret link observation, and repeated con
   );
   assert.equal(second.response.status, 200);
   assert.equal(second.body.connection.generation, 2);
-  assert.deepEqual(app.calls.authorizeMachine, [MACHINE_ID, MACHINE_ID]);
+  assert.deepEqual(app.calls.authorizeCallerMachine, [
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+  ]);
   assert.equal(app.calls.connect.length, 2);
 });
 
@@ -313,10 +435,15 @@ test("stored connection observation is read-only and recover creates a new gener
   );
   assert.equal(recovered.response.status, 200);
   assert.equal(recovered.body.connection.generation, 2);
-  assert.deepEqual(app.calls.authorizeMachine, [MACHINE_ID, MACHINE_ID]);
 
   const current = await requestJson(app.base, `/api/machines/${MACHINE_ID}/connection`);
   assert.equal(current.body.connection.generation, 2);
+  assert.deepEqual(app.calls.authorizeCallerMachine, [
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+  ]);
 });
 
 test("sessions require a current link, reauthorize, and never connect implicitly", async (t) => {
@@ -327,7 +454,11 @@ test("sessions require a current link, reauthorize, and never connect implicitly
     app.base,
     `/api/machines/${MACHINE_ID}/sessions`,
   );
-  assert.equal(unavailable.response.status, 409);
+  assert.equal(
+    unavailable.response.status,
+    409,
+    JSON.stringify(unavailable.body),
+  );
   assert.equal(unavailable.body.error.code, "MACHINE_NOT_CONNECTED");
   assert.equal(app.calls.authorizeMachine.length, 0);
   assert.equal(app.calls.listSessions.length, 0);
@@ -348,7 +479,11 @@ test("sessions require a current link, reauthorize, and never connect implicitly
   ]);
   assert.equal(result.body.observation.value.machineId, MACHINE_ID);
   assert.equal(result.body.observation.value.generation, 1);
-  assert.deepEqual(app.calls.authorizeMachine, [MACHINE_ID, MACHINE_ID]);
+  assert.deepEqual(app.calls.authorizeCallerMachine, [
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+    { machineId: MACHINE_ID, token: ACCOUNTS_TOKEN },
+  ]);
   assert.equal(app.calls.connect.length, 1);
   assert.equal(app.calls.listSessions.length, 1);
   assert.equal(app.calls.listSessions[0].generation, 1);
@@ -383,7 +518,11 @@ test("disconnect closes only its machine link and removes the current observatio
     app.base,
     `/api/machines/${MACHINE_ID}/sessions`,
   );
-  assert.equal(catalogUnavailable.response.status, 409);
+  assert.equal(
+    catalogUnavailable.response.status,
+    409,
+    JSON.stringify(catalogUnavailable.body),
+  );
   assert.equal(catalogUnavailable.body.error.code, "MACHINE_NOT_CONNECTED");
 
   const inputUnavailable = await requestJson(
@@ -407,6 +546,51 @@ test("disconnect closes only its machine link and removes the current observatio
   assert.equal(other.response.status, 200);
   assert.equal(other.body.connection.machineId, OTHER_MACHINE_ID);
   assert.equal(other.body.connection.generation, 2);
+});
+
+test("cross-account machine actions fail as not found before connect", async (t) => {
+  const app = await fixture({
+    authorizeMachine(machineId, token) {
+      if (token === OTHER_ACCOUNTS_TOKEN) {
+        throw typedError(
+          "MACHINE_NOT_FOUND",
+          "accounts",
+          "machine.authorize",
+          404,
+        );
+      }
+      return {
+        machineId,
+        daemonHostId: "daemon-remote",
+        accountId: "account-current",
+        authorizationId: "authz-secret",
+        capabilities: {
+          channelKinds: ["terminal"],
+          transportKind: "websocket",
+        },
+        target: {
+          bridgeHost: "127.0.0.1",
+          bridgePort: 49997,
+          daemonHostId: "daemon-remote",
+        },
+        settings: {},
+      };
+    },
+  });
+  t.after(() => app.close());
+
+  const response = await requestJson(
+    app.base,
+    `/api/machines/${MACHINE_ID}/connect`,
+    {
+      method: "POST",
+      accountsToken: OTHER_ACCOUNTS_TOKEN,
+    },
+  );
+  assert.equal(response.response.status, 404);
+  assert.equal(response.body.error.code, "MACHINE_NOT_FOUND");
+  assert.equal(response.body.error.owningModule, "accounts");
+  assert.equal(app.calls.connect.length, 0);
 });
 
 test("typed authorization and catalog failures keep owner, code, and operation", async (t) => {

@@ -312,7 +312,14 @@ export function assembleDaemonConfig(
 
   const relayBaseUrl = requireText(accounts, "relayBaseUrl", "accounts");
   const authorizationStoreFile = requireText(accounts, "authorizationStoreFile", "accounts");
-  const machineAuthorizationToken = requireText(accounts, "machineAuthorizationToken", "accounts");
+  // Explicit service credential for delivery-target authorization only. Browser
+  // machine directory, connection, and terminal actions use the caller's
+  // accounts session through authorizeCallerMachine.
+  const deliveryAuthorizationToken = requireText(
+    accounts,
+    "machineAuthorizationToken",
+    "accounts",
+  );
 
   const organizationStoreFile = requireText(organizationConfig, "storeFile", "organization");
   const bindingStoreFile = requireText(membersConfig, "bindingStoreFile", "members");
@@ -330,7 +337,7 @@ export function assembleDaemonConfig(
     verifySession: (token) => authService.verifySession(token),
   });
   const authorizationPort = createAccountsAuthorizationPort({
-    token: machineAuthorizationToken,
+    token: deliveryAuthorizationToken,
     authService,
     machineService,
     routes: createStaticMachineRouteSource(connections.machineRoutes),
@@ -503,6 +510,7 @@ export function assembleDaemonConfig(
       tickets,
       board,
       memberHostObserver,
+      authService,
       machineService,
       machineAuthorization: authorizationPort,
       connectionManager,

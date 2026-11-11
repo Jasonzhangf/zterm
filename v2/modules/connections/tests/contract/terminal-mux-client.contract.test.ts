@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createConnectionManager } from "../../src/public/link-port";
+import { createConnectionManager } from "../support/caller-bound-manager";
 import { createTerminalMuxClient } from "../../src/public/terminal-mux-client";
 import { ConnectionError } from "../../src/public/errors";
 import type {

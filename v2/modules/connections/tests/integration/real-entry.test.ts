@@ -7,7 +7,8 @@ import {
   buildTerminalMuxServerTargetMessage,
   isTerminalMuxClientFrame,
 } from "@zterm/shared/connection/protocol";
-import { createConnectionManager, V1TraversalTransport } from "../../src/index";
+import { V1TraversalTransport } from "../../src/index";
+import { createConnectionManager } from "../support/caller-bound-manager";
 import type { AuthorizedMachineLink } from "../../src/ports/accounts-authorization";
 
 const TOKEN = "test-token-abc";

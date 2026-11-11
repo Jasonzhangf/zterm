@@ -134,6 +134,7 @@ export function createDaemon({
   routing,
   memberHostObserver,
   terminalCatalog,
+  authService,
   machineService,
   machineAuthorization,
   connectionManager,
@@ -178,6 +179,7 @@ export function createDaemon({
     routing,
     memberHostObserver,
     terminalCatalog,
+    authService,
     machineService,
     machineAuthorization,
     connectionManager,
@@ -270,6 +272,18 @@ async function handleRequest({ request, response, context }) {
     return logout(request, response, context);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/accounts/login") {
+    return accountsLogin(request, response, context);
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/accounts/session") {
+    return accountsSession(request, response, context);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/accounts/logout") {
+    return accountsLogout(request, response, context);
+  }
+
   if (request.method === "GET" && url.pathname === "/api/sessions") {
     authenticate(request, context);
     const sessions = await context.terminal.listSessions();
@@ -286,12 +300,23 @@ async function handleRequest({ request, response, context }) {
 
   if (request.method === "GET" && url.pathname === "/api/terminal/stream") {
     requireTerminalAdmission(context, "terminal.stream");
-    return streamTerminal(request, response, context, url, credentialHeader(request));
+    return streamTerminal(
+      request,
+      response,
+      context,
+      url,
+      accountsSessionHeader(request),
+    );
   }
 
   if (request.method === "POST" && url.pathname === "/api/terminal/input") {
     requireTerminalAdmission(context, "terminal.input");
-    return sendTerminalInput(request, response, context, credentialHeader(request));
+    return sendTerminalInput(
+      request,
+      response,
+      context,
+      accountsSessionHeader(request),
+    );
   }
 
   if (request.method === "GET" && url.pathname === "/api/workspaces") {
@@ -349,23 +374,17 @@ function matchMachineRoute(pathname) {
 
 async function handleMachineRoute({ request, response, context, route }) {
   authenticate(request, context);
+  const accountsToken = accountsSessionHeader(request);
 
   if (route.kind === "machine-list") {
     if (request.method !== "GET") {
       throw daemonError("METHOD_NOT_ALLOWED", "machine.list", "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
     }
+    requireMachineAccountsSession(accountsToken, "machine.list");
     requireMachineService(context, "machine.list");
-    const token = credentialHeader(request);
-    if (!token) {
-      throw daemonError(
-        "MACHINE_ACCOUNT_SESSION_REQUIRED",
-        "machine.list",
-        "An accounts session credential is required.",
-      );
-    }
     let machines;
     try {
-      machines = await context.machineService.listAuthorizedMachines(token);
+      machines = await context.machineService.listAuthorizedMachines(accountsToken);
     } catch (error) {
       throw toControlTypedError(error, "machine.list");
     }
@@ -377,16 +396,26 @@ async function handleMachineRoute({ request, response, context, route }) {
 
   const operationId = `machine.${route.kind.slice("machine-".length)}`;
   requireConnectionManager(context, operationId);
+  requireMachineAccountsSession(accountsToken, operationId);
+  requireMachineAuthorization(context, operationId);
 
   if (route.kind === "machine-connect" || route.kind === "machine-recover") {
     if (request.method !== "POST") {
       throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
     }
-    requireMachineAuthorization(context, operationId);
-    const authorization = await authorizeMachine(route.machineId, context, operationId);
+    const authorization = await authorizeCallerMachine(
+      route.machineId,
+      accountsToken,
+      context,
+      operationId,
+    );
     const link = await withTerminalAdmission(
       operationId,
-      () => context.connectionManager.connect(route.machineId, authorization),
+      () => context.connectionManager.connect(
+        route.machineId,
+        accountsToken,
+        authorization,
+      ),
     );
     let connection;
     try {
@@ -402,7 +431,7 @@ async function handleMachineRoute({ request, response, context, route }) {
       }
       throw error;
     }
-    context.machineLinks.set(route.machineId, link);
+    context.machineLinks.set(machineLinkKey(authorization, route.machineId), link);
     return sendJson(response, 200, {
       connection,
       observation: observation("connections", {
@@ -418,7 +447,15 @@ async function handleMachineRoute({ request, response, context, route }) {
     if (request.method !== "GET") {
       throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
     }
-    const link = context.machineLinks.get(route.machineId);
+    const authorization = await authorizeCallerMachine(
+      route.machineId,
+      accountsToken,
+      context,
+      operationId,
+    );
+    const link = context.machineLinks.get(
+      machineLinkKey(authorization, route.machineId),
+    );
     if (!link) {
       return sendJson(response, 200, {
         connection: null,
@@ -450,12 +487,24 @@ async function handleMachineRoute({ request, response, context, route }) {
     if (request.method !== "POST") {
       throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
     }
-    const link = requireCurrentMachineLink(route.machineId, context, operationId);
+    const authorization = await authorizeCallerMachine(
+      route.machineId,
+      accountsToken,
+      context,
+      operationId,
+    );
+    const linkKey = machineLinkKey(authorization, route.machineId);
+    const link = requireCurrentMachineLink(
+      linkKey,
+      route.machineId,
+      context,
+      operationId,
+    );
     await withTerminalAdmission(
       operationId,
       () => context.connectionManager.closeOwnLink(link),
     );
-    context.machineLinks.delete(route.machineId);
+    context.machineLinks.delete(linkKey);
     return sendJson(response, 200, {
       disconnected: true,
       machineId: route.machineId,
@@ -473,12 +522,18 @@ async function handleMachineRoute({ request, response, context, route }) {
     if (request.method !== "GET") {
       throw daemonError("METHOD_NOT_ALLOWED", operationId, "HTTP method is not allowed for this endpoint.", `${request.method} ${request.url}`);
     }
-    const link = requireCurrentMachineLink(route.machineId, context, operationId);
-    requireMachineAuthorization(context, operationId);
-    const authorization = await authorizeMachine(route.machineId, context, operationId);
-    if (authorization.machineId !== route.machineId) {
-      throw daemonError("machine_mismatch", operationId, "Machine authorization does not match the requested machine.", route.machineId);
-    }
+    const authorization = await authorizeCallerMachine(
+      route.machineId,
+      accountsToken,
+      context,
+      operationId,
+    );
+    const link = requireCurrentMachineLink(
+      machineLinkKey(authorization, route.machineId),
+      route.machineId,
+      context,
+      operationId,
+    );
     const sessions = await withTerminalAdmission(
       operationId,
       () => context.connectionManager.listSessions(link),
@@ -506,8 +561,23 @@ function requireMachineService(context, operationId) {
   }
 }
 
+function requireMachineAccountsSession(token, operationId) {
+  if (!token) {
+    throw daemonError(
+      "MACHINE_ACCOUNT_SESSION_REQUIRED",
+      operationId,
+      "An accounts session credential is required.",
+    );
+  }
+  return token;
+}
+
 function requireMachineAuthorization(context, operationId) {
-  if (!context.machineAuthorization || typeof context.machineAuthorization.authorizeMachine !== "function") {
+  if (
+    !context.machineAuthorization
+    || typeof context.machineAuthorization.authorizeCallerMachine !== "function"
+    || typeof context.machineAuthorization.authorizeMachine !== "function"
+  ) {
     throw daemonError(
       "MACHINE_AUTHORIZATION_UNCONFIGURED",
       operationId,
@@ -532,8 +602,8 @@ function requireConnectionManager(context, operationId) {
   }
 }
 
-function requireCurrentMachineLink(machineId, context, operationId) {
-  const link = context.machineLinks.get(machineId);
+function requireCurrentMachineLink(linkKey, machineId, context, operationId) {
+  const link = context.machineLinks.get(linkKey);
   if (!link) {
     throw daemonError(
       "MACHINE_NOT_CONNECTED",
@@ -545,12 +615,38 @@ function requireCurrentMachineLink(machineId, context, operationId) {
   return link;
 }
 
-async function authorizeMachine(machineId, context, operationId) {
+async function authorizeCallerMachine(machineId, accountsToken, context, operationId) {
   try {
-    return await context.machineAuthorization.authorizeMachine(machineId);
+    const authorization = await context.machineAuthorization.authorizeCallerMachine(
+      machineId,
+      accountsToken,
+    );
+    const accountId = typeof authorization?.accountId === "string"
+      ? authorization.accountId.trim()
+      : "";
+    if (!accountId) {
+      throw daemonError(
+        "MACHINE_ACCOUNT_SESSION_REQUIRED",
+        operationId,
+        "The accounts machine authorization has no account scope.",
+      );
+    }
+    if (authorization.machineId !== machineId) {
+      throw daemonError(
+        "machine_mismatch",
+        operationId,
+        "Machine authorization does not match the requested machine.",
+        machineId,
+      );
+    }
+    return authorization;
   } catch (error) {
     throw toControlTypedError(error, operationId);
   }
+}
+
+function machineLinkKey(authorization, machineId) {
+  return JSON.stringify([authorization.accountId, machineId]);
 }
 
 function matchWorkspaceRoute(pathname) {
@@ -1413,6 +1509,11 @@ function credentialHeader(request) {
   return "";
 }
 
+function accountsSessionHeader(request) {
+  const value = request.headers["x-zterm-accounts-session"];
+  return typeof value === "string" ? value.trim() : "";
+}
+
 function controlToken(request) {
   const bearer = request.headers.authorization;
   if (typeof bearer === "string" && bearer.toLowerCase().startsWith("bearer ")) {
@@ -1528,6 +1629,83 @@ function logout(request, response, context) {
   sendJson(response, 200, { ok: true });
 }
 
+function requireAccountsAuthService(context, operationId) {
+  if (
+    !context.authService
+    || typeof context.authService.login !== "function"
+    || typeof context.authService.verifySession !== "function"
+    || typeof context.authService.logout !== "function"
+  ) {
+    throw daemonError(
+      "ACCOUNTS_SERVICE_UNCONFIGURED",
+      operationId,
+      "The accounts session service is not configured.",
+    );
+  }
+}
+
+async function accountsLogin(request, response, context) {
+  authenticate(request, context);
+  if (!requestOriginAllowed(request)) {
+    throw daemonError("ORIGIN_NOT_ALLOWED", "accounts.login", "Cross-origin login is not allowed.");
+  }
+  requireAccountsAuthService(context, "accounts.login");
+  const body = await readJson(request);
+  const loginName = validateNonEmptyString(
+    body.loginName,
+    "loginName",
+    "accounts.login",
+  );
+  const credential = validateNonEmptyString(
+    body.credential,
+    "credential",
+    "accounts.login",
+  );
+  let result;
+  try {
+    result = await context.authService.login({ loginName, credential });
+  } catch (error) {
+    throw toControlTypedError(error, "accounts.login");
+  }
+  return sendJson(response, 200, {
+    token: result.token,
+    account: {
+      accountId: result.authContext.accountId,
+      loginName: result.authContext.loginName,
+    },
+  });
+}
+
+async function accountsSession(request, response, context) {
+  authenticate(request, context);
+  requireAccountsAuthService(context, "accounts.session");
+  let authContext;
+  try {
+    authContext = await context.authService.verifySession(
+      accountsSessionHeader(request),
+    );
+  } catch (error) {
+    throw toControlTypedError(error, "accounts.session");
+  }
+  return sendJson(response, 200, {
+    account: {
+      accountId: authContext.accountId,
+      loginName: authContext.loginName,
+    },
+  });
+}
+
+async function accountsLogout(request, response, context) {
+  authenticate(request, context);
+  requireAccountsAuthService(context, "accounts.logout");
+  try {
+    await context.authService.logout(accountsSessionHeader(request));
+  } catch (error) {
+    throw toControlTypedError(error, "accounts.logout");
+  }
+  return sendJson(response, 200, { ok: true });
+}
+
 function constantTimeEqual(left, right) {
   const a = Buffer.from(String(left));
   const b = Buffer.from(String(right));
@@ -1546,6 +1724,8 @@ async function streamTerminal(request, response, context, url, callerToken) {
   let streamResolution = null;
   let target = null;
   requireTerminalAdmission(context, "terminal.stream");
+  authenticate(request, context);
+  requireMachineAccountsSession(callerToken, "terminal.stream");
   streamResolution = await withTerminalAdmission("terminal.stream", () => context.admission.admit({
     callerToken,
     workspaceId: url.searchParams.get("workspaceId"),
@@ -1690,6 +1870,8 @@ async function streamTerminal(request, response, context, url, callerToken) {
 
 async function sendTerminalInput(request, response, context, callerToken) {
   requireTerminalAdmission(context, "terminal.input");
+  authenticate(request, context);
+  requireMachineAccountsSession(callerToken, "terminal.input");
   const body = await readJson(request);
   const result = await withTerminalAdmission("terminal.input", () => context.admission.forwardInput({
     callerToken,
@@ -1897,6 +2079,7 @@ function statusForError(error) {
     case "BINDING_HOST_IDENTITY_UNAVAILABLE":
       return 503;
     case "V2_AUTH_UNCONFIGURED":
+    case "ACCOUNTS_SERVICE_UNCONFIGURED":
     case "TERMINAL_ADMISSION_REQUIRED":
       return 503;
     case "V2_CREDENTIAL_REQUIRED":

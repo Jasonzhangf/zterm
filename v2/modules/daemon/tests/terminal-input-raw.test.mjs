@@ -3,11 +3,16 @@ import { test } from "node:test";
 import { createDaemon } from "../src/server.mjs";
 import { TypedError } from "../../errors/src/public/index.mjs";
 
-const TOKEN = "raw-input-token";
+const V2_TOKEN = "raw-input-v2-token";
+const ACCOUNTS_TOKEN = "raw-input-accounts-token";
 const MACHINE_ID = "machine-raw";
 const DAEMON_HOST_ID = "daemon-raw";
 const TARGET = Object.freeze({ backend: "tmux", stableId: "s1", name: "s1" });
-const authHeaders = { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" };
+const authHeaders = {
+  authorization: `Bearer ${V2_TOKEN}`,
+  "x-zterm-accounts-session": ACCOUNTS_TOKEN,
+  "content-type": "application/json",
+};
 
 function createAdmissionHarness() {
   const inputs = [];
@@ -25,7 +30,7 @@ function createAdmissionHarness() {
 
   const auth = {
     async verify(token) {
-      if (token !== TOKEN) {
+      if (token !== ACCOUNTS_TOKEN) {
         throw new TypedError({
           code: "UNAUTHENTICATED",
           owningModule: "routing",
@@ -64,12 +69,23 @@ function createAdmissionHarness() {
       };
     },
   };
+  const machineTerminalCalls = [];
   const machineTerminal = {
-    async forMachine({ machineId, memberId, bindingGeneration }) {
+    async forMachine({ machineId, memberId, bindingGeneration, accountsToken }) {
+      machineTerminalCalls.push({ machineId, memberId, bindingGeneration, accountsToken });
+      if (accountsToken !== ACCOUNTS_TOKEN) {
+        throw new TypedError({
+          code: "MACHINE_ACCOUNT_SESSION_REQUIRED",
+          owningModule: "accounts",
+          operationId: "machine-terminal.forMachine",
+          message: "The machine terminal authorization is not caller bound.",
+        });
+      }
       return {
         machineId,
         memberId,
         bindingGeneration,
+        accountsToken,
         status: "connected",
         freshness: "fresh",
         peerIdentityVerified: true,
@@ -81,9 +97,11 @@ function createAdmissionHarness() {
       };
     },
   };
+  machineTerminal.calls = machineTerminalCalls;
 
   return {
     admission: { auth, members, routing, machineTerminal },
+    machineTerminal,
     inputs,
     terminalPort: terminal,
   };
@@ -92,7 +110,7 @@ function createAdmissionHarness() {
 async function startDaemon(t, harness) {
   const daemon = createDaemon({
     v1WsUrl: "ws://127.0.0.1:1/ws",
-    v2Token: TOKEN,
+    v2Token: V2_TOKEN,
     terminalPort: harness.terminalPort,
     admission: harness.admission,
     log: () => {},
@@ -142,6 +160,47 @@ test("admitted raw input preserves exact bytes and does not add an Enter", async
     assert.equal(response.status, 200);
     assert.deepEqual(harness.inputs.at(-1), { target: TARGET.stableId, data: expected });
   }
+});
+
+test("terminal input keeps V2 gate and accounts session credentials separate", async (t) => {
+  const harness = createAdmissionHarness();
+  const base = await startDaemon(t, harness);
+
+  const missingAccountsSession = await postInput(
+    base,
+    admissionBody({ data: "missing", raw: true }),
+    {
+      authorization: `Bearer ${V2_TOKEN}`,
+      "content-type": "application/json",
+    },
+  );
+  assert.equal(missingAccountsSession.status, 401);
+  assert.equal(
+    (await missingAccountsSession.json()).error.code,
+    "MACHINE_ACCOUNT_SESSION_REQUIRED",
+  );
+  assert.equal(harness.inputs.length, 0);
+  assert.equal(harness.machineTerminal.calls.length, 0);
+
+  const v2Only = await postInput(
+    base,
+    admissionBody({ data: "v2-only", raw: true }),
+    {
+      authorization: `Bearer ${V2_TOKEN}`,
+      "x-zterm-accounts-session": V2_TOKEN,
+      "content-type": "application/json",
+    },
+  );
+  assert.equal(v2Only.status, 401);
+  assert.equal(harness.inputs.length, 0);
+  assert.equal(harness.machineTerminal.calls.length, 0);
+
+  const response = await postInput(base, admissionBody({ data: "l", raw: true }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    harness.machineTerminal.calls.map((call) => call.accountsToken),
+    [ACCOUNTS_TOKEN, ACCOUNTS_TOKEN],
+  );
 });
 
 test("legacy raw flag values do not change admitted byte forwarding", async (t) => {
@@ -213,5 +272,5 @@ test("admitted input preserves delivery order and cannot bypass auth or target c
     { "content-type": "application/json" },
   );
   assert.equal(response.status, 401);
-  assert.equal((await response.json()).error.code, "UNAUTHENTICATED");
+  assert.equal((await response.json()).error.code, "V2_CREDENTIAL_REQUIRED");
 });
