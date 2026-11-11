@@ -570,7 +570,6 @@ the previous entry is still healthy.
 
 ```sh
 zterm daemon install
-zterm daemon install --no-start
 zterm daemon status
 zterm daemon config
 zterm daemon config tmux set <name> --socket <path>
@@ -604,19 +603,19 @@ Installs the `@jsonstudio/zterm-daemon` package that matches the current host
 platform manifest. Installation uses a temporary staging prefix, verifies the
 package and runtime components, installs the staged tarball into the same npm
 global prefix, and asks the package-owned shim installer to publish the user
-command. On macOS, after entry verification, it activates the installed
-autostart service through the formal `zterm-daemon install-service` owner.
-Linux and Windows have no verified formal service owner yet, so installation
-succeeds and reports service activation as unsupported.
+command, then verifies the installed entry. Successful completion prints
+`安装命令未执行服务激活；现有服务状态保持不变。`
 
-Use `--no-start` to install the package without activating the service. In
-that mode the command prints `未启动 autostart 服务`. The normal macOS activation
-path prints `autostart 服务已启动`; an unsupported platform prints the explicit
-unsupported message instead.
+The removed `--no-start` option fails before installer dispatch with usage exit
+code `2`. The installation command now has no service activation mode; the
+existing package-owned `zterm-daemon install-service` command remains a separate
+operation. See
+[`android/docs/decisions/2026-10-24-cli-daemon-release-process.md`](../android/docs/decisions/2026-10-24-cli-daemon-release-process.md)
+for the package-install and service-activation boundary.
 
 This command does not:
 
-- stop or restart an already running daemon
+- start, stop, or restart the daemon
 - write `~/.zterm/config.json`
 - execute package lifecycle scripts during staging
 

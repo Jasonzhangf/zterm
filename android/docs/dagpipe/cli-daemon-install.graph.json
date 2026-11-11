@@ -128,33 +128,10 @@
       "operator": "cli.daemon_install.settle",
       "operator_version": "0.1",
       "inputs": [
-        "arc.daemon_service_activation"
-      ],
-      "output": {
-        "id": "arc.daemon_install_result",
-        "schema": "Object"
-      },
-      "input_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "output_selector": {
-        "include": [],
-        "exclude": [],
-        "predicate": null
-      },
-      "iterator": "Whole"
-    },
-    {
-      "id": "activate_daemon_service",
-      "operator": "cli.daemon_install.activate_service",
-      "operator_version": "0.1",
-      "inputs": [
         "arc.daemon_install_verification"
       ],
       "output": {
-        "id": "arc.daemon_service_activation",
+        "id": "arc.daemon_install_result",
         "schema": "Object"
       },
       "input_selector": {
@@ -193,13 +170,8 @@
     },
     {
       "from": "verify_daemon_entry",
-      "to": "activate_daemon_service",
-      "arc_id": "arc.daemon_install_verification"
-    },
-    {
-      "from": "activate_daemon_service",
       "to": "settle_daemon_install",
-      "arc_id": "arc.daemon_service_activation"
+      "arc_id": "arc.daemon_install_verification"
     }
   ],
   "outputs": [

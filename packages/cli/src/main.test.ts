@@ -703,19 +703,15 @@ describe('zterm public main contract', () => {
     const daemonInstall = vi.fn(async () => ({
       phase: 'verify' as const,
       installedVersion: '1.2.3',
+      payloadPackage: '@jsonstudio/zterm-daemon-darwin-arm64',
       commandAvailable: true,
       filesWritten: [],
       previousEntryPreserved: 'unknown' as const,
-      serviceActivation: {
-        state: 'skipped' as const,
-        reason: 'disabled' as const,
-      },
     }));
 
     for (const args of [
       ['daemon', 'install', '--version', '1.2.3', '--registry', 'https://npm.example/'],
       ['daemon', 'install', '--registry', 'https://npm.example/', '--version', '1.2.3'],
-      ['daemon', 'install', '--no-start', '--version', '1.2.3'],
     ]) {
       const exitCode = await runMain(args, {
         store,
@@ -730,62 +726,24 @@ describe('zterm public main contract', () => {
     expect(daemonInstall).toHaveBeenNthCalledWith(1, {
       version: '1.2.3',
       registry: 'https://npm.example/',
-      startService: true,
       signal: expect.any(AbortSignal),
     });
     expect(daemonInstall).toHaveBeenNthCalledWith(2, {
       version: '1.2.3',
       registry: 'https://npm.example/',
-      startService: true,
-      signal: expect.any(AbortSignal),
-    });
-    expect(daemonInstall).toHaveBeenNthCalledWith(3, {
-      version: '1.2.3',
-      startService: false,
       signal: expect.any(AbortSignal),
     });
   });
 
-  it('reports the real daemon service activation result', async () => {
-    const { store } = testStore();
-    const daemonInstall = vi.fn(async () => ({
-      phase: 'activate-service' as const,
-      installedVersion: '1.2.3',
-      commandAvailable: true,
-      filesWritten: [],
-      previousEntryPreserved: 'unknown' as const,
-      serviceActivation: {
-        state: 'started' as const,
-        command: '/usr/local/bin/zterm-daemon',
-        args: ['install-service'],
-      },
-    }));
-    const stdout = outputCapture();
-
-    const exitCode = await runMain(['daemon', 'install'], {
-      store,
-      daemonInstall,
-      stdout: stdout.stream,
-      stderr: outputCapture().stream,
-      signal: new AbortController().signal,
-    });
-
-    expect(exitCode).toBe(0);
-    expect(stdout.read()).toContain('autostart 服务已启动');
-  });
-
-  it('reports unsupported daemon service activation without failing the install', async () => {
+  it('prints installation-only completion without claiming a service state', async () => {
     const { store } = testStore();
     const daemonInstall = vi.fn(async () => ({
       phase: 'verify' as const,
       installedVersion: '1.2.3',
+      payloadPackage: '@jsonstudio/zterm-daemon-darwin-arm64',
       commandAvailable: true,
       filesWritten: [],
       previousEntryPreserved: 'unknown' as const,
-      serviceActivation: {
-        state: 'skipped' as const,
-        reason: 'platform_unsupported' as const,
-      },
     }));
     const stdout = outputCapture();
 
@@ -798,21 +756,44 @@ describe('zterm public main contract', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout.read()).toContain('当前平台未提供正式 autostart 服务');
+    const output = stdout.read();
+    expect(output).toContain('daemon 安装完成：1.2.3');
+    expect(output).toContain('安装命令未执行服务激活；现有服务状态保持不变。');
+    expect(output).not.toContain('服务已启动');
   });
 
-  it('preserves daemon service activation failure as a non-zero command result', async () => {
+  it('rejects the removed --no-start option before installer dispatch', async () => {
+    const { store } = testStore();
+    const daemonInstall = vi.fn();
+    const stderr = outputCapture();
+
+    const exitCode = await runMain(['daemon', 'install', '--no-start'], {
+      store,
+      daemonInstall,
+      stdout: outputCapture().stream,
+      stderr: stderr.stream,
+      signal: new AbortController().signal,
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stderr.read()).toContain(
+      '--no-start 已移除：daemon install 现在只安装和验证，不执行服务激活。',
+    );
+    expect(daemonInstall).not.toHaveBeenCalled();
+  });
+
+  it('preserves an explicit daemon installation failure', async () => {
     const { store } = testStore();
     const daemonInstall = vi.fn(async () => ({
-      phase: 'activate-service' as const,
+      phase: 'verify' as const,
       installedVersion: '1.2.3',
+      payloadPackage: '@jsonstudio/zterm-daemon-darwin-arm64',
       commandAvailable: true,
       filesWritten: ['/usr/local/lib/node_modules/@jsonstudio/zterm-daemon'],
       previousEntryPreserved: 'unknown' as const,
-      serviceActivation: { state: 'skipped' as const },
       error: {
-        code: 'daemon_service_install_failed',
-        message: 'launchctl bootstrap failed',
+        code: 'daemon_entry_verification_failed',
+        message: 'official daemon command did not report 1.2.3',
       },
     }));
     const stderr = outputCapture();
@@ -826,7 +807,7 @@ describe('zterm public main contract', () => {
     });
 
     expect(exitCode).toBe(1);
-    expect(stderr.read()).toContain('launchctl bootstrap failed');
+    expect(stderr.read()).toContain('official daemon command did not report 1.2.3');
   });
 
   it('delegates upgrade registry selection and preserves the unchanged state', async () => {
