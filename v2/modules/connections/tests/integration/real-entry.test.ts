@@ -16,6 +16,10 @@ const DAEMON = "daemon-lan-peer";
 const MACHINE = "machine-lan-peer";
 const KNOWN_SESSION = "known-session";
 
+// Terminal text payloads on the mux wire are JSON control messages. A string
+// that is not valid JSON is a protocol error, not binary terminal data.
+const inputMessage = (text: string) => JSON.stringify({ type: "input", payload: text });
+
 // Modes model the real V1 daemon wire behavior. "missing-identity" omits
 // daemonHostId, exactly like the live daemon. The identity modes declare a
 // matching or different identity. There is no generic message/file capability
@@ -43,6 +47,9 @@ let catalogResponseMode: CatalogResponseMode = "catalog";
 let targetRequests: Array<{ requestId?: string; type: string; payload?: unknown }> = [];
 let channelOpenCount = 0;
 let channelBinaryCount = 0;
+let channelMessageCount = 0;
+let lastChannelMessageFrame: { channelId: string; message: unknown } | null = null;
+let lastChannelBinaryFrame: { channelId: string; dataBase64: string } | null = null;
 
 class FailOnceLateOpenCloseWebSocket extends WebSocket {
   override send(data: RawData, options?: unknown, callback?: unknown): void {
@@ -125,6 +132,7 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
         if (!isTerminalMuxClientFrame(parsed)) return;
         if (parsed.type === "mux-channel-open") channelOpenCount += 1;
         if (parsed.type === "mux-channel-binary") channelBinaryCount += 1;
+        if (parsed.type === "mux-channel-message") channelMessageCount += 1;
         if (parsed.type === "mux-hello") {
           if (mode === "bad-json") {
             socket.send("not-json{");
@@ -251,6 +259,10 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
           return;
         }
         if (parsed.type === "mux-channel-binary" && openChannels.has(parsed.payload.channelId)) {
+          lastChannelBinaryFrame = {
+            channelId: parsed.payload.channelId,
+            dataBase64: parsed.payload.dataBase64,
+          };
           // Real terminal output is delivered as an addressed channel frame on
           // the accepted channel id, not a generic echo to every channel.
           socket.send(JSON.stringify({
@@ -258,6 +270,19 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
             payload: {
               channelId: parsed.payload.channelId,
               message: { type: "session-preview", data: Buffer.from(parsed.payload.dataBase64, "base64").toString("utf8") },
+            },
+          }));
+        }
+        if (parsed.type === "mux-channel-message" && openChannels.has(parsed.payload.channelId)) {
+          lastChannelMessageFrame = {
+            channelId: parsed.payload.channelId,
+            message: parsed.payload.message,
+          };
+          socket.send(JSON.stringify({
+            type: "mux-channel-message",
+            payload: {
+              channelId: parsed.payload.channelId,
+              message: { type: "session-preview", data: JSON.stringify(parsed.payload.message) },
             },
           }));
         }
@@ -287,6 +312,9 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     targetRequests = [];
     channelOpenCount = 0;
     channelBinaryCount = 0;
+    channelMessageCount = 0;
+    lastChannelMessageFrame = null;
+    lastChannelBinaryFrame = null;
   });
 
   afterAll(async () => {
@@ -363,16 +391,50 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     manager.onChannelMessage(first, (message) => firstSeen.push(String(message.data)));
     manager.onChannelMessage(second, (message) => secondSeen.push(String(message.data)));
 
-    manager.sendChannel(first, "payload-one");
+    manager.sendChannel(first, inputMessage("payload-one"));
     await waitFor(() => firstSeen.length > 0);
     expect(firstSeen[0]).toContain("payload-one");
     expect(secondSeen).toHaveLength(0);
 
     manager.closeChannel(first);
-    manager.sendChannel(second, "payload-two");
+    manager.sendChannel(second, inputMessage("payload-two"));
     await waitFor(() => secondSeen.length > 0);
     expect(secondSeen[0]).toContain("payload-two");
     expect(manager.observeLink(link).status).toBe("connected");
+    manager.closeOwnLink(link);
+  });
+
+  it("keeps text control messages and binary bodies on their protocol lanes", async () => {
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+    const channel = await manager.openChannel(link, "terminal", {
+      sessionName: KNOWN_SESSION,
+      backend: "tmux",
+    });
+
+    manager.sendChannel(channel, JSON.stringify({
+      type: "input",
+      payload: "ZQA_TEXT_MARKER\r",
+    }));
+    await waitFor(() => channelMessageCount === 1);
+    expect(lastChannelMessageFrame).toMatchObject({
+      channelId: channel.id,
+      message: { type: "input", payload: "ZQA_TEXT_MARKER\r" },
+    });
+    expect(channelBinaryCount).toBe(0);
+
+    manager.sendChannel(channel, new TextEncoder().encode("ZQA_BINARY_BODY").buffer);
+    await waitFor(() => channelBinaryCount === 1);
+    expect(lastChannelBinaryFrame).toMatchObject({
+      channelId: channel.id,
+      dataBase64: Buffer.from("ZQA_BINARY_BODY").toString("base64"),
+    });
+    expect(channelMessageCount).toBe(1);
+
+    manager.closeChannel(channel);
     manager.closeOwnLink(link);
   });
 
@@ -473,7 +535,7 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     const next = await manager.openChannel(link, "terminal", { sessionName: KNOWN_SESSION });
     const seen: string[] = [];
     manager.onChannelMessage(next, (message) => seen.push(String(message.data)));
-    manager.sendChannel(next, "after-late-release");
+    manager.sendChannel(next, inputMessage("after-late-release"));
     await waitFor(() => seen.length > 0);
     expect(seen[0]).toContain("after-late-release");
     expect(manager.observeLink(link).status).toBe("connected");
@@ -518,7 +580,7 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
 
     const seen: string[] = [];
     manager.onChannelMessage(sibling, (message) => seen.push(String(message.data)));
-    manager.sendChannel(sibling, "sibling-after-retry");
+    manager.sendChannel(sibling, inputMessage("sibling-after-retry"));
     await waitFor(() => seen.length > 0);
     expect(seen[0]).toContain("sibling-after-retry");
     expect(manager.observeLink(link).status).toBe("connected");
@@ -539,18 +601,18 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     remoteCloseAcceptedChannel!(first.id);
     await waitFor(() => {
       try {
-        manager.sendChannel(first, "probe");
+        manager.sendChannel(first, inputMessage("probe"));
         return false;
       } catch {
         return true;
       }
     });
-    expect(() => manager.sendChannel(first, "stale")).toThrow(expect.objectContaining({ code: "link_closed" }));
+    expect(() => manager.sendChannel(first, inputMessage("stale"))).toThrow(expect.objectContaining({ code: "link_closed" }));
     expect(() => manager.closeChannel(first)).toThrow(expect.objectContaining({ code: "link_closed" }));
 
     const seen: string[] = [];
     manager.onChannelMessage(sibling, (message) => seen.push(String(message.data)));
-    manager.sendChannel(sibling, "sibling-live");
+    manager.sendChannel(sibling, inputMessage("sibling-live"));
     await waitFor(() => seen.length > 0);
     expect(seen[0]).toContain("sibling-live");
     expect(manager.observeLink(link).status).toBe("connected");

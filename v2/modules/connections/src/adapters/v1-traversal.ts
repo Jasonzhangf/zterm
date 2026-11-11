@@ -18,12 +18,14 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import {
   buildTerminalMuxChannelBinary,
+  buildTerminalMuxChannelMessage,
   buildTerminalMuxChannelOpen,
   buildTerminalMuxHello,
   buildTerminalMuxTargetMessage,
   isTerminalMuxServerFrame,
   TERMINAL_MUX_PROTOCOL_VERSION,
   type TerminalMuxCapabilities,
+  type TerminalMuxChannelClientMessage,
 } from "../../../../../packages/shared/src/connection/protocol.ts";
 import {
   TraversalRouteHealthCache,
@@ -647,7 +649,27 @@ export class V1TraversalTransport implements TransportPort {
             machineId: auth.machineId,
           });
         }
-        const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : Buffer.from(data);
+        // Text carries a typed terminal mux control message; binary carries raw
+        // terminal bytes. Re-framing a string envelope as mux-channel-binary
+        // makes the peer write the JSON itself to the terminal.
+        if (typeof data === "string") {
+          let frame: ReturnType<typeof buildTerminalMuxChannelMessage>;
+          try {
+            frame = buildTerminalMuxChannelMessage(
+              channelId,
+              JSON.parse(data) as TerminalMuxChannelClientMessage,
+            );
+          } catch (error) {
+            throw new ConnectionError("invalid_input", "terminal channel text payload is not a valid mux message", {
+              machineId: auth.machineId,
+              channelId,
+              cause: error,
+            });
+          }
+          socket.send(JSON.stringify(frame));
+          return;
+        }
+        const bytes = Buffer.from(data);
         socket.send(JSON.stringify(buildTerminalMuxChannelBinary(channelId, bytes.toString("base64"))));
       },
       closeChannel: (channelId, reason) => {
