@@ -1901,11 +1901,50 @@ async function sendTerminalInput(request, response, context, callerToken) {
   authenticate(request, context);
   requireMachineAccountsSession(callerToken, "terminal.input");
   const body = await readJson(request);
+  let machineId = body.machineId;
+  if (context.connectionManager || context.machineAuthorization) {
+    machineId = validateNonEmptyString(
+      body.machineId,
+      "machineId",
+      "terminal.input",
+    ).trim();
+    requireConnectionManager(context, "terminal.input");
+    requireMachineAuthorization(context, "terminal.input");
+    const authorization = await authorizeCallerMachine(
+      machineId,
+      callerToken,
+      context,
+      "terminal.input",
+    );
+    const link = requireCurrentMachineLink(
+      machineLinkKey(authorization, machineId),
+      machineId,
+      context,
+      "terminal.input",
+    );
+    const current = await withTerminalAdmission(
+      "terminal.input",
+      () => context.connectionManager.observeLink(link),
+    );
+    if (current.status !== "connected" || current.freshness !== "fresh") {
+      throw daemonError(
+        "TERMINAL_TARGET_BINDING_UNAVAILABLE",
+        "terminal.input",
+        "The machine has no connected and fresh UI link in this caller scope.",
+        {
+          reason: "machine-link-unavailable",
+          machineId,
+          status: current.status,
+          freshness: current.freshness,
+        },
+      );
+    }
+  }
   const result = await withTerminalAdmission("terminal.input", () => context.admission.forwardInput({
     callerToken,
     workspaceId: body.workspaceId,
     memberId: body.memberId,
-    machineId: body.machineId,
+    machineId,
     groupPath: body.groupPath,
     expectedGeneration: body.expectedGeneration,
     target: requireTarget(body.target, "terminal.input"),

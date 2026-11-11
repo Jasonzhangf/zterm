@@ -207,6 +207,7 @@ async function fixture(overrides = {}) {
     machineService,
     machineAuthorization,
     connectionManager,
+    admission: overrides.admission,
     terminalPort: {
       async listSessions() {
         calls.terminal.push("listSessions");
@@ -235,6 +236,79 @@ async function fixture(overrides = {}) {
     calls,
     close: () => new Promise((resolve) => daemon.server.close(resolve)),
   };
+}
+
+function createTerminalAdmissionHarness() {
+  const target = { backend: "tmux", stableId: "stable-remote-shell" };
+  const machineTerminalCalls = [];
+  const inputs = [];
+  const terminal = {
+    machineId: MACHINE_ID,
+    status: "connected",
+    freshness: "fresh",
+    peerIdentityVerified: true,
+    daemonHostId: "daemon-remote",
+    linkGeneration: 1,
+    async forMachine({ machineId, memberId, bindingGeneration, accountsToken }) {
+      machineTerminalCalls.push({ machineId, memberId, bindingGeneration, accountsToken });
+      if (accountsToken !== ACCOUNTS_TOKEN) {
+        throw typedError("UNAUTHENTICATED", "accounts", "terminal.admission", 401);
+      }
+      return {
+        machineId,
+        status: terminal.status,
+        freshness: terminal.freshness,
+        peerIdentityVerified: terminal.peerIdentityVerified,
+        daemonHostId: terminal.daemonHostId,
+        linkGeneration: terminal.linkGeneration,
+        async listSessions() {
+          return [target];
+        },
+        async input(stableId, data) {
+          inputs.push({ stableId, data });
+          return { accepted: true };
+        },
+        subscribe() {
+          return { close() {} };
+        },
+      };
+    },
+  };
+  const admission = {
+    auth: {
+      async verify(token) {
+        if (token !== ACCOUNTS_TOKEN) {
+          throw typedError("UNAUTHENTICATED", "routing", "auth.verify", 401);
+        }
+        return { accountId: "account-current" };
+      },
+    },
+    members: {
+      async getRuntimeBinding(memberId) {
+        return {
+          memberId,
+          machineId: MACHINE_ID,
+          bindingGeneration: 1,
+          sessionId: "session-remote-shell",
+          anchor: "pane:0",
+          terminalTarget: target,
+        };
+      },
+      async resolveBindingTarget({ binding, catalog }) {
+        return catalog.find((candidate) => (
+          candidate.backend === binding.terminalTarget.backend
+          && candidate.stableId === binding.terminalTarget.stableId
+        )) ?? null;
+      },
+    },
+    routing: {
+      async resolve({ address }) {
+        return address;
+      },
+    },
+    machineTerminal: terminal,
+  };
+  return { admission, machineTerminalCalls, inputs };
 }
 
 async function requestJson(base, path, {
@@ -664,4 +738,67 @@ test("typed authorization and catalog failures keep owner, code, and operation",
   assert.equal(catalog.body.error.owningModule, "connections");
   assert.equal(catalog.body.error.operationId, "machine.sessions");
   assert.equal(app.calls.connect.length, 1);
+});
+
+test("terminal input requires the caller's current machine connection", async (t) => {
+  const admission = createTerminalAdmissionHarness();
+  const app = await fixture({ admission: admission.admission });
+  t.after(() => app.close());
+
+  const inputBody = {
+    workspaceId: "workspace-current",
+    memberId: "member-remote-shell",
+    machineId: MACHINE_ID,
+    groupPath: "group-current",
+    expectedGeneration: 1,
+    target: { backend: "tmux", stableId: "stable-remote-shell" },
+    data: "echo V2_A1_REMOTE_OK",
+  };
+
+  const unavailable = await requestJson(
+    app.base,
+    "/api/terminal/input",
+    { method: "POST", body: inputBody },
+  );
+  assert.equal(unavailable.response.status, 409, JSON.stringify(unavailable.body));
+  assert.equal(unavailable.body.error.code, "MACHINE_NOT_CONNECTED");
+  assert.equal(admission.machineTerminalCalls.length, 0);
+  assert.equal(admission.inputs.length, 0);
+
+  const connected = await requestJson(
+    app.base,
+    `/api/machines/${MACHINE_ID}/connect`,
+    { method: "POST" },
+  );
+  assert.equal(connected.response.status, 200);
+
+  const accepted = await requestJson(
+    app.base,
+    "/api/terminal/input",
+    { method: "POST", body: inputBody },
+  );
+  assert.equal(accepted.response.status, 200);
+  assert.equal(accepted.body.accepted, true);
+  assert.equal(admission.machineTerminalCalls.length, 2);
+  assert.deepEqual(admission.inputs, [{
+    stableId: "stable-remote-shell",
+    data: "echo V2_A1_REMOTE_OK",
+  }]);
+
+  const disconnected = await requestJson(
+    app.base,
+    `/api/machines/${MACHINE_ID}/disconnect`,
+    { method: "POST" },
+  );
+  assert.equal(disconnected.response.status, 200);
+
+  const rejected = await requestJson(
+    app.base,
+    "/api/terminal/input",
+    { method: "POST", body: inputBody },
+  );
+  assert.equal(rejected.response.status, 409);
+  assert.equal(rejected.body.error.code, "MACHINE_NOT_CONNECTED");
+  assert.equal(admission.machineTerminalCalls.length, 2);
+  assert.equal(admission.inputs.length, 1);
 });
