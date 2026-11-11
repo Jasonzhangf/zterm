@@ -331,7 +331,7 @@ class ConnectionsTerminalMuxClient implements TerminalMuxClient {
 
   retryLateOpenClose(channelId: string): boolean {
     try {
-      this.manager.retryLateOpenClose(this.link, channelId);
+      return this.manager.retryLateOpenClose(this.link, channelId);
     } catch (error) {
       this.log({
         event: "connections.terminal.late-open-retry.failed",
@@ -340,9 +340,6 @@ class ConnectionsTerminalMuxClient implements TerminalMuxClient {
       });
       return false;
     }
-    // The transport does not expose whether a matching late-open release was
-    // sent, so this adapter does not claim a successful retry.
-    return false;
   }
 
   getState(): "idle" | "ready" | "closed" | "failed" {

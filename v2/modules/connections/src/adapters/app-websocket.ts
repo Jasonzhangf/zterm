@@ -400,7 +400,7 @@ export class AppWebSocketTransport implements TransportPort {
       },
       onChannelClosed: () => () => undefined,
       onChannelCloseFailure: () => () => undefined,
-      retryLateOpenClose: () => undefined,
+      retryLateOpenClose: () => false,
       requestAppFrame: (frame: AppClientFrame, timeoutMs?: number) => {
         const requestId = (frame.payload as { requestId?: unknown }).requestId;
         if (typeof requestId !== "string" || !requestId) {
