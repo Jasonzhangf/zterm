@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Terminal } from "@jsonstudio/wtermmod-react";
+import { createTerminalSelection } from "./selection.mjs";
 
 export function TerminalApp({ api }) {
   const [phase, setPhase] = useState("checking");
@@ -15,17 +16,20 @@ export function TerminalApp({ api }) {
   const loadedRef = useRef(false);
 
   const terminalRef = useRef(null);
-  const streamRef = useRef(null);
+  const admissionRef = useRef(null);
   const readyRef = useRef(false);
   const pendingRef = useRef("");
 
+  const selection = useMemo(() => createTerminalSelection({
+    resolveAdmission: (target) => api.resolveTerminalAdmission(target),
+    openStream: (admission, handlers) => api.openTerminalStream(admission, handlers),
+  }), [api]);
+
   const closeStream = useCallback(() => {
-    if (streamRef.current) {
-      streamRef.current.close();
-      streamRef.current = null;
-    }
+    selection.close();
+    admissionRef.current = null;
     pendingRef.current = "";
-  }, []);
+  }, [selection]);
 
   const flushPending = useCallback(() => {
     if (readyRef.current && pendingRef.current) {
@@ -34,12 +38,15 @@ export function TerminalApp({ api }) {
     }
   }, []);
 
-  const selectTarget = useCallback((target) => {
-    closeStream();
+  const selectTarget = useCallback(async (session) => {
+    const target = typeof session === "string" ? { name: session } : (session || {});
     setError("");
-    setActiveTarget(target);
     setStatus("Connecting");
-    streamRef.current = api.openTerminalStream(target, {
+    const result = await selection.select(target, {
+      onAdmission: (admission) => {
+        setActiveTarget(target.name || "");
+        admissionRef.current = admission;
+      },
       onReady: () => {
         setStatus("Live");
       },
@@ -68,7 +75,20 @@ export function TerminalApp({ api }) {
         setError(`${streamError.code}: ${streamError.message}`);
       },
     });
-  }, [api, closeStream]);
+
+    if (!result) {
+      return;
+    }
+    if (!result.admission) {
+      setStatus("Unavailable");
+      if (result.error) {
+        setError(`${result.error.code || "ERROR"}: ${result.error.message}`);
+      } else {
+        setError("TERMINAL_ADMISSION_UNRESOLVED: no authorized member binding for this session.");
+      }
+      return;
+    }
+  }, [selection]);
 
   const loadSessions = useCallback(async () => {
     setStatus("Connecting");
@@ -81,7 +101,7 @@ export function TerminalApp({ api }) {
       if (!loadedRef.current) {
         loadedRef.current = true;
         const requested = new URLSearchParams(window.location.search).get("target");
-        const initial = requested || (next[0] && next[0].name) || null;
+        const initial = (requested ? next.find((session) => session.name === requested) : null) || next[0] || null;
         if (initial) {
           selectTarget(initial);
         }
@@ -106,8 +126,12 @@ export function TerminalApp({ api }) {
         if (cancelled) {
           return;
         }
-        if (state.authenticated) {
+        if (state.authenticated && api.hasAuthorization?.()) {
           await loadSessions();
+        } else if (state.authenticated) {
+          setPhase("login");
+          setStatus("Signed out");
+          setError("SESSION_AUTHORIZATION_RESTORE_REQUIRED: sign in again to restore terminal authorization.");
         } else {
           setPhase("login");
           setStatus("Signed out");
@@ -157,12 +181,12 @@ export function TerminalApp({ api }) {
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!activeTarget || !command) {
+    if (!activeTarget || !command || !admissionRef.current) {
       return;
     }
     try {
       setError("");
-      await api.sendInput(activeTarget, command);
+      await api.sendInput(admissionRef.current, command);
       setCommand("");
     } catch (inputError) {
       setError(`${inputError.code || "ERROR"}: ${inputError.message}`);
@@ -222,7 +246,7 @@ export function TerminalApp({ api }) {
                   className="session-button"
                   data-target={session.name}
                   aria-pressed={session.name === activeTarget}
-                  onClick={() => selectTarget(session.name)}
+                  onClick={() => selectTarget(session)}
                 >
                   <span className="session-name">{session.name}</span>
                   <span className="session-id">{session.id}</span>

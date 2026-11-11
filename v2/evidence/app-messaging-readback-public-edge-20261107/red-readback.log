@@ -1,0 +1,42 @@
+
+ RUN  v1.6.1 /Volumes/Intel/playground/zterm/worktrees/app-messaging-readback-public-edge-20261107/android
+
+ ❯ src/server/daemon-app-messaging-public.test.ts  (16 tests | 2 failed) 440ms
+   ❯ src/server/daemon-app-messaging-public.test.ts > app messaging persistence facade > reads the accepted command with its persistence-owned V1 message identity
+     → .toMatch() expects to receive a string, but got undefined
+   ❯ src/server/daemon-app-messaging-public.test.ts > app messaging persistence facade > read accepted command distinguishes invalid input and not-found without writing
+     → store.readAcceptedCommand is not a function
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/daemon-app-messaging-public.test.ts > app messaging persistence facade > reads the accepted command with its persistence-owned V1 message identity
+TypeError: .toMatch() expects to receive a string, but got undefined
+ ❯ src/server/daemon-app-messaging-public.test.ts:185:41
+    183|     expect(created.kind).toBe('created');
+    184|     if (created.kind !== 'created') throw new Error('unreachable');
+    185|     expect(created.receipt.v1MessageId).toMatch(
+       |                                         ^
+    186|       /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f…
+    187|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/server/daemon-app-messaging-public.test.ts > app messaging persistence facade > read accepted command distinguishes invalid input and not-found without writing
+TypeError: store.readAcceptedCommand is not a function
+ ❯ src/server/daemon-app-messaging-public.test.ts:211:33
+    209|     const store = createPersistence({ appRootDir: join(root, 'app') });
+    210|
+    211|     const invalid = await store.readAcceptedCommand({ ...ref(), reques…
+       |                                 ^
+    212|     expect(invalid.kind).toBe('invalid-input');
+    213|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+ Test Files  1 failed (1)
+      Tests  2 failed | 14 passed (16)
+   Start at  14:15:49
+   Duration  751ms (transform 99ms, setup 11ms, collect 103ms, tests 440ms, environment 0ms, prepare 44ms)
+
+
+exit_status=1

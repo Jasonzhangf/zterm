@@ -155,7 +155,7 @@ function normalizeTarget(options = {}) {
   return { targetOs, targetArch, triple };
 }
 
-function linuxRunner() {
+export function linuxRunner() {
   return `#!/usr/bin/env bash
 set -euo pipefail
 
@@ -275,7 +275,31 @@ case "$command_name" in
   run) run_foreground "$@" ;;
   start) start_direct ;;
   stop) stop_direct ;;
-  restart) stop_direct; start_direct ;;
+  restart)
+    if [[ $# -gt 0 ]]; then
+      case "$1" in
+        -h|--help)
+          cat <<'USAGE'
+Usage:
+  zterm-daemon run
+  zterm-daemon start
+  zterm-daemon status
+  zterm-daemon config
+  zterm-daemon stop
+  zterm-daemon restart
+  zterm-daemon configure-relay --relay-url URL --username USER --password-stdin --host-id HOST_ID [--device-name NAME]
+USAGE
+          ;;
+        *)
+          echo "unknown restart option: $1" >&2
+          exit 1
+          ;;
+      esac
+    else
+      stop_direct
+      start_direct
+    fi
+    ;;
   status) status_direct ;;
   config) "$NODE_BIN" "$TERMINAL_CONFIG_COMMAND" daemon-config ;;
   configure-relay) "$NODE_BIN" "$TERMINAL_CONFIG_COMMAND" configure-relay "$@" ;;

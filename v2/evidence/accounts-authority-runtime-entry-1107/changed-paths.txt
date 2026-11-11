@@ -1,0 +1,26 @@
+v2/evidence/accounts-authority-runtime-entry-1107/result.md
+v2/evidence/accounts-authority-runtime-entry-1107/changed-paths.txt
+v2/modules/accounts/DESIGN.md
+v2/modules/accounts/src/adapters/file-account-authorization-store.ts
+v2/modules/accounts/src/application/accounts-authority-runtime.ts
+v2/modules/accounts/src/domain/authorization.ts
+v2/modules/accounts/src/ports/account-authorization-store.ts
+v2/modules/accounts/src/public/contracts.ts
+v2/modules/accounts/src/public/errors.ts
+v2/modules/accounts/src/public/index.mjs
+v2/modules/accounts/tests/contract/public-runtime.test.ts
+v2/modules/accounts/tests/integration/accounts-flow.test.ts
+
+Rework 2026-11-08:
+v2/modules/accounts/src/application/accounts-authority-runtime.ts
+v2/modules/accounts/tests/contract/public-runtime.test.ts
+v2/modules/accounts/tests/integration/accounts-flow.test.ts
+v2/modules/accounts/DESIGN.md
+v2/evidence/accounts-authority-runtime-entry-1107/architecture-mapping.md
+v2/evidence/accounts-authority-runtime-entry-1107/result.md
+v2/evidence/accounts-authority-runtime-entry-1107/rework-red-public-runtime.txt
+v2/evidence/accounts-authority-runtime-entry-1107/rework-red-real-relay-tests.txt
+v2/evidence/accounts-authority-runtime-entry-1107/rework-green-public-runtime-contract.txt
+v2/evidence/accounts-authority-runtime-entry-1107/rework-green-real-relay-tests.txt
+v2/evidence/accounts-authority-runtime-entry-1107/rework-green-accounts-tests.txt
+v2/evidence/accounts-authority-runtime-entry-1107/rework-syntax-diff-checks.txt

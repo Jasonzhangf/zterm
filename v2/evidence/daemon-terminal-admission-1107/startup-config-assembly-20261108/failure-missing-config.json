@@ -1,0 +1,21 @@
+{
+  "label": "missing-config",
+  "status": 503,
+  "body": {
+    "error": {
+      "code": "TERMINAL_ADMISSION_REQUIRED",
+      "owningModule": "daemon",
+      "operationId": "terminal.input",
+      "cause": {
+        "reason": "admission-missing"
+      },
+      "message": "Terminal admission is not configured; the token-only legacy path is disabled."
+    }
+  },
+  "sideEffects": {
+    "terminalBufferUnchanged": true,
+    "channelOpenDelta": 0,
+    "inputDelta": 0,
+    "evidence": "HTTP refusal happens before connection-manager channel open/input; real tmux buffer unchanged"
+  }
+}

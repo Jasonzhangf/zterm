@@ -1,0 +1,19 @@
+--- node --check public/index.mjs
+node --check public/index.mjs exit=0
+--- node --check public runtime sources
+node --check accounts-authority-runtime.ts exit=0
+node --check file-account-authorization-store.ts exit=0
+node --check authorization.ts exit=0
+--- git diff --check
+git diff --check exit=0
+--- changed paths
+ M v2/modules/accounts/src/adapters/file-account-authorization-store.ts
+ M v2/modules/accounts/src/domain/authorization.ts
+ M v2/modules/accounts/src/ports/account-authorization-store.ts
+ M v2/modules/accounts/src/public/contracts.ts
+ M v2/modules/accounts/src/public/errors.ts
+ M v2/modules/accounts/tests/integration/accounts-flow.test.ts
+?? v2/evidence/accounts-authority-runtime-entry-1107/
+?? v2/modules/accounts/src/application/accounts-authority-runtime.ts
+?? v2/modules/accounts/src/public/index.mjs
+?? v2/modules/accounts/tests/contract/public-runtime.test.ts

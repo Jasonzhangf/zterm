@@ -1,0 +1,29 @@
+{
+  "label": "wrong-machine",
+  "status": 404,
+  "body": {
+    "error": {
+      "code": "MEMBER_NOT_FOUND",
+      "owningModule": "daemon",
+      "operationId": "terminal.admission.input",
+      "cause": {
+        "sourceCode": "ROUTE_NOT_FOUND",
+        "sourceModule": "routing",
+        "details": {
+          "machineId": "startup-blackbox-wrong-machine",
+          "groupPath": "/StartupBlackbox/team",
+          "memberId": "mbr_3718bbfd-09db-48ae-b0a6-b4f94f3d1fa2",
+          "memberName": null
+        },
+        "message": "no member at startup-blackbox-wrong-machine/StartupBlackbox/team"
+      },
+      "message": "The target member was not found at the authorized workspace address."
+    }
+  },
+  "sideEffects": {
+    "terminalBufferUnchanged": true,
+    "channelOpenDelta": 0,
+    "inputDelta": 0,
+    "evidence": "HTTP refusal happens before connection-manager channel open/input; real tmux buffer unchanged"
+  }
+}

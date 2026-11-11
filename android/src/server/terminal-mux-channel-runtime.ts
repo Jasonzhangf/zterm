@@ -31,6 +31,7 @@ import type {
 // close envelopes, target-message unwrap, and ping. Extracted from
 // terminal-message-runtime so the message switch stays routing-only.
 export interface TerminalMuxChannelRuntimeDeps {
+  daemonHostId?: string;
   sessions: Map<string, TerminalTransportSubscriber>;
   mirrors: ReadonlyMap<string, SessionMirror>;
   sendTransportMessage: (
@@ -191,6 +192,7 @@ export function createTerminalMuxChannelRuntime(
         connection.deviceId = frame.payload.deviceId;
         deps.ensureMuxChannels(connection);
         sendMuxFrame(connection, buildTerminalMuxReady({
+          daemonHostId: deps.daemonHostId,
           capabilities: buildTerminalMuxCapabilities({
             reliableInput: { version: 1 },
           }),

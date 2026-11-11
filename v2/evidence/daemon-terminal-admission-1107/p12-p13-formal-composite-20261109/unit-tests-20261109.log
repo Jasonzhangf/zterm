@@ -1,0 +1,244 @@
+TAP version 13
+# Subtest: forMachine projects the verified connections link and exact catalog
+ok 1 - forMachine projects the verified connections link and exact catalog
+  ---
+  duration_ms: 1.481667
+  type: 'test'
+  ...
+# Subtest: factory rejects a manager or terminal that lacks the required public edges
+ok 2 - factory rejects a manager or terminal that lacks the required public edges
+  ---
+  duration_ms: 0.24875
+  type: 'test'
+  ...
+# Subtest: forMachine checks machine authorization before terminal access
+ok 3 - forMachine checks machine authorization before terminal access
+  ---
+  duration_ms: 0.091959
+  type: 'test'
+  ...
+# Subtest: forMachine surfaces accounts-owned authorization refusal without terminal side effects
+ok 4 - forMachine surfaces accounts-owned authorization refusal without terminal side effects
+  ---
+  duration_ms: 0.190041
+  type: 'test'
+  ...
+# Subtest: forMachine rejects an unverified peer identity and closes the link
+ok 5 - forMachine rejects an unverified peer identity and closes the link
+  ---
+  duration_ms: 0.161834
+  type: 'test'
+  ...
+# Subtest: input maps stableId to the terminal public input edge
+ok 6 - input maps stableId to the terminal public input edge
+  ---
+  duration_ms: 0.102709
+  type: 'test'
+  ...
+# Subtest: input rejects a stableId that is not in the current catalog
+ok 7 - input rejects a stableId that is not in the current catalog
+  ---
+  duration_ms: 0.129542
+  type: 'test'
+  ...
+# Subtest: subscribe delegates to the terminal public stream edge
+ok 8 - subscribe delegates to the terminal public stream edge
+  ---
+  duration_ms: 0.096333
+  type: 'test'
+  ...
+# Subtest: forMachine reuses one link per machine and keeps catalogs machine-scoped
+ok 9 - forMachine reuses one link per machine and keeps catalogs machine-scoped
+  ---
+  duration_ms: 0.41925
+  type: 'test'
+  ...
+# Subtest: startup config requires every production section
+ok 10 - startup config requires every production section
+  ---
+  duration_ms: 2.982708
+  type: 'test'
+  ...
+# Subtest: startup config defaults to the connections public V1 transport
+ok 11 - startup config defaults to the connections public V1 transport
+  ---
+  duration_ms: 3.560167
+  type: 'test'
+  ...
+# Subtest: startup config uses an injected transport factory only when supplied
+ok 12 - startup config uses an injected transport factory only when supplied
+  ---
+  duration_ms: 4.388959
+  type: 'test'
+  ...
+# Subtest: startup config rejects an explicit non-function transport factory
+ok 13 - startup config rejects an explicit non-function transport factory
+  ---
+  duration_ms: 0.425833
+  type: 'test'
+  ...
+# Subtest: startup config rejects a machine route with mismatched daemon identity
+ok 14 - startup config rejects a machine route with mismatched daemon identity
+  ---
+  duration_ms: 0.784375
+  type: 'test'
+  ...
+# Subtest: startup config rejects a machine route with an invalid bridge port
+ok 15 - startup config rejects a machine route with an invalid bridge port
+  ---
+  duration_ms: 0.304334
+  type: 'test'
+  ...
+# Subtest: assembleDaemonConfig composes the real daemon ports from config
+ok 16 - assembleDaemonConfig composes the real daemon ports from config
+  ---
+  duration_ms: 5.893209
+  type: 'test'
+  ...
+# Subtest: loadStartupConfig rejects unreadable and invalid JSON config files
+ok 17 - loadStartupConfig rejects unreadable and invalid JSON config files
+  ---
+  duration_ms: 9.872417
+  type: 'test'
+  ...
+# Subtest: terminal routes fail closed with typed unavailable when admission is missing
+ok 18 - terminal routes fail closed with typed unavailable when admission is missing
+  ---
+  duration_ms: 20.082708
+  type: 'test'
+  ...
+# Subtest: terminal routes fail closed before token configuration is considered
+ok 19 - terminal routes fail closed before token configuration is considered
+  ---
+  duration_ms: 4.569292
+  type: 'test'
+  ...
+# Subtest: routing-configured daemon rejects a legacy terminal input that bypasses admission
+ok 20 - routing-configured daemon rejects a legacy terminal input that bypasses admission
+  ---
+  duration_ms: 69.195084
+  type: 'test'
+  ...
+# Subtest: admission rejects missing and invalid credentials before target access
+ok 21 - admission rejects missing and invalid credentials before target access
+  ---
+  duration_ms: 62.835334
+  type: 'test'
+  ...
+# Subtest: admission rejects an unauthorized workspace
+ok 22 - admission rejects an unauthorized workspace
+  ---
+  duration_ms: 42.824292
+  type: 'test'
+  ...
+# Subtest: admission rejects an unknown member
+ok 23 - admission rejects an unknown member
+  ---
+  duration_ms: 55.089625
+  type: 'test'
+  ...
+# Subtest: admission rejects an unbound member
+ok 24 - admission rejects an unbound member
+  ---
+  duration_ms: 47.702167
+  type: 'test'
+  ...
+# Subtest: admission rejects a stale binding generation
+ok 25 - admission rejects a stale binding generation
+  ---
+  duration_ms: 67.684417
+  type: 'test'
+  ...
+# Subtest: admission rejects a missing or wrong terminal target identity
+ok 26 - admission rejects a missing or wrong terminal target identity
+  ---
+  duration_ms: 78.714208
+  type: 'test'
+  ...
+# Subtest: admission rejects an authorized member targeting an unrelated terminal
+ok 27 - admission rejects an authorized member targeting an unrelated terminal
+  ---
+  duration_ms: 87.197541
+  type: 'test'
+  ...
+# Subtest: admission opens the exact existingOnly target and forwards typed input
+ok 28 - admission opens the exact existingOnly target and forwards typed input
+  ---
+  duration_ms: 99.917666
+  type: 'test'
+  ...
+# Subtest: admission forwards nonempty raw input without appending an Enter
+ok 29 - admission forwards nonempty raw input without appending an Enter
+  ---
+  duration_ms: 93.975959
+  type: 'test'
+  ...
+# Subtest: admission forwards one Enter as exactly one CR
+ok 30 - admission forwards one Enter as exactly one CR
+  ---
+  duration_ms: 81.31075
+  type: 'test'
+  ...
+# Subtest: admission stream exposes the exact admitted session
+ok 31 - admission stream exposes the exact admitted session
+  ---
+  duration_ms: 4086.5895
+  type: 'test'
+  ...
+# Subtest: startDaemon forwards admission to the public input route
+ok 32 - startDaemon forwards admission to the public input route
+  ---
+  duration_ms: 46.400834
+  type: 'test'
+  ...
+# Subtest: admission rejects the same target text when the scoped consumer belongs to another machine
+ok 33 - admission rejects the same target text when the scoped consumer belongs to another machine
+  ---
+  duration_ms: 60.643291
+  type: 'test'
+  ...
+# Subtest: admission rejects a revoked machine link before opening the target
+ok 34 - admission rejects a revoked machine link before opening the target
+  ---
+  duration_ms: 52.525583
+  type: 'test'
+  ...
+# Subtest: admission preserves a connections peer identity mismatch
+ok 35 - admission preserves a connections peer identity mismatch
+  ---
+  duration_ms: 44.437625
+  type: 'test'
+  ...
+# Subtest: admission rejects a superseded link generation before dispatch
+ok 36 - admission rejects a superseded link generation before dispatch
+  ---
+  duration_ms: 47.390166
+  type: 'test'
+  ...
+# Subtest: admission rejects a rebind that lands between lookup and dispatch
+ok 37 - admission rejects a rebind that lands between lookup and dispatch
+  ---
+  duration_ms: 62.125666
+  type: 'test'
+  ...
+# Subtest: admission fails closed when the machine terminal consumer is absent
+ok 38 - admission fails closed when the machine terminal consumer is absent
+  ---
+  duration_ms: 34.645208
+  type: 'test'
+  ...
+# Subtest: admission fails closed when members does not expose the public resolver
+ok 39 - admission fails closed when members does not expose the public resolver
+  ---
+  duration_ms: 40.583875
+  type: 'test'
+  ...
+1..39
+# tests 39
+# suites 0
+# pass 39
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5948.056666

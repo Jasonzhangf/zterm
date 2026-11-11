@@ -1,0 +1,7 @@
+{
+  "name": "AccountsError",
+  "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+  "status": 403,
+  "owningModule": null,
+  "message": "No workspace authorization grant exists for this account."
+}

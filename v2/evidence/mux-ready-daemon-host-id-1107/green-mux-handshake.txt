@@ -1,0 +1,9 @@
+
+ RUN  v1.6.1 /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android
+
+ ✓ src/server/terminal-message-runtime.test.ts  (68 tests | 66 skipped) 4ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed | 66 skipped (68)
+   Start at  01:22:30
+   Duration  553ms (transform 179ms, setup 9ms, collect 208ms, tests 4ms, environment 0ms, prepare 39ms)

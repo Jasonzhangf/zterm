@@ -15,6 +15,7 @@ import type {
 import type {
   DeliveryAuthorizationPort,
   DeliveryRoutingPort,
+  MessageDispatchPort,
 } from "../../src/ports/dependencies.ts";
 import type { ReceiptStore } from "../../src/ports/receipt-store.ts";
 
@@ -158,13 +159,28 @@ function createIntegrationPort(
     },
   };
 
+  const dispatchCalls: string[] = [];
+  let dispatchResult: Awaited<ReturnType<MessageDispatchPort["dispatchMessage"]>> = {
+    kind: "remote-stored",
+    observedAt: "2026-11-03T10:01:00.000Z",
+  };
+  const dispatch: MessageDispatchPort = {
+    async dispatchMessage(command) {
+      dispatchCalls.push(command.deliveryRef.requestId);
+      return dispatchResult;
+    },
+  };
+
   return {
     port: createDeliveryPort<AuthContext, string>({
       authorization,
       routing,
+      dispatch,
       receiptStore,
     }),
+    adapter,
     calls,
+    dispatchCalls,
     reports,
   };
 }
@@ -180,6 +196,21 @@ async function findRecordFile(directory: string): Promise<string | null> {
     }
   }
   return null;
+}
+
+async function acceptPersisted(
+  adapter: ReturnType<typeof createV1ReceiptStore>,
+  ref: DeliveryRef,
+  message: { subject?: string; body: string },
+) {
+  const result = await adapter.acceptMessage({
+    deliveryRef: ref,
+    target,
+    kind: "message",
+    message,
+  });
+  assert.equal(result.kind, "created");
+  return result;
 }
 
 function childEnv(): NodeJS.ProcessEnv {
@@ -221,7 +252,10 @@ if (process.argv[2] === "--child-write" || process.argv[2] === "--child-query") 
       ref.requestId,
       { body: "child-body" },
     );
-    if (result.kind !== "accepted" || result.disposition !== "created") {
+    if (
+      result.kind !== "dispatch-unavailable" ||
+      result.receipt.durableStage !== "accepted"
+    ) {
       process.stderr.write("child write did not create a durable receipt\n");
       process.exit(2);
     }
@@ -235,7 +269,7 @@ if (process.argv[2] === "--child-write" || process.argv[2] === "--child-query") 
 
 test("real facade adapter accepts once, replays, conflicts and rejects stale binding", async () => {
   const { appRootDir } = await makeRoot();
-  const { port, calls } = createIntegrationPort(appRootDir);
+  const { port, calls, dispatchCalls } = createIntegrationPort(appRootDir);
   const ref = deliveryRef();
   const actor = actorFor(ref);
 
@@ -243,37 +277,47 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
     actor,
     "member-a",
     ref.requestId,
-    { subject: "", body: "hello" },
+    { subject: "hello subject", body: "hello" },
   );
+  // Persistence read-back supplies v1MessageId on accept, so the first
+  // submission dispatches immediately instead of stopping at accepted.
   assert.equal(first.kind, "accepted");
-  if (first.kind !== "accepted") assert.fail("first submission was not accepted");
-  assert.equal(first.disposition, "created");
-  assert.equal(first.receipt.durableStage, "accepted");
-  assert.equal(first.receipt.outcome, "pending");
+  if (first.kind !== "accepted") {
+    assert.fail("first submission with persisted v1MessageId was not accepted");
+  }
+  assert.match(
+    first.receipt.v1MessageId ?? "",
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+  );
+  assert.equal(first.receipt.durableStage, "remote-stored");
+  assert.equal(first.receipt.outcome, "confirmed");
   assert.deepEqual(first.receipt.deliveryRef, ref);
   assert.deepEqual(first.receipt.target, target);
-  assert.deepEqual(calls, ["accept"]);
+  assert.deepEqual(calls, ["accept", "apply-evidence"]);
+  assert.deepEqual(dispatchCalls, [ref.requestId]);
 
   const replay = await port.submitMessage(
     actor,
     "member-a",
     ref.requestId,
-    { subject: "", body: "hello" },
+    { subject: "hello subject", body: "hello" },
   );
   assert.equal(replay.kind, "accepted");
   if (replay.kind !== "accepted") assert.fail("replay was not accepted");
   assert.equal(replay.disposition, "replayed");
   assert.deepEqual(replay.receipt, first.receipt);
+  assert.deepEqual(dispatchCalls, [ref.requestId], "replay must not dispatch again");
 
   const conflict = await port.submitMessage(
     actor,
     "member-a",
     ref.requestId,
-    { subject: "", body: "different" },
+    { subject: "hello subject", body: "different" },
   );
   assert.equal(conflict.kind, "rejected");
   if (conflict.kind !== "rejected") assert.fail("content conflict was not rejected");
   assert.equal(conflict.code, "DELIVERY_CONFLICT");
+  assert.deepEqual(dispatchCalls, [ref.requestId], "conflict must not dispatch");
 
   const missingSubject = await port.submitMessage(
     actor,
@@ -286,6 +330,7 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
     assert.fail("missing subject did not conflict with an empty subject");
   }
   assert.equal(missingSubject.code, "DELIVERY_CONFLICT");
+  assert.deepEqual(dispatchCalls, [ref.requestId], "missing subject must not dispatch");
 
   const separateRef = deliveryRef({}, "request-missing-subject");
   const separate = await port.submitMessage(
@@ -294,8 +339,11 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
     separateRef.requestId,
     { body: "hello" },
   );
-  assert.equal(separate.kind, "accepted");
-  if (separate.kind !== "accepted") assert.fail("missing subject was not accepted");
+  assert.equal(separate.kind, "dispatch-unavailable");
+  if (separate.kind !== "dispatch-unavailable") {
+    assert.fail("missing subject was not durably unavailable");
+  }
+  assert.deepEqual(dispatchCalls, [ref.requestId]);
 
   const stale = createIntegrationPort(appRootDir, {
     target: { ...target, bindingGeneration: target.bindingGeneration + 1 },
@@ -304,7 +352,7 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
     actor,
     "member-a",
     ref.requestId,
-    { subject: "", body: "hello" },
+    { subject: "hello subject", body: "hello" },
   );
   assert.equal(staleResult.kind, "rejected");
   if (staleResult.kind !== "rejected") assert.fail("stale binding was not rejected");
@@ -318,7 +366,7 @@ test("real facade adapter accepts once, replays, conflicts and rejects stale bin
 
 test("complete DeliveryRef isolates identifiers and query remains read-only", async () => {
   const { appRootDir } = await makeRoot();
-  const { port, calls } = createIntegrationPort(appRootDir);
+  const { port, adapter, calls } = createIntegrationPort(appRootDir);
   const variants = [
     deliveryRef(),
     deliveryRef({ sourceMachineId: "machine-b" }),
@@ -327,15 +375,11 @@ test("complete DeliveryRef isolates identifiers and query remains read-only", as
   ];
 
   for (const variant of variants) {
-    const result = await port.submitMessage(
-      actorFor(variant),
-      "member-a",
-      variant.requestId,
+    await acceptPersisted(
+      adapter,
+      variant,
       { body: JSON.stringify(variant) },
     );
-    assert.equal(result.kind, "accepted");
-    if (result.kind !== "accepted") assert.fail("variant was not accepted");
-    assert.equal(result.disposition, "created");
   }
 
   for (const variant of variants) {
@@ -348,7 +392,7 @@ test("complete DeliveryRef isolates identifiers and query remains read-only", as
   const missing = deliveryRef({}, "request-missing");
   const notFound = await port.queryReceipt(actorFor(missing), missing);
   assert.equal(notFound.kind, "not-found");
-  assert.equal(calls.filter((call) => call === "accept").length, variants.length);
+  assert.equal(calls.filter((call) => call === "accept").length, 0);
   assert.equal(calls.filter((call) => call === "read").length, variants.length + 1);
 });
 
@@ -400,14 +444,12 @@ test("fresh reopen and child process recover durable acceptance", async () => {
 
   const parentRef = deliveryRef({}, "request-child-query");
   const parent = createIntegrationPort(appRootDir);
-  const parentWrite = await parent.port.submitMessage(
-    actorFor(parentRef),
-    "member-a",
-    parentRef.requestId,
+  const parentWrite = await acceptPersisted(
+    parent.adapter,
+    parentRef,
     { body: "parent-body" },
   );
-  assert.equal(parentWrite.kind, "accepted");
-  if (parentWrite.kind !== "accepted") assert.fail("parent write was not accepted");
+  assert.equal(parentWrite.kind, "created");
 
   const output = runChild("--child-query", appRootDir, parentRef);
   const line = output
@@ -426,14 +468,12 @@ test("corrupt durable read preserves unavailable and acceptance-unknown chains",
   const { appRootDir } = await makeRoot();
   const ref = deliveryRef({}, "request-corrupt");
   const first = createIntegrationPort(appRootDir);
-  const accepted = await first.port.submitMessage(
-    actorFor(ref),
-    "member-a",
-    ref.requestId,
+  const accepted = await acceptPersisted(
+    first.adapter,
+    ref,
     { body: "durable" },
   );
-  assert.equal(accepted.kind, "accepted");
-  if (accepted.kind !== "accepted") assert.fail("corrupt setup was not accepted");
+  assert.equal(accepted.kind, "created");
 
   const recordFile = await findRecordFile(
     join(appRootDir, "app-delivery", "records"),

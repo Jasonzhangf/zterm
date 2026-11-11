@@ -70,6 +70,11 @@ export function createOrganizationService({ store, auth }) {
     }
   }
 
+  function isMemberVisible(context, memberId) {
+    if (context.members === undefined) return true;
+    return Array.isArray(context.members) && context.members.includes(memberId);
+  }
+
   function requireRevisionInput(expectedRevision, operationId) {
     if (!Number.isInteger(expectedRevision)) {
       fail(ERROR_CODES.ORGANIZATION_REVISION_STALE, 'expectedRevision is required', {
@@ -256,7 +261,32 @@ export function createOrganizationService({ store, auth }) {
     });
   }
 
-  async function addMember({ token, workspaceId, groupId, name, expectedRevision } = {}) {
+  async function addMember({
+    token,
+    workspaceId,
+    groupId,
+    name,
+    managerMemberId,
+    expectedRevision,
+  } = {}) {
+    return addMemberInternal({
+      token,
+      workspaceId,
+      groupId,
+      name,
+      managerMemberId,
+      expectedRevision,
+    });
+  }
+
+  async function addMemberInternal({
+    token,
+    workspaceId,
+    groupId,
+    name,
+    managerMemberId = null,
+    expectedRevision,
+  } = {}) {
     const context = await authorize(token);
     requireWorkspaceAccess(context, workspaceId, 'org:write', 'addMember');
     requireMemberCreationAccess(context, 'addMember');
@@ -264,6 +294,9 @@ export function createOrganizationService({ store, auth }) {
     requireString(groupId, 'groupId', MODULE);
     requireString(name, 'name', MODULE);
     assertPathSegment(name, MODULE);
+    if (managerMemberId !== undefined && managerMemberId !== null) {
+      requireString(managerMemberId, 'managerMemberId', MODULE);
+    }
     requireRevisionInput(expectedRevision, 'addMember');
 
     return store.update((state) => {
@@ -273,11 +306,22 @@ export function createOrganizationService({ store, auth }) {
       assertMemberNameAvailable(state, workspaceId, groupId, name, {
         operationId: 'addMember',
       });
+      const memberId = newId('mbr');
+      if (managerMemberId !== undefined && managerMemberId !== null) {
+        const manager = findMember(state, workspaceId, managerMemberId);
+        if (manager.memberId === memberId) {
+          fail(ERROR_CODES.VALIDATION, 'a member cannot manage itself', {
+            owningModule: MODULE,
+            operationId: 'addMember',
+          });
+        }
+      }
       const member = {
-        memberId: newId('mbr'),
+        memberId,
         workspaceId,
         groupId,
         name,
+        managerMemberId: managerMemberId === undefined ? null : managerMemberId,
       };
       state.members[member.memberId] = member;
       workspace.revision += 1;
@@ -291,6 +335,7 @@ export function createOrganizationService({ store, auth }) {
     memberId,
     name,
     groupId,
+    managerMemberId,
     expectedRevision,
   } = {}) {
     const context = await authorize(token);
@@ -303,12 +348,43 @@ export function createOrganizationService({ store, auth }) {
       assertPathSegment(name, MODULE);
     }
     if (groupId !== undefined) requireString(groupId, 'groupId', MODULE);
+    if (managerMemberId !== undefined && managerMemberId !== null) {
+      requireString(managerMemberId, 'managerMemberId', MODULE);
+      requireMemberAllowlisted(context, managerMemberId, 'updateMember');
+    }
     requireRevisionInput(expectedRevision, 'updateMember');
 
     return store.update((state) => {
       const workspace = findWorkspace(state, workspaceId);
       requireCurrentRevision(expectedRevision, workspace, 'updateMember');
       const member = findMember(state, workspaceId, memberId);
+      const resolvedManagerId = managerMemberId === undefined
+        ? member.managerMemberId ?? null
+        : managerMemberId;
+      if (managerMemberId !== undefined && resolvedManagerId !== (member.managerMemberId ?? null)) {
+        const oldManagerId = member.managerMemberId ?? null;
+        if (oldManagerId !== null && !isMemberVisible(context, oldManagerId)) {
+          fail(ERROR_CODES.ORGANIZATION_FORBIDDEN, 'member relation update is not allowed', {
+            owningModule: MODULE,
+            operationId: 'updateMember',
+          });
+        }
+      }
+      if (resolvedManagerId !== null) {
+        const manager = findMember(state, workspaceId, resolvedManagerId);
+        if (manager.memberId === member.memberId) {
+          fail(ERROR_CODES.VALIDATION, 'a member cannot manage itself', {
+            owningModule: MODULE,
+            operationId: 'updateMember',
+          });
+        }
+        if (managerIsDescendantOf(state, manager, member.memberId)) {
+          fail(ERROR_CODES.VALIDATION, 'manager relation would form a cycle', {
+            owningModule: MODULE,
+            operationId: 'updateMember',
+          });
+        }
+      }
       const resolvedName = name ?? member.name;
       const resolvedGroupId = groupId ?? member.groupId;
       findGroup(state, workspaceId, resolvedGroupId);
@@ -318,8 +394,9 @@ export function createOrganizationService({ store, auth }) {
       });
       member.name = resolvedName;
       member.groupId = resolvedGroupId;
+      member.managerMemberId = resolvedManagerId;
       workspace.revision += 1;
-      return { ...member, revision: workspace.revision };
+      return { ...memberCopy(member, context.members), revision: workspace.revision };
     });
   }
 
@@ -334,7 +411,21 @@ export function createOrganizationService({ store, auth }) {
     return store.update((state) => {
       const workspace = findWorkspace(state, workspaceId);
       requireCurrentRevision(expectedRevision, workspace, 'deleteMember');
-      findMember(state, workspaceId, memberId);
+      const member = findMember(state, workspaceId, memberId);
+      const directReports = Object.values(state.members)
+        .filter((candidate) => candidate.workspaceId === workspaceId)
+        .filter((candidate) => candidate.managerMemberId === member.memberId);
+      if (directReports.length > 0) {
+        fail(ERROR_CODES.MANAGER_HAS_DIRECT_REPORTS, `member ${memberId} still has direct reports`, {
+          owningModule: MODULE,
+          operationId: 'deleteMember',
+          details: {
+            workspaceId,
+            managerMemberId: member.memberId,
+            directReportCount: directReports.length,
+          },
+        });
+      }
       delete state.members[memberId];
       workspace.revision += 1;
       return { workspaceId, memberId, revision: workspace.revision };
@@ -444,6 +535,47 @@ export function createOrganizationService({ store, auth }) {
     return buildTree(state, workspace, context.members);
   }
 
+  // Authorized workspace catalog for WebUI navigation. Accounts owns account
+  // identity and workspace grants; organization only lists the structural
+  // workspace records the verified AuthContext may read. The result is stable
+  // references plus display names, not a second organization model.
+  async function listWorkspaces({ token } = {}) {
+    const context = await authorize(token);
+    requireScope(context, 'org:read', 'listWorkspaces');
+    const state = await store.read();
+    return Object.values(state.workspaces)
+      .filter((workspace) => hasWorkspace(context, workspace.workspaceId))
+      .map((workspace) => ({
+        workspaceId: workspace.workspaceId,
+        name: workspace.name,
+        revision: workspace.revision,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name) || left.workspaceId.localeCompare(right.workspaceId));
+  }
+
+  async function listDirectReports({ token, workspaceId, managerMemberId } = {}) {
+    const context = await authorize(token);
+    requireWorkspaceAccess(context, workspaceId, 'org:read', 'listDirectReports');
+    requireString(workspaceId, 'workspaceId', MODULE);
+    requireString(managerMemberId, 'managerMemberId', MODULE);
+    requireMemberAllowlisted(context, managerMemberId, 'listDirectReports');
+
+    const state = await store.read();
+    const workspace = findWorkspace(state, workspaceId);
+    findMember(state, workspaceId, managerMemberId);
+    const directMemberIds = Object.values(state.members)
+      .filter((member) => member.workspaceId === workspace.workspaceId)
+      .filter((member) => member.managerMemberId === managerMemberId)
+      .filter((member) => isMemberVisible(context, member.memberId))
+      .map((member) => member.memberId);
+    return {
+      workspaceId: workspace.workspaceId,
+      managerMemberId,
+      directMemberIds,
+      revision: workspace.revision,
+    };
+  }
+
   // Read ports for members and routing. They never mutate and never take auth; the
   // composing caller already authenticated the request.
   async function readWorkspace(workspaceId) {
@@ -457,7 +589,7 @@ export function createOrganizationService({ store, auth }) {
         .map((group) => ({ ...group })),
       members: Object.values(state.members)
         .filter((member) => member.workspaceId === workspaceId)
-        .map(memberCopy),
+        .map((member) => memberCopy(member)),
     };
   }
 
@@ -478,6 +610,8 @@ export function createOrganizationService({ store, auth }) {
     mountWorkspace,
     unmountWorkspace,
     queryTree,
+    listWorkspaces,
+    listDirectReports,
     readWorkspace,
     getMember,
   });
@@ -571,6 +705,19 @@ function isDescendantGroup(state, ancestorGroupId, candidateGroupId) {
   return false;
 }
 
+function managerIsDescendantOf(state, manager, reportId) {
+  const visited = new Set();
+  let current = manager;
+  while (current && !visited.has(current.memberId)) {
+    if (current.memberId === reportId) return true;
+    visited.add(current.memberId);
+    current = current.managerMemberId === null || current.managerMemberId === undefined
+      ? null
+      : state.members[current.managerMemberId];
+  }
+  return false;
+}
+
 function recomputeSubtreePaths(state, groupId, path) {
   const group = state.groups[groupId];
   if (!group) return;
@@ -613,7 +760,7 @@ function buildTree(state, workspace, memberAllowlist) {
   for (const member of Object.values(state.members)) {
     if (member.workspaceId !== workspace.workspaceId) continue;
     if (memberAllowlist !== undefined && !memberAllowlist.includes(member.memberId)) continue;
-    nodes.get(member.groupId)?.members.push(memberCopy(member));
+    nodes.get(member.groupId)?.members.push(memberCopy(member, memberAllowlist));
   }
   for (const mount of Object.values(state.mounts)) {
     if (mount.workspaceId !== workspace.workspaceId) continue;
@@ -631,11 +778,13 @@ function sortTree(node) {
   for (const child of node.children) sortTree(child);
 }
 
-function memberCopy(member) {
+function memberCopy(member, visibleMemberIds) {
+  const managerVisible = visibleMemberIds === undefined || visibleMemberIds.includes(member.managerMemberId);
   return {
     memberId: member.memberId,
     workspaceId: member.workspaceId,
     groupId: member.groupId,
     name: member.name,
+    managerMemberId: managerVisible ? member.managerMemberId ?? null : null,
   };
 }

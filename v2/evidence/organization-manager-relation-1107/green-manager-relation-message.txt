@@ -1,0 +1,52 @@
+TAP version 13
+# Subtest: manages direct reports through public member and report APIs
+ok 1 - manages direct reports through public member and report APIs
+  ---
+  duration_ms: 17.935917
+  type: 'test'
+  ...
+# Subtest: rejects unknown, cross-workspace, self, cycle, and hidden managers
+ok 2 - rejects unknown, cross-workspace, self, cycle, and hidden managers
+  ---
+  duration_ms: 9.846625
+  type: 'test'
+  ...
+# Subtest: listDirectReports filters hidden members without leaking ids
+ok 3 - listDirectReports filters hidden members without leaking ids
+  ---
+  duration_ms: 4.483709
+  type: 'test'
+  ...
+# Subtest: queryTree does not leak an invisible manager id
+ok 4 - queryTree does not leak an invisible manager id
+  ---
+  duration_ms: 4.238958
+  type: 'test'
+  ...
+# Subtest: denies clearing or reassigning a hidden manager without changing the relation
+ok 5 - denies clearing or reassigning a hidden manager without changing the relation
+  ---
+  duration_ms: 4.933959
+  type: 'test'
+  ...
+# Subtest: projects a hidden manager on ordinary rename and group updates
+ok 6 - projects a hidden manager on ordinary rename and group updates
+  ---
+  duration_ms: 4.805667
+  type: 'test'
+  ...
+# Subtest: deleting a manager with reports returns an explicit conflict
+ok 7 - deleting a manager with reports returns an explicit conflict
+  ---
+  duration_ms: 3.781
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 131.483041

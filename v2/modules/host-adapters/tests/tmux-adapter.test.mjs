@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
-import { TypedError } from "../../errors/src/typed-error.mjs";
+import { TypedError } from "../../errors/src/public/index.mjs";
 import { TmuxAdapter } from "../src/tmux/tmux-adapter.mjs";
 
 const socketName = `zterm-v2-i0-host-test-${process.pid}`;

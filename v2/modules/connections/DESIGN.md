@@ -10,7 +10,7 @@
 connections/
 ├── DESIGN.md
 ├── src/
-│   ├── public/link-port：connect/openChannel/observeLink
+│   ├── public/link-port：connect/listSessions/openChannel/observeLink
 │   ├── domain/link-state：身份、代次与能力
 │   ├── application/connection-manager：候选到连接
 │   ├── ports/transport：平台传输契约
@@ -28,7 +28,17 @@ connections/
 
 ## 公开接口、数据及错误
 
-connect(machineId, verifiedAuthorization) → LinkRef；openChannel(LinkRef, kind, target?) → ChannelRef；observeLink 提供路径、状态与新鲜度。openChannel 为 async：只有对端真实 open/ack 后才返回可寻址 ChannelRef，未接能力抛 unsupported_channel。
+connect(machineId, verifiedAuthorization) → LinkRef；listSessions(LinkRef) → SessionCatalogEntry[]；openChannel(LinkRef, kind, target?) → ChannelRef；observeLink 提供路径、状态与新鲜度。openChannel 为 async：只有对端真实 open/ack 后才返回可寻址 ChannelRef，未接能力抛 unsupported_channel。
+
+catalog 读是机器作用域的 target 控制操作，不是 terminal channel：`listSessions` 经 V1
+`mux-target-message` 承载 `list-sessions` 请求，按 `requestId` 关联 `sessions` 响应，
+不 open channel、不发送 channel payload。公开条目为 `{ name, backend, stableId }`；
+shared mux-ready 契约强制 `targetMessages: true` 并由 `isTerminalMuxServerFrame` 在握手校验；
+缺失该能力的帧在握手期被拒绝且不建立 link，因此不存在可达的 `unsupported_catalog`
+公开分支。响应缺 `sessions` 或 `sessionCatalog`、条目缺 `stableId` 时抛
+`invalid_response`；远端 `list_sessions_failed` 保留原始 message/code 并抛 typed
+`list_sessions_failed`。缺 stableId 不自行合成。terminal mux 当前只
+请求 tmux backend 的 catalog。
 
 通道边界（R3 修正）：terminal mux 的 channelEnvelope/bulkChannel 是传输能力，不是 generic message/file 服务声明。首增量只把 channelEnvelope 映射为 terminal 会话 channel，open 必须带真实 sessionName/backend/expectedSessionIdentity；generic message/file/receipt/status 属于独立 V1 /app 服务，未接入时显式 unsupported，绝不在 terminal mux 上发送任意 payload。
 

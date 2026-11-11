@@ -1,0 +1,20 @@
+$ node --experimental-strip-types -e "import(...public/index.mjs)..."
+{
+  "exports": [
+    "ConnectionError",
+    "V1TraversalTransport",
+    "createConnectionManager",
+    "resolveAuthorizedTerminalDirectory"
+  ],
+  "expected": [
+    "ConnectionError",
+    "V1TraversalTransport",
+    "createConnectionManager",
+    "resolveAuthorizedTerminalDirectory"
+  ],
+  "exportSetMatches": true,
+  "hasV1TraversalTransport": true,
+  "constructedType": "V1TraversalTransport"
+}
+
+exit code: 0

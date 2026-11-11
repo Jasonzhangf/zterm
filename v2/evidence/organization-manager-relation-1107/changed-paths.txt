@@ -1,0 +1,31 @@
+ M v2/modules/organization/DESIGN.md
+ M v2/modules/organization/src/application/organization-service.mjs
+ M v2/modules/organization/src/public/typed-error.mjs
+ M v2/modules/organization/tests/organization.test.mjs
+?? v2/evidence/organization-manager-relation-1107/changed-paths.txt
+?? v2/evidence/organization-manager-relation-1107/dagpipe-validate.txt
+?? v2/evidence/organization-manager-relation-1107/green-manager-relation.txt
+?? v2/evidence/organization-manager-relation-1107/organization-tests.txt
+?? v2/evidence/organization-manager-relation-1107/red-manager-relation.txt
+?? v2/evidence/organization-manager-relation-1107/red-old-manager-hidden.txt
+?? v2/evidence/organization-manager-relation-1107/result.md
+?? v2/evidence/organization-manager-relation-1107/self-check.txt
+?? v2/evidence/organization-manager-relation-1107/green-manager-relation-rework.txt
+?? v2/evidence/organization-manager-relation-1107/green-hidden-manager-message.txt
+?? v2/evidence/organization-manager-relation-1107/green-manager-relation-message.txt
+?? v2/evidence/organization-manager-relation-1107/node-check-message.txt
+?? v2/evidence/organization-manager-relation-1107/organization-tests-rework.txt
+?? v2/evidence/organization-manager-relation-1107/organization-tests-message.txt
+?? v2/evidence/organization-manager-relation-1107/self-check-message.txt
+?? v2/evidence/organization-manager-relation-1107/red-hidden-manager-message.txt
+?? v2/modules/organization/docs/dagpipe/graphs/manager-direct-reports.graph.json
+?? v2/modules/organization/docs/dagpipe/graphs/member-manager-assignment.graph.json
+?? v2/modules/organization/tests/manager-relation.test.mjs
+
+--- changed tracked paths ---
+M	v2/modules/organization/DESIGN.md
+M	v2/modules/organization/src/application/organization-service.mjs
+M	v2/modules/organization/src/public/typed-error.mjs
+M	v2/modules/organization/tests/organization.test.mjs
+
+EXIT_CODE=0

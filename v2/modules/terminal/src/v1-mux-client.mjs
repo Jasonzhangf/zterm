@@ -1,4 +1,4 @@
-import { TypedError } from "../../errors/src/typed-error.mjs";
+import { TypedError } from "../../errors/src/public/index.mjs";
 
 const VERSION = 1;
 const HANDSHAKE_TIMEOUT_MS = 8000;
@@ -59,6 +59,7 @@ export function createV1MuxClient(options = {}) {
   let lastAuthFailure = null;
   const lateOpenChannelIds = new Set();
   const lateOpenCloseListeners = new Set();
+  const openStatusListeners = new Set();
 
   function currentOpenSocket() {
     return socket && socket.readyState === WebSocketImpl.OPEN;
@@ -77,6 +78,14 @@ export function createV1MuxClient(options = {}) {
     for (const listener of lateOpenCloseListeners) {
       try {
         listener(typed);
+      } catch {}
+    }
+  }
+
+  function notifyOpenStatus(status) {
+    for (const listener of openStatusListeners) {
+      try {
+        listener(status);
       } catch {}
     }
   }
@@ -104,7 +113,7 @@ export function createV1MuxClient(options = {}) {
     pendingOpens.clear();
   }
 
-  function detachChannels(reason) {
+  function detachChannels(error) {
     for (const channelId of Array.from(channels.keys())) {
       channels.delete(channelId);
       channelPendingMessages.delete(channelId);
@@ -113,7 +122,7 @@ export function createV1MuxClient(options = {}) {
         channelMessageListeners.delete(channelId);
         for (const listener of listeners) {
           try {
-            listener({ type: "mux-channel-closed", payload: { channelId, reason } });
+            listener({ type: "mux-channel-closed", payload: { channelId, error } });
           } catch {}
         }
       }
@@ -135,7 +144,7 @@ export function createV1MuxClient(options = {}) {
     state = error ? "failed" : "closed";
     const terminalError = error || muxError("TRANSPORT_CLOSED", "V1 mux transport closed.");
     failPending(terminalError);
-    detachChannels(terminalError.message);
+    detachChannels(terminalError);
     lateOpenChannelIds.clear();
     if (rejectReady) {
       rejectReady(terminalError);
@@ -392,6 +401,9 @@ export function createV1MuxClient(options = {}) {
       }
       socket = nextSocket;
       nextSocket.onopen = () => {
+        if (socket !== nextSocket) {
+          return;
+        }
         try {
           nextSocket.send(JSON.stringify({
             type: "mux-hello",
@@ -404,9 +416,15 @@ export function createV1MuxClient(options = {}) {
         startHandshakeTimer();
       };
       nextSocket.onmessage = (event) => {
+        if (socket !== nextSocket) {
+          return;
+        }
         handleMessage(event.data);
       };
       nextSocket.onclose = (event) => {
+        if (socket !== nextSocket) {
+          return;
+        }
         if (state === "ready" || state === "connecting") {
           const code = event && event.code !== undefined ? Number(event.code) : 0;
           if (code === 4001 || lastAuthFailure) {
@@ -417,6 +435,9 @@ export function createV1MuxClient(options = {}) {
         }
       };
       nextSocket.onerror = () => {
+        if (socket !== nextSocket) {
+          return;
+        }
         if (state !== "ready") {
           shutdown(lastAuthFailure || muxError("V1_CONNECTION_FAILED", "V1 mux socket failed before readiness."));
         }
@@ -454,9 +475,28 @@ export function createV1MuxClient(options = {}) {
     if (state !== "ready") {
       return Promise.reject(muxError("NOT_READY", "V1 mux transport is not ready."));
     }
+    const waitMode = input.waitMode ?? "bounded";
+    if (waitMode !== "bounded" && waitMode !== "persistent") {
+      return Promise.reject(muxError("V1_INVALID_OPEN_WAIT_MODE", `Unsupported V1 mux open wait mode: ${waitMode}.`));
+    }
     const channelId = `${++channelSeq}:${clientInstanceId}`;
-    return new Promise((resolve, reject) => {
+    const openPromise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
+        if (waitMode === "persistent") {
+          clearTimer(timer);
+          const boundary = muxError(
+            "V1_OPEN_WAIT_BOUNDARY_REACHED",
+            "V1 mux channel open reached the wait boundary without completion.",
+          );
+          boundary.channelId = channelId;
+          boundary.waitMode = "persistent";
+          const pending = pendingOpens.get(channelId);
+          if (pending) {
+            pending.timer = null;
+          }
+          notifyOpenStatus(boundary);
+          return;
+        }
         pendingOpens.delete(channelId);
         lateOpenChannelIds.add(channelId);
         const timeout = muxError("V1_CHANNEL_OPEN_TIMEOUT", "Timed out waiting for mux-channel-opened.");
@@ -496,6 +536,8 @@ export function createV1MuxClient(options = {}) {
         reject(error);
       }
     });
+    openPromise.channelId = channelId;
+    return openPromise;
   }
 
   function closeChannel(channelId, reason = "client close") {
@@ -580,6 +622,41 @@ export function createV1MuxClient(options = {}) {
     return true;
   }
 
+  function onOpenStatus(listener) {
+    openStatusListeners.add(listener);
+    return () => openStatusListeners.delete(listener);
+  }
+
+  function cancelOpenChannel(channelId) {
+    const pending = pendingOpens.get(channelId);
+    if (!pending) {
+      return false;
+    }
+    pendingOpens.delete(channelId);
+    // A cancelled open can still complete on the wire. Keep the exact identity
+    // so a late mux-channel-opened is released through the existing late-open
+    // close path instead of being silently discarded while the remote keeps an
+    // open channel.
+    lateOpenChannelIds.add(channelId);
+    clearTimer(pending.timer);
+    pending.timer = null;
+    const cancelError = muxError("V1_CHANNEL_OPEN_CANCELLED", "V1 mux channel open was cancelled by the client.");
+    cancelError.channelId = channelId;
+    try {
+      if (currentOpenSocket()) {
+        sendRaw({ type: "mux-channel-close", payload: { channelId, reason: "client cancelled open" } });
+      }
+    } catch (sendError) {
+      log({
+        event: "v1-mux.cancel-open-close.failed",
+        channelId,
+        message: String(sendError && sendError.message ? sendError.message : sendError),
+      });
+    }
+    pending.reject(cancelError);
+    return true;
+  }
+
   function getState() {
     return state;
   }
@@ -598,6 +675,8 @@ export function createV1MuxClient(options = {}) {
     onClose,
     onChannelCloseFailure,
     retryLateOpenClose,
+    onOpenStatus,
+    cancelOpenChannel,
     getState,
     close,
   };

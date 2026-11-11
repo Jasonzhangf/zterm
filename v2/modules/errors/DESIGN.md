@@ -26,7 +26,9 @@ errors/
 
 ## 公开接口、数据及错误
 
-recordError(code,owner,operationRef,cause,retryDisposition)；query在相应scope授权后返回脱敏因果。
+当前公开入口 `src/public/index.mjs` 只导出 `TypedError` 与 `asTypedError`。这两项是 daemon、terminal 与录制错误 consumer 当前共享的错误构造/归一化形状；不导出内部存储、脱敏或查询实现。
+
+recordError(code,owner,operationRef,cause,retryDisposition) 是后续统一记录接口；query 在相应 scope 授权后返回脱敏因果。
 
 错误存储失败必须显式记录当前动作结果，不递归发无限错误，不吞原错。
 

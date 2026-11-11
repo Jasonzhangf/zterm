@@ -1,5 +1,5 @@
 import type { RelayEndpointCandidate } from './relay-directory';
-import { DEFAULT_BRIDGE_PORT } from './mobile-config';
+import { DEFAULT_BRIDGE_PORT } from './mobile-config.ts';
 
 export const TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES = 128_000;
 export const TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES = 4096;

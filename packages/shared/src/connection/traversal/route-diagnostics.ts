@@ -1,5 +1,5 @@
 import type { RelayEndpointCandidate } from '../relay-directory';
-import { selectBestTraversalRoute } from './route-selector';
+import { selectBestTraversalRoute } from './route-selector.ts';
 import type {
   TraversalPlanCandidate,
   TraversalResolvedPath,

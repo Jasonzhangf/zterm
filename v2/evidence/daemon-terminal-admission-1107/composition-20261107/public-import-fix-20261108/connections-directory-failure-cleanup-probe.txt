@@ -1,0 +1,2 @@
+rejected: catalog boom
+transport.close() calls after failed resolve = 0

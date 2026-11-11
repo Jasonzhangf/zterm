@@ -11,6 +11,8 @@
     ".": "./src/index.ts",
     "./connection/traversal": "./src/connection/traversal/index.ts",
     "./connection/traversal/*": "./src/connection/traversal/*.ts",
+    "./connection/protocol": "./src/connection/protocol.ts",
+    "./connection/app-protocol": "./src/connection/app-protocol.ts",
     "./connection/cli-slot-config": "./src/connection/cli-slot-config.ts",
     "./terminal-buffer": "./src/connection/terminal-buffer.ts",
     "./terminal/buffer-frame-assembly": "./src/terminal/buffer-frame-assembly/session-buffer-frame-assembly.ts",

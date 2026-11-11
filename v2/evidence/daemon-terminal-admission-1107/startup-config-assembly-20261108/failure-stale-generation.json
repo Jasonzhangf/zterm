@@ -1,0 +1,23 @@
+{
+  "label": "stale-generation",
+  "status": 409,
+  "body": {
+    "error": {
+      "code": "BINDING_GENERATION_STALE",
+      "owningModule": "daemon",
+      "operationId": "terminal.admission.input",
+      "cause": {
+        "memberId": "mbr_3718bbfd-09db-48ae-b0a6-b4f94f3d1fa2",
+        "expectedGeneration": 0,
+        "currentGeneration": 1
+      },
+      "message": "binding generation 1 != expected 0"
+    }
+  },
+  "sideEffects": {
+    "terminalBufferUnchanged": true,
+    "channelOpenDelta": 0,
+    "inputDelta": 0,
+    "evidence": "HTTP refusal happens before connection-manager channel open/input; real tmux buffer unchanged"
+  }
+}

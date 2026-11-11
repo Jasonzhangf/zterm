@@ -1,0 +1,101 @@
+{
+  "ok": true,
+  "probe": "p13-revocation-probe",
+  "supportedEntry": "startDaemon",
+  "fixture": {
+    "port": 56129,
+    "alpha": "fixture-alpha-46546",
+    "alphaStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2246550%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794168385%7D",
+    "daemonHostId": "daemon-Macstudio-2.local-e4f4de19edf5c3f6"
+  },
+  "account": {
+    "accountId": "55b231aa2d762ac15c6ba28844645f60",
+    "machineId": "mach_57aacab2f3893ea8bc70ff20444889a4"
+  },
+  "hostProducer": {
+    "hostBindingSucceeded": false,
+    "stableId": null,
+    "catalogStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2246550%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794168385%7D",
+    "equal": false,
+    "streamStatus": null,
+    "streamError": {
+      "expectedRefusal": true,
+      "stage": "host-producer-binding",
+      "name": "TypedError",
+      "code": "BINDING_HOST_UNAVAILABLE",
+      "status": null,
+      "owningModule": "members",
+      "message": "host session/anchor is not reachable"
+    },
+    "acceptedByDaemon": false
+  },
+  "positive": {
+    "streamStatus": 200,
+    "inputStatus": 200
+  },
+  "grantRevocation": {
+    "liveTransportStayedConnected": true,
+    "streamStatus": 403,
+    "streamError": {
+      "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+      "owningModule": "accounts",
+      "operationId": "terminal.admission",
+      "cause": {
+        "sourceCode": "WORKSPACE_AUTHORIZATION_REQUIRED",
+        "sourceModule": null,
+        "details": null,
+        "message": "No workspace authorization grant exists for this account."
+      },
+      "message": "No workspace authorization grant exists for this account."
+    },
+    "inputStatus": 403,
+    "inputError": {
+      "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+      "owningModule": "accounts",
+      "operationId": "terminal.admission.input",
+      "cause": {
+        "sourceCode": "WORKSPACE_AUTHORIZATION_REQUIRED",
+        "sourceModule": null,
+        "details": null,
+        "message": "No workspace authorization grant exists for this account."
+      },
+      "message": "No workspace authorization grant exists for this account."
+    },
+    "directAdmissionError": {
+      "name": "TypedError",
+      "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+      "status": null,
+      "owningModule": "accounts",
+      "message": "No workspace authorization grant exists for this account."
+    },
+    "sideEffectsAfterRevoke": {
+      "connects": 1,
+      "channelOpens": 1,
+      "inputWrites": 1
+    }
+  },
+  "machineRevocation": {
+    "liveTransportStayedConnected": true,
+    "streamStatus": 403,
+    "streamError": {
+      "code": "MACHINE_REVOKED",
+      "owningModule": "accounts",
+      "operationId": "machine-terminal.forMachine",
+      "cause": "Machine is revoked.",
+      "message": "Machine is revoked."
+    },
+    "inputStatus": 403,
+    "inputError": {
+      "code": "MACHINE_REVOKED",
+      "owningModule": "accounts",
+      "operationId": "machine-terminal.forMachine",
+      "cause": "Machine is revoked.",
+      "message": "Machine is revoked."
+    },
+    "sideEffectsAfterRevoke": {
+      "connects": 1,
+      "channelOpens": 1,
+      "inputWrites": 1
+    }
+  }
+}

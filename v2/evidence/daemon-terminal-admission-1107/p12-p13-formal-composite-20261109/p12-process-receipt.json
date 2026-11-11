@@ -1,0 +1,31 @@
+{
+  "probe": "p12-committed-frame-probe",
+  "supportedEntry": "startDaemon",
+  "startedAt": "2026-11-09T02:08:01.266Z",
+  "probePid": 29716,
+  "v2Daemon": {
+    "pid": 29716,
+    "host": "127.0.0.1",
+    "port": 49623,
+    "listening": true
+  },
+  "fixture": {
+    "daemonPid": 46560,
+    "port": 56129,
+    "tmuxSocketPath": "/tmp/isolated-v1-46546-mw89j6nf/tmux.sock",
+    "tmuxServerPid": "46550",
+    "alpha": "fixture-alpha-46546",
+    "alphaStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2246550%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794168385%7D",
+    "daemonHostId": "daemon-Macstudio-2.local-e4f4de19edf5c3f6"
+  },
+  "relay": {
+    "pid": 29717,
+    "port": 49615,
+    "baseUrl": "http://127.0.0.1:49615",
+    "health": "200"
+  },
+  "tmuxSessions": [
+    "fixture-alpha-46546|$0|46550",
+    "fixture-beta-46546|$1|46550"
+  ]
+}

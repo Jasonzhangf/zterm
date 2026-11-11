@@ -1,0 +1,272 @@
+
+> @ test /Volumes/Intel/playground/zterm/worktrees/delivery-production-dispatch-20261107/v2/modules/delivery
+> node --test tests/contract/*.test.ts
+
+TAP version 13
+# Subtest: submit creates one exact immutable command and returns one result
+ok 1 - submit creates one exact immutable command and returns one result
+  ---
+  duration_ms: 2.134125
+  type: 'test'
+  ...
+# Subtest: missing subject stays accepted and empty subject fails validation
+ok 2 - missing subject stays accepted and empty subject fails validation
+  ---
+  duration_ms: 0.141125
+  type: 'test'
+  ...
+# Subtest: same requestId under different full refs remains isolated
+ok 3 - same requestId under different full refs remains isolated
+  ---
+  duration_ms: 0.213375
+  type: 'test'
+  ...
+# Subtest: binding generation is a nonnegative safe integer and is not stringified
+ok 4 - binding generation is a nonnegative safe integer and is not stringified
+  ---
+  duration_ms: 0.9875
+  type: 'test'
+  ...
+# Subtest: denied or revoked authorization stops before routing and every store call
+ok 5 - denied or revoked authorization stops before routing and every store call
+  ---
+  duration_ms: 0.214166
+  type: 'test'
+  ...
+# Subtest: atomic acceptance outcomes map without a pre-read or invented receipt
+ok 6 - atomic acceptance outcomes map without a pre-read or invented receipt
+  ---
+  duration_ms: 0.339166
+  type: 'test'
+  ...
+# Subtest: replay returns the persisted receipt without resend or extra store access
+ok 7 - replay returns the persisted receipt without resend or extra store access
+  ---
+  duration_ms: 0.104125
+  type: 'test'
+  ...
+# Subtest: dispatch unavailable preserves the durable receipt for query
+ok 8 - dispatch unavailable preserves the durable receipt for query
+  ---
+  duration_ms: 0.189542
+  type: 'test'
+  ...
+# Subtest: successful dispatch returns the durable receipt through the public port
+ok 9 - successful dispatch returns the durable receipt through the public port
+  ---
+  duration_ms: 0.39625
+  type: 'test'
+  ...
+# Subtest: successful protocol send with lost receipt evidence stays unknown
+ok 10 - successful protocol send with lost receipt evidence stays unknown
+  ---
+  duration_ms: 0.319958
+  type: 'test'
+  ...
+# Subtest: dispatch exception stays typed with an error chain and keeps the receipt
+ok 11 - dispatch exception stays typed with an error chain and keeps the receipt
+  ---
+  duration_ms: 0.310875
+  type: 'test'
+  ...
+# Subtest: missing dispatch capability never fakes connected delivery
+ok 12 - missing dispatch capability never fakes connected delivery
+  ---
+  duration_ms: 0.080291
+  type: 'test'
+  ...
+# Subtest: missing routing capability returns a typed unavailable result
+ok 13 - missing routing capability returns a typed unavailable result
+  ---
+  duration_ms: 0.066833
+  type: 'test'
+  ...
+# Subtest: wrong token, unauthorized workspace, and unknown member reject before write
+ok 14 - wrong token, unauthorized workspace, and unknown member reject before write
+  ---
+  duration_ms: 0.128541
+  type: 'test'
+  ...
+# Subtest: no production port method promotes consumed evidence
+ok 15 - no production port method promotes consumed evidence
+  ---
+  duration_ms: 0.045583
+  type: 'test'
+  ...
+# Subtest: unexpected acceptance and read exceptions stay explicit and conservative
+ok 16 - unexpected acceptance and read exceptions stay explicit and conservative
+  ---
+  duration_ms: 0.102583
+  type: 'test'
+  ...
+# Subtest: query authorizes the exact full ref before reading and preserves all outcomes
+ok 17 - query authorizes the exact full ref before reading and preserves all outcomes
+  ---
+  duration_ms: 0.267791
+  type: 'test'
+  ...
+# Subtest: application has no path that promotes weak acknowledgement evidence
+ok 18 - application has no path that promotes weak acknowledgement evidence
+  ---
+  duration_ms: 0.079625
+  type: 'test'
+  ...
+# Subtest: resume dispatches the immutable accepted command after send authorization
+ok 19 - resume dispatches the immutable accepted command after send authorization
+  ---
+  duration_ms: 0.298083
+  type: 'test'
+  ...
+# Subtest: resume returns already-dispatched only for durable remote-stored evidence
+ok 20 - resume returns already-dispatched only for durable remote-stored evidence
+  ---
+  duration_ms: 0.110833
+  type: 'test'
+  ...
+# Subtest: resume rejects a read-only actor before any dispatch
+ok 21 - resume rejects a read-only actor before any dispatch
+  ---
+  duration_ms: 0.070083
+  type: 'test'
+  ...
+# Subtest: resume reports subject-required and never dispatches
+ok 22 - resume reports subject-required and never dispatches
+  ---
+  duration_ms: 0.085583
+  type: 'test'
+  ...
+# Subtest: resume without a command reader stays typed unavailable
+ok 23 - resume without a command reader stays typed unavailable
+  ---
+  duration_ms: 0.04625
+  type: 'test'
+  ...
+# Subtest: resume reports an unknown delivery
+ok 24 - resume reports an unknown delivery
+  ---
+  duration_ms: 0.058
+  type: 'test'
+  ...
+# Subtest: resume keeps the durable receipt when dispatch is unavailable
+ok 25 - resume keeps the durable receipt when dispatch is unavailable
+  ---
+  duration_ms: 0.079667
+  type: 'test'
+  ...
+# Subtest: submit refuses to dispatch without the persisted v1MessageId
+ok 26 - submit refuses to dispatch without the persisted v1MessageId
+  ---
+  duration_ms: 0.082458
+  type: 'test'
+  ...
+# Subtest: submit keeps a possible-write dispatch result as typed unknown
+ok 27 - submit keeps a possible-write dispatch result as typed unknown
+  ---
+  duration_ms: 0.059958
+  type: 'test'
+  ...
+# Subtest: resume refuses to dispatch without the persisted v1MessageId
+ok 28 - resume refuses to dispatch without the persisted v1MessageId
+  ---
+  duration_ms: 0.063416
+  type: 'test'
+  ...
+# Subtest: resume denies ref access before reading the accepted command
+ok 29 - resume denies ref access before reading the accepted command
+  ---
+  duration_ms: 0.056625
+  type: 'test'
+  ...
+# Subtest: resume never reads or dispatches another scope's command
+ok 30 - resume never reads or dispatches another scope's command
+  ---
+  duration_ms: 0.052167
+  type: 'test'
+  ...
+# Subtest: receipt factory returns immutable accepted/pending with exact identity
+ok 31 - receipt factory returns immutable accepted/pending with exact identity
+  ---
+  duration_ms: 1.2615
+  type: 'test'
+  ...
+# Subtest: strong evidence advances monotonically and confirms the stage
+ok 32 - strong evidence advances monotonically and confirms the stage
+  ---
+  duration_ms: 0.182083
+  type: 'test'
+  ...
+# Subtest: error evidence preserves the proven stage and records current outcome
+ok 33 - error evidence preserves the proven stage and records current outcome
+  ---
+  duration_ms: 0.089625
+  type: 'test'
+  ...
+# Subtest: weak acknowledgements and unverified consumption do not promote stages
+ok 34 - weak acknowledgements and unverified consumption do not promote stages
+  ---
+  duration_ms: 0.116458
+  type: 'test'
+  ...
+# Subtest: evidence with a different full ref or target is an identity mismatch
+ok 35 - evidence with a different full ref or target is an identity mismatch
+  ---
+  duration_ms: 0.066167
+  type: 'test'
+  ...
+# Subtest: acceptance-unknown preserves the public error chain
+ok 36 - acceptance-unknown preserves the public error chain
+  ---
+  duration_ms: 1.38825
+  type: 'test'
+  ...
+# Subtest: unavailable query preserves the public error chain
+ok 37 - unavailable query preserves the public error chain
+  ---
+  duration_ms: 0.151416
+  type: 'test'
+  ...
+# Subtest: unexpected acceptance exception preserves message and nested cause
+ok 38 - unexpected acceptance exception preserves message and nested cause
+  ---
+  duration_ms: 0.219792
+  type: 'test'
+  ...
+# Subtest: unexpected read exception preserves message and nested cause
+ok 39 - unexpected read exception preserves message and nested cause
+  ---
+  duration_ms: 0.086167
+  type: 'test'
+  ...
+# Subtest: receiptStore rejections with undefined or null stay typed and isolated
+ok 40 - receiptStore rejections with undefined or null stay typed and isolated
+  ---
+  duration_ms: 0.212667
+  type: 'test'
+  ...
+# Subtest: submission authorization exceptions become typed authorization unavailable
+ok 41 - submission authorization exceptions become typed authorization unavailable
+  ---
+  duration_ms: 0.06925
+  type: 'test'
+  ...
+# Subtest: submission routing exceptions become typed routing unavailable
+ok 42 - submission routing exceptions become typed routing unavailable
+  ---
+  duration_ms: 0.110833
+  type: 'test'
+  ...
+# Subtest: receipt query authorization exceptions become typed unavailable with an authorize chain
+ok 43 - receipt query authorization exceptions become typed unavailable with an authorize chain
+  ---
+  duration_ms: 0.160417
+  type: 'test'
+  ...
+1..43
+# tests 43
+# suites 0
+# pass 43
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 140.521459

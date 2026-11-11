@@ -1,0 +1,18 @@
+
+ RUN  v1.6.1 /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/android
+
+stderr | src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > reports attach failure only through the mux-channel-closed control error path
+[server] mux channel attach failed: forced attach failure (channelId=channel-attach-failed session=alpha)
+
+stdout | src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > does not echo legacy clientSessionId in session-ticket because daemon owns no client state
+[server] session-open transport=transport-1 openRequestId=n/a session=demo
+
+stderr | src/server/terminal-message-runtime.test.ts > terminal message runtime explicit error truth > surfaces a disconnect cleanup failure instead of swallowing it, awaiting the same stop owner
+[rw-close] disconnect surfaced cleanup failure: stream stream-1 stop not released after disconnect: status=cleanup_failed remaining=input:stream-1
+
+ ✓ src/server/terminal-message-runtime.test.ts  (68 tests) 74ms
+
+ Test Files  1 passed (1)
+      Tests  68 passed (68)
+   Start at  01:38:36
+   Duration  865ms (transform 216ms, setup 13ms, collect 231ms, tests 74ms, environment 0ms, prepare 105ms)

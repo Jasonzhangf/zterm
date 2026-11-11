@@ -1,0 +1,46 @@
+{
+  "probe": "startup-config-real-blackbox",
+  "command": "/opt/homebrew/Cellar/node@22/22.22.2_2/bin/node v2/modules/daemon/src/main.mjs --config /var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/zterm-startup-blackbox-QF6mGz/daemon-startup-config.json",
+  "worktree": {
+    "path": "/Volumes/Intel/playground/zterm/worktrees/terminal-admission-startup-config-20261108",
+    "branch": "terminal-admission-startup-config-20261108",
+    "head": "36de5b2570fb0a6021537accbb4d8b6b8a1ffd55"
+  },
+  "isolated": {
+    "daemonPid": 38358,
+    "daemonPort": 65527,
+    "relayPort": 65528,
+    "v1FixturePid": 28223,
+    "v1Port": 57324,
+    "v1TmuxSocket": "/tmp/isolated-v1-28147-mw7sco4k/tmux.sock"
+  },
+  "fixture": {
+    "alpha": "fixture-alpha-28147",
+    "alphaStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D",
+    "daemonHostId": "daemon-Macstudio-2.local-e77d4c1116506598"
+  },
+  "account": {
+    "accountId": "8e156f5c31193bc89eadbe8405bd09e0",
+    "machineId": "mach_b8ef4b77d3434faf026e613926d29f57"
+  },
+  "workspace": {
+    "workspaceId": "ws_4fad044b-f4bb-4efb-9907-2fd80629ef6f",
+    "groupPath": "/StartupBlackbox/team",
+    "memberId": "mbr_3718bbfd-09db-48ae-b0a6-b4f94f3d1fa2"
+  },
+  "binding": {
+    "generation": 1,
+    "terminalTarget": {
+      "backend": "tmux",
+      "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D"
+    }
+  },
+  "listening": {
+    "event": "listening",
+    "host": "127.0.0.1",
+    "port": 65527,
+    "v1WsUrl": "ws://127.0.0.1:57324/ws?token=%3Credacted%3E",
+    "v2AuthRequired": true,
+    "v1AuthConfigured": true
+  }
+}

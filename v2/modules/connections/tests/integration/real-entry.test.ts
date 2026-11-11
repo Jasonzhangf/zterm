@@ -4,6 +4,7 @@ import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   buildTerminalMuxCapabilities,
   buildTerminalMuxReady,
+  buildTerminalMuxServerTargetMessage,
   isTerminalMuxClientFrame,
 } from "@zterm/shared/connection/protocol";
 import { createConnectionManager, V1TraversalTransport } from "../../src/index";
@@ -14,13 +15,33 @@ const DAEMON = "daemon-lan-peer";
 const MACHINE = "machine-lan-peer";
 const KNOWN_SESSION = "known-session";
 
-// Modes model the real V1 daemon wire behavior. "ok" sends mux-ready WITHOUT
-// daemonHostId, exactly like the live daemon; the identity modes declare a
+// Modes model the real V1 daemon wire behavior. "missing-identity" omits
+// daemonHostId, exactly like the live daemon. The identity modes declare a
 // matching or different identity. There is no generic message/file capability
 // on the terminal mux in any mode.
-type ConnectionMode = "ok" | "identity-match" | "identity-mismatch" | "bad-json" | "non-mux" | "mux-error";
+type ConnectionMode =
+  | "missing-identity"
+  | "identity-match"
+  | "identity-mismatch"
+  | "bad-json"
+  | "non-mux"
+  | "mux-error";
 
 let failNextLateOpenClose = false;
+type CatalogResponseMode =
+  | "catalog"
+  | "wrong-request-id"
+  | "wrong-type"
+  | "missing-catalog"
+  | "missing-sessions"
+  | "malformed-sessions"
+  | "missing-stable-id"
+  | "error"
+  | "hold";
+let catalogResponseMode: CatalogResponseMode = "catalog";
+let targetRequests: Array<{ requestId?: string; type: string; payload?: unknown }> = [];
+let channelOpenCount = 0;
+let channelBinaryCount = 0;
 
 class FailOnceLateOpenCloseWebSocket extends WebSocket {
   override send(data: RawData, options?: unknown, callback?: unknown): void {
@@ -65,7 +86,7 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
   let wsServer: WebSocketServer;
   let port: number;
   let host: string;
-  let nextMode: ConnectionMode = "ok";
+  let nextMode: ConnectionMode = "identity-match";
   let notifyBadSocketClosed: (() => void) | null = null;
   let holdChannelOpenAcks = false;
   let releaseHeldChannelOpenAck: (() => void) | null = null;
@@ -101,6 +122,8 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
         let parsed: unknown;
         try { parsed = JSON.parse(raw.toString()); } catch { return; }
         if (!isTerminalMuxClientFrame(parsed)) return;
+        if (parsed.type === "mux-channel-open") channelOpenCount += 1;
+        if (parsed.type === "mux-channel-binary") channelBinaryCount += 1;
         if (parsed.type === "mux-hello") {
           if (mode === "bad-json") {
             socket.send("not-json{");
@@ -127,7 +150,82 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
           }
           return;
         }
-        if (mode !== "ok" && mode !== "identity-match") return;
+        if (mode !== "identity-match") return;
+        if (parsed.type === "mux-target-message" && parsed.payload.message.type === "list-sessions") {
+          const requestId = typeof parsed.payload.requestId === "string" ? parsed.payload.requestId : "";
+          targetRequests.push({
+            ...(requestId ? { requestId } : {}),
+            type: parsed.payload.message.type,
+            payload: parsed.payload.message.payload,
+          });
+          if (catalogResponseMode === "hold") return;
+          if (catalogResponseMode === "wrong-request-id") {
+            socket.send(JSON.stringify(buildTerminalMuxServerTargetMessage({
+              type: "sessions",
+              payload: {
+                sessions: ["wrong"],
+                sessionCatalog: [{ name: "wrong", backend: "tmux", stableId: "wrong-stable" }],
+              },
+            }, "unrelated-catalog-request")));
+          }
+          let inner: Parameters<typeof buildTerminalMuxServerTargetMessage>[0];
+          switch (catalogResponseMode) {
+            case "wrong-type":
+              inner = { type: "pong" };
+              break;
+            case "missing-catalog":
+              inner = { type: "sessions", payload: { sessions: ["zterm-1"] } };
+              break;
+            case "missing-sessions":
+              socket.send(JSON.stringify({
+                type: "mux-target-message",
+                payload: {
+                  requestId,
+                  message: {
+                    type: "sessions",
+                    payload: { sessionCatalog: [{ name: "zterm-1", backend: "tmux", stableId: "stable-zterm-1" }] },
+                  },
+                },
+              }));
+              return;
+            case "malformed-sessions":
+              socket.send(JSON.stringify({
+                type: "mux-target-message",
+                payload: {
+                  requestId,
+                  message: {
+                    type: "sessions",
+                    payload: {
+                      sessions: "zterm-1",
+                      sessionCatalog: [{ name: "zterm-1", backend: "tmux", stableId: "stable-zterm-1" }],
+                    },
+                  },
+                },
+              }));
+              return;
+            case "missing-stable-id":
+              inner = { type: "sessions", payload: { sessions: ["zterm-1"], sessionCatalog: [{ name: "zterm-1", backend: "tmux" }] } };
+              break;
+            case "error":
+              inner = { type: "error", payload: { message: "list failed", code: "list_sessions_failed" } };
+              break;
+            default:
+              inner = {
+                type: "sessions",
+                payload: {
+                  sessions: ["zterm-1"],
+                  sessionCatalog: [{
+                    name: "zterm-1",
+                    backend: "tmux",
+                    stableId: "stable-zterm-1",
+                    cwd: "/tmp/zterm-1",
+                  }],
+                },
+              };
+          }
+          socket.send(JSON.stringify(buildTerminalMuxServerTargetMessage(inner, requestId)));
+          return;
+        }
         if (parsed.type === "mux-channel-open") {
           const { channelId, sessionName } = parsed.payload;
           if (sessionName === KNOWN_SESSION) {
@@ -178,12 +276,16 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
   });
 
   afterEach(() => {
-    nextMode = "ok";
+    nextMode = "identity-match";
     notifyBadSocketClosed = null;
     holdChannelOpenAcks = false;
     releaseHeldChannelOpenAck = null;
     remoteCloseAcceptedChannel = null;
     lastClientChannelClose = null;
+    catalogResponseMode = "catalog";
+    targetRequests = [];
+    channelOpenCount = 0;
+    channelBinaryCount = 0;
   });
 
   afterAll(async () => {
@@ -191,21 +293,18 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
-  it("connects over a real LAN websocket and records direct path with terminal-only capability", async () => {
+  it("rejects a real LAN websocket when the peer omits its canonical identity", async () => {
+    nextMode = "missing-identity";
     const manager = createConnectionManager({
       authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
       transport: new V1TraversalTransport(),
     });
-    const link = await manager.connect(MACHINE);
-    const obs = manager.observeLink(link);
-    expect(obs.status).toBe("connected");
-    expect(obs.path).toBe("direct");
-    // The mux omits daemonHostId on the wire, so no peer identity is observed.
+    await expect(manager.connect(MACHINE)).rejects.toMatchObject({ code: "peer_identity_mismatch" });
+    const obs = manager.observeLink({ id: `link:${MACHINE}`, machineId: MACHINE, generation: 1 });
+    expect(obs.status).toBe("rejected");
+    expect(obs.freshness).toBe("stale");
     expect(obs.peerIdentity).toBeNull();
     expect(obs.peerIdentityVerified).toBe(false);
-    // channelEnvelope is a terminal channel capability, NOT a message/file service.
-    expect(obs.capabilities.channelKinds).toEqual(["terminal"]);
-    manager.closeOwnLink(link);
   });
 
   it("does not advertise or open generic message/file on the terminal mux", async () => {
@@ -277,7 +376,7 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
   });
 
   it("releases a socket after a bad handshake and leaves another link usable", async () => {
-    nextMode = "ok";
+    nextMode = "identity-match";
     const healthy = createConnectionManager({
       authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
       transport: new V1TraversalTransport(),
@@ -329,17 +428,19 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     manager.closeOwnLink(link);
   });
 
-  it("does not project the expected identity when mux-ready omits it", async () => {
+  it("rejects when mux-ready omits the expected peer identity", async () => {
+    nextMode = "missing-identity";
     const expected = "expected-only";
     const manager = createConnectionManager({
       authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN, expected) },
       transport: new V1TraversalTransport(),
     });
-    const link = await manager.connect(MACHINE);
-    const obs = manager.observeLink(link);
+    await expect(manager.connect(MACHINE)).rejects.toMatchObject({ code: "peer_identity_mismatch" });
+    const obs = manager.observeLink({ id: `link:${MACHINE}`, machineId: MACHINE, generation: 1 });
+    expect(obs.status).toBe("rejected");
+    expect(obs.freshness).toBe("stale");
     expect(obs.peerIdentity).toBeNull();
     expect(obs.peerIdentityVerified).toBe(false);
-    manager.closeOwnLink(link);
   });
 
   it("rejects a declared peer identity mismatch and never reports connected", async () => {
@@ -455,4 +556,151 @@ describe("connections real-entry (LAN direct, real mux wire)", () => {
     manager.closeChannel(sibling);
     manager.closeOwnLink(link);
   });
+
+  it("lists sessions over mux-target-message without opening a terminal channel", async () => {
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    const sessions = await manager.listSessions(link);
+
+    expect(sessions).toEqual([{ name: "zterm-1", backend: "tmux", stableId: "stable-zterm-1" }]);
+    expect(targetRequests).toEqual([{
+      requestId: expect.any(String),
+      type: "list-sessions",
+      payload: { terminalBackend: "tmux" },
+    }]);
+    expect(channelOpenCount).toBe(0);
+    expect(channelBinaryCount).toBe(0);
+    expect(manager.observeLink(link).status).toBe("connected");
+    manager.closeOwnLink(link);
+  });
+
+  it("ignores catalog responses that carry a different request id", async () => {
+    catalogResponseMode = "wrong-request-id";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    const sessions = await manager.listSessions(link);
+
+    expect(sessions).toEqual([{ name: "zterm-1", backend: "tmux", stableId: "stable-zterm-1" }]);
+    expect(targetRequests).toHaveLength(1);
+    manager.closeOwnLink(link);
+  });
+
+  it("rejects a catalog response with the wrong message type", async () => {
+    catalogResponseMode = "wrong-type";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({ code: "invalid_response" });
+    expect(manager.observeLink(link).status).toBe("connected");
+    manager.closeOwnLink(link);
+  });
+
+  it("rejects a catalog response without a session catalog", async () => {
+    catalogResponseMode = "missing-catalog";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({ code: "invalid_response" });
+    expect(manager.observeLink(link).status).toBe("connected");
+    manager.closeOwnLink(link);
+  });
+
+  it("rejects a catalog response without the required sessions list", async () => {
+    catalogResponseMode = "missing-sessions";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({ code: "invalid_response" });
+    expect(manager.observeLink(link).status).toBe("connected");
+    expect(channelOpenCount).toBe(0);
+    manager.closeOwnLink(link);
+  });
+
+  it("rejects a malformed sessions list instead of accepting the catalog", async () => {
+    catalogResponseMode = "malformed-sessions";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({ code: "invalid_response" });
+    expect(manager.observeLink(link).status).toBe("connected");
+    expect(channelOpenCount).toBe(0);
+    manager.closeOwnLink(link);
+  });
+
+  it("rejects a catalog entry without a stable id instead of synthesizing one", async () => {
+    catalogResponseMode = "missing-stable-id";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({ code: "invalid_response" });
+    expect(manager.observeLink(link).status).toBe("connected");
+    manager.closeOwnLink(link);
+  });
+
+  it("preserves the typed remote catalog failure and keeps the link connected", async () => {
+    catalogResponseMode = "error";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({
+      code: "list_sessions_failed",
+      message: expect.stringContaining("list failed"),
+    });
+    expect(manager.observeLink(link).status).toBe("connected");
+    expect(channelOpenCount).toBe(0);
+    manager.closeOwnLink(link);
+  });
+
+  it("rejects a pending catalog read when the link closes", async () => {
+    catalogResponseMode = "hold";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    const listing = manager.listSessions(link);
+    await waitFor(() => targetRequests.length > 0);
+    manager.closeOwnLink(link);
+
+    await expect(listing).rejects.toMatchObject({ code: "link_closed" });
+  });
+
+  it("rejects a catalog read that never receives a response", async () => {
+    catalogResponseMode = "hold";
+    const manager = createConnectionManager({
+      authorizationPort: { authorizeMachine: async () => authFor(host, port, TOKEN) },
+      transport: new V1TraversalTransport(),
+    });
+    const link = await manager.connect(MACHINE);
+
+    await expect(manager.listSessions(link)).rejects.toMatchObject({ code: "unreachable" });
+    manager.closeOwnLink(link);
+  }, 15000);
 });

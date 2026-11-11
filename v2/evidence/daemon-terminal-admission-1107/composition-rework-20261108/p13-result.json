@@ -1,0 +1,108 @@
+{
+  "ok": true,
+  "probe": "p13-revocation-probe",
+  "supportedEntry": "startDaemon",
+  "fixture": {
+    "port": 57324,
+    "alpha": "fixture-alpha-28147",
+    "alphaStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D",
+    "daemonHostId": "daemon-Macstudio-2.local-e77d4c1116506598"
+  },
+  "account": {
+    "accountId": "88048d844e62abc360934a19b98a9b7b",
+    "machineId": "mach_e2448932d9e9abbd8394cdc0aa93d2b6"
+  },
+  "hostProducer": {
+    "hostBindingSucceeded": true,
+    "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22socketPath%22%3A%22%2Ftmp%2Fisolated-v1-28147-mw7sco4k%2Ftmux.sock%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D",
+    "catalogStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D",
+    "equal": false,
+    "streamStatus": 424,
+    "streamError": {
+      "code": "TERMINAL_TARGET_BINDING_UNAVAILABLE",
+      "owningModule": "daemon",
+      "operationId": "terminal.admission",
+      "cause": {
+        "reason": "binding-target-unresolved",
+        "memberId": "mbr_44a062f0-38ee-40dd-8267-1bc0367b6a24",
+        "bindingSessionId": "$0",
+        "bindingAnchor": "%0",
+        "requested": {
+          "backend": "tmux",
+          "stableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22socketPath%22%3A%22%2Ftmp%2Fisolated-v1-28147-mw7sco4k%2Ftmux.sock%22%2C%22serverPid%22%3A%2228186%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794139528%7D"
+        }
+      },
+      "message": "The member runtime binding does not resolve to a native terminal target."
+    },
+    "acceptedByDaemon": false
+  },
+  "positive": {
+    "streamStatus": 200,
+    "inputStatus": 200
+  },
+  "grantRevocation": {
+    "liveTransportStayedConnected": true,
+    "streamStatus": 403,
+    "streamError": {
+      "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+      "owningModule": "accounts",
+      "operationId": "terminal.admission",
+      "cause": {
+        "sourceCode": "WORKSPACE_AUTHORIZATION_REQUIRED",
+        "sourceModule": null,
+        "details": null,
+        "message": "No workspace authorization grant exists for this account."
+      },
+      "message": "No workspace authorization grant exists for this account."
+    },
+    "inputStatus": 403,
+    "inputError": {
+      "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+      "owningModule": "accounts",
+      "operationId": "terminal.admission.input",
+      "cause": {
+        "sourceCode": "WORKSPACE_AUTHORIZATION_REQUIRED",
+        "sourceModule": null,
+        "details": null,
+        "message": "No workspace authorization grant exists for this account."
+      },
+      "message": "No workspace authorization grant exists for this account."
+    },
+    "directAdmissionError": {
+      "name": "TypedError",
+      "code": "WORKSPACE_AUTHORIZATION_REQUIRED",
+      "status": null,
+      "owningModule": "accounts",
+      "message": "No workspace authorization grant exists for this account."
+    },
+    "sideEffectsAfterRevoke": {
+      "connects": 1,
+      "channelOpens": 2,
+      "inputWrites": 1
+    }
+  },
+  "machineRevocation": {
+    "liveTransportStayedConnected": true,
+    "streamStatus": 403,
+    "streamError": {
+      "code": "MACHINE_REVOKED",
+      "owningModule": "accounts",
+      "operationId": "machine-terminal.forMachine",
+      "cause": "Machine is revoked.",
+      "message": "Machine is revoked."
+    },
+    "inputStatus": 403,
+    "inputError": {
+      "code": "MACHINE_REVOKED",
+      "owningModule": "accounts",
+      "operationId": "machine-terminal.forMachine",
+      "cause": "Machine is revoked.",
+      "message": "Machine is revoked."
+    },
+    "sideEffectsAfterRevoke": {
+      "connects": 1,
+      "channelOpens": 2,
+      "inputWrites": 1
+    }
+  }
+}

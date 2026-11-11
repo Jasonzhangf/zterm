@@ -1,0 +1,10 @@
+{
+  "observedAt": "2026-11-09T02:08:09.898Z",
+  "fixtureAlphaSession": "fixture-alpha-46546",
+  "fixtureTmuxSocket": "/tmp/isolated-v1-46546-mw89j6nf/tmux.sock",
+  "hostProbeAvailable": false,
+  "hostProbeAnchorPresent": false,
+  "hostProbeStableId": null,
+  "catalogAlphaStableId": "tmux:v1:%7B%22backend%22%3A%22tmux%22%2C%22serverPid%22%3A%2246550%22%2C%22sessionId%22%3A%22%240%22%2C%22createdAt%22%3A1794168385%7D",
+  "equal": false
+}

@@ -1,0 +1,14 @@
+
+> @zterm/v2-connections@0.0.1 test /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+> vitest run --config vitest.config.ts app-send-entry
+
+
+ RUN  v1.6.0 /Volumes/Intel/playground/zterm/worktrees/connections-app-send-public-edge-20261107/v2/modules/connections
+
+ ✓ tests/integration/app-send-entry.test.ts  (8 tests) 151ms
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  14:46:20
+   Duration  952ms (transform 136ms, setup 0ms, collect 331ms, tests 151ms, environment 0ms, prepare 305ms)
+

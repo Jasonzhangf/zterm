@@ -1,0 +1,42 @@
+TAP version 13
+# Subtest: public runtime delegates login to HTTP relay and rejects bad or unknown credentials without policy side effects
+ok 1 - public runtime delegates login to HTTP relay and rejects bad or unknown credentials without policy side effects
+  ---
+  duration_ms: 26.350167
+  type: 'test'
+  ...
+# Subtest: grant persists exact workspace and machine scope and verifies only that pair
+ok 2 - grant persists exact workspace and machine scope and verifies only that pair
+  ---
+  duration_ms: 14.455416
+  type: 'test'
+  ...
+# Subtest: grant rejects unverified targets and leaves the policy store unchanged
+ok 3 - grant rejects unverified targets and leaves the policy store unchanged
+  ---
+  duration_ms: 5.520416
+  type: 'test'
+  ...
+# Subtest: revoke invalidates the existing grant and generation, and regrant advances the generation
+ok 4 - revoke invalidates the existing grant and generation, and regrant advances the generation
+  ---
+  duration_ms: 6.739667
+  type: 'test'
+  ...
+# Subtest: grant and revoke require a currently verified management grant
+ok 5 - grant and revoke require a currently verified management grant
+  ---
+  duration_ms: 1.712417
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 182.663708
+
+exit=0

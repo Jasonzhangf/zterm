@@ -1,0 +1,9 @@
+
+ RUN  v1.6.0 /Volumes/Intel/playground/zterm/worktrees/mux-ready-daemon-host-id-20261107/packages/shared
+
+ ✓ src/connection/protocol.test.ts  (22 tests) 6ms
+
+ Test Files  1 passed (1)
+      Tests  22 passed (22)
+   Start at  01:38:36
+   Duration  602ms (transform 46ms, setup 0ms, collect 48ms, tests 6ms, environment 0ms, prepare 81ms)

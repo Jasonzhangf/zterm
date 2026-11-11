@@ -11,6 +11,15 @@ import {
   AuthService,
   MachineService,
   V1RelayAdapter,
+  createAccountsAuthorizationPort,
+  createFileAccountAuthorizationStore,
+  createWorkspaceAuthorization,
+} from '../../src/public/contracts.ts'
+import { createAccountsRuntime } from '../../src/public/index.mjs'
+import type {
+  AccountAuthorizationGrant,
+  MachineAuthorizationRoute,
+  MachineRouteSource,
 } from '../../src/public/contracts.ts'
 
 interface RelayServer {
@@ -276,5 +285,333 @@ test('real V1 relay proves enrollment, possession, owner revoke, and logout', as
     alice.machines.listAuthorizedMachines(alice.token),
     'AUTHENTICATION_REQUIRED',
     401,
+  )
+})
+
+test('real V1 relay drives workspace and machine authorization adapters end to end', async () => {
+  assert.ok(relay, 'real relay is unavailable')
+  const alice = await createAccount(relay.baseUrl, 'authz-alice')
+  const bob = await createAccount(relay.baseUrl, 'authz-bob')
+
+  const enrolled = await alice.machines.enrollMachine(alice.token, {
+    deviceId: 'alice-authz-laptop',
+    deviceToken: 'alice-authz-device-proof',
+    displayName: 'Alice Authz Laptop',
+  })
+  const machineId = enrolled.machineId
+  assert.match(machineId, /^mach_/)
+
+  const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-v2-accounts-authz-'))
+  try {
+    const store = createFileAccountAuthorizationStore(join(tempRoot, 'authorization.json'))
+    const grant: AccountAuthorizationGrant = {
+      accountId: alice.accountId,
+      scopes: ['org:read', 'org:write'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      memberIds: ['mbr-a'],
+      updatedAt: '2026-11-07T00:00:00.000Z',
+    }
+    await store.putGrant(grant)
+    const workspaceAuthz = createWorkspaceAuthorization({ authService: alice.auth, store })
+
+    const context = await workspaceAuthz.verify(alice.token)
+    assert.equal(context.accountId, alice.accountId)
+    assert.deepEqual(context.workspaces, ['ws-a'])
+    assert.deepEqual(context.members, ['mbr-a'])
+
+    await expectError(
+      workspaceAuthz.verify(bob.token),
+      'WORKSPACE_AUTHORIZATION_REQUIRED',
+      403,
+    )
+
+    const canonicalRoute: MachineAuthorizationRoute = {
+      machineId,
+      daemonHostId: 'daemon-alice',
+      capabilities: { transportKind: 'websocket', channelKinds: ['terminal'] },
+      target: {
+        bridgeHost: '127.0.0.1',
+        bridgePort: 47821,
+        daemonHostId: 'daemon-alice',
+        transportMode: 'websocket',
+      },
+      settings: { transportMode: 'websocket' },
+    }
+    const routes: MachineRouteSource = {
+      async get(requested) {
+        return requested === machineId ? canonicalRoute : undefined
+      },
+    }
+    const alicePort = createAccountsAuthorizationPort({
+      token: alice.token,
+      authService: alice.auth,
+      machineService: alice.machines,
+      routes,
+    })
+
+    const link = await alicePort.authorizeMachine(machineId)
+    assert.equal(link.machineId, machineId)
+    assert.equal(link.accountId, alice.accountId)
+    assert.equal(link.daemonHostId, 'daemon-alice')
+    assert.match(link.authorizationId, /^authz_/)
+    assert.notEqual(link.authorizationId, alice.token)
+
+    await expectError(alicePort.authorizeMachine('mach_missing'), 'MACHINE_NOT_FOUND', 404)
+
+    const bobPort = createAccountsAuthorizationPort({
+      token: bob.token,
+      authService: bob.auth,
+      machineService: bob.machines,
+      routes,
+    })
+    await expectError(bobPort.authorizeMachine(machineId), 'MACHINE_NOT_FOUND', 404)
+
+    const noProofPort = createAccountsAuthorizationPort({
+      token: alice.token,
+      authService: alice.auth,
+      machineService: alice.machines,
+      routes: {
+        async get() {
+          return {
+            machineId,
+            daemonHostId: '',
+            capabilities: { transportKind: 'websocket', channelKinds: ['terminal'] },
+            target: { bridgeHost: '127.0.0.1', bridgePort: 47822, transportMode: 'websocket' },
+            settings: { transportMode: 'websocket' },
+          }
+        },
+      },
+    })
+    await expectError(
+      noProofPort.authorizeMachine(machineId),
+      'MACHINE_IDENTITY_UNVERIFIED',
+      403,
+    )
+
+    await alice.machines.revokeMachine(alice.token, { machineId })
+    await expectError(
+      alicePort.authorizeMachine(machineId),
+      'MACHINE_REVOKED',
+      403,
+    )
+
+    await alice.auth.logout(alice.token)
+    await expectError(
+      workspaceAuthz.verify(alice.token),
+      'AUTHENTICATION_REQUIRED',
+      401,
+    )
+    await expectError(
+      alicePort.authorizeMachine(machineId),
+      'AUTHENTICATION_REQUIRED',
+      401,
+    )
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true })
+  }
+})
+
+test('real V1 relay verifies grant targets and exposes the cross-account lookup gap', async (t) => {
+  assert.ok(relay, 'real relay is unavailable')
+  const storeRoot = mkdtempSync(join(tmpdir(), 'zterm-accounts-runtime-real-'))
+  t.after(() => rmSync(storeRoot, { recursive: true, force: true }))
+  const storeFile = join(storeRoot, 'authorization.json')
+
+  const adminIdentity = uniqueIdentity('public-admin')
+  const admin = await createAccount(relay.baseUrl, 'public-admin')
+  const alice = await createAccount(relay.baseUrl, 'public-alice')
+  const bob = await createAccount(relay.baseUrl, 'public-bob')
+
+  const adminMachine = await admin.machines.enrollMachine(admin.token, {
+    deviceId: 'public-admin-machine',
+    deviceToken: 'public-admin-proof',
+  })
+  const aliceMachine = await alice.machines.enrollMachine(alice.token, {
+    deviceId: 'public-alice-machine',
+    deviceToken: 'public-alice-proof',
+  })
+  const bobMachine = await bob.machines.enrollMachine(bob.token, {
+    deviceId: 'public-bob-machine',
+    deviceToken: 'public-bob-proof',
+  })
+
+  const store = createFileAccountAuthorizationStore(storeFile)
+  await store.putGrant({
+    accountId: admin.accountId,
+    scopes: ['org:read', 'org:write'],
+    allWorkspaces: true,
+    workspaceIds: [],
+    machineIds: [],
+    memberIds: [],
+    updatedAt: '2026-11-07T00:00:00.000Z',
+  })
+  const aliceInitial = await store.putGrant({
+    accountId: alice.accountId,
+    scopes: ['org:read'],
+    allWorkspaces: false,
+    workspaceIds: ['ws-a'],
+    machineIds: [aliceMachine.machineId],
+    memberIds: [],
+    updatedAt: '2026-11-07T00:00:00.000Z',
+  })
+
+  const runtime = createAccountsRuntime({
+    relayBaseUrl: relay.baseUrl,
+    authorizationStoreFile: storeFile,
+  })
+  const adminLogin = await runtime.login(admin.identity)
+  const aliceLogin = await runtime.login(alice.identity)
+
+  await expectError(
+    runtime.login({ loginName: adminIdentity.loginName, credential: 'wrong' }),
+    'AUTHENTICATION_REQUIRED',
+    401,
+  )
+  await expectError(
+    runtime.grant({
+      token: alice.token,
+      accountId: alice.accountId,
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: [aliceMachine.machineId],
+    }),
+    'WORKSPACE_AUTHORIZATION_REQUIRED',
+    403,
+  )
+
+  const adminGrantBefore = await store.getGrant(admin.accountId)
+  const aliceGrantBefore = await store.getGrant(alice.accountId)
+  assert.ok(adminGrantBefore)
+  assert.ok(aliceGrantBefore)
+
+  await expectError(
+    runtime.grant({
+      token: adminLogin.token,
+      accountId: 'acct_missing',
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: [adminMachine.machineId],
+    }),
+    'UNSUPPORTED',
+    501,
+  )
+  await expectError(
+    runtime.grant({
+      token: adminLogin.token,
+      accountId: adminLogin.accountId,
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: ['mach_missing'],
+    }),
+    'MACHINE_NOT_FOUND',
+    404,
+  )
+  await expectError(
+    runtime.grant({
+      token: adminLogin.token,
+      accountId: adminLogin.accountId,
+      scopes: ['org:read'],
+      allWorkspaces: false,
+      workspaceIds: ['ws-a'],
+      machineIds: [bobMachine.machineId],
+    }),
+    'MACHINE_NOT_FOUND',
+    404,
+  )
+
+  assert.equal(
+    (await store.getGrant(admin.accountId))?.authorizationGeneration,
+    adminGrantBefore.authorizationGeneration,
+  )
+  assert.equal(
+    (await store.getGrant(alice.accountId))?.authorizationGeneration,
+    aliceGrantBefore.authorizationGeneration,
+  )
+  assert.equal(await store.getGrant('acct_missing'), undefined)
+
+  const revoked = await runtime.revoke({
+    token: adminLogin.token,
+    accountId: aliceLogin.accountId,
+    expectedGeneration: aliceInitial.authorizationGeneration,
+  })
+  assert.equal(revoked.revokedGeneration, aliceInitial.authorizationGeneration)
+  await expectError(
+    runtime.verifyAuthority({
+      token: aliceLogin.token,
+      workspaceId: 'ws-a',
+      machineId: aliceMachine.machineId,
+      expectedGeneration: aliceInitial.authorizationGeneration,
+    }),
+    'WORKSPACE_AUTHORIZATION_REQUIRED',
+    403,
+  )
+
+  const aliceReplacement = await store.putGrant({
+    accountId: alice.accountId,
+    scopes: ['org:read'],
+    allWorkspaces: false,
+    workspaceIds: ['ws-a'],
+    machineIds: [aliceMachine.machineId],
+    memberIds: [],
+    updatedAt: '2026-11-07T00:00:01.000Z',
+  })
+  assert.ok(
+    aliceReplacement.authorizationGeneration
+      > aliceInitial.authorizationGeneration,
+  )
+  await expectError(
+    runtime.verifyAuthority({
+      token: aliceLogin.token,
+      workspaceId: 'ws-a',
+      machineId: aliceMachine.machineId,
+      expectedGeneration: aliceInitial.authorizationGeneration,
+    }),
+    'AUTHORIZATION_GENERATION_STALE',
+    409,
+  )
+
+  const selfGrant = await runtime.grant({
+    token: adminLogin.token,
+    accountId: adminLogin.accountId,
+    scopes: ['org:read'],
+    allWorkspaces: false,
+    workspaceIds: ['ws-a'],
+    machineIds: [adminMachine.machineId],
+  })
+  assert.equal(selfGrant.accountId, admin.accountId)
+  assert.equal(
+    selfGrant.authorizationGeneration,
+    adminGrantBefore.authorizationGeneration + 1,
+  )
+
+  const authority = await runtime.verifyAuthority({
+    token: adminLogin.token,
+    workspaceId: 'ws-a',
+    machineId: adminMachine.machineId,
+    expectedGeneration: selfGrant.bindingGeneration,
+  })
+  assert.equal(authority.accountId, admin.accountId)
+  assert.equal(authority.bindingGeneration, selfGrant.bindingGeneration)
+  await expectError(
+    runtime.verifyAuthority({
+      token: adminLogin.token,
+      workspaceId: 'ws-b',
+      machineId: adminMachine.machineId,
+    }),
+    'WORKSPACE_FORBIDDEN',
+    403,
+  )
+  await expectError(
+    runtime.verifyAuthority({
+      token: adminLogin.token,
+      workspaceId: 'ws-a',
+      machineId: bobMachine.machineId,
+    }),
+    'MACHINE_NOT_OWNED',
+    403,
   )
 })

@@ -645,6 +645,7 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
 });
 
 const terminalMessageRuntime = createTerminalMessageRuntime({
+  daemonHostId: DAEMON_CONFIG.daemonHostId,
   sessions,
   sendTransportMessage,
   sendMessage,

@@ -1,0 +1,17 @@
+{
+  "status": 500,
+  "body": {
+    "error": {
+      "code": "DAEMON_REQUEST_FAILED",
+      "owningModule": "daemon",
+      "operationId": "request",
+      "cause": "No workspace authorization grant exists for this account.",
+      "message": "The daemon request failed."
+    }
+  },
+  "sideEffects": {
+    "connects": 1,
+    "channelOpens": 2,
+    "inputWrites": 1
+  }
+}

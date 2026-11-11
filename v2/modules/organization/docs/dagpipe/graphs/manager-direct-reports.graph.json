@@ -1,0 +1,152 @@
+{
+  "id": "organization.manager_direct_reports",
+  "version": "0.1",
+  "inputs": [
+    {
+      "id": "arc.manager_reports_request",
+      "schema": "Object"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "extract.request",
+      "operator": "organization.request.extract",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.manager_reports_request"
+      ],
+      "output": {
+        "id": "arc.manager_reports_command",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "authenticate",
+      "operator": "accounts.session.verify",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.manager_reports_command"
+      ],
+      "output": {
+        "id": "arc.authenticated_manager_query",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "authorize_read",
+      "operator": "organization.access.authorize_read",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authenticated_manager_query"
+      ],
+      "output": {
+        "id": "arc.authorized_manager_query",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "select_direct_reports",
+      "operator": "organization.relation.select_direct_reports",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.authorized_manager_query"
+      ],
+      "output": {
+        "id": "arc.visible_direct_reports",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "project_public_result",
+      "operator": "organization.relation.project_result",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.visible_direct_reports"
+      ],
+      "output": {
+        "id": "arc.manager_reports_result",
+        "schema": "Object"
+      },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "output_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {
+      "from": "extract.request",
+      "to": "authenticate",
+      "arc_id": "arc.manager_reports_command"
+    },
+    {
+      "from": "authenticate",
+      "to": "authorize_read",
+      "arc_id": "arc.authenticated_manager_query"
+    },
+    {
+      "from": "authorize_read",
+      "to": "select_direct_reports",
+      "arc_id": "arc.authorized_manager_query"
+    },
+    {
+      "from": "select_direct_reports",
+      "to": "project_public_result",
+      "arc_id": "arc.visible_direct_reports"
+    }
+  ],
+  "outputs": [
+    "arc.manager_reports_result"
+  ]
+}

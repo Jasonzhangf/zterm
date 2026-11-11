@@ -1,0 +1,9 @@
+# Red-first: base commit f99a61a8 has no resumeDispatch recovery path
+## base delivery-port.ts members: submitMessage, queryReceipt
+NO_MATCH (no resumeDispatch method on the public DeliveryPort)
+## base application/resume-dispatch.ts
+NO_FILE (`git cat-file -e f99a61a8:.../resume-dispatch.ts` exit 128)
+## base ports/accepted-command-reader.ts
+NO_FILE (`git cat-file -e f99a61a8:.../accepted-command-reader.ts` exit 128)
+## base DeliveryAuthorizationPort
+NO_MATCH (no authorizeResume; resume is a send operation that did not exist)

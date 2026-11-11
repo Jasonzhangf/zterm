@@ -1,0 +1,19 @@
+{
+  "mode": "cleanup-refusal-helper",
+  "realDaemonSpawned": false,
+  "cleanup": {
+    "pid": 424242,
+    "exited": false,
+    "exitCode": null,
+    "signalCode": null,
+    "scratchRoot": "/var/folders/jm/blkk8bbd6v78rv2pwxgxh3kr0000gn/T/zterm-cleanup-refusal-98rV0o",
+    "scratchDirRemoved": false,
+    "ok": false,
+    "reason": "owned child did not exit; scratch directory preserved"
+  },
+  "sentinelPreserved": true,
+  "scratchPreserved": true,
+  "ok": true
+}
+
+EXIT_CODE=0

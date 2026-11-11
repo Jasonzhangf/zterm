@@ -17,14 +17,80 @@ function safeJson(value) {
   }
 }
 
+const ADMISSION_FIELDS = [
+  "workspaceId",
+  "memberId",
+  "machineId",
+  "groupPath",
+  "expectedGeneration",
+  "backend",
+  "stableId",
+];
+
+function admissionQuery(admission) {
+  const query = new URLSearchParams();
+  for (const field of ADMISSION_FIELDS) {
+    const value = admission?.[field];
+    if (value !== undefined && value !== null && value !== "") {
+      query.set(field, String(value));
+    }
+  }
+  return query;
+}
+
+function flattenTree(root) {
+  const members = [];
+  const visit = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    for (const member of node.members ?? []) {
+      members.push({ ...member, groupPath: node.path });
+    }
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  };
+  visit(root);
+  return members;
+}
+
+function projectSnapshotMember(member) {
+  const runtime = member.runtime ?? null;
+  const binding = member.binding ?? null;
+  const availability = member.availability ?? null;
+  const machineId = runtime?.machineId ?? binding?.machineId ?? "";
+  return {
+    ...member,
+    groupPath: member.groupPath ?? "",
+    runtime,
+    binding,
+    availability,
+    status: availability?.status ?? "unknown",
+    sessionId: binding?.sessionId ?? "",
+    machineId,
+    machine: machineId,
+  };
+}
+
 export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
   let csrfToken = "";
+  let authToken = "";
+
+  function hasAuthorization() {
+    return Boolean(authToken);
+  }
 
   async function request(path, options = {}) {
+    const headers = { ...(options.headers || {}) };
+    if (authToken) {
+      headers.authorization = `Bearer ${authToken}`;
+    }
     const response = await fetchImpl(`${baseUrl}${path}`, {
       cache: "no-store",
       credentials: "same-origin",
       ...options,
+      headers,
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -46,6 +112,7 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ token }),
       });
+      authToken = typeof token === "string" ? token.trim() : "";
       csrfToken = typeof payload.csrfToken === "string" ? payload.csrfToken : "";
       return payload;
     },
@@ -54,6 +121,7 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       try {
         await request("/api/auth/logout", { method: "POST" });
       } finally {
+        authToken = "";
         csrfToken = "";
       }
     },
@@ -62,34 +130,272 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       return request("/api/sessions");
     },
 
-    openTerminalStream(target, { onReady, onBuffer, onError } = {}) {
-      const query = new URLSearchParams({ target });
-      const source = new EventSource(`${baseUrl}/api/terminal/stream?${query.toString()}`);
-      source.addEventListener("ready", (event) => {
-        onReady?.(safeJson(event.data));
-      });
-      source.addEventListener("buffer", (event) => {
-        const payload = safeJson(event.data);
-        if (payload) {
-          onBuffer?.(payload);
+    async listWorkspaces() {
+      const payload = await request("/api/workspaces");
+      if (!Array.isArray(payload.workspaces)) {
+        throw new DaemonError({ code: "WORKSPACES_RESPONSE_INVALID", message: "Daemon returned a malformed workspace list." }, 502);
+      }
+      return payload.workspaces;
+    },
+
+    async getWorkspaceSnapshot({ workspaceId } = {}) {
+      const tree = await this.getWorkspaceTree({ workspaceId });
+      if (!tree.workspace || typeof tree.workspace !== "object") {
+        throw new DaemonError({ code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace tree." }, 502);
+      }
+      if (String(tree.workspace.workspaceId ?? "") !== String(workspaceId)) {
+        throw new DaemonError({ code: "WORKSPACE_SCOPE_MISMATCH", message: "Daemon returned a workspace outside the requested scope." }, 502);
+      }
+      if (!tree.root || typeof tree.root !== "object") {
+        throw new DaemonError({ code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace tree." }, 502);
+      }
+      let members;
+      try {
+        members = flattenTree(tree.root);
+      } catch {
+        throw new DaemonError({ code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace tree." }, 502);
+      }
+      for (const member of members) {
+        if (!member || typeof member !== "object" || !member.memberId) {
+          throw new DaemonError({ code: "WORKSPACE_TREE_RESPONSE_INVALID", message: "Daemon returned a malformed workspace member." }, 502);
         }
-      });
-      source.addEventListener("error", (event) => {
-        const payload = event.data ? safeJson(event.data) : null;
-        onError?.(payload?.error || { code: "TERMINAL_STREAM_UNAVAILABLE", message: "Terminal stream is unavailable." });
-        source.close();
-      });
+        if (String(member.workspaceId ?? "") !== String(workspaceId)) {
+          throw new DaemonError({ code: "WORKSPACE_SCOPE_MISMATCH", message: "Daemon returned a member outside the requested workspace." }, 502);
+        }
+      }
+      return { workspace: tree.workspace, members: members.map(projectSnapshotMember) };
+    },
+
+    async getWorkspaceTree({ workspaceId } = {}) {
+      return request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/tree`);
+    },
+
+    async getMemberRuntime({ workspaceId, memberId } = {}) {
+      return request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/runtime`);
+    },
+
+    async resolveTerminalAdmission(session = {}) {
+      const workspaceId = session.workspaceId;
+      const memberId = session.memberId;
+      const requestedTarget = session.binding?.terminalTarget;
+      const requestedBackend = typeof session.backend === "string" && session.backend !== ""
+        ? session.backend
+        : requestedTarget?.backend;
+      const requestedStableId = typeof session.stableId === "string" && session.stableId !== ""
+        ? session.stableId
+        : requestedTarget?.stableId;
+      if (
+        typeof workspaceId !== "string"
+        || workspaceId.trim() === ""
+        || typeof memberId !== "string"
+        || memberId.trim() === ""
+        || typeof requestedBackend !== "string"
+        || requestedBackend === ""
+        || typeof requestedStableId !== "string"
+        || requestedStableId === ""
+      ) {
+        return null;
+      }
+
+      const memberRuntime = await this.getMemberRuntime({ workspaceId, memberId });
+      const member = memberRuntime?.member;
+      const requestedGroupPath = typeof session.groupPath === "string" && session.groupPath !== ""
+        ? session.groupPath
+        : "";
+      const responseGroupPath = typeof member?.groupPath === "string" && member.groupPath !== ""
+        ? member.groupPath
+        : "";
+      if (
+        !member
+        || typeof member !== "object"
+        || String(member.memberId ?? "") !== memberId
+        || String(member.workspaceId ?? "") !== workspaceId
+      ) {
+        throw new DaemonError({
+          code: "WORKSPACE_SCOPE_MISMATCH",
+          message: "Daemon returned a member outside the requested workspace scope.",
+        }, 502);
+      }
+
+      const binding = memberRuntime.binding;
+      const target = binding?.terminalTarget;
+      const runtimeMachineId = memberRuntime.runtime?.machineId;
+      const bindingMachineId = binding?.machineId;
+      if (
+        !binding
+        || !target
+        || typeof target.backend !== "string"
+        || target.backend === ""
+        || typeof target.stableId !== "string"
+        || target.stableId === ""
+        || binding.generation == null
+        || responseGroupPath === ""
+        || typeof runtimeMachineId !== "string"
+        || runtimeMachineId === ""
+        || typeof bindingMachineId !== "string"
+        || bindingMachineId === ""
+        || runtimeMachineId !== bindingMachineId
+        || (requestedGroupPath !== "" && responseGroupPath !== requestedGroupPath)
+        || target.backend !== requestedBackend
+        || target.stableId !== requestedStableId
+      ) {
+        return null;
+      }
+
+      return {
+        workspaceId,
+        memberId,
+        machineId: runtimeMachineId,
+        groupPath: responseGroupPath,
+        expectedGeneration: binding.generation,
+        backend: target.backend,
+        stableId: target.stableId,
+      };
+    },
+
+    openTerminalStream(admission, { onReady, onBuffer, onError } = {}) {
+      const query = admissionQuery(admission);
+      const controller = new AbortController();
+      let explicitlyClosed = false;
+      const source = {
+        closed: false,
+        close() {
+          explicitlyClosed = true;
+          source.closed = true;
+          controller.abort();
+        },
+      };
+
+      const emitError = (error) => {
+        if (source.closed) {
+          return;
+        }
+        onError?.(error);
+      };
+
+      const dispatch = (chunk) => {
+        let eventName = "message";
+        const dataLines = [];
+        for (const line of chunk.split("\n")) {
+          if (line.startsWith(":")) {
+            continue;
+          }
+          if (line.startsWith("event:")) {
+            eventName = line.slice(6).trim();
+          } else if (line.startsWith("data:")) {
+            dataLines.push(line.slice(5).replace(/^ /u, ""));
+          }
+        }
+        if (dataLines.length === 0) {
+          return;
+        }
+        const payload = safeJson(dataLines.join("\n"));
+        if (eventName === "ready") {
+          onReady?.(payload);
+        } else if (eventName === "buffer") {
+          if (payload) {
+            onBuffer?.(payload);
+          }
+        } else if (eventName === "error") {
+          emitError(payload?.error || { code: "TERMINAL_STREAM_UNAVAILABLE", message: "Terminal stream is unavailable." });
+          source.close();
+        }
+      };
+
+      (async () => {
+        const headers = authToken ? { authorization: `Bearer ${authToken}` } : {};
+        let response;
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          try {
+            response = await fetchImpl(`${baseUrl}/api/terminal/stream?${query.toString()}`, {
+              cache: "no-store",
+              credentials: "same-origin",
+              headers,
+              signal: controller.signal,
+            });
+          } catch (error) {
+            emitError({ code: "TERMINAL_STREAM_UNAVAILABLE", message: error?.message || "Terminal stream request failed." });
+            return;
+          }
+          // The machine-scoped terminal link can take a moment to become
+          // fresh after an isolated daemon start; 424 is retryable.
+          if (response.status !== 424 || source.closed) {
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+        if (!response.ok || !response.body) {
+          let payload = null;
+          try {
+            payload = await response.json();
+          } catch {
+            payload = null;
+          }
+          emitError(payload?.error || {
+            code: "TERMINAL_STREAM_UNAVAILABLE",
+            message: `Terminal stream is unavailable (HTTP ${response.status}).`,
+          });
+          source.close();
+          return;
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        try {
+          while (!source.closed) {
+            const { value, done } = await reader.read();
+            if (done) {
+              if (!explicitlyClosed) {
+                emitError({
+                  code: "TERMINAL_STREAM_EOF",
+                  message: "Terminal stream ended unexpectedly.",
+                });
+              }
+              break;
+            }
+            buffer += decoder.decode(value, { stream: true });
+            let boundary = buffer.indexOf("\n\n");
+            while (boundary >= 0) {
+              const chunk = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              dispatch(chunk);
+              boundary = buffer.indexOf("\n\n");
+            }
+          }
+        } catch (error) {
+          emitError({ code: "TERMINAL_STREAM_FAILED", message: error?.message || "Terminal stream failed." });
+        } finally {
+          source.closed = true;
+        }
+      })();
+
       return source;
     },
 
-    async sendInput(target, data) {
+    hasAuthorization,
+    async sendInput(admission, data, options = {}) {
+      const body = {
+        workspaceId: admission?.workspaceId,
+        memberId: admission?.memberId,
+        machineId: admission?.machineId,
+        groupPath: admission?.groupPath,
+        expectedGeneration: admission?.expectedGeneration,
+        target: {
+          backend: admission?.backend,
+          stableId: admission?.stableId,
+        },
+        data,
+      };
+      if (options.raw === true) {
+        body.raw = true;
+      }
       return request("/api/terminal/input", {
         method: "POST",
         headers: {
           "content-type": "application/json",
           ...(csrfToken ? { "x-zterm-csrf": csrfToken } : {}),
         },
-        body: JSON.stringify({ target, data }),
+        body: JSON.stringify(body),
       });
     },
   };

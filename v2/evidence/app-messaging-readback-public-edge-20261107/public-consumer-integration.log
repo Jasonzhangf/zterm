@@ -1,0 +1,34 @@
+TAP version 13
+# Subtest: real package specifier facade creates durable receipt and reopens in child
+ok 1 - real package specifier facade creates durable receipt and reopens in child
+  ---
+  duration_ms: 128.131708
+  type: 'test'
+  ...
+# Subtest: lifecycle evidence through package specifier persists across fresh process reopen
+ok 2 - lifecycle evidence through package specifier persists across fresh process reopen
+  ---
+  duration_ms: 162.018833
+  type: 'test'
+  ...
+# Subtest: fresh child applies evidence into parent-created record and parent observes it
+ok 3 - fresh child applies evidence into parent-created record and parent observes it
+  ---
+  duration_ms: 127.308167
+  type: 'test'
+  ...
+# Subtest: conflicts and stale bindings do not overwrite accepted receipt
+ok 4 - conflicts and stale bindings do not overwrite accepted receipt
+  ---
+  duration_ms: 11.981333
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 553.636792

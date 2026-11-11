@@ -1,0 +1,3 @@
+$ cd android && pnpm exec tsc --noEmit
+EXIT_CODE=0
+(no output; TypeScript type check passed with no errors)

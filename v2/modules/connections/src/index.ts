@@ -1,7 +1,7 @@
-export { createConnectionManager } from "./public/link-port";
-export type { ConnectionManager, ConnectionManagerOptions } from "./public/link-port";
-export { ConnectionError } from "./public/errors";
-export type { ConnectionErrorCode } from "./public/errors";
+export { createConnectionManager } from "./public/link-port.ts";
+export type { ConnectionManager, ConnectionManagerOptions } from "./public/link-port.ts";
+export { ConnectionError } from "./public/errors.ts";
+export type { ConnectionErrorCode } from "./public/errors.ts";
 export type {
   LinkKind,
   TerminalBackendKind,
@@ -16,10 +16,14 @@ export type {
   ChannelRef,
   LinkBackpressure,
   LinkObservation,
+  SessionCatalogEntry,
   ChannelMessage,
   ChannelEventHandler,
-} from "./public/types";
-export type { AuthorizedMachineLink, AccountsAuthorizationPort } from "./ports/accounts-authorization";
-export type { TransportHandle, TransportPort } from "./ports/transport";
-export { V1TraversalTransport } from "./adapters/v1-traversal";
-export { createAppCodec } from "./adapters/app-websocket";
+  AppMessageRequest,
+  AppMessageResult,
+} from "./public/types.ts";
+export type { AuthorizedMachineLink, AccountsAuthorizationPort } from "./ports/accounts-authorization.ts";
+export type { TransportHandle, TransportPort } from "./ports/transport.ts";
+export { V1TraversalTransport } from "./adapters/v1-traversal.ts";
+export { createAppCodec, AppWebSocketTransport, buildAppGatewayUrl } from "./adapters/app-websocket.ts";
+export type { AppFrameTransportHandle } from "./adapters/app-websocket.ts";

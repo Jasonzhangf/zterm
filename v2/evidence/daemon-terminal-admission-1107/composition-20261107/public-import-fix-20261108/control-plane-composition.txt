@@ -1,0 +1,82 @@
+TAP version 13
+# Subtest: workspace catalog returns only authorized stable references
+ok 1 - workspace catalog returns only authorized stable references
+  ---
+  duration_ms: 43.550083
+  type: 'test'
+  ...
+# Subtest: control-plane rejects cross-origin reads and invalid credentials explicitly
+ok 2 - control-plane rejects cross-origin reads and invalid credentials explicitly
+  ---
+  duration_ms: 55.816792
+  type: 'test'
+  ...
+# Subtest: the same machine can serve multiple workspaces without leaking members across them
+ok 3 - the same machine can serve multiple workspaces without leaking members across them
+  ---
+  duration_ms: 27.394959
+  type: 'test'
+  ...
+# Subtest: member identity stays stable when the bound session is replaced
+ok 4 - member identity stays stable when the bound session is replaced
+  ---
+  duration_ms: 14.592584
+  type: 'test'
+  ...
+# Subtest: one workspace returns co-located and cross-machine members with truthful unavailable state
+ok 5 - one workspace returns co-located and cross-machine members with truthful unavailable state
+  ---
+  duration_ms: 13.540084
+  type: 'test'
+  ...
+# Subtest: unassigned terminal catalog targets are reported and never become members
+ok 6 - unassigned terminal catalog targets are reported and never become members
+  ---
+  duration_ms: 10.946667
+  type: 'test'
+  ...
+# Subtest: missing terminal catalog observation stays explicitly unknown
+ok 7 - missing terminal catalog observation stays explicitly unknown
+  ---
+  duration_ms: 11.127417
+  type: 'test'
+  ...
+# Subtest: host observation failure yields typed unavailable instead of a constant online status
+ok 8 - host observation failure yields typed unavailable instead of a constant online status
+  ---
+  duration_ms: 11.489583
+  type: 'test'
+  ...
+# Subtest: unauthorized workspace read is rejected before returning organization data
+ok 9 - unauthorized workspace read is rejected before returning organization data
+  ---
+  duration_ms: 9.12075
+  type: 'test'
+  ...
+# Subtest: direct member runtime requires organization authorization in addition to members authorization
+ok 10 - direct member runtime requires organization authorization in addition to members authorization
+  ---
+  duration_ms: 10.377875
+  type: 'test'
+  ...
+# Subtest: terminal catalog failure keeps the authorized tree readable and preserves the typed error
+ok 11 - terminal catalog failure keeps the authorized tree readable and preserves the typed error
+  ---
+  duration_ms: 9.079125
+  type: 'test'
+  ...
+# Subtest: resolve returns the stable member and exact binding generation over HTTP
+ok 12 - resolve returns the stable member and exact binding generation over HTTP
+  ---
+  duration_ms: 12.739084
+  type: 'test'
+  ...
+1..12
+# tests 12
+# suites 0
+# pass 12
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 385.815167

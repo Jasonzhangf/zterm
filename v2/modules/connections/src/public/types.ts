@@ -1,3 +1,9 @@
+import type {
+  AppErrorCode,
+  AppSendResultPayload,
+  AppSendResultStatus,
+} from "../../../../../packages/shared/src/connection/app-protocol.ts";
+
 /**
  * Public contract types for the Zterm V2 connections module.
  *
@@ -15,6 +21,17 @@
 export type LinkKind = "terminal" | "message" | "file" | "receipt" | "status";
 
 export type TerminalBackendKind = "tmux" | "herdr";
+
+/**
+ * One machine-scoped terminal session the peer proved in its catalog.
+ * `stableId` is the daemon-issued identity used for exact-existing channel
+ * targets; it is never synthesized from `name`.
+ */
+export interface SessionCatalogEntry {
+  readonly name: string;
+  readonly backend: TerminalBackendKind;
+  readonly stableId: string;
+}
 
 export interface TerminalChannelTarget {
   readonly sessionName: string;
@@ -95,3 +112,49 @@ export interface ChannelMessage {
 }
 
 export type ChannelEventHandler = (event: ChannelMessage) => void;
+
+/**
+ * One requests-message command on an accepted `message` channel. It carries
+ * only the V1 logical message id and the non-secret destination selector;
+ * the caller never supplies target credentials or a raw destination URL.
+ */
+export interface AppMessageRequest {
+  /**
+   * Wire correlation id and V1 logical message id. Persisted at accept time,
+   * reused on resume, and never regenerated per attempt.
+   */
+  readonly v1MessageId: string;
+  /**
+   * Persisted destination machine selector. connections resolves this into the
+   * exact V1 AppTarget through the accounts authorization port; it is never
+   * written to the wire.
+   */
+  readonly targetMachineId: string;
+  readonly subject: string;
+  readonly body: string;
+}
+
+/** Public outcome of one `requestMessage` call. */
+export type AppMessageResult =
+  | {
+      readonly kind: "result";
+      readonly requestId: string;
+      readonly messageId: string;
+      readonly status: AppSendResultStatus;
+      readonly stage: AppSendResultPayload["stage"];
+    }
+  | {
+      readonly kind: "unknown";
+      readonly requestId: string;
+      readonly messageId: string;
+      readonly errorRef: string;
+      readonly cause?: string;
+    }
+  | {
+      readonly kind: "rejected";
+      /** Wire-level AppProtocolError code, or a connection-level code. */
+      readonly code: AppErrorCode | "peer_identity_mismatch" | "unsupported_channel";
+      readonly stage?: string;
+      readonly errorRef?: string;
+      readonly cause?: string;
+    };

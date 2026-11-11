@@ -3,13 +3,20 @@ import type {
   DeliveryErrorFrame,
 } from "../ports/receipt-store.ts";
 
-export type DeliveryOperation = "accept" | "read" | "authorize";
+export type DeliveryOperation =
+  | "accept"
+  | "read"
+  | "authorize"
+  | "dispatch"
+  | "apply-evidence";
 
 const MAX_CAUSE_DEPTH = 8;
 const DEFAULT_SOURCE: Readonly<Record<DeliveryOperation, string>> = {
   accept: "delivery-receipt-store",
   read: "delivery-receipt-store",
   authorize: "delivery-authorization",
+  dispatch: "delivery-message-dispatch",
+  "apply-evidence": "delivery-receipt-store",
 };
 const CAUSE_SOURCE = "cause";
 

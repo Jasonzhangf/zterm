@@ -1,0 +1,14 @@
+{
+  "name": "@zterm/v2-webui",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./scripts/build-pane-terminal-bundle.mjs"
+  },
+  "dependencies": {
+    "@jsonstudio/wtermmod-dom": "0.1.9"
+  },
+  "devDependencies": {
+    "esbuild": "0.21.5"
+  }
+}

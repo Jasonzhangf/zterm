@@ -149,6 +149,7 @@ test('creates structural workspaces, groups, and members with one revision per m
       workspaceId: workspace.workspaceId,
       groupId: platform.groupId,
       name: 'Bot',
+      managerMemberId: null,
     },
   ]);
 });
@@ -732,7 +733,7 @@ test('never exposes members runtime fields through organization outputs', async 
   const treeMember = allMembers(tree).find((entry) => entry.memberId === member.memberId);
   const workspaceRead = await service.readWorkspace(workspace.workspaceId);
   const memberRead = await service.getMember(member.memberId);
-  const expectedKeys = ['groupId', 'memberId', 'name', 'workspaceId'];
+  const expectedKeys = ['groupId', 'managerMemberId', 'memberId', 'name', 'workspaceId'];
 
   assert.deepEqual(Object.keys(treeMember).sort(), expectedKeys);
   assert.deepEqual(Object.keys(workspaceRead.members[0]).sort(), expectedKeys);

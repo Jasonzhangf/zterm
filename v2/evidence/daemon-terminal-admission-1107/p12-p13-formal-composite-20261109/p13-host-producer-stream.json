@@ -1,0 +1,9 @@
+{
+  "expectedRefusal": true,
+  "stage": "host-producer-binding",
+  "name": "TypedError",
+  "code": "BINDING_HOST_UNAVAILABLE",
+  "status": null,
+  "owningModule": "members",
+  "message": "host session/anchor is not reachable"
+}
