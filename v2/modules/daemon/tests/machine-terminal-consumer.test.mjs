@@ -15,6 +15,7 @@ function createStubManager({
   peerIdentityVerified = true,
   peerIdentity = "daemon-host-x",
   catalog = () => CATALOG,
+  observeStaleAsError = false,
 } = {}) {
   const calls = { connect: [], listSessions: 0, closeOwnLink: 0 };
   const links = new Map();
@@ -33,6 +34,12 @@ function createStubManager({
       return link;
     },
     observeLink(link) {
+      if (observeStaleAsError && link.generation !== currentGeneration) {
+        throw Object.assign(new Error(`link ${link.id} generation is stale`), {
+          code: "stale_generation",
+          owningModule: "connections",
+        });
+      }
       return {
         machineId: link.machineId,
         generation: currentGeneration,
@@ -480,6 +487,36 @@ test("a fresh explicit forMachine creates a new generation adapter and keeps the
   );
   assert.equal(remote.ports[0].calls.input.length, 0);
   assert.equal(local.calls.input.length, 0);
+});
+
+test("a cached stale observation is discarded before resolving the current authorized link", async (t) => {
+  const manager = createStubManager({ observeStaleAsError: true });
+  const remote = createRemoteFactories();
+  const consumer = createConnectionMachineTerminal({
+    connectionManager: manager,
+    createMuxClient: remote.createMuxClient,
+    createTerminalPort: remote.createTerminalPort,
+  });
+  const cached = await consumer.forMachine({ machineId: "remote-machine" });
+  assert.equal(cached.linkGeneration, 7);
+
+  manager.setGeneration(8);
+  const supersedingLink = await manager.connect("remote-machine");
+  assert.equal(supersedingLink.generation, 8);
+
+  const refreshed = await consumer.forMachine({ machineId: "remote-machine" });
+  t.after(() => refreshed.close());
+  assert.equal(refreshed.linkGeneration, 8);
+  assert.equal(manager.calls.connect.length, 3);
+  assert.equal(manager.calls.closeOwnLink, 1);
+
+  await refreshed.input("tmux:v1:alpha", "fresh\r");
+  assert.deepEqual(remote.ports[1].calls.input, [{ target: "tmux:v1:alpha", data: "fresh\r" }]);
+  await assert.rejects(
+    () => cached.input("tmux:v1:alpha", "stale\r"),
+    (error) => error.code === "stale_generation",
+  );
+  assert.equal(remote.ports[0].calls.input.length, 0);
 });
 
 test("close releases an owned remote adapter and link but never the shared local terminal", async () => {

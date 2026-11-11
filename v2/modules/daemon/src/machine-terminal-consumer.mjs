@@ -206,17 +206,22 @@ export function createConnectionMachineTerminal({
       } catch (error) {
         machineStates.delete(stateKey);
         releaseState(existing);
-        throw error;
+        if (error?.code !== "stale_generation") {
+          throw error;
+        }
+        observation = null;
       }
-      if (observation.generation !== existing.link.generation) {
-        machineStates.delete(stateKey);
-        releaseState(existing);
-      } else if (observation.status !== "connected" || observation.freshness !== "fresh") {
-        machineStates.delete(stateKey);
-        releaseState(existing);
-      } else {
-        existing.observation = observation;
-        return existing;
+      if (observation) {
+        if (observation.generation !== existing.link.generation) {
+          machineStates.delete(stateKey);
+          releaseState(existing);
+        } else if (observation.status !== "connected" || observation.freshness !== "fresh") {
+          machineStates.delete(stateKey);
+          releaseState(existing);
+        } else {
+          existing.observation = observation;
+          return existing;
+        }
       }
     }
 
