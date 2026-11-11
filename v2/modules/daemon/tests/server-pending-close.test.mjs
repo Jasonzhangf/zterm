@@ -212,6 +212,7 @@ function openTargetSocket(port, harness) {
       `GET /api/terminal/stream?${query.toString()} HTTP/1.1\r\n`
         + `host: 127.0.0.1:${port}\r\n`
         + `authorization: ${AUTH}\r\n`
+        + `x-zterm-accounts-session: ${TOKEN}\r\n`
         + "connection: keep-alive\r\n\r\n",
     );
   });

@@ -1,7 +1,8 @@
 import { createRequire } from "node:module";
 import { createServer } from "node:http";
 import { buildTerminalMuxCapabilities, buildTerminalMuxReady, isTerminalMuxClientFrame } from "@zterm/shared/connection/protocol";
-import { createConnectionManager, V1TraversalTransport } from "../../src/index";
+import { V1TraversalTransport } from "../../src/index";
+import { createConnectionManager } from "../support/caller-bound-manager";
 import type { AuthorizedMachineLink } from "../../src/ports/accounts-authorization";
 
 const cliRequire = createRequire(new URL("../../../../../packages/cli/package.json", import.meta.url));

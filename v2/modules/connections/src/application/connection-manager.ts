@@ -4,11 +4,13 @@ import { ConnectionError } from "../public/errors.ts";
 import type {
   AppMessageRequest,
   AppMessageResult,
+  ChannelCloseInfo,
   ChannelEventHandler,
   ChannelRef,
   Freshness,
   LinkBackpressure,
   LinkCapabilities,
+  LinkCloseInfo,
   LinkKind,
   LinkObservation,
   LinkPath,
@@ -136,6 +138,7 @@ export class ConnectionManager {
   private readonly pendingMessageRequests = new Set<string>();
   private readonly channelCloseFailureHandlers = new Map<TransportHandle, Set<(failure: ConnectionError) => void>>();
   private readonly channelCloseFailureUnsubscribes = new Map<TransportHandle, () => void>();
+  private readonly linkCloseHandlers = new Map<TransportHandle, Set<(info: LinkCloseInfo) => void>>();
 
   constructor(options: ConnectionManagerOptions) {
     this.authorizationPort = options.authorizationPort;
@@ -143,11 +146,22 @@ export class ConnectionManager {
     this.now = options.now ?? (() => Date.now());
   }
 
-  async connect(machineId: string, verifiedAuthorization?: AuthorizedMachineLink): Promise<LinkRef> {
+  async connect(
+    machineId: string,
+    callerToken?: string,
+    verifiedAuthorization?: AuthorizedMachineLink,
+  ): Promise<LinkRef> {
     if (!machineId.trim()) {
       throw new ConnectionError("invalid_input", "machineId is required");
     }
-    const auth = verifiedAuthorization ?? (await this.authorizationPort.authorizeMachine(machineId));
+    const token = typeof callerToken === "string" ? callerToken.trim() : "";
+    if (!verifiedAuthorization && !token) {
+      throw new ConnectionError("unauthorized", "callerToken is required", {
+        machineId,
+      });
+    }
+    const auth = verifiedAuthorization
+      ?? (await this.authorizationPort.authorizeCallerMachine(machineId, token));
     if (auth.machineId !== machineId) {
       throw new ConnectionError(
         "machine_mismatch",
@@ -165,7 +179,8 @@ export class ConnectionManager {
       try {
         previous.transport.close(1000, "superseded");
       } catch {
-        // ignore
+        // The close event cannot arrive after a failed close call.
+        this.removeLinkCloseHandlers(previous.transport);
       }
       this.dispatcher.removeLink(previous.transport);
       this.removeChannelCloseFailureHandlers(previous.transport);
@@ -281,6 +296,15 @@ export class ConnectionManager {
       // including callbacks from an already superseded generation.
       this.dispatcher.removeLink(transport);
       this.removeChannelCloseFailureHandlers(transport);
+      const closeHandlers = [...(this.linkCloseHandlers.get(transport) ?? [])];
+      this.removeLinkCloseHandlers(transport);
+      for (const handler of closeHandlers) {
+        try {
+          handler({ code: info.code, reason: info.reason });
+        } catch {
+          // A close observer must not prevent the link state from settling.
+        }
+      }
       const current = this.store.get(id);
       // Generation fencing: an old socket callback must not overwrite a new link.
       if (!current || !isCurrentGeneration(current, capturedGeneration)) {
@@ -328,6 +352,10 @@ export class ConnectionManager {
 
   onChannelMessage(channel: ChannelRef, handler: ChannelEventHandler): () => void {
     return this.dispatcher.onMessage(channel, handler);
+  }
+
+  onChannelClosed(channel: ChannelRef, handler: (info?: ChannelCloseInfo) => void): () => void {
+    return this.dispatcher.onClosed(channel, handler);
   }
 
   sendChannel(channel: ChannelRef, data: string | ArrayBuffer): void {
@@ -504,6 +532,23 @@ export class ConnectionManager {
     };
   }
 
+  onLinkClose(link: LinkRef, handler: (info: LinkCloseInfo) => void): () => void {
+    const record = this.requireCurrent(link);
+    if (!record.transport || record.status !== "connected") {
+      throw new ConnectionError("link_closed", `link ${link.id} is not connected`, { machineId: link.machineId });
+    }
+    let handlers = this.linkCloseHandlers.get(record.transport);
+    if (!handlers) {
+      handlers = new Set();
+      this.linkCloseHandlers.set(record.transport, handlers);
+    }
+    handlers.add(handler);
+    return () => {
+      handlers!.delete(handler);
+      if (handlers!.size === 0) this.linkCloseHandlers.delete(record.transport!);
+    };
+  }
+
   retryLateOpenClose(link: LinkRef, channelId: string): void {
     const record = this.requireCurrent(link);
     if (!record.transport || record.status !== "connected") {
@@ -567,6 +612,7 @@ export class ConnectionManager {
         record.transport.close(1000, "client-closed");
       } catch {
         // ignore
+        this.removeLinkCloseHandlers(record.transport);
       } finally {
         this.dispatcher.removeLink(record.transport);
         this.removeChannelCloseFailureHandlers(record.transport);
@@ -584,6 +630,10 @@ export class ConnectionManager {
       this.channelCloseFailureUnsubscribes.delete(transport);
     }
     this.channelCloseFailureHandlers.delete(transport);
+  }
+
+  private removeLinkCloseHandlers(transport: TransportHandle): void {
+    this.linkCloseHandlers.delete(transport);
   }
 
   private requireCurrent(link: LinkRef): LinkRecord {

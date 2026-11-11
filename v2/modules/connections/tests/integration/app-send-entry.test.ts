@@ -6,7 +6,7 @@ import {
   type AppClientFrame,
   type AppServerFrame,
 } from "@zterm/shared/connection/app-protocol";
-import { createConnectionManager } from "../../src/index";
+import { createConnectionManager } from "../support/caller-bound-manager";
 import { AppWebSocketTransport } from "../../src/adapters/app-websocket";
 import type { AuthorizedMachineLink } from "../../src/ports/accounts-authorization";
 

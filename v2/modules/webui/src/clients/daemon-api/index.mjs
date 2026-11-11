@@ -5,6 +5,9 @@ export class DaemonError extends Error {
     this.code = error.code || "DAEMON_REQUEST_FAILED";
     this.owningModule = error.owningModule;
     this.operationId = error.operationId;
+    this.cause = error.cause;
+    this.retryDisposition = error.retryDisposition;
+    this.details = error.details;
     this.status = status;
   }
 }
@@ -53,6 +56,27 @@ function flattenTree(root) {
   };
   visit(root);
   return members;
+}
+
+function flattenGroups(root) {
+  const groups = [];
+  const visit = (node) => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    groups.push({
+      groupId: node.groupId,
+      workspaceId: node.workspaceId,
+      parentGroupId: node.parentGroupId ?? null,
+      name: node.name,
+      path: node.path,
+    });
+    for (const child of node.children ?? []) {
+      visit(child);
+    }
+  };
+  visit(root);
+  return groups;
 }
 
 function projectSnapshotMember(member) {
@@ -126,6 +150,27 @@ function operationError(payload, fallbackCode, fallbackMessage) {
   return error;
 }
 
+function requireMachineId(machineId) {
+  const value = typeof machineId === "string" ? machineId.trim() : "";
+  if (value === "") {
+    throw new DaemonError({
+      code: "MACHINE_ID_REQUIRED",
+      message: "A machineId is required.",
+    }, 400);
+  }
+  return value;
+}
+
+function machinePath(machineId, suffix) {
+  return `/api/machines/${encodeURIComponent(requireMachineId(machineId))}/${suffix}`;
+}
+
+function responseMachineId(connection) {
+  return connection && typeof connection === "object"
+    ? String(connection.machineId ?? "")
+    : "";
+}
+
 function requireSuccessfulOperation(payload, action) {
   if (!payload || payload.operation?.state !== "succeeded") {
     throw operationError(payload, "TICKET_OPERATION_NOT_SUCCEEDED", `${action} did not complete successfully.`);
@@ -136,6 +181,7 @@ function requireSuccessfulOperation(payload, action) {
 export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
   let csrfToken = "";
   let authToken = "";
+  let accountsToken = "";
 
   function hasAuthorization() {
     return Boolean(authToken);
@@ -145,6 +191,9 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
     const headers = { ...(options.headers || {}) };
     if (authToken) {
       headers.authorization = `Bearer ${authToken}`;
+    }
+    if (accountsToken) {
+      headers["x-zterm-accounts-session"] = accountsToken;
     }
     const response = await fetchImpl(`${baseUrl}${path}`, {
       cache: "no-store",
@@ -186,6 +235,29 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       }
     },
 
+    async accountsLogin({ loginName, credential } = {}) {
+      accountsToken = "";
+      const payload = await request("/api/accounts/login", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ loginName, credential }),
+      });
+      accountsToken = typeof payload.token === "string" ? payload.token.trim() : "";
+      return payload;
+    },
+
+    async accountsSessionState() {
+      return request("/api/accounts/session");
+    },
+
+    async accountsLogout() {
+      try {
+        return await request("/api/accounts/logout", { method: "POST" });
+      } finally {
+        accountsToken = "";
+      }
+    },
+
     async listSessions() {
       return request("/api/sessions");
     },
@@ -196,6 +268,86 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
         throw new DaemonError({ code: "WORKSPACES_RESPONSE_INVALID", message: "Daemon returned a malformed workspace list." }, 502);
       }
       return payload.workspaces;
+    },
+
+    async listMachines() {
+      const payload = await request("/api/machines");
+      if (!Array.isArray(payload.machines)) {
+        throw new DaemonError({
+          code: "MACHINES_RESPONSE_INVALID",
+          message: "Daemon returned a malformed machine directory.",
+        }, 502);
+      }
+      return {
+        machines: payload.machines,
+        observation: payload.observation ?? null,
+      };
+    },
+
+    async connectMachine({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "connect"), { method: "POST" });
+      if (responseMachineId(payload?.connection) !== requestedMachineId) {
+        throw new DaemonError({
+          code: "MACHINE_CONNECTION_RESPONSE_INVALID",
+          message: "Daemon returned a connection outside the requested machine scope.",
+        }, 502);
+      }
+      return payload;
+    },
+
+    async getMachineConnection({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "connection"));
+      if (payload?.connection !== null && (typeof payload?.connection !== "object" || Array.isArray(payload.connection))) {
+        throw new DaemonError({
+          code: "MACHINE_CONNECTION_RESPONSE_INVALID",
+          message: "Daemon returned a malformed connection observation.",
+        }, 502);
+      }
+      if (payload?.connection && responseMachineId(payload.connection) !== requestedMachineId) {
+        throw new DaemonError({
+          code: "MACHINE_CONNECTION_RESPONSE_INVALID",
+          message: "Daemon returned a connection outside the requested machine scope.",
+        }, 502);
+      }
+      return payload;
+    },
+
+    async recoverMachine({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "recover"), { method: "POST" });
+      if (responseMachineId(payload?.connection) !== requestedMachineId) {
+        throw new DaemonError({
+          code: "MACHINE_CONNECTION_RESPONSE_INVALID",
+          message: "Daemon returned a connection outside the requested machine scope.",
+        }, 502);
+      }
+      return payload;
+    },
+
+    async disconnectMachine({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "disconnect"), { method: "POST" });
+      if (String(payload?.machineId ?? "") !== requestedMachineId) {
+        throw new DaemonError({
+          code: "MACHINE_DISCONNECT_RESPONSE_INVALID",
+          message: "Daemon returned a disconnect result outside the requested machine scope.",
+        }, 502);
+      }
+      return payload;
+    },
+
+    async listMachineSessions({ machineId } = {}) {
+      const requestedMachineId = requireMachineId(machineId);
+      const payload = await request(machinePath(requestedMachineId, "sessions"));
+      if (!Array.isArray(payload?.sessions)) {
+        throw new DaemonError({
+          code: "MACHINE_SESSIONS_RESPONSE_INVALID",
+          message: "Daemon returned a malformed machine session catalog.",
+        }, 502);
+      }
+      return payload;
     },
 
     async getWorkspaceSnapshot({ workspaceId } = {}) {
@@ -223,7 +375,13 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
           throw new DaemonError({ code: "WORKSPACE_SCOPE_MISMATCH", message: "Daemon returned a member outside the requested workspace." }, 502);
         }
       }
-      return { workspace: tree.workspace, members: members.map(projectSnapshotMember) };
+      return {
+        workspace: tree.workspace,
+        root: tree.root,
+        groups: flattenGroups(tree.root),
+        members: members.map(projectSnapshotMember),
+        observation: tree.observation ?? null,
+      };
     },
 
     async getWorkspaceTree({ workspaceId } = {}) {
@@ -372,6 +530,94 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       return request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/runtime`);
     },
 
+    async createGroup({ workspaceId, name, parentGroupId, expectedRevision } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/groups`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name, parentGroupId: parentGroupId ?? null, expectedRevision }),
+      });
+      if (!payload.group || typeof payload.group !== "object") {
+        throw new DaemonError({ code: "GROUP_RESPONSE_INVALID", message: "Daemon returned a malformed group receipt." }, 502);
+      }
+      return payload.group;
+    },
+
+    async createMember({ workspaceId, groupId, name, expectedRevision } = {}) {
+      const payload = await request(`/api/workspaces/${encodeURIComponent(String(workspaceId))}/members`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ groupId, name, expectedRevision }),
+      });
+      if (!payload.member || typeof payload.member !== "object") {
+        throw new DaemonError({ code: "MEMBER_RESPONSE_INVALID", message: "Daemon returned a malformed member receipt." }, 502);
+      }
+      return payload.member;
+    },
+
+    async configureMemberRuntime({
+      workspaceId,
+      memberId,
+      machineId,
+      hostKind,
+      agentKind,
+      launchProfileRef,
+    } = {}) {
+      const payload = await request(
+        `/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/runtime`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ machineId, hostKind, agentKind, launchProfileRef }),
+        },
+      );
+      if (!payload.runtime || typeof payload.runtime !== "object") {
+        throw new DaemonError({ code: "RUNTIME_RESPONSE_INVALID", message: "Daemon returned a malformed runtime receipt." }, 502);
+      }
+      return payload.runtime;
+    },
+
+    async bindMemberSession({
+      workspaceId,
+      memberId,
+      sessionId,
+      anchor,
+      expectedGeneration,
+      terminalTarget,
+    } = {}) {
+      const payload = await request(
+        `/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/binding`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            sessionId,
+            anchor,
+            expectedGeneration,
+            ...(terminalTarget !== undefined ? { terminalTarget } : {}),
+          }),
+        },
+      );
+      if (!payload.binding || typeof payload.binding !== "object") {
+        throw new DaemonError({ code: "BINDING_RESPONSE_INVALID", message: "Daemon returned a malformed binding receipt." }, 502);
+      }
+      return payload.binding;
+    },
+
+    async restoreMemberBinding({ workspaceId, memberId, machineId, expectedGeneration } = {}) {
+      const payload = await request(
+        `/api/workspaces/${encodeURIComponent(String(workspaceId))}/members/${encodeURIComponent(String(memberId))}/restore-binding`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ machineId, expectedGeneration }),
+        },
+      );
+      if (!payload.verification || typeof payload.verification !== "object") {
+        throw new DaemonError({ code: "RESTORE_RESPONSE_INVALID", message: "Daemon returned a malformed restore receipt." }, 502);
+      }
+      return payload.verification;
+    },
+
     async resolveTerminalAdmission(session = {}) {
       const workspaceId = session.workspaceId;
       const memberId = session.memberId;
@@ -501,7 +747,13 @@ export function createDaemonApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       };
 
       (async () => {
-        const headers = authToken ? { authorization: `Bearer ${authToken}` } : {};
+        const headers = {};
+        if (authToken) {
+          headers.authorization = `Bearer ${authToken}`;
+        }
+        if (accountsToken) {
+          headers["x-zterm-accounts-session"] = accountsToken;
+        }
         let response;
         for (let attempt = 0; attempt < 20; attempt += 1) {
           try {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createConnectionManager } from "../../src/index";
+import { createConnectionManager as createProductionConnectionManager } from "../../src/index";
+import { createConnectionManager } from "../support/caller-bound-manager";
 import { ConnectionError } from "../../src/public/errors";
 import type {
   ChannelMessage,
@@ -106,6 +107,30 @@ function fakeTransport(
 }
 
 describe("connections contract", () => {
+  it("connects through the caller-bound accounts authorization and fails without a caller token", async () => {
+    const calls: Array<{ machineId: string; token: string }> = [];
+    const manager = createProductionConnectionManager({
+      authorizationPort: {
+        authorizeCallerMachine: async (machineId: string, token: string) => {
+          calls.push({ machineId, token });
+          return authFor(machineId);
+        },
+        authorizeMachine: async () => {
+          throw new Error("service authorization must not be used");
+        },
+      },
+      transport: { open: async () => fakeTransport("direct", "daemon-machine-a", ["terminal"]).handle },
+    });
+
+    const link = await manager.connect("machine-a", "caller-token");
+    expect(link.machineId).toBe("machine-a");
+    expect(calls).toEqual([{ machineId: "machine-a", token: "caller-token" }]);
+
+    await expect(manager.connect("machine-b")).rejects.toMatchObject({
+      code: "unauthorized",
+    });
+  });
+
   it("connects with a verified authorization and records the real path + peer identity", async () => {
     const manager = createConnectionManager({
       authorizationPort: { authorizeMachine: async () => { throw new Error("must not be called"); } },

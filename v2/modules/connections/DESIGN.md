@@ -40,6 +40,13 @@ shared mux-ready 契约强制 `targetMessages: true` 并由 `isTerminalMuxServer
 `list_sessions_failed`。缺 stableId 不自行合成。terminal mux 当前只
 请求 tmux backend 的 catalog。
 
+`createTerminalMuxClient({ connectionManager, link })` 提供只绑定一个当前 `LinkRef` 的
+terminal mux client。它的 catalog 调用 `listSessions(link)`，channel open 调用
+`openChannel(link, "terminal", exactTarget)`，消息只写当前 `ChannelRef`。channel close
+和 physical link close 分别通过公开事件投影给 terminal。adapter 的 `close()` 只关闭自己
+拥有的 channel；link 仍由连接 owner 用 `closeOwnLink` 显式释放。当前代次失效后，旧
+adapter 不读取新 catalog、不打开新 channel，也不把旧事件交给新代 adapter。
+
 通道边界（R3 修正）：terminal mux 的 channelEnvelope/bulkChannel 是传输能力，不是 generic message/file 服务声明。首增量只把 channelEnvelope 映射为 terminal 会话 channel，open 必须带真实 sessionName/backend/expectedSessionIdentity；generic message/file/receipt/status 属于独立 V1 /app 服务，未接入时显式 unsupported，绝不在 terminal mux 上发送任意 payload。
 
 鉴权拒绝不换通道绕过。路径耗尽与当前暂态不可达按声明恢复政策区分；不伪造在线。

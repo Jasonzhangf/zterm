@@ -27,3 +27,14 @@ export type { TransportHandle, TransportPort } from "./ports/transport.ts";
 export { V1TraversalTransport } from "./adapters/v1-traversal.ts";
 export { createAppCodec, AppWebSocketTransport, buildAppGatewayUrl } from "./adapters/app-websocket.ts";
 export type { AppFrameTransportHandle } from "./adapters/app-websocket.ts";
+export { createTerminalMuxClient } from "./public/terminal-mux-client.ts";
+export type {
+  TerminalMuxClient,
+  TerminalMuxClientOptions,
+  TerminalMuxChannel,
+  TerminalMuxChannelPromise,
+  TerminalMuxOpenInput,
+  TerminalMuxTargetRequest,
+  TerminalMuxTargetResult,
+} from "./public/terminal-mux-client.ts";
+export type { ChannelCloseInfo, LinkCloseInfo } from "./public/types.ts";

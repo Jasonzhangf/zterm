@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createConnectionManager, V1TraversalTransport } from "../../src/index";
+import { V1TraversalTransport } from "../../src/index";
+import { createConnectionManager } from "../support/caller-bound-manager";
 import type { AuthorizedMachineLink } from "../../src/ports/accounts-authorization";
 
 // Real V1 daemon black-box evidence. Skipped unless explicitly pointed at a

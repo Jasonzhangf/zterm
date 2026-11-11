@@ -282,6 +282,7 @@ test("real V1 mux rejection requests an exact range and commits one complete rep
   const frames = [];
   const subscription = await terminal.subscribe(session, (frame) => frames.push(frame));
   t.after(() => subscription.close());
+  await subscription.ready;
 
   fixture.emitChannelMessage(message(payload({
     revision: 1,
