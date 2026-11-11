@@ -43,7 +43,20 @@ interface DaemonPublicManifest {
   optionalDependencies?: Record<string, string>;
 }
 
-export type DaemonInstallPhase = 'resolve' | 'download' | 'stage' | 'publish-shim' | 'verify';
+export type DaemonInstallPhase =
+  | 'resolve'
+  | 'download'
+  | 'stage'
+  | 'publish-shim'
+  | 'verify'
+  | 'activate-service';
+
+export interface DaemonServiceActivation {
+  state: 'started' | 'skipped';
+  reason?: 'disabled' | 'platform_unsupported';
+  command?: string;
+  args?: string[];
+}
 
 export interface DaemonInstallResult {
   phase: DaemonInstallPhase;
@@ -54,6 +67,7 @@ export interface DaemonInstallResult {
   filesWritten: string[];
   previousEntryPreserved: boolean | 'unknown';
   userShims?: string[];
+  serviceActivation?: DaemonServiceActivation;
   error?: PublicError;
 }
 
@@ -68,6 +82,7 @@ export interface DaemonInstallOptions {
   nodeAbi?: string;
   stagingDir?: string;
   packageManager?: string;
+  startService?: boolean;
   runner?: ProcessRunner;
   signal?: AbortSignal;
 }
@@ -792,8 +807,72 @@ export async function installDaemon(
     };
   }
 
+  let serviceActivation: DaemonServiceActivation;
+  if (options.startService === false) {
+    serviceActivation = { state: 'skipped', reason: 'disabled' };
+  } else if (platform !== 'darwin') {
+    serviceActivation = { state: 'skipped', reason: 'platform_unsupported' };
+  } else {
+    serviceActivation = { state: 'skipped' };
+    let serviceInvocation: { command: string; args: string[] };
+    try {
+      serviceInvocation = daemonInvocationForEntry(
+        platform,
+        entryPath,
+        packageRoot,
+        ['install-service'],
+      );
+    } catch (error) {
+      return {
+        phase: 'activate-service',
+        installedVersion: installedPublicManifest.version,
+        payloadPackage: payloadName,
+        payloadPath: installedPayload.payloadRoot,
+        commandAvailable: commandAvailable(entryPath),
+        filesWritten,
+        previousEntryPreserved: 'unknown',
+        userShims,
+        serviceActivation,
+        error:
+          error && typeof error === 'object' && 'code' in error
+            ? (error as PublicError)
+            : publicError('daemon_service_install_unavailable', String(error)),
+      };
+    }
+
+    const serviceInstall = await runner(
+      serviceInvocation.command,
+      serviceInvocation.args,
+      { signal: options.signal },
+    );
+    if (!successful(serviceInstall)) {
+      return {
+        phase: 'activate-service',
+        installedVersion: installedPublicManifest.version,
+        payloadPackage: payloadName,
+        payloadPath: installedPayload.payloadRoot,
+        commandAvailable: commandAvailable(entryPath),
+        filesWritten,
+        previousEntryPreserved: 'unknown',
+        userShims,
+        serviceActivation,
+        error: publicError(
+          serviceInstall.signal
+            ? 'daemon_service_install_cancelled'
+            : 'daemon_service_install_failed',
+          processError(serviceInstall),
+        ),
+      };
+    }
+    serviceActivation = {
+      state: 'started',
+      command: serviceInvocation.command,
+      args: serviceInvocation.args,
+    };
+  }
+
   return {
-    phase: 'verify',
+    phase: serviceActivation.state === 'started' ? 'activate-service' : 'verify',
     installedVersion: installedPublicManifest.version,
     payloadPackage: payloadName,
     payloadPath: installedPayload.payloadRoot,
@@ -801,6 +880,7 @@ export async function installDaemon(
     filesWritten,
     previousEntryPreserved: 'unknown',
     userShims,
+    serviceActivation,
   };
 }
 
