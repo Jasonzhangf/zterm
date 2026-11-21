@@ -1494,7 +1494,7 @@ type AssertTerminalMuxChannelClientMessageTypesRegistered = Exclude<
   TerminalMuxChannelClientMessage['type'],
   RegisteredTerminalMuxChannelClientMessageType
 > extends never ? true : never;
-const TERMINAL_MUX_CHANNEL_CLIENT_MESSAGE_TYPES_ARE_REGISTERED: AssertTerminalMuxChannelClientMessageTypesRegistered = true;
+void (true satisfies AssertTerminalMuxChannelClientMessageTypesRegistered);
 
 const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES);
 const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES);
