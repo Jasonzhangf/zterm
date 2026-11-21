@@ -57,7 +57,7 @@ function makeFakeTransport({
     onClose: () => undefined,
     onChannelClosed: () => () => undefined,
     onChannelCloseFailure: () => () => undefined,
-    retryLateOpenClose: () => undefined,
+    retryLateOpenClose: () => false,
   };
   return { handle, state };
 }

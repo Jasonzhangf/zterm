@@ -59,7 +59,7 @@ function fakeTransport() {
       return () => state.channelCloseHandlers.delete(handler);
     },
     onChannelCloseFailure: () => () => undefined,
-    retryLateOpenClose: () => undefined,
+    retryLateOpenClose: () => false,
   };
   return {
     handle,

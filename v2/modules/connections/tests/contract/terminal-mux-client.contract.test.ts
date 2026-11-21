@@ -51,6 +51,8 @@ function fakeTransport(options: {
     listSessionsError: null as Error | null,
     openError: null as Error | null,
     pendingOpens: new Map<string, OpenWaiter>(),
+    lateOpenRetryResults: [] as boolean[],
+    lateOpenRetryCalls: [] as string[],
   };
   const messageHandlers = new Set<(channelId: string, data: string | ArrayBuffer) => void>();
   const channelCloseHandlers = new Set<(channelId: string, info?: { reason?: string; code?: string }) => void>();
@@ -103,7 +105,10 @@ function fakeTransport(options: {
       return () => channelCloseHandlers.delete(handler);
     },
     onChannelCloseFailure: () => () => undefined,
-    retryLateOpenClose: () => undefined,
+    retryLateOpenClose: (channelId) => {
+      state.lateOpenRetryCalls.push(channelId);
+      return state.lateOpenRetryResults.shift() ?? false;
+    },
   };
 
   return {
@@ -340,5 +345,19 @@ describe("connections terminal mux client adapter", () => {
       .toThrow(expect.objectContaining({ code: "link_closed" }));
     expect(fake.state.sent).toHaveLength(1);
     expect(fake.state.sent[0]?.data).toBe(JSON.stringify({ type: "input", payload: "once\r" }));
+  });
+
+  it("preserves late-open close retry success through the public mux client", async () => {
+    const fake = fakeTransport();
+    const manager = managerFor(fake);
+    const link = await manager.connect("machine-a", authFor("machine-a"));
+    const client = createTerminalMuxClient({ connectionManager: manager, link });
+    const channelId = "late-open-channel";
+    fake.state.lateOpenRetryResults.push(false, true, false);
+
+    expect(client.retryLateOpenClose(channelId)).toBe(false);
+    expect(client.retryLateOpenClose(channelId)).toBe(true);
+    expect(client.retryLateOpenClose(channelId)).toBe(false);
+    expect(fake.state.lateOpenRetryCalls).toEqual([channelId, channelId, channelId]);
   });
 });

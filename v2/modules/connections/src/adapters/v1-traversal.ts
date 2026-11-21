@@ -213,19 +213,22 @@ export class V1TraversalTransport implements TransportPort {
       pendingCatalogs.clear();
     };
 
-    const sendLateOpenClose = (channelId: string) => {
+    const sendLateOpenClose = (channelId: string): boolean => {
+      if (!pendingRelease.has(channelId)) return false;
       try {
         socket.send(JSON.stringify({
           type: "mux-channel-close",
           payload: { channelId, reason: "late-open-release" },
         }));
         pendingRelease.delete(channelId);
+        return true;
       } catch (cause) {
         notifyChannelCloseFailure(new ConnectionError(
           "channel_close_failed",
           `failed to release late-open channel ${channelId}`,
           { machineId: auth.machineId, channelId, cause },
         ));
+        return false;
       }
     };
 
@@ -693,9 +696,7 @@ export class V1TraversalTransport implements TransportPort {
         channelCloseFailureHandlers.add(handler);
         return () => { channelCloseFailureHandlers.delete(handler); };
       },
-      retryLateOpenClose: (channelId) => {
-        if (pendingRelease.has(channelId)) sendLateOpenClose(channelId);
-      },
+      retryLateOpenClose: (channelId) => sendLateOpenClose(channelId),
     };
   }
 }

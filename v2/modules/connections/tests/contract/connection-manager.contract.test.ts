@@ -90,7 +90,7 @@ function fakeTransport(
       return () => channelCloseHandlers.delete(handler);
     },
     onChannelCloseFailure: () => () => undefined,
-    retryLateOpenClose: () => undefined,
+    retryLateOpenClose: () => false,
   };
   return {
     handle,
@@ -363,7 +363,7 @@ describe("connections contract", () => {
       onClose: () => undefined,
       onChannelClosed: () => () => undefined,
       onChannelCloseFailure: () => () => undefined,
-      retryLateOpenClose: () => undefined,
+      retryLateOpenClose: () => false,
     };
     const manager = createConnectionManager({
       authorizationPort: { authorizeMachine: async () => authFor("machine-a") },
