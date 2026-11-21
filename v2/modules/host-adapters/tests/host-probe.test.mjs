@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
+import { TypedError } from "../../errors/src/public/index.mjs";
 import { createTmuxHostProbe } from "../src/public/index.mjs";
 
 const socketName = `zterm-v2-host-probe-${process.pid}`;
@@ -30,12 +31,11 @@ test("tmux host probe observes the exact session_id target", async (t) => {
   tmux(["new-session", "-d", "-s", sessionName]);
   t.after(() => tmux(["kill-session", "-t", sessionName]));
 
-  const probe = createTmuxHostProbe({ socketName });
+  const probe = createTmuxHostProbe({ socketName, machineId: "mac-probe" });
   const observation = await probe.probe({ sessionId: sessionName });
 
   assert.equal(observation.available, true);
-  // No authoritative machine identity source exists in this host adapter yet.
-  assert.equal(observation.machineId, null);
+  assert.equal(observation.machineId, "mac-probe");
   assert.equal(observation.terminalTarget.backend, "tmux");
   assertAuthoritativeTmuxIdentity(observation);
 });
@@ -44,6 +44,13 @@ test("tmux host probe rejects a non-tmux backend at creation", () => {
   assert.throws(
     () => createTmuxHostProbe({ socketName, backend: "herdr" }),
     TypeError
+  );
+});
+
+test("tmux host probe rejects an omitted machine identity at construction", () => {
+  assert.throws(
+    () => createTmuxHostProbe({ socketName }),
+    (error) => error instanceof TypedError && error.code === "HOST_MACHINE_ID_REQUIRED",
   );
 });
 
@@ -62,7 +69,7 @@ test("tmux host probe reports anchorPresent true for a live pane", async (t) => 
   tmux(["new-session", "-d", "-s", sessionName]);
   t.after(() => tmux(["kill-session", "-t", sessionName]));
 
-  const probe = createTmuxHostProbe({ socketName });
+  const probe = createTmuxHostProbe({ socketName, machineId: "mac-probe" });
   const observation = await probe.probe({ sessionId: sessionName, anchor: "%0" });
 
   assert.equal(observation.available, true);
@@ -75,7 +82,7 @@ test("tmux host probe reports anchorPresent false for a missing pane", async (t)
   tmux(["new-session", "-d", "-s", sessionName]);
   t.after(() => tmux(["kill-session", "-t", sessionName]));
 
-  const probe = createTmuxHostProbe({ socketName });
+  const probe = createTmuxHostProbe({ socketName, machineId: "mac-probe" });
   const observation = await probe.probe({ sessionId: sessionName, anchor: "%999" });
 
   assert.equal(observation.available, true);
@@ -85,7 +92,10 @@ test("tmux host probe reports anchorPresent false for a missing pane", async (t)
 });
 
 test("tmux host probe reports unavailable for a missing session", async () => {
-  const probe = createTmuxHostProbe({ socketName: `zterm-v2-host-probe-missing-${process.pid}` });
+  const probe = createTmuxHostProbe({
+    socketName: `zterm-v2-host-probe-missing-${process.pid}`,
+    machineId: "mac-probe",
+  });
   const observation = await probe.probe({ sessionId: "does-not-exist", anchor: "%999" });
 
   assert.equal(observation.available, false);

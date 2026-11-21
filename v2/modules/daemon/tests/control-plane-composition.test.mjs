@@ -24,6 +24,7 @@ const TOKENS = Object.freeze({
   owner: "control-owner-token",
   other: "control-other-token",
   membersOnly: "control-members-only-token",
+  accounts: "browser-accounts-session-token",
 });
 
 const SCOPES = Object.freeze([
@@ -41,6 +42,7 @@ async function fixture({ hostObserver = null, terminalCatalog = null } = {}) {
       [TOKENS.owner]: { accountId: "acct-owner", scopes: SCOPES, workspaces: "*" },
       [TOKENS.other]: { accountId: "acct-other", scopes: SCOPES, workspaces: ["ws-other-account-only"] },
       [TOKENS.membersOnly]: { accountId: "acct-members-only", scopes: ["members:read"], workspaces: "*" },
+      [TOKENS.accounts]: { accountId: "acct-owner", scopes: SCOPES, workspaces: "*" },
     },
   });
   const organization = createOrganizationService({
@@ -163,6 +165,22 @@ async function fixture({ hostObserver = null, terminalCatalog = null } = {}) {
   const daemon = createDaemon({
     v1WsUrl: "ws://127.0.0.1:1/ws",
     v2Token: "legacy-token",
+    authService: {
+      async login({ loginName, credential }) {
+        assert.equal(loginName, "alice");
+        assert.equal(credential, "credential");
+        return {
+          token: TOKENS.accounts,
+          authContext: { accountId: "acct-owner", loginName: "alice" },
+        };
+      },
+      async verifySession() {
+        throw new Error("verifySession is not used by this control-plane test");
+      },
+      async logout() {
+        throw new Error("logout is not used by this control-plane test");
+      },
+    },
     workspaceAuth: auth,
     organization,
     members,
@@ -250,6 +268,57 @@ test("control-plane rejects cross-origin reads and invalid credentials explicitl
   });
   assert.equal(crossOrigin.status, 403);
   assert.equal((await crossOrigin.json()).error.code, "ORIGIN_NOT_ALLOWED");
+});
+
+test("browser workspace control accepts the post-login accounts session and rejects missing or wrong sessions", async (t) => {
+  const app = await fixture();
+  t.after(() => app.close());
+
+  const login = await fetch(`${app.base}/api/accounts/login`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer legacy-token",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ loginName: "alice", credential: "credential" }),
+  });
+  assert.equal(login.status, 200);
+  const loginBody = await login.json();
+  assert.equal(loginBody.token, TOKENS.accounts);
+
+  const browserHeaders = {
+    authorization: "Bearer legacy-token",
+    "x-zterm-accounts-session": loginBody.token,
+  };
+  const catalog = await fetch(`${app.base}/api/workspaces`, { headers: browserHeaders });
+  assert.equal(catalog.status, 200);
+  const catalogBody = await catalog.json();
+  assert.deepEqual(
+    catalogBody.workspaces.map((workspace) => workspace.workspaceId),
+    [app.workspace.workspaceId, app.secondWorkspace.workspaceId],
+  );
+
+  const tree = await fetch(
+    `${app.base}/api/workspaces/${app.workspace.workspaceId}/tree`,
+    { headers: browserHeaders },
+  );
+  assert.equal(tree.status, 200);
+  assert.equal((await tree.json()).root.workspaceId, app.workspace.workspaceId);
+
+  const missing = await fetch(`${app.base}/api/workspaces`, {
+    headers: { authorization: "Bearer legacy-token" },
+  });
+  assert.equal(missing.status, 401);
+  assert.equal((await missing.json()).error.code, "UNAUTHENTICATED");
+
+  const wrong = await fetch(`${app.base}/api/workspaces`, {
+    headers: {
+      authorization: "Bearer legacy-token",
+      "x-zterm-accounts-session": "wrong-accounts-session",
+    },
+  });
+  assert.equal(wrong.status, 401);
+  assert.equal((await wrong.json()).error.code, "UNAUTHENTICATED");
 });
 
 test("the same machine can serve multiple workspaces without leaking members across them", async (t) => {

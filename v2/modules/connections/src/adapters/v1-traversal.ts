@@ -18,9 +18,11 @@ import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import {
   buildTerminalMuxChannelBinary,
+  buildTerminalMuxChannelMessage,
   buildTerminalMuxChannelOpen,
   buildTerminalMuxHello,
   buildTerminalMuxTargetMessage,
+  isTerminalMuxChannelClientMessage,
   isTerminalMuxServerFrame,
   TERMINAL_MUX_PROTOCOL_VERSION,
   type TerminalMuxCapabilities,
@@ -211,19 +213,22 @@ export class V1TraversalTransport implements TransportPort {
       pendingCatalogs.clear();
     };
 
-    const sendLateOpenClose = (channelId: string) => {
+    const sendLateOpenClose = (channelId: string): boolean => {
+      if (!pendingRelease.has(channelId)) return false;
       try {
         socket.send(JSON.stringify({
           type: "mux-channel-close",
           payload: { channelId, reason: "late-open-release" },
         }));
         pendingRelease.delete(channelId);
+        return true;
       } catch (cause) {
         notifyChannelCloseFailure(new ConnectionError(
           "channel_close_failed",
           `failed to release late-open channel ${channelId}`,
           { machineId: auth.machineId, channelId, cause },
         ));
+        return false;
       }
     };
 
@@ -647,7 +652,28 @@ export class V1TraversalTransport implements TransportPort {
             machineId: auth.machineId,
           });
         }
-        const bytes = typeof data === "string" ? Buffer.from(data, "utf8") : Buffer.from(data);
+        // Text carries a typed terminal mux control message; binary carries raw
+        // terminal bytes. Re-framing a string envelope as mux-channel-binary
+        // makes the peer write the JSON itself to the terminal.
+        if (typeof data === "string") {
+          let frame: ReturnType<typeof buildTerminalMuxChannelMessage>;
+          try {
+            const message: unknown = JSON.parse(data);
+            if (!isTerminalMuxChannelClientMessage(message)) {
+              throw new Error("terminal channel text payload is not a registered client message");
+            }
+            frame = buildTerminalMuxChannelMessage(channelId, message);
+          } catch (error) {
+            throw new ConnectionError("invalid_input", "terminal channel text payload is not a valid mux message", {
+              machineId: auth.machineId,
+              channelId,
+              cause: error,
+            });
+          }
+          socket.send(JSON.stringify(frame));
+          return;
+        }
+        const bytes = Buffer.from(data);
         socket.send(JSON.stringify(buildTerminalMuxChannelBinary(channelId, bytes.toString("base64"))));
       },
       closeChannel: (channelId, reason) => {
@@ -670,9 +696,7 @@ export class V1TraversalTransport implements TransportPort {
         channelCloseFailureHandlers.add(handler);
         return () => { channelCloseFailureHandlers.delete(handler); };
       },
-      retryLateOpenClose: (channelId) => {
-        if (pendingRelease.has(channelId)) sendLateOpenClose(channelId);
-      },
+      retryLateOpenClose: (channelId) => sendLateOpenClose(channelId),
     };
   }
 }

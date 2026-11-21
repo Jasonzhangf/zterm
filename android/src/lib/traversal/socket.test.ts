@@ -1631,9 +1631,11 @@ describe('TraversalSocket reconnect', () => {
     socket.onclose = onclose;
     await flushMicrotasks();
 
-    // relay (2500ms budget) times out, then the contracted direct budget
-    // (3000ms) expires -> total 5500ms -> finishFailure -> onclose.
-    await vi.advanceTimersByTimeAsync(5500);
+    // The 8000ms relay attempt and the contracted 3000ms direct attempt
+    // must both exhaust their budgets before the plan closes.
+    await vi.advanceTimersByTimeAsync(10999);
+    expect(onclose).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
     await flushMicrotasks();
 
     expect(onclose).toHaveBeenCalledTimes(1);

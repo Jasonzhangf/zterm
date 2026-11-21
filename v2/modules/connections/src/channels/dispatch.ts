@@ -1,6 +1,7 @@
 /** Channel negotiation and isolation over one physical link. */
 import { ConnectionError } from "../public/errors.ts";
 import type {
+  ChannelCloseInfo,
   ChannelEventHandler,
   ChannelMessage,
   ChannelRef,
@@ -12,6 +13,7 @@ import type { TransportHandle } from "../ports/transport.ts";
 export interface ChannelRecord {
   readonly ref: ChannelRef;
   readonly handlers: Set<ChannelEventHandler>;
+  readonly closeHandlers: Set<(info?: ChannelCloseInfo) => void>;
   readonly transport: TransportHandle;
   readonly address: string;
   readonly unsubscribe: () => void;
@@ -92,7 +94,14 @@ export class ChannelDispatcher {
         }
       }
     });
-    this.channels.set(address, { ref, handlers: new Set(), transport, address, unsubscribe });
+    this.channels.set(address, {
+      ref,
+      handlers: new Set(),
+      closeHandlers: new Set(),
+      transport,
+      address,
+      unsubscribe,
+    });
     this.ensureChannelClosedHook(transport);
     return ref;
   }
@@ -105,6 +114,17 @@ export class ChannelDispatcher {
     record.handlers.add(handler);
     return () => {
       record.handlers.delete(handler);
+    };
+  }
+
+  onClosed(ref: ChannelRef, handler: (info?: ChannelCloseInfo) => void): () => void {
+    const record = this.channels.get(ref.id);
+    if (!record) {
+      throw new ConnectionError("link_closed", `channel ${ref.id} is not open`, { machineId: ref.linkId });
+    }
+    record.closeHandlers.add(handler);
+    return () => {
+      record.closeHandlers.delete(handler);
     };
   }
 
@@ -134,6 +154,7 @@ export class ChannelDispatcher {
       });
     }
     record.unsubscribe();
+    record.closeHandlers.clear();
     this.channels.delete(ref.id);
   }
 
@@ -153,12 +174,20 @@ export class ChannelDispatcher {
    */
   private ensureChannelClosedHook(transport: TransportHandle): void {
     if (this.linkCloseUnsubscribes.has(transport)) return;
-    const unsubscribe = transport.onChannelClosed((channelId) => {
+    const unsubscribe = transport.onChannelClosed((channelId, info) => {
       const record = this.channels.get(channelId);
       if (!record) return;
       record.unsubscribe();
       record.handlers.clear();
       this.channels.delete(channelId);
+      for (const handler of [...record.closeHandlers]) {
+        try {
+          handler(info);
+        } catch {
+          // A single close observer must not interfere with channel cleanup.
+        }
+      }
+      record.closeHandlers.clear();
     });
     this.linkCloseUnsubscribes.set(transport, unsubscribe);
   }
@@ -174,6 +203,7 @@ export class ChannelDispatcher {
       if (record.transport !== transport) continue;
       record.unsubscribe();
       record.handlers.clear();
+      record.closeHandlers.clear();
       this.channels.delete(address);
     }
   }

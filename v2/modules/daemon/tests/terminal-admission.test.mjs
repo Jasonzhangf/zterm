@@ -311,12 +311,13 @@ function admissionBody(harness, target, overrides = {}) {
   };
 }
 
-function postInput(base, body, token = CALLER_TOKEN) {
+function postInput(base, body, token = CALLER_TOKEN, accountsToken = token) {
   return fetch(`${base}/api/terminal/input`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(accountsToken ? { "x-zterm-accounts-session": accountsToken } : {}),
     },
     body: JSON.stringify(body),
   });
@@ -380,11 +381,22 @@ test("admission rejects missing and invalid credentials before target access", a
 
   let response = await postInput(base, admissionBody(harness, target), "");
   assert.equal(response.status, 401);
-  assert.equal(await errorCode(response), "UNAUTHENTICATED");
+  assert.equal(await errorCode(response), "V2_CREDENTIAL_REQUIRED");
+
+  response = await fetch(`${base}/api/terminal/input`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${CALLER_TOKEN}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(admissionBody(harness, target)),
+  });
+  assert.equal(response.status, 401);
+  assert.equal(await errorCode(response), "MACHINE_ACCOUNT_SESSION_REQUIRED");
 
   response = await postInput(base, admissionBody(harness, target), "not-a-token");
   assert.equal(response.status, 401);
-  assert.equal(await errorCode(response), "UNAUTHENTICATED");
+  assert.equal(await errorCode(response), "V2_CREDENTIAL_INVALID");
   assert.equal(fixture.recorded.input.length, 0);
 });
 
@@ -401,6 +413,7 @@ test("admission rejects an unauthorized workspace", async (t) => {
   const response = await postInput(
     base,
     admissionBody(harness, target),
+    CALLER_TOKEN,
     OTHER_WORKSPACE_TOKEN,
   );
   assert.equal(response.status, 403);
@@ -610,7 +623,10 @@ test("admission stream exposes the exact admitted session", async (t) => {
   });
 
   const response = await fetch(`${base}/api/terminal/stream?${query.toString()}`, {
-    headers: { authorization: `Bearer ${CALLER_TOKEN}` },
+    headers: {
+      authorization: `Bearer ${CALLER_TOKEN}`,
+      "x-zterm-accounts-session": CALLER_TOKEN,
+    },
   });
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") || "", /text\/event-stream/u);
