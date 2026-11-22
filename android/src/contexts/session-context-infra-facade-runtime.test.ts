@@ -1,4 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { bindTargetMuxTransportSocketLifecycleRuntime, handleTargetMuxServerFrameRuntime } from './session-context-transport-runtime';
+import { getSessionTransportResource, getSessionTransportHost } from '../lib/session-transport-runtime';
+import { getSessionIdForTerminalChannel, getOpeningSessionTerminalChannelsForTarget } from '../lib/terminal-channel-mux-runtime';
+import { enqueueReliableInputChunks, resetTerminalReliableInputRuntimeForTests, type SendInputTransportOptions } from '../lib/reliable-input/reliable-input-queue';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { BridgeTransportSocket } from '../lib/traversal/types';
+import { sendInputThroughSessionTransport } from './session-context-input-runtime';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
@@ -64,6 +71,195 @@ function unwrap(data: string | ArrayBuffer) {
   expect(typeof data).toBe('string');
   return JSON.parse(data as string);
 }
+
+describe('channel-owned connected input policy at mux wire boundaries', () => {
+  afterEach(() => {
+    resetTerminalReliableInputRuntimeForTests();
+    vi.useRealTimers();
+  });
+
+  function fixture(inputReadiness: 'terminal-connected' | null = 'terminal-connected', backend: 'tmux' | 'herdr' = 'tmux') {
+    vi.useFakeTimers();
+    const store = createSessionTransportRuntimeStore();
+    const host = { ...makeHost(), terminalBackend: backend, expectedSessionIdentity: 'opaque-block-a' };
+    const runtime = upsertSessionTransportRuntime(store, 'session-1', host);
+    const wire: unknown[] = [];
+    const ws: BridgeTransportSocket = { readyState: WebSocket.OPEN, bufferedAmount: 0,
+      onopen: null, onmessage: null, onclose: null, onerror: null,
+      send: (data) => { wire.push(unwrap(data)); }, close: vi.fn(),
+      reportFailure: vi.fn(),
+      getDiagnostics: () => ({ mode: 'auto', stage: 'open', attempts: [] }),
+    };
+    setTargetTerminalTransport(store, runtime.targetKey, ws);
+    const channelOptions = { channelId: 'attempt-a', inputReadiness: inputReadiness ?? undefined };
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-1', channelOptions);
+    const sendSocketPayload: SendInputTransportOptions['sendSocketPayload'] = (sessionId, socket, data) => {
+      socket.send(wrapSessionPayloadForTargetMuxRuntime({ store, sessionId, ws: socket, data }));
+    };
+    const daemonConnection = {
+      readSessionResource: (id: string) => getSessionTransportResource(store, id),
+      readSessionSocket: (id: string) => getSessionTransportResource(store, id).socket,
+    } as ClientDaemonConnection;
+    const inputOptions: SendInputTransportOptions = {
+      sessionId: 'session-1', data: 'marker', refs: {
+        sessionsRef: { current: [{ id: 'session-1', reliableInputSupported: true }] },
+        stateRef: { current: { activeSessionId: 'session-1' } },
+      },
+      daemonConnection, sendSocketPayload, runtimeDebug: vi.fn(), isReconnectInFlight: () => false,
+      markPendingInputTailRefresh: () => false, readSessionBufferSnapshot: () => ({ revision: 0 }),
+      requestSessionBufferHead: () => false, hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+    };
+    const readChannel = () => getSessionTerminalChannel(store.terminalChannels, 'session-1');
+    const bindSocket = (ws: BridgeTransportSocket) => bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-1', targetKey: runtime.targetKey, targetHeartbeatKey: 'test-heartbeat', host, ws,
+      debugScope: 'connect', readTargetTerminalSocket: () => store.targets.get(runtime.targetKey)?.terminalTransport || null,
+      readRequestedTerminalGeometry: () => null,
+      getOpeningTerminalChannelsForTarget: (key, priority) => getOpeningSessionTerminalChannelsForTarget(store.terminalChannels, key, priority),
+      readSessionTransportHost: (id) => getSessionTransportHost(store, id), readSessionTerminalChannel: readChannel,
+      writeSessionTerminalChannelState: (id, state) => updateSessionTerminalChannelState(store.terminalChannels, id, state),
+      readPrioritySessionId: () => 'session-1',
+      setTargetMuxReady: (_key, ready) => setSessionTargetTerminalMuxReady(store, 'session-1', ready),
+      sendSocketPayload, applyTransportDiagnostics: vi.fn(), runtimeDebug: vi.fn(), finalizeFailure: vi.fn(),
+      handleTargetMuxServerFrame: (frame) => handleTargetMuxServerFrameRuntime({
+        anchorSessionId: 'session-1', host, ws, debugScope: 'connect', frame,
+        resolveSessionIdForChannel: (id) => getSessionIdForTerminalChannel(store.terminalChannels, runtime.targetKey, id),
+        readSessionTransportHost: (id) => getSessionTransportHost(store, id), readSessionTerminalChannel: readChannel,
+        readSessionTerminalChannelBodySubscribed: () => true,
+        updateSessionTerminalChannelState: (id, state) => updateSessionTerminalChannelState(store.terminalChannels, id, state),
+        sendSocketPayload, handleSocketServerMessage: vi.fn(),
+        buildChannelCallbacks: () => ({ onConnected: vi.fn(), onClosed: vi.fn(), onFailure: vi.fn() }),
+        onExactChannelRejected: () => updateSessionTerminalChannelState(store.terminalChannels, 'session-1', 'closed'),
+        runtimeDebug: vi.fn(),
+      }),
+    });
+    bindSocket(ws);
+    const ingress = (frame: unknown) => ws.onmessage?.({ data: JSON.stringify(frame) } as MessageEvent);
+    const opened = (stableId = host.expectedSessionIdentity) => ingress({ type: 'mux-channel-opened', payload: { channelId: readChannel()!.channelId, sessionName: 'alpha', stableId } });
+    const message = (type: string, channelId = readChannel()!.channelId) => ingress({ type: 'mux-channel-message', payload: { channelId, message: { type, payload: {} } } });
+    ingress({ type: 'mux-ready', payload: { version: 1, capabilities: { version: 1, channelEnvelope: true, targetMessages: true, boundedBodyScheduler: true } } });
+    const inputs = () => wire.filter((frame: any) => frame.type === 'mux-channel-message' && frame.payload.message.type === 'input');
+    return { store, runtime, ws, wire, inputOptions, sendSocketPayload, readChannel, ingress, opened, message, inputs, bindSocket };
+  }
+
+  it('holds reliable input after matched ACK while control passes, then releases once on current connected', () => {
+    const f = fixture();
+    enqueueReliableInputChunks(f.inputOptions, 'session-1', ['marker']);
+    f.message('connected'); // Pre-admission evidence must be forgotten.
+    f.opened();
+    expect(f.wire).toContainEqual(expect.objectContaining({ type: 'mux-channel-message', payload: expect.objectContaining({ message: expect.objectContaining({ type: 'body-subscription' }) }) }));
+    f.message('buffer-head');
+    f.message('buffer-sync');
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toEqual([]);
+    f.message('connected');
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toHaveLength(1);
+    f.message('connected');
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toHaveLength(1);
+  });
+
+  it('gates raw, typed and pre-wrapped input at final send without blocking control', () => {
+    const f = fixture();
+    f.opened();
+    const payloads = ['raw marker', JSON.stringify({ type: 'input', payload: 'typed' }), JSON.stringify({ type: 'mux-channel-message', payload: { channelId: 'attempt-a', message: { type: 'input', payload: 'wrapped' } } })];
+    for (const data of payloads) {
+      expect(() => f.sendSocketPayload('session-1', f.ws, data)).toThrow('input is not ready');
+    }
+    f.sendSocketPayload('session-1', f.ws, JSON.stringify({ type: 'body-subscription', payload: { version: 1, subscribed: true } }));
+    expect(f.inputs()).toEqual([]);
+    f.message('connected');
+    for (const data of payloads) f.sendSocketPayload('session-1', f.ws, data);
+    expect(f.inputs()).toHaveLength(3);
+    expect(() => f.sendSocketPayload('session-1', f.ws, JSON.stringify({ type: 'mux-channel-message', payload: { channelId: 'retired-id', message: { type: 'input', payload: 'stale' } } }))).toThrow();
+    expect(f.inputs()).toHaveLength(3);
+  });
+
+  it('drops ordinary input while waiting without queueing or reconnecting', () => {
+    const f = fixture();
+    f.opened();
+    const scheduleReconnect = vi.fn();
+    const ordinary = { ...f.inputOptions, scheduleReconnect, refs: { ...f.inputOptions.refs, sessionsRef: { current: [{ id: 'session-1', reliableInputSupported: false }] } } };
+    sendInputThroughSessionTransport(ordinary);
+    f.message('connected');
+    vi.advanceTimersByTime(1000);
+    expect(f.inputs()).toEqual([]);
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    sendInputThroughSessionTransport(ordinary);
+    expect(f.inputs()).toHaveLength(1);
+  });
+
+  it('requires a fresh admission and connected after physical replacement; stale socket cannot release it', () => {
+    const f = fixture();
+    f.opened();
+    f.message('connected');
+    const replacement = { ...f.ws };
+    setTargetTerminalTransport(f.store, f.runtime.targetKey, replacement);
+    f.bindSocket(replacement);
+    enqueueReliableInputChunks(f.inputOptions, 'session-1', ['replacement-marker']);
+    f.opened(); // Old socket callback is fenced before ingress.
+    f.message('connected');
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toEqual([]);
+    expect(f.readChannel()?.state).toBe('opening');
+    expect(() => f.sendSocketPayload('session-1', f.ws, 'stale raw')).toThrow();
+    const receive = (frame: unknown) => replacement.onmessage?.({ data: JSON.stringify(frame) });
+    const connected = { type: 'mux-channel-message', payload: { channelId: 'attempt-a', message: { type: 'connected', payload: {} } } };
+    receive({ type: 'mux-ready', payload: { version: 1, capabilities: { version: 1, channelEnvelope: true, targetMessages: true, boundedBodyScheduler: true } } });
+    receive(connected);
+    receive({ type: 'mux-channel-opened', payload: { channelId: 'attempt-a', sessionName: 'alpha', stableId: 'opaque-block-a' } });
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toEqual([]);
+    receive(connected);
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toHaveLength(1);
+  });
+
+  it('does not let closed/rejected or retired channel events release a new exact attempt', () => {
+    const f = fixture();
+    f.opened('wrong-block');
+    f.message('connected');
+    expect(f.readChannel()?.state).toBe('closed');
+    ensureSessionTerminalChannel(f.store.terminalChannels, 'session-1', { channelId: 'attempt-b', inputReadiness: 'terminal-connected' });
+    enqueueReliableInputChunks(f.inputOptions, 'session-1', ['new-marker']);
+    f.opened();
+    f.message('connected', 'attempt-a');
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toEqual([]);
+    f.message('connected');
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toHaveLength(1);
+    f.ingress({ type: 'mux-channel-closed', payload: { channelId: 'attempt-b', reason: 'attach failed' } });
+    f.message('connected');
+    expect(() => f.sendSocketPayload('session-1', f.ws, 'closed marker')).toThrow();
+    expect(f.inputs()).toHaveLength(1);
+  });
+
+  it.each(['tmux', 'herdr'] as const)('preserves exact %s ACK-ready input without the policy', (backend) => {
+    // Explicitly omitted policy: exact identity by itself does not select Rex.
+    const f = fixture(null, backend);
+    enqueueReliableInputChunks(f.inputOptions, 'session-1', ['legacy-marker']);
+    f.opened();
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toHaveLength(1);
+  });
+
+  it('cancels held input when its channel is retired rather than transferring it to replacement', () => {
+    const f = fixture();
+    enqueueReliableInputChunks(f.inputOptions, 'session-1', ['retired-marker']);
+    f.opened();
+    f.ingress({ type: 'mux-channel-closed', payload: { channelId: 'attempt-a', reason: 'attach failed' } });
+    ensureSessionTerminalChannel(f.store.terminalChannels, 'session-1', { channelId: 'attempt-b', inputReadiness: 'terminal-connected' });
+    f.opened();
+    f.message('connected');
+    vi.advanceTimersByTime(500);
+    expect(f.inputs()).toEqual([]);
+    enqueueReliableInputChunks(f.inputOptions, 'session-1', ['replacement-marker']);
+    expect(f.inputs()).toHaveLength(1);
+    expect(f.inputs()[0]).toMatchObject({ payload: { channelId: 'attempt-b', message: { payload: { data: 'replacement-marker' } } } });
+  });
+});
 
 describe('Android connection service platform wiring', () => {
   it('routes Android daemon target sockets through the native service projection factory', () => {

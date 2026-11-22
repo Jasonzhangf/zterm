@@ -9,6 +9,9 @@ export interface SessionTerminalChannelRuntime {
   bodySubscribed: boolean;
   openedAt: number;
   closedAt: number | null;
+  /** Combination supplies this only for the exact Rex lane from its typed Host. */
+  inputReadiness?: 'terminal-connected';
+  terminalConnected?: boolean;
 }
 
 export interface TerminalChannelTargetRuntime {
@@ -180,6 +183,7 @@ export function ensureSessionTerminalChannel(
     channelId?: string;
     now?: number;
     bodySubscribed?: boolean;
+    inputReadiness?: SessionTerminalChannelRuntime['inputReadiness'];
   } = {},
 ) {
   const normalizedSessionId = normalizeKeyText(sessionId);
@@ -188,7 +192,8 @@ export function ensureSessionTerminalChannel(
     return null;
   }
   const existing = getSessionTerminalChannel(store, normalizedSessionId);
-  if (existing) {
+  const requestedChannelId = normalizeKeyText(options.channelId);
+  if (existing && !(existing.state === 'closed' && requestedChannelId && requestedChannelId !== existing.channelId)) {
     return existing;
   }
   const target = ensureTerminalChannelTarget(store, binding.targetKey);
@@ -197,6 +202,7 @@ export function ensureSessionTerminalChannel(
   if (sameId && sameId.sessionId !== normalizedSessionId) {
     throw new Error(`terminal channel ${channelId} is already bound to ${sameId.sessionId}`);
   }
+  if (existing) target.channels.delete(existing.channelId);
   const channel: SessionTerminalChannelRuntime = {
     channelId,
     sessionId: normalizedSessionId,
@@ -206,6 +212,8 @@ export function ensureSessionTerminalChannel(
     bodySubscribed: typeof options.bodySubscribed === 'boolean' ? options.bodySubscribed : true,
     openedAt: Number.isFinite(options.now) ? Math.max(0, Math.floor(options.now || 0)) : Date.now(),
     closedAt: null,
+    inputReadiness: options.inputReadiness,
+    terminalConnected: false,
   };
   target.channels.set(channelId, channel);
   binding.channelId = channelId;
@@ -242,10 +250,34 @@ export function updateSessionTerminalChannelState(
     return null;
   }
   channel.state = state;
+  if (state !== 'open') resetTerminalChannelInputReadiness(channel);
   if (state === 'closed') {
     channel.closedAt = Math.max(0, Math.floor(now || 0));
   }
   return channel;
+}
+
+type ChannelInputReadiness = Pick<SessionTerminalChannelRuntime, 'state' | 'inputReadiness' | 'terminalConnected'>;
+
+export function resetTerminalChannelInputReadiness(channel: ChannelInputReadiness) {
+  channel.terminalConnected = false;
+}
+
+export function markTerminalChannelConnected(channel: ChannelInputReadiness) {
+  // Pre-admission connected is not remembered for a later ACK.
+  if (channel.state === 'open') channel.terminalConnected = true;
+}
+
+export function isTerminalChannelInputReady(channel: ChannelInputReadiness) {
+  return channel.state === 'open'
+    && (channel.inputReadiness !== 'terminal-connected' || channel.terminalConnected === true);
+}
+
+export class TerminalMuxInputNotReadyError extends Error {
+  constructor(sessionId: string) {
+    super(`terminal mux input is not ready for session ${sessionId}`);
+    this.name = 'TerminalMuxInputNotReadyError';
+  }
 }
 
 export function setSessionChannelBodySubscribed(

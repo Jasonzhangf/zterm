@@ -27,6 +27,22 @@ Foreground resume is a data-refresh trigger only. On Android it may refresh the 
 
 ## Test Layers
 
+### JS exact-channel input readiness candidate
+
+The channel runtime owns an explicit `terminal-connected` input policy for the
+exact Rex lane. Shared Host/backend types do not yet include Rex; combination
+must wire this policy from the real typed Host. Exact tmux/Herdr opens retain
+their default ACK-ready input behavior.
+
+Inject mux frames through the current socket's actual onmessage handler and
+capture the final wrapped socket send. A matching opened ACK must permit body
+subscription/control while reliable input stays queued. Pre-admission connected,
+buffer messages, stale socket frames and retired/rejected attempts cannot release
+input. Current admitted connected releases queued input once; duplicates do not
+resend it. Verify typed, raw and pre-wrapped input at the final send boundary,
+ordinary-input drop semantics, and default tmux/Herdr behavior. No live Rex or
+Android acceptance follows from this in-process fixture.
+
 ### State machine and snapshot
 
 `src/lib/android-connection-service-snapshot.test.ts` must cover:

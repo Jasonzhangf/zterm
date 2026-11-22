@@ -10,6 +10,8 @@ import {
   getSessionTerminalChannel,
   setSessionChannelBodySubscribed,
   TerminalMuxChannelNotOpenError,
+  TerminalMuxInputNotReadyError,
+  isTerminalChannelInputReady,
 } from '../lib/terminal-channel-mux-runtime';
 import {
   getSessionTargetTerminalTransport,
@@ -113,6 +115,15 @@ function requireTerminalMuxChannel(
   return channel;
 }
 
+function requireTerminalMuxInputReady(store: SessionTransportRuntimeStore, sessionId: string, channelId?: unknown) {
+  const channel = requireTerminalMuxChannel(store, sessionId);
+  if ((channelId !== undefined && channelId !== channel.channelId)
+    || (channel.inputReadiness === 'terminal-connected' && !isTerminalChannelInputReady(channel))) {
+    throw new TerminalMuxInputNotReadyError(sessionId);
+  }
+  return channel;
+}
+
 export function wrapSessionPayloadForTargetMuxRuntime(options: {
   store: SessionTransportRuntimeStore;
   sessionId: string;
@@ -121,6 +132,9 @@ export function wrapSessionPayloadForTargetMuxRuntime(options: {
 }): string | ArrayBuffer {
   const targetSocket = getSessionTargetTerminalTransport(options.store, options.sessionId);
   if (!targetSocket || targetSocket !== options.ws) {
+    if (getSessionTerminalChannel(options.store.terminalChannels, options.sessionId)?.inputReadiness === 'terminal-connected') {
+      throw new TerminalMuxChannelNotOpenError(options.sessionId);
+    }
     return options.data;
   }
   if (typeof options.data !== 'string') {
@@ -135,7 +149,7 @@ export function wrapSessionPayloadForTargetMuxRuntime(options: {
   try {
     parsed = JSON.parse(options.data);
   } catch {
-    const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+    const channel = requireTerminalMuxInputReady(options.store, options.sessionId);
     return JSON.stringify(buildTerminalMuxChannelMessage(channel.channelId, {
       type: 'input',
       payload: options.data,
@@ -146,6 +160,10 @@ export function wrapSessionPayloadForTargetMuxRuntime(options: {
     throw new Error('terminal mux outbound payload requires a typed JSON message');
   }
   if (parsed.type.startsWith('mux-')) {
+    if (parsed.type === 'mux-channel-message' && isRecord(parsed.payload)
+      && isRecord(parsed.payload.message) && parsed.payload.message.type === 'input') {
+      requireTerminalMuxInputReady(options.store, options.sessionId, parsed.payload.channelId);
+    }
     return options.data;
   }
   if (parsed.type === 'close') {
@@ -171,7 +189,9 @@ export function wrapSessionPayloadForTargetMuxRuntime(options: {
   if (lane === 'target') {
     return JSON.stringify(buildTerminalMuxTargetMessage(message as Parameters<typeof buildTerminalMuxTargetMessage>[0]));
   }
-  const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+  const channel = message.type === 'input'
+    ? requireTerminalMuxInputReady(options.store, options.sessionId)
+    : requireTerminalMuxChannel(options.store, options.sessionId);
   return JSON.stringify(buildTerminalMuxChannelMessage(
     channel.channelId,
     message as Parameters<typeof buildTerminalMuxChannelMessage>[1],

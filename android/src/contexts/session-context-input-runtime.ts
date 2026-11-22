@@ -7,6 +7,7 @@ import {
 } from '@zterm/shared/terminal/input-chunking';
 import {
   enqueueReliableInputChunks,
+  isSessionInputTransportReady,
   isSessionMessageTransportReady,
   readDaemonConnectionSessionResource,
   readDaemonConnectionSessionSocket,
@@ -86,7 +87,7 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
     return;
   }
 
-  if (isSessionMessageTransportReady(resource, ws)) {
+  if (isSessionInputTransportReady(resource, ws)) {
     const bufferedBytes = Number.isFinite(ws.bufferedAmount)
       ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
       : 0;
@@ -147,6 +148,13 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
     }
     // Input path keeps transport input synchronous and moves head refresh to a
     // coalesced microtask so refresh work cannot block key dispatch.
+    return;
+  }
+
+  if (isSessionMessageTransportReady(resource, ws)) {
+    // Ordinary input keeps its existing no-queue drop semantics. Waiting for
+    // terminal connected is not physical transport failure or recovery demand.
+    options.runtimeDebug('session.input.drop.input-not-ready', { sessionId: targetSessionId });
     return;
   }
 

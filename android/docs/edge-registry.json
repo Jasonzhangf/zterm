@@ -4726,6 +4726,11 @@
       "status": "active"
     },
     {
+      "from_module": "client.reliable_input",
+      "to_module": "client.terminal_channel_mux",
+      "status": "active"
+    },
+    {
       "from_module": "client.file_browser",
       "to_module": "client.reliable_input",
       "status": "active"

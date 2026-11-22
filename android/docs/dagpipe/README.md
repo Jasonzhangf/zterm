@@ -267,6 +267,28 @@ Android client boundaries frozen by these graphs:
   saved direct/Tailscale entries and never owns terminal body truth.
 - One stable daemon target owns one physical transport; terminal sessions are
   logical channels on that transport, not per-session sockets.
+- `open_session_channels` constructs each mux open from its own session demand.
+  An explicit exact target carries its backend, opaque stable identity, and
+  `existingOnly: true`. Only a matching `mux-channel-opened.stableId` admits
+  the current channel for allocation and body subscription. A missing or
+  different identity retires that channel only; it does not fail the physical
+  target or siblings. Legacy opens without an exact identity keep their
+  existing behavior.
+- Invalid exact intent settles only its current opening row, without an open
+  or close frame; the first mux-ready batch continues with healthy siblings.
+  Each open demand settles as admitted, rejected, or cancelled. Cancellation
+  retires the old attempt before replacement. A new exact attempt on an existing
+  JS-owned socket uses a fresh routing ID and removes the retired reverse lookup.
+  Service-owned replay keeps its existing IDs. Admission permits subscription;
+  connected/first body and physical recovery remain with their existing owners.
+- A recoverable logical close first settles any pending open intent. For a
+  settled current exact channel, teardown keeps its current channel/generation
+  guard, and `no_body_demand` remains business idle. Active/live demand uses the
+  existing per-session reconnect builder with the same backend, opaque identity,
+  and `existingOnly: true`; the default name catalog is not queried. Inactive
+  exact channels stay idle. A rejected original identity ends through the
+  existing pending-intent failure terminal without opening or feeding a
+  same-name sibling. Legacy/non-exact closes retain the existing catalog branch.
 - A session channel failure must not close sibling channels on the same target.
 - Physical transport heartbeat/reconnect/backoff belongs to the connection
   owner; foreground/background only changes data-refresh cadence.

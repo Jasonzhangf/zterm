@@ -6,6 +6,9 @@ import {
   createTerminalChannelMuxStore,
   getSessionTerminalChannel,
   removeSessionTerminalChannel,
+  getTerminalChannelsForTarget,
+  resetTerminalChannelInputReadiness,
+  updateSessionTerminalChannelState,
   type SessionTerminalChannelRuntime,
   type TerminalChannelMuxStore,
 } from './terminal-channel-mux-runtime';
@@ -23,10 +26,14 @@ type TransportTargetKeyHost = Pick<Host, 'bridgeHost' | 'bridgePort' | 'authToke
   | 'transportMode'
 >>;
 
+export type SessionTransportHost = Host & {
+  readonly expectedSessionIdentity?: string;
+};
+
 export interface SessionTransportRuntime {
   sessionId: string;
   targetKey: string;
-  host: Host;
+  host: SessionTransportHost;
   activeSocket: BridgeTransportSocket | null;
   supersededSockets: BridgeTransportSocket[];
   channelId: string | null;
@@ -44,7 +51,7 @@ export interface SessionTransportResource {
   runtime: SessionTransportRuntime | null;
   targetRuntime: TargetTransportRuntime | null;
   targetKey: string | null;
-  host: Host | null;
+  host: SessionTransportHost | null;
   socket: BridgeTransportSocket | null;
   socketReadyState: number | null;
   socketState: SessionTransportSocketState;
@@ -140,7 +147,7 @@ function normalizePort(port: number | undefined | null) {
   return Math.max(1, Math.floor(port || 3333));
 }
 
-function normalizeHostForRuntime(host: Host): Host {
+function normalizeHostForRuntime(host: SessionTransportHost): SessionTransportHost {
   return {
     ...host,
     bridgeHost: host.bridgeHost.trim(),
@@ -261,7 +268,7 @@ export function getSessionTransportTargetKey(
 export function upsertSessionTransportRuntime(
   store: SessionTransportRuntimeStore,
   sessionId: string,
-  host: Host,
+  host: SessionTransportHost,
 ) {
   const normalizedHost = normalizeHostForRuntime(host);
   const nextTarget = ensureTargetTransportRuntime(store, normalizedHost);
@@ -398,6 +405,14 @@ export function setTargetTerminalTransport(
   if (!targetRuntime) {
     return null;
   }
+  if (targetRuntime.terminalTransport !== socket) {
+    for (const channel of getTerminalChannelsForTarget(store.terminalChannels, targetKey)) {
+      resetTerminalChannelInputReadiness(channel);
+      if (channel.inputReadiness === 'terminal-connected' && channel.state === 'open') {
+        updateSessionTerminalChannelState(store.terminalChannels, channel.sessionId, 'opening');
+      }
+    }
+  }
   targetRuntime.terminalTransport = socket;
   if (!socket) {
     targetRuntime.terminalMuxReady = false;
@@ -417,14 +432,7 @@ export function setSessionTargetTerminalTransport(
   if (!targetRuntime) {
     return null;
   }
-  targetRuntime.terminalTransport = socket;
-  if (!socket) {
-    targetRuntime.terminalMuxReady = false;
-  }
-  if (!socket) {
-    maybeDeleteEmptyTargetRuntime(store, targetRuntime.key);
-  }
-  return targetRuntime;
+  return setTargetTerminalTransport(store, targetRuntime.key, socket);
 }
 
 export function getSessionTargetTerminalMuxReady(

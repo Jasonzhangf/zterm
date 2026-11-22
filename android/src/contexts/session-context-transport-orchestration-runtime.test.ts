@@ -6,6 +6,7 @@ import {
   notifyTargetNetworkSignalRuntime,
   reportTargetNetworkProbeErrorRuntime,
   resolveMuxChannelClosedWithControlStatusRuntime,
+  retireRejectedExactChannelRuntime,
   routeTargetSocketFailureRuntime,
 } from './session-context-transport-orchestration-runtime';
 import {
@@ -671,7 +672,222 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
   });
 });
 
+describe('retireRejectedExactChannelRuntime', () => {
+  const makeRejectionOptions = (overrides: Record<string, unknown> = {}) => {
+    const pending = makePendingIntent('session-exact');
+    const pendingSessionTransportOpenIntentsRef = {
+      current: new Map([[pending.sessionId, pending]]),
+    };
+    const ws = makeFailedSocket(WebSocket.OPEN);
+    return {
+      pending,
+      ws,
+      pendingSessionTransportOpenIntentsRef,
+      options: {
+        sessionId: 'session-exact',
+        channelId: 'channel-exact',
+        sessionName: 'same-label',
+        expectedSessionIdentity: 'rex:pane/a.b+c 雪',
+        replySessionIdentity: 'rex:pane/other',
+        ws,
+        readSessionTerminalChannel: () => ({
+          channelId: 'channel-exact',
+          state: 'opening' as const,
+        }),
+        writeSessionTerminalChannelState: vi.fn(),
+        pendingSessionTransportOpenIntentsRef,
+        clearSessionHandshakeTimeout: vi.fn(),
+        sendSocketPayload: vi.fn(),
+        onSessionTransportTeardown: vi.fn(),
+        updateSessionSync: vi.fn(),
+        emitSessionStatus: vi.fn(),
+        runtimeDebug: vi.fn(),
+        ...overrides,
+      },
+    };
+  };
+
+  it('retires only the rejected current channel and leaves the physical socket intact', () => {
+    const { pendingSessionTransportOpenIntentsRef, options } = makeRejectionOptions();
+
+    retireRejectedExactChannelRuntime(options);
+
+    expect(options.clearSessionHandshakeTimeout).toHaveBeenCalledWith('session-exact');
+    expect(options.writeSessionTerminalChannelState).toHaveBeenCalledWith('session-exact', 'closed');
+    expect(pendingSessionTransportOpenIntentsRef.current.has('session-exact')).toBe(false);
+    expect(options.onSessionTransportTeardown).toHaveBeenCalledWith(
+      'session-exact',
+      'terminal mux exact identity rejected',
+    );
+    expect(options.sendSocketPayload).toHaveBeenCalledWith(
+      'session-exact',
+      options.ws,
+      JSON.stringify({
+        type: 'mux-channel-close',
+        payload: {
+          channelId: 'channel-exact',
+          reason: 'terminal mux exact identity rejected',
+        },
+      }),
+    );
+    expect(options.ws.close).not.toHaveBeenCalled();
+    expect(options.ws.reportFailure).not.toHaveBeenCalled();
+    expect(options.updateSessionSync).toHaveBeenCalledWith(
+      'session-exact',
+      expect.objectContaining({ state: 'disconnected' }),
+    );
+    expect(options.emitSessionStatus).toHaveBeenCalledWith(
+      'session-exact',
+      'closed',
+      'terminal mux exact session identity mismatch',
+    );
+    expect(options.emitSessionStatus).not.toHaveBeenCalledWith(
+      'session-exact',
+      'error',
+      expect.anything(),
+    );
+  });
+
+  it('settles local rejection when the channel close send fails', () => {
+    const sendSocketPayload = vi.fn(() => {
+      throw new Error('wire unavailable');
+    });
+    const { pendingSessionTransportOpenIntentsRef, options } = makeRejectionOptions({ sendSocketPayload });
+
+    expect(() => retireRejectedExactChannelRuntime(options)).not.toThrow();
+
+    expect(options.writeSessionTerminalChannelState).toHaveBeenCalledWith('session-exact', 'closed');
+    expect(pendingSessionTransportOpenIntentsRef.current.has('session-exact')).toBe(false);
+    expect(options.emitSessionStatus).toHaveBeenCalledWith(
+      'session-exact',
+      'closed',
+      'terminal mux exact session identity mismatch',
+    );
+    expect(options.runtimeDebug).toHaveBeenCalledWith(
+      'session.mux.channel-opened.exact-close-send-failed',
+      expect.objectContaining({ error: 'wire unavailable' }),
+    );
+  });
+
+  it('ignores a late rejection for a channel that is no longer the current opening attempt', () => {
+    const { options } = makeRejectionOptions({
+      readSessionTerminalChannel: () => ({
+        channelId: 'channel-new',
+        state: 'opening' as const,
+      }),
+    });
+
+    retireRejectedExactChannelRuntime(options);
+
+    expect(options.writeSessionTerminalChannelState).not.toHaveBeenCalled();
+    expect(options.sendSocketPayload).not.toHaveBeenCalled();
+    expect(options.onSessionTransportTeardown).not.toHaveBeenCalled();
+  });
+});
+
 describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
+  it('reopens a settled current exact channel without querying the name catalog', () => {
+    const queryTargetSessions = vi.fn(async () => ['same-name-tmux']);
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const onTransportTeardown = vi.fn();
+    const runtimeDebug = vi.fn();
+    const channel = makeClosedChannel('same-name');
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'same-name',
+      channelId: 'channel-1',
+      reason: 'mux data channel closed',
+      expectedSessionIdentity: 'opaque/exact',
+      shouldReconnectNow: true,
+      queryTargetSessions,
+      onTransportTeardown,
+      readSessionTerminalChannel: () => channel,
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus: vi.fn(),
+      runtimeDebug,
+    });
+
+    expect(queryTargetSessions).not.toHaveBeenCalled();
+    expect(onTransportTeardown).toHaveBeenCalledWith('session-1', 'mux data channel closed');
+    expect(scheduleReconnect).toHaveBeenCalledWith(
+      'session-1',
+      'mux data channel closed',
+      true,
+    );
+    expect(updateSessionSync).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith('session.mux.channel-closed.exact', {
+      sessionId: 'session-1',
+      channelId: 'channel-1',
+      expectedSessionIdentity: 'opaque/exact',
+      reconnectNow: true,
+    });
+  });
+
+  it('keeps an inactive exact channel idle without catalog query or reconnect', () => {
+    const queryTargetSessions = vi.fn(async () => ['same-name']);
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'same-name',
+      channelId: 'channel-1',
+      reason: 'inactive exact channel closed',
+      expectedSessionIdentity: 'opaque/exact',
+      shouldReconnectNow: false,
+      queryTargetSessions,
+      readSessionTerminalChannel: () => makeClosedChannel('same-name'),
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus: vi.fn(),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(queryTargetSessions).not.toHaveBeenCalled();
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'idle',
+      ws: null,
+    }));
+  });
+
+  it('ignores a late exact close after the channel generation changed', () => {
+    const queryTargetSessions = vi.fn(async () => ['same-name']);
+    const scheduleReconnect = vi.fn();
+    const onTransportTeardown = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'same-name',
+      channelId: 'channel-old',
+      reason: 'late close',
+      expectedSessionIdentity: 'opaque/exact',
+      shouldReconnectNow: true,
+      queryTargetSessions,
+      readSessionTerminalChannel: () => ({
+        ...makeClosedChannel('same-name'),
+        channelId: 'channel-new',
+      }),
+      onTransportTeardown,
+      scheduleReconnect,
+      updateSessionSync: vi.fn(),
+      emitSessionStatus: vi.fn(),
+      runtimeDebug,
+    });
+
+    expect(queryTargetSessions).not.toHaveBeenCalled();
+    expect(onTransportTeardown).not.toHaveBeenCalled();
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith('session.mux.channel-closed.control-status.stale', {
+      sessionId: 'session-1',
+      channelId: 'channel-old',
+    });
+  });
+
   it('treats no_body_demand as business idle without control query or reconnect', async () => {
     const queryTargetSessions = vi.fn(async () => ['demo']);
     const scheduleReconnect = vi.fn();
