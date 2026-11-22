@@ -33,6 +33,68 @@ describe('Android connection service state machine', () => {
     expect(machine.readSnapshot().generation).toBe('g1');
   });
 
+  it('commits optional identity after heartbeat and keeps snapshot copies immutable', () => {
+    const machine = createAndroidConnectionServiceStateMachine({ now: () => 1000 });
+
+    send(machine, { type: 'bind-target', target });
+    send(machine, { type: 'transport-opening', generation: 'g1' });
+    send(machine, { type: 'mux-ready', generation: 'g1', muxReadyPayload });
+    send(machine, { type: 'heartbeat-pong', generation: 'g1', at: 900 });
+    expect(send(machine, {
+      type: 'channel-opened',
+      generation: 'g1',
+      channelId: 'c1',
+      sessionName: 'same-name',
+      stableId: 'rex:v1:c1',
+    }).state).toBe('channels-ready');
+
+    const first = machine.readSnapshot();
+    expect(first.channels).toEqual([{
+      channelId: 'c1',
+      state: 'open',
+      sessionName: 'same-name',
+      stableId: 'rex:v1:c1',
+    }]);
+    first.channels[0].stableId = 'mutated-copy';
+    expect(machine.readSnapshot().channels[0].stableId).toBe('rex:v1:c1');
+
+    send(machine, { type: 'channel-closed', generation: 'g1', channelId: 'c1', reason: 'closed' });
+    expect(machine.readSnapshot().channels[0]).toMatchObject({
+      state: 'closed',
+      stableId: 'rex:v1:c1',
+    });
+  });
+
+  it('keeps legacy identity optional and resets it with the generation', () => {
+    const machine = createAndroidConnectionServiceStateMachine({ now: () => 1000 });
+
+    send(machine, { type: 'bind-target', target });
+    send(machine, { type: 'transport-opening', generation: 'g1' });
+    send(machine, { type: 'mux-ready', generation: 'g1', muxReadyPayload });
+    send(machine, {
+      type: 'channel-opened',
+      generation: 'g1',
+      channelId: 'legacy',
+      sessionName: 'tmux',
+    });
+    expect(machine.readSnapshot().channels[0]).not.toHaveProperty('stableId');
+
+    send(machine, {
+      type: 'transport-failure',
+      generation: 'g1',
+      message: 'physical loss',
+    });
+    send(machine, { type: 'transport-opening', generation: 'g2' });
+    send(machine, { type: 'mux-ready', generation: 'g2', muxReadyPayload });
+    send(machine, {
+      type: 'channel-opened',
+      generation: 'g2',
+      channelId: 'legacy',
+      sessionName: 'tmux',
+    });
+    expect(machine.readSnapshot().channels[0]).not.toHaveProperty('stableId');
+  });
+
   it('retires one generation after exactly three heartbeat misses', () => {
     const machine = createAndroidConnectionServiceStateMachine({ now: () => 1000 });
     send(machine, { type: 'bind-target', target });

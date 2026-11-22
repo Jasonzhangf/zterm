@@ -1346,6 +1346,30 @@ describe('AndroidConnectionServiceTransportSocket', () => {
     });
   });
 
+  it('preserves exact-open identity options at the native socket entry', () => {
+    const socket = new AndroidConnectionServiceTransportSocket(target);
+    socket.send(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-exact',
+        sessionName: 'shell',
+        expectedSessionIdentity: 'rex:v1:block-1',
+        existingOnly: true,
+      },
+    }));
+
+    expect(plugin.sendCommand).toHaveBeenCalledWith({
+      type: 'open-channel',
+      targetKey: 'daemon:mac-studio',
+      channelId: 'channel-exact',
+      sessionName: 'shell',
+      options: {
+        expectedSessionIdentity: 'rex:v1:block-1',
+        existingOnly: true,
+      },
+    });
+  });
+
   it('ignores events projected for a different target', async () => {
     const { listeners, add } = listenerMock();
     plugin.addListener.mockImplementation(add);

@@ -2018,16 +2018,30 @@ public class AndroidConnectionService extends Service {
                 throw new IllegalArgumentException("mux channel-opened channelId missing");
             }
             ChannelIntent channel = desiredChannels.get(channelId);
-            stateMachine.dispatch(AndroidConnectionServiceEvent.channelOpened(
-                generation, channelId, channel == null ? "" : channel.sessionName,
-                System.currentTimeMillis()), System.currentTimeMillis());
-            if (channel != null) {
-                channel.opened = true;
+            if (channel == null || channel.opened) {
+                return;
+            }
+            String expectedIdentity = optionExpectedSessionIdentity(channel.options);
+            if (expectedIdentity != null
+                && !hasExactIdentity(payload, "stableId", expectedIdentity)) {
+                retireChannel(channelId, "session-identity-mismatch",
+                    "session_identity_mismatch", true, null);
+                return;
+            }
+            String stableId = optionalString(payload, "stableId");
+            if (!stateMachine.dispatch(AndroidConnectionServiceEvent.channelOpened(
+                generation, channelId, channel.sessionName, stableId,
+                System.currentTimeMillis()), System.currentTimeMillis())) {
+                return;
+            }
+            channel.opened = true;
+            if (!isRexChannel(channel)) {
+                channel.inputReady = true;
             }
             drainPendingFrames(channelId);
             publishEvent(AndroidConnectionServiceEventEnvelope.channelOpened(
                 target.targetKey, generation, channelId,
-                channel == null ? "" : channel.sessionName,
+                channel.sessionName,
                 stateMachine.readSnapshot()));
             refreshNotification();
         }
@@ -2038,6 +2052,25 @@ public class AndroidConnectionService extends Service {
             if (channelId.trim().isEmpty() || message == null) {
                 throw new IllegalArgumentException("mux channel-message envelope invalid");
             }
+            ChannelIntent channel = desiredChannels.get(channelId);
+            if (channel == null
+                || (optionExpectedSessionIdentity(channel.options) != null
+                    && !channel.opened)) {
+                return;
+            }
+            if (isRexChannel(channel) && !channel.opened) {
+                return;
+            }
+            boolean exactIdentityChannel =
+                optionExpectedSessionIdentity(channel.options) != null;
+            boolean rexConnected = false;
+            if (isRexChannel(channel) && exactIdentityChannel
+                && "connected".equals(message.optString("type"))) {
+                if (!channel.inputReady) {
+                    channel.inputReady = true;
+                    rexConnected = true;
+                }
+            }
             publishEvent(AndroidConnectionServiceEventEnvelope.channelMessage(
                 new AndroidConnectionServiceChannelMessageEvent.Builder()
                     .targetKey(target.targetKey)
@@ -2045,6 +2078,9 @@ public class AndroidConnectionService extends Service {
                     .channelId(channelId)
                     .message(message)
                     .build()));
+            if (rexConnected) {
+                drainPendingFrames(channelId);
+            }
         }
 
         private void handleChannelClosed(JSONObject payload) throws JSONException {
@@ -2054,12 +2090,7 @@ public class AndroidConnectionService extends Service {
             }
             String reason = payload.optString("reason", "closed");
             String code = payload.optString("code", "");
-            desiredChannels.remove(channelId);
-            stateMachine.dispatch(AndroidConnectionServiceEvent.channelClosed(
-                generation, channelId, reason),
-                System.currentTimeMillis());
-            publishEvent(AndroidConnectionServiceEventEnvelope.channelClosed(
-                target.targetKey, generation, channelId, reason, code));
+            retireChannel(channelId, reason, code, false, null);
         }
 
         private void handleMuxError(JSONObject payload) {
@@ -2129,6 +2160,10 @@ public class AndroidConnectionService extends Service {
                         "terminal channel is not open");
                     return;
                 }
+            }
+            if (!isChannelInputSendable(channelId, frame)) {
+                holdUnreadyInput(channelId, frame, source);
+                return;
             }
             if ((current != null || currentRtc != null) && generation != null
                 && transportNetworkGeneration == networkEpoch
@@ -2325,6 +2360,23 @@ public class AndroidConnectionService extends Service {
                 || (currentLifecycleEpoch != null && requireOpenedChannel
                     && !isChannelOpened(safeRetryChannelId))) {
                 clearRetryPending();
+                if (channelRetired) {
+                    if (retryLifecycleEpoch != null) {
+                        removeDeferredFramesForChannel(safeRetryChannelId);
+                        return;
+                    }
+                    if (safeRetryChannelId != null && !safeRetryChannelId.isEmpty()
+                        && requireOpenedChannel
+                        && currentLifecycleEpoch != null
+                        && !desiredChannels.containsKey(safeRetryChannelId)) {
+                        removeDeferredFramesForChannel(safeRetryChannelId);
+                        return;
+                    }
+                    parkCurrentAndDeferredForReconnect(new DeferredSend(
+                        frame, channelId, source, requireOpenedChannel,
+                        currentLifecycleEpoch, gate));
+                    return;
+                }
                 if (safeRetryChannelId != null && !safeRetryChannelId.isEmpty()
                     && requireOpenedChannel
                     && currentLifecycleEpoch != null
@@ -2335,6 +2387,11 @@ public class AndroidConnectionService extends Service {
                 parkCurrentAndDeferredForReconnect(new DeferredSend(
                     frame, channelId, source, requireOpenedChannel,
                     retryLifecycleEpoch, gate));
+                return;
+            }
+            if (!isChannelInputSendable(safeRetryChannelId, frame)) {
+                clearRetryPending();
+                holdUnreadyInput(safeRetryChannelId, frame, source);
                 return;
             }
             final String lane = resolveClientFrameLane(frame);
@@ -2438,6 +2495,12 @@ public class AndroidConnectionService extends Service {
                     return;
                 }
             } catch (RuntimeException error) {
+                if (channelLifecycleChanged(channelId, retryLifecycleEpoch)) {
+                    clearRetryPending();
+                    removeDeferredFramesForChannel(
+                        channelId == null ? null : channelId.trim());
+                    return;
+                }
                 if (attempt >= SEND_RETRY_MAX) {
                     clearRetryPending();
                     parkCurrentAndDeferredForReconnect(new DeferredSend(
@@ -2450,6 +2513,12 @@ public class AndroidConnectionService extends Service {
             // OPEN but send() returned false, or a retry was attempted, is a
             // congestion wait for RTC. It must not escalate to reconnect.
             if (rtcLaneOpen) {
+                if (channelLifecycleChanged(channelId, retryLifecycleEpoch)) {
+                    clearRetryPending();
+                    removeDeferredFramesForChannel(
+                        channelId == null ? null : channelId.trim());
+                    return;
+                }
                 long currentBuffered = rtcLaneBuffered;
                 if (isSendCongested(currentBuffered)) {
                     congestionDraining = true;
@@ -2480,6 +2549,12 @@ public class AndroidConnectionService extends Service {
                     attempt + 1));
                 return;
             }
+            if (channelLifecycleChanged(channelId, retryLifecycleEpoch)) {
+                clearRetryPending();
+                removeDeferredFramesForChannel(
+                    channelId == null ? null : channelId.trim());
+                return;
+            }
             if (attempt >= SEND_RETRY_MAX) {
                 clearRetryPending();
                 parkCurrentAndDeferredForReconnect(new DeferredSend(
@@ -2507,6 +2582,65 @@ public class AndroidConnectionService extends Service {
             ));
         }
 
+        private boolean channelLifecycleChanged(String channelId, Long expectedEpoch) {
+            String safeChannelId = channelId == null ? null : channelId.trim();
+            if (safeChannelId == null || safeChannelId.isEmpty()) {
+                return false;
+            }
+            return !java.util.Objects.equals(
+                expectedEpoch, channelLifecycleEpoch(safeChannelId));
+        }
+
+        private boolean isRexChannel(ChannelIntent channel) {
+            return channel != null && "rex".equals(optionBackend(channel.options));
+        }
+
+        private boolean isRexInputFrame(String channelId, JSONObject frame) {
+            if (channelId == null || channelId.trim().isEmpty() || frame == null
+                || !"mux-channel-message".equals(frame.optString("type"))) {
+                return false;
+            }
+            JSONObject payload = frame.optJSONObject("payload");
+            return payload != null
+                && channelId.equals(payload.optString("channelId"))
+                && payload.optJSONObject("message") != null
+                && "input".equals(payload.optJSONObject("message").optString("type"));
+        }
+
+        private boolean isChannelInputSendable(String channelId, JSONObject frame) {
+            if (!isRexInputFrame(channelId, frame)) {
+                return true;
+            }
+            ChannelIntent channel = desiredChannels.get(channelId);
+            if (channel == null || !channel.opened) {
+                return false;
+            }
+            return !isRexChannel(channel) || channel.inputReady;
+        }
+
+        private void holdUnreadyInput(
+            String channelId,
+            JSONObject frame,
+            AndroidConnectionCommand source
+        ) {
+            String safeChannelId = channelId == null ? null : channelId.trim();
+            if (safeChannelId == null || safeChannelId.isEmpty()) {
+                publishFrameRejected(source, "frame-dropped-pending-overflow",
+                    "pending frame window exceeded "
+                        + TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL);
+                return;
+            }
+            java.util.ArrayDeque<JSONObject> pending = pendingFrames.get(safeChannelId);
+            if (pending != null && pending.peekFirst() == frame) {
+                return;
+            }
+            if (!enqueuePendingFrame(safeChannelId, frame)) {
+                publishFrameRejected(source, "frame-dropped-pending-overflow",
+                    "pending frame window exceeded "
+                        + TARGET_RUNTIME_MAX_PENDING_FRAMES_PER_CHANNEL);
+            }
+        }
+
         private boolean isSendCongested(long bufferedBytes) {
             return bufferedBytes >= SEND_FLOW_HIGH_WATER_BYTES;
         }
@@ -2529,6 +2663,12 @@ public class AndroidConnectionService extends Service {
                 if (channelId == null || channelId.isEmpty()) {
                     continue;
                 }
+                if (!java.util.Objects.equals(
+                    deferred.lifecycleEpoch, channelLifecycleEpoch(channelId))
+                    || !desiredChannels.containsKey(channelId)) {
+                    mutated = true;
+                    continue;
+                }
                 java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(channelId);
                 if (queue == null) {
                     queue = new java.util.ArrayDeque<>();
@@ -2549,6 +2689,11 @@ public class AndroidConnectionService extends Service {
             }
             String safeChannelId = current.channelId == null ? null : current.channelId.trim();
             if (safeChannelId != null && !safeChannelId.isEmpty()) {
+                if (!java.util.Objects.equals(
+                    current.lifecycleEpoch, channelLifecycleEpoch(safeChannelId))
+                    || !desiredChannels.containsKey(safeChannelId)) {
+                    return;
+                }
                 java.util.ArrayDeque<JSONObject> queue = pendingFrames.get(safeChannelId);
                 if (queue != null && queue.peekFirst() == current.frame) {
                     return;
@@ -2664,6 +2809,7 @@ public class AndroidConnectionService extends Service {
             if (!drainingPendingFrames.add(channelId)) {
                 return;
             }
+            java.util.ArrayDeque<JSONObject> heldInputs = new java.util.ArrayDeque<>();
             try {
                 while (!queue.isEmpty()) {
                     if (sendRetryPending || sendStalled) {
@@ -2671,6 +2817,11 @@ public class AndroidConnectionService extends Service {
                         return;
                     }
                     JSONObject frame = queue.peekFirst();
+                    if (!isChannelInputSendable(channelId, frame)) {
+                        queue.removeFirst();
+                        heldInputs.addLast(frame);
+                        continue;
+                    }
                     attemptSendWithRetry(frame, channelId, null, false, SendGate.MUX_READY,
                         current, currentRtc, generation, transportNetworkGeneration,
                         channelLifecycleEpoch(channelId), 1);
@@ -2686,6 +2837,9 @@ public class AndroidConnectionService extends Service {
                     }
                 }
             } finally {
+                while (!heldInputs.isEmpty()) {
+                    queue.addFirst(heldInputs.removeLast());
+                }
                 drainingPendingFrames.remove(channelId);
                 if (queue.isEmpty()) {
                     pendingFrames.remove(channelId);
@@ -2707,6 +2861,15 @@ public class AndroidConnectionService extends Service {
         }
 
         void sendChannelOpen(AndroidConnectionCommand command) {
+            if (isRexChannelOptions(command.channelOptions)
+                && !hasExactExistingRexIntent(command.channelOptions)) {
+                rejectRexExactExistingIntent(command);
+                return;
+            }
+            if (hasBlankExpectedSessionIdentity(command.channelOptions)) {
+                rejectBlankExpectedSessionIdentity(command);
+                return;
+            }
             ChannelIntent existing = desiredChannels.get(command.channelId);
             if (existing != null && existing.opened
                 && isMuxReady()
@@ -2730,6 +2893,12 @@ public class AndroidConnectionService extends Service {
             // with the exact requested channelId so the client mapping is 1:1.
             long lifecycleEpoch = nextChannelLifecycleEpoch.incrementAndGet();
             channelLifecycleEpochs.put(command.channelId, lifecycleEpoch);
+            if (existing != null) {
+                if (!sameChannelIdentity(existing.sessionName, existing.options,
+                    command.sessionName, command.channelOptions)) {
+                    removeChannelQueues(command.channelId, command.channelId);
+                }
+            }
             desiredChannels.put(command.channelId,
                 new ChannelIntent(
                     command.channelId, command.sessionName, command.channelOptions, lifecycleEpoch));
@@ -2760,6 +2929,76 @@ public class AndroidConnectionService extends Service {
             return backend == null ? "" : backend.trim();
         }
 
+        private static boolean isRexChannelOptions(JSONObject options) {
+            return "rex".equals(optionBackend(options));
+        }
+
+        private static boolean hasExactExistingRexIntent(JSONObject options) {
+            if (!hasNonblankExpectedSessionIdentity(options)
+                || options == null
+                || !options.has("existingOnly")) {
+                return false;
+            }
+            Object existingOnly = options.opt("existingOnly");
+            return existingOnly instanceof Boolean && Boolean.TRUE.equals(existingOnly);
+        }
+
+        private static boolean hasNonblankExpectedSessionIdentity(JSONObject options) {
+            if (options == null || !options.has("expectedSessionIdentity")) {
+                return false;
+            }
+            Object value = options.opt("expectedSessionIdentity");
+            return value instanceof String && !((String) value).trim().isEmpty();
+        }
+
+        private static String optionExpectedSessionIdentity(JSONObject options) {
+            if (options == null || !options.has("expectedSessionIdentity")) {
+                return null;
+            }
+            Object value = options.opt("expectedSessionIdentity");
+            if (!(value instanceof String)) {
+                return null;
+            }
+            String normalized = ((String) value).trim();
+            return normalized.isEmpty() ? null : normalized;
+        }
+
+        private static boolean hasBlankExpectedSessionIdentity(JSONObject options) {
+            if (options == null || !options.has("expectedSessionIdentity")) {
+                return false;
+            }
+            Object value = options.opt("expectedSessionIdentity");
+            return !(value instanceof String) || ((String) value).trim().isEmpty();
+        }
+
+        private static boolean hasExactIdentity(
+            JSONObject payload, String key, String expectedIdentity
+        ) {
+            Object value = payload.opt(key);
+            if (!(value instanceof String)) {
+                return false;
+            }
+            return expectedIdentity.equals(value);
+        }
+
+        private static String optionalString(JSONObject payload, String key) {
+            Object value = payload == null ? null : payload.opt(key);
+            return value instanceof String ? (String) value : null;
+        }
+
+        private void rejectBlankExpectedSessionIdentity(AndroidConnectionCommand command) {
+            publishEvent(AndroidConnectionServiceEventEnvelope.commandRejected(
+                command, "invalid-expected-session-identity",
+                "expectedSessionIdentity must be a nonblank string"));
+        }
+
+        private void rejectRexExactExistingIntent(AndroidConnectionCommand command) {
+            publishEvent(AndroidConnectionServiceEventEnvelope.commandRejected(
+                command, "invalid-expected-session-identity",
+                "Rex channel open requires a nonblank expectedSessionIdentity "
+                    + "and existingOnly=true"));
+        }
+
         private boolean sameChannelIdentity(
             String leftSession, JSONObject leftOptions,
             String rightSession, JSONObject rightOptions) {
@@ -2768,7 +3007,10 @@ public class AndroidConnectionService extends Service {
             if (leftNormalized.isEmpty() || !leftNormalized.equals(rightNormalized)) {
                 return false;
             }
-            return optionBackend(leftOptions).equals(optionBackend(rightOptions));
+            return optionBackend(leftOptions).equals(optionBackend(rightOptions))
+                && java.util.Objects.equals(
+                    optionExpectedSessionIdentity(leftOptions),
+                    optionExpectedSessionIdentity(rightOptions));
         }
 
         private void closeStaleChannelsForSession(
@@ -2833,6 +3075,7 @@ public class AndroidConnectionService extends Service {
             synchronized (desiredChannels) {
                 for (ChannelIntent channel : desiredChannels.values()) {
                     channel.opened = false;
+                    channel.inputReady = false;
                     sendChannelOpenFrame(channel.channelId, channel.sessionName, channel.options, null);
                 }
             }
@@ -2887,26 +3130,42 @@ public class AndroidConnectionService extends Service {
                 AndroidConnectionCommand.targetMessage(target.targetKey, requestId, message));
         }
         void sendCloseChannel(AndroidConnectionCommand command) {
-            desiredChannels.remove(command.channelId);
-            String channelId = command.channelId == null ? null : command.channelId.trim();
+            retireChannel(command.channelId, command.reason, "closed", true, command);
+        }
+
+        private void retireChannel(
+            String channelId, String reason, String code, boolean sendCloseFrame,
+            AndroidConnectionCommand closeSource
+        ) {
+            String rawChannelId = channelId;
+            channelId = channelId == null ? null : channelId.trim();
+            ChannelIntent existing = desiredChannels.remove(rawChannelId);
+            if (existing == null) {
+                return;
+            }
             if (channelId != null && !channelId.isEmpty()) {
                 channelLifecycleEpochs.put(channelId, nextChannelLifecycleEpoch.incrementAndGet());
             }
-            removeChannelQueues(command.channelId, channelId);
-            if (!isMuxReady()) {
+            removeChannelQueues(rawChannelId, channelId);
+            stateMachine.dispatch(AndroidConnectionServiceEvent.channelClosed(
+                generation, rawChannelId, reason),
+                System.currentTimeMillis());
+            publishEvent(AndroidConnectionServiceEventEnvelope.channelClosed(
+                target.targetKey, generation, rawChannelId, reason, code));
+            if (!sendCloseFrame || !isMuxReady()) {
                 return;
             }
             JSONObject frame = new JSONObject();
             try {
                 frame.put("type", "mux-channel-close");
                 JSONObject payload = new JSONObject();
-                payload.put("channelId", command.channelId);
-                payload.put("reason", command.reason);
+                payload.put("channelId", rawChannelId);
+                payload.put("reason", reason);
                 frame.put("payload", payload);
             } catch (JSONException error) {
                 throw new IllegalArgumentException("channel-close serialization failed", error);
             }
-            sendOrQueue(frame, command.channelId, command);
+            sendOrQueue(frame, rawChannelId, closeSource);
         }
 
         private void scheduleBackoff() {
@@ -3263,6 +3522,7 @@ public class AndroidConnectionService extends Service {
             final JSONObject options;
             final long lifecycleEpoch;
             volatile boolean opened;
+            volatile boolean inputReady;
 
             ChannelIntent(String channelId, String sessionName, JSONObject options, long lifecycleEpoch) {
                 this.channelId = channelId;
@@ -3270,6 +3530,7 @@ public class AndroidConnectionService extends Service {
                 this.options = options;
                 this.lifecycleEpoch = lifecycleEpoch;
                 this.opened = false;
+                this.inputReady = false;
             }
         }
 

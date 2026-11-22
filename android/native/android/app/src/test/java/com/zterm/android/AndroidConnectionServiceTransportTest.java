@@ -60,6 +60,56 @@ public final class AndroidConnectionServiceTransportTest {
     private static void useImmediateScheduler(AndroidConnectionService service) throws Exception {
         setField(service, "sendRetryScheduler", IMMEDIATE_SCHEDULER);
     }
+
+    private static final class ExactIdentityHarness {
+        final AndroidConnectionService service;
+        final Object runtime;
+        final List<AndroidConnectionServiceEventEnvelope> events = new ArrayList<>();
+        final List<String> sent = new ArrayList<>();
+        final okhttp3.WebSocketListener listener;
+
+        ExactIdentityHarness(String targetKey) throws Exception {
+            AndroidConnectionService.resetForTests();
+            AndroidConnectionService.registerListenerForTests(
+                new AndroidConnectionServiceListener() {
+                    @Override
+                    public void onSnapshot(AndroidConnectionServiceSnapshot snapshot) {
+                    }
+
+                    @Override
+                    public void onEvent(AndroidConnectionServiceEventEnvelope event) {
+                        events.add(event);
+                    }
+                });
+            service = new AndroidConnectionService();
+            setField(service, "workerHandler", new Handler(Looper.getMainLooper()));
+            AndroidConnectionServiceTarget target = target(targetKey);
+            runtime = newRuntime(service, target);
+            setField(runtime, "stateMachine", readyStateMachine(target));
+            setField(runtime, "generation", "gen-1");
+            setField(runtime, "transportNetworkGeneration", 0L);
+            setField(service, "networkGeneration", 0L);
+            listener = new okhttp3.WebSocketListener() {
+                @Override
+                public void onMessage(WebSocket webSocket, String text) {
+                    try {
+                        Method handleServerText = runtime.getClass().getDeclaredMethod(
+                            "handleServerText", String.class, WebSocket.class);
+                        handleServerText.setAccessible(true);
+                        handleServerText.invoke(runtime, text, webSocket);
+                    } catch (Exception error) {
+                        throw new RuntimeException(error);
+                    }
+                }
+            };
+            setField(runtime, "socket", fakeSocket(sent, true));
+        }
+
+        void close() {
+            AndroidConnectionService.resetForTests();
+        }
+    }
+
     @Test
     public void channelMessageQueuesUntilTransportReadyThenPreservesWirePayload() throws Exception {
         AndroidConnectionService service = new AndroidConnectionService();
@@ -3169,12 +3219,1019 @@ public final class AndroidConnectionServiceTransportTest {
         sendChannelMessage.invoke(runtime, channelId, message);
     }
 
+    private static JSONObject exactChannelOptions(String backend, Object expectedIdentity)
+        throws Exception {
+        JSONObject options = new JSONObject().put("backend", backend);
+        if (expectedIdentity != null) {
+            options.put("expectedSessionIdentity", expectedIdentity);
+        }
+        if ("rex".equals(backend)) {
+            options.put("existingOnly", true);
+        }
+        return options;
+    }
+
+    private static boolean invokeSendChannelOpen(
+        Object runtime, String channelId, String sessionName, JSONObject options
+    ) throws Exception {
+        Method sendChannelOpen = runtime.getClass().getDeclaredMethod(
+            "sendChannelOpen", AndroidConnectionCommand.class);
+        sendChannelOpen.setAccessible(true);
+        sendChannelOpen.invoke(runtime, AndroidConnectionCommand.openChannel(
+            "target-a", channelId, sessionName, options));
+        return isChannelDesired(runtime, channelId);
+    }
+
+    private static void invokeReplayDesiredChannels(Object runtime) throws Exception {
+        Method replay = runtime.getClass().getDeclaredMethod("replayDesiredChannels");
+        replay.setAccessible(true);
+        replay.invoke(runtime);
+    }
+
+    private static void invokeDrainPendingFrames(Object runtime, String channelId)
+        throws Exception {
+        Method drain = runtime.getClass().getDeclaredMethod(
+            "drainPendingFrames", String.class);
+        drain.setAccessible(true);
+        drain.invoke(runtime, channelId);
+    }
+
+    private static void invokeHandleRtcFlowChanged(
+        Object runtime, long bufferedBytes, long sampledAt
+    ) throws Exception {
+        Method flowChanged = runtime.getClass().getDeclaredMethod(
+            "handleRtcFlowChanged", long.class, long.class);
+        flowChanged.setAccessible(true);
+        flowChanged.invoke(runtime, bufferedBytes, sampledAt);
+    }
+
+    private static void invokeListenerText(
+        ExactIdentityHarness harness, String text
+    ) throws Exception {
+        WebSocket socket = (WebSocket) field(harness.runtime, "socket");
+        harness.listener.onMessage(socket, text);
+    }
+
+    private static void invokeHandleChannelOpened(Object runtime, JSONObject payload)
+        throws Exception {
+        Method handleChannelOpened = runtime.getClass().getDeclaredMethod(
+            "handleChannelOpened", JSONObject.class);
+        handleChannelOpened.setAccessible(true);
+        try {
+            handleChannelOpened.invoke(runtime, payload);
+        } catch (java.lang.reflect.InvocationTargetException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            throw error;
+        }
+    }
+
+    private static void invokeHandleChannelMessage(Object runtime, JSONObject payload)
+        throws Exception {
+        Method handleChannelMessage = runtime.getClass().getDeclaredMethod(
+            "handleChannelMessage", JSONObject.class);
+        handleChannelMessage.setAccessible(true);
+        try {
+            handleChannelMessage.invoke(runtime, payload);
+        } catch (java.lang.reflect.InvocationTargetException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            throw error;
+        }
+    }
+
+    private static void invokeHandleChannelClosed(Object runtime, JSONObject payload)
+        throws Exception {
+        Method handleChannelClosed = runtime.getClass().getDeclaredMethod(
+            "handleChannelClosed", JSONObject.class);
+        handleChannelClosed.setAccessible(true);
+        try {
+            handleChannelClosed.invoke(runtime, payload);
+        } catch (java.lang.reflect.InvocationTargetException error) {
+            Throwable cause = error.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            throw error;
+        }
+    }
+
+    private static boolean isChannelDesired(Object runtime, String channelId) throws Exception {
+        Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
+        desiredChannelsField.setAccessible(true);
+        Map<?, ?> desiredChannels = (Map<?, ?>) desiredChannelsField.get(runtime);
+        return desiredChannels.containsKey(channelId);
+    }
+
+    private static boolean isChannelOpenedForTests(Object runtime, String channelId)
+        throws Exception {
+        Field desiredChannelsField = runtime.getClass().getDeclaredField("desiredChannels");
+        desiredChannelsField.setAccessible(true);
+        Map<?, ?> desiredChannels = (Map<?, ?>) desiredChannelsField.get(runtime);
+        Object channel = desiredChannels.get(channelId);
+        if (channel == null) {
+            return false;
+        }
+        Field openedField = channel.getClass().getDeclaredField("opened");
+        openedField.setAccessible(true);
+        return openedField.getBoolean(channel);
+    }
+
+    private static int pendingFrameCountForTests(Object runtime) throws Exception {
+        Method pendingCount = runtime.getClass().getDeclaredMethod(
+            "pendingFrameCountForTests");
+        pendingCount.setAccessible(true);
+        return ((Number) pendingCount.invoke(runtime)).intValue();
+    }
+
+    private static JSONObject queuedInput(String text) throws Exception {
+        return new JSONObject().put("type", "input").put("data", text);
+    }
+
+    private static List<JSONObject> framesOfType(List<String> sent, String type)
+        throws Exception {
+        List<JSONObject> frames = new ArrayList<>();
+        for (String raw : sent) {
+            JSONObject frame = new JSONObject(raw);
+            if (type.equals(frame.optString("type"))) {
+                frames.add(frame);
+            }
+        }
+        return frames;
+    }
+
+    private static List<String> messageTypesForChannel(List<String> sent, String channelId)
+        throws Exception {
+        List<String> types = new ArrayList<>();
+        for (JSONObject frame : framesOfType(sent, "mux-channel-message")) {
+            JSONObject payload = frame.getJSONObject("payload");
+            if (channelId.equals(payload.optString("channelId"))) {
+                types.add(payload.getJSONObject("message").optString("type"));
+            }
+        }
+        return types;
+    }
+
     private static void invokeRetireForNetworkChange(Object runtime, String reason)
         throws Exception {
         Method retire = runtime.getClass().getDeclaredMethod(
             "retireForNetworkChange", String.class);
         retire.setAccessible(true);
         retire.invoke(runtime, reason);
+    }
+
+    private static JSONObject channelOpenedPayload(
+        String channelId, String sessionName, String stableId
+    ) throws Exception {
+        JSONObject payload = new JSONObject()
+            .put("channelId", channelId)
+            .put("sessionName", sessionName == null ? "" : sessionName);
+        if (stableId != null) {
+            payload.put("stableId", stableId);
+        }
+        return payload;
+    }
+
+    private static JSONObject channelMessagePayload(
+        String channelId, String messageType
+    ) throws Exception {
+        return new JSONObject()
+            .put("channelId", channelId)
+            .put("message", new JSONObject().put("type", messageType));
+    }
+
+    private static void assertExactIdentityFailure(
+        ExactIdentityHarness harness,
+        String channelId,
+        String sessionName,
+        String stableId
+    ) throws Exception {
+        invokeSendChannelOpen(harness.runtime, channelId, sessionName,
+            exactChannelOptions("rex", "exact-" + channelId));
+        sendChannelMessage(harness.runtime, channelId, queuedInput("queued"));
+
+        int eventCount = harness.events.size();
+        invokeHandleChannelOpened(harness.runtime,
+            channelOpenedPayload(channelId, sessionName, stableId));
+
+        assertEquals("invalid exact acknowledgement must not release input",
+            0, messageTypesForChannel(harness.sent, channelId).size());
+        assertFalse("invalid exact acknowledgement must not leave a desired channel",
+            isChannelDesired(harness.runtime, channelId));
+        assertEquals("invalid exact acknowledgement must discard pending input",
+            0, pendingFrameCountForTests(harness.runtime));
+        assertEquals("invalid exact acknowledgement must publish exactly one closure",
+            1L, harness.events.subList(eventCount, harness.events.size()).stream()
+                .filter(event -> event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_CLOSED
+                    && channelId.equals(event.channelId)
+                    && "session_identity_mismatch".equals(event.code))
+                .count());
+        assertEquals("invalid exact acknowledgement must not publish opened state",
+            0L, harness.events.subList(eventCount, harness.events.size()).stream()
+                .filter(event -> event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED)
+                .count());
+        List<JSONObject> closeFrames = framesOfType(harness.sent, "mux-channel-close");
+        assertEquals("invalid exact acknowledgement must close only its channel",
+            1, closeFrames.size());
+        assertEquals(channelId,
+            closeFrames.get(0).getJSONObject("payload").optString("channelId"));
+    }
+
+    @Test
+    public void exactIdentityMatchingAcknowledgementPreservesIdentityButHoldsRexInput()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-match");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeSendChannelOpen(harness.runtime, "channel-sibling", "sibling-block",
+                exactChannelOptions("rex", "sibling-block-a"));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("rex"));
+            sendChannelMessage(harness.runtime, "channel-sibling", queuedInput("sibling"));
+
+            assertEquals("input must wait for the exact acknowledgement",
+                2, pendingFrameCountForTests(harness.runtime));
+            List<JSONObject> opens = framesOfType(harness.sent, "mux-channel-open");
+            assertEquals("both Rex channels must submit exact opens", 2, opens.size());
+            for (JSONObject open : opens) {
+                JSONObject payload = open.getJSONObject("payload");
+                assertTrue("initial Rex open must preserve literal existingOnly=true",
+                    payload.has("existingOnly") && payload.optBoolean("existingOnly"));
+            }
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-a"));
+
+            assertTrue("matching acknowledgement must not release Rex input",
+                messageTypesForChannel(harness.sent, "channel-rex").isEmpty());
+            assertTrue("sibling input must remain queued",
+                messageTypesForChannel(harness.sent, "channel-sibling").isEmpty());
+            assertEquals("both inputs must remain queued before either channel connects",
+                2, pendingFrameCountForTests(harness.runtime));
+            assertTrue("matching acknowledgement must mark its channel opened",
+                isChannelOpenedForTests(harness.runtime, "channel-rex"));
+            assertFalse("matching acknowledgement must not open its sibling",
+                isChannelOpenedForTests(harness.runtime, "channel-sibling"));
+
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-rex", "connected"));
+
+            assertEquals("same-channel connected must release only its Rex input",
+                java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-rex"));
+            assertTrue("sibling input must still wait for its connected",
+                messageTypesForChannel(harness.sent, "channel-sibling").isEmpty());
+            assertEquals("sibling input must remain queued",
+                1, pendingFrameCountForTests(harness.runtime));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityPreAdmissionRexConnectedIsNotReplayedAfterAcknowledgement()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-early-connected");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("early-connected"));
+
+            invokeListenerText(harness,
+                "{\"type\":\"mux-channel-message\",\"payload\":{"
+                    + "\"channelId\":\"channel-rex\",\"message\":{\"type\":\"connected\"}}}");
+            invokeListenerText(harness,
+                "{\"type\":\"mux-channel-opened\",\"payload\":{"
+                    + "\"channelId\":\"channel-rex\",\"sessionName\":\"rex-block\","
+                    + "\"stableId\":\"rex-block-a\"}}");
+
+            assertTrue("pre-admission connected must not release held input",
+                messageTypesForChannel(harness.sent, "channel-rex").isEmpty());
+            assertEquals("current admission ACK must publish opened state",
+                1L, harness.events.stream().filter(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED
+                        && "channel-rex".equals(event.channelId)).count());
+
+            invokeListenerText(harness,
+                "{\"type\":\"mux-channel-message\",\"payload\":{"
+                    + "\"channelId\":\"channel-rex\",\"message\":{\"type\":\"connected\"}}}");
+            assertEquals("only post-admission connected releases held input",
+                java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-rex"));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityUsesActualTransportIngressForReadinessAndControl()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-ingress");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("held"));
+            sendChannelMessage(harness.runtime, "channel-rex",
+                new JSONObject().put("type", "body-subscription").put("bodySubscribed", true));
+
+            invokeListenerText(harness,
+                "{\"type\":\"mux-channel-opened\",\"payload\":{"
+                    + "\"channelId\":\"channel-rex\",\"sessionName\":\"rex-block\","
+                    + "\"stableId\":\"rex-block-a\"}}");
+
+            assertEquals("ACK must still project the admitted channel",
+                1, harness.events.stream().filter(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED
+                        && "channel-rex".equals(event.channelId)).count());
+            assertEquals("control must pass the held input head",
+                java.util.Collections.singletonList("body-subscription"),
+                messageTypesForChannel(harness.sent, "channel-rex"));
+            assertEquals("held input must remain queued", 1,
+                pendingFrameCountForTests(harness.runtime));
+
+            invokeListenerText(harness,
+                "{\"type\":\"mux-channel-message\",\"payload\":{"
+                    + "\"channelId\":\"channel-rex\",\"message\":{\"type\":\"connected\"}}}");
+
+            assertEquals("current transport connected releases held input in order",
+                java.util.Arrays.asList("body-subscription", "input"),
+                messageTypesForChannel(harness.sent, "channel-rex"));
+            assertEquals(0, pendingFrameCountForTests(harness.runtime));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityReadinessIsPerCurrentChannelAndFailsClosed()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-readiness");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-a", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeSendChannelOpen(harness.runtime, "channel-b", "rex-block",
+                exactChannelOptions("rex", "rex-block-b"));
+            sendChannelMessage(harness.runtime, "channel-a", queuedInput("a"));
+            sendChannelMessage(harness.runtime, "channel-b", queuedInput("b"));
+
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-a", "rex-block", "rex-block-a"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-b", "rex-block", "rex-block-b"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-b", "connected"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-b", "buffer-sync"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-b", "input-ack"));
+
+            assertTrue("sibling connected must not release A",
+                messageTypesForChannel(harness.sent, "channel-a").isEmpty());
+            assertEquals("only B input may send",
+                java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-b"));
+
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-a", "connected"));
+            assertEquals("A connected must release only A",
+                java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-a"));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityReadinessResetsOnReplayAndReopensWithExactOptions()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-replay");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-a"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-rex", "connected"));
+
+            invokeReplayDesiredChannels(harness.runtime);
+
+            assertFalse("replay must require a fresh current acknowledgement",
+                isChannelOpenedForTests(harness.runtime, "channel-rex"));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("post-replay"));
+            assertTrue("replay must clear readiness until connected returns",
+                messageTypesForChannel(harness.sent, "channel-rex").size() <= 1);
+            List<JSONObject> opens = framesOfType(harness.sent, "mux-channel-open");
+            assertEquals(2, opens.size());
+            JSONObject replayed = opens.get(1).getJSONObject("payload");
+            assertEquals("rex", replayed.optString("backend"));
+            assertEquals("rex-block-a", replayed.optString("expectedSessionIdentity"));
+            assertTrue("replay must preserve literal existingOnly=true",
+                replayed.has("existingOnly") && replayed.optBoolean("existingOnly"));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityAttachFailureAndCancellationDiscardHeldRexInput()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-failure");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-peer", "rex-peer",
+                exactChannelOptions("rex", "rex-peer-a"));
+            sendChannelMessage(harness.runtime, "channel-peer", queuedInput("peer-held"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-peer", "rex-peer", "rex-peer-a"));
+
+            invokeHandleChannelClosed(harness.runtime, new JSONObject()
+                .put("channelId", "channel-peer")
+                .put("reason", "attach-failed")
+                .put("code", "attach_failed"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-peer", "connected"));
+
+            assertFalse("failed peer channel must be retired",
+                isChannelDesired(harness.runtime, "channel-peer"));
+            assertTrue("failed peer channel must not release input",
+                messageTypesForChannel(harness.sent, "channel-peer").isEmpty());
+            assertEquals("failed peer held input must be discarded",
+                0, pendingFrameCountForTests(harness.runtime));
+            assertEquals("late connected must not be projected",
+                0L, harness.events.stream().filter(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_MESSAGE
+                        && "channel-peer".equals(event.channelId)).count());
+
+            invokeSendChannelOpen(harness.runtime, "channel-cancel", "rex-cancel",
+                exactChannelOptions("rex", "rex-cancel-a"));
+            sendChannelMessage(harness.runtime, "channel-cancel", queuedInput("cancel-held"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-cancel", "rex-cancel", "rex-cancel-a"));
+            Method sendCloseChannel = harness.runtime.getClass().getDeclaredMethod(
+                "sendCloseChannel", AndroidConnectionCommand.class);
+            sendCloseChannel.setAccessible(true);
+            sendCloseChannel.invoke(harness.runtime, AndroidConnectionCommand.closeChannel(
+                "target-exact-failure", "channel-cancel", "user-close"));
+
+            assertFalse("cancelled channel must not release held input",
+                messageTypesForChannel(harness.sent, "channel-cancel").contains("input"));
+            assertEquals("cancelled channel input must be discarded",
+                0, pendingFrameCountForTests(harness.runtime));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityReuseCannotDrainOrResetRexReadiness()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-reuse-ready");
+        try {
+            JSONObject options = exactChannelOptions("rex", "rex-block-a");
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block", options);
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-a"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-rex", "connected"));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("ready-input"));
+            assertEquals(1, messageTypesForChannel(harness.sent, "channel-rex").size());
+
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block", options);
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("reuse-input"));
+            assertEquals("same exact current channel remains ready",
+                2, messageTypesForChannel(harness.sent, "channel-rex").size());
+            assertEquals("reuse must publish one opened projection",
+                2L, harness.events.stream().filter(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED
+                        && "channel-rex".equals(event.channelId)).count());
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityAcknowledgementCommitsStableIdInSnapshotAndOpenedProjection()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-projection");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-a"));
+
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) field(harness.runtime, "stateMachine");
+            org.json.JSONObject snapshotJson = stateMachine.readSnapshot().toJson();
+            org.json.JSONObject channelJson = snapshotJson.getJSONArray("channels")
+                .getJSONObject(0);
+            assertTrue("admitted identity must be serialized",
+                channelJson.has("stableId"));
+            assertEquals("rex-block-a", channelJson.getString("stableId"));
+
+            AndroidConnectionServiceEventEnvelope opened = harness.events.stream()
+                .filter(event -> event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED
+                    && "channel-rex".equals(event.channelId))
+                .reduce((first, second) -> second)
+                .orElseThrow(() -> new AssertionError("opened event missing"));
+            org.json.JSONObject eventChannelJson = opened.snapshot.toJson()
+                .getJSONArray("channels").getJSONObject(0);
+            assertEquals("opened event must read the committed snapshot identity",
+                "rex-block-a", eventChannelJson.getString("stableId"));
+
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "different-identity"));
+
+            assertEquals("duplicate acknowledgement must not rewrite identity",
+                "rex-block-a", stateMachine.readSnapshot().toJson()
+                    .getJSONArray("channels").getJSONObject(0).getString("stableId"));
+            assertEquals("duplicate acknowledgement must not publish another open",
+                1L, harness.events.stream().filter(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED
+                        && "channel-rex".equals(event.channelId)).count());
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityMissingAcknowledgementIsRejectedWithoutInputDelivery()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-missing");
+        try {
+            assertExactIdentityFailure(harness, "channel-rex", "rex-block", null);
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityDifferentAcknowledgementIsRejectedWithoutInputDelivery()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-different");
+        try {
+            assertExactIdentityFailure(
+                harness, "channel-rex", "rex-block", "rex-block-b");
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityRejectsMalformedAcknowledgementWithoutStringCoercion()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-malformed");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("queued"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", null)
+                    .put("stableId", 7));
+
+            assertTrue("numeric stableId must not be coerced",
+                messageTypesForChannel(harness.sent, "channel-rex").isEmpty());
+            assertFalse("numeric stableId must retire the channel",
+                isChannelDesired(harness.runtime, "channel-rex"));
+            assertEquals("numeric stableId must publish one typed closure",
+                1L, harness.events.stream().filter(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_CLOSED
+                        && "session_identity_mismatch".equals(event.code)).count());
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityBlankRequestIsRejectedInsteadOfFallingBackToLegacy()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-blank-request");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "  "));
+
+            assertFalse("blank expected identity must not create a desired channel",
+                isChannelDesired(harness.runtime, "channel-rex"));
+            assertTrue("blank expected identity must reject the open command",
+                harness.events.stream().anyMatch(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.COMMAND_REJECTED));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityMissingRexIdentityRejectsBeforeChannelAllocation()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-missing-request");
+        try {
+            int eventCount = harness.events.size();
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                new JSONObject().put("backend", "rex").put("existingOnly", true));
+
+            assertFalse("missing Rex identity must not create a desired channel",
+                isChannelDesired(harness.runtime, "channel-rex"));
+            assertTrue("missing Rex identity must not send a channel open",
+                framesOfType(harness.sent, "mux-channel-open").isEmpty());
+            assertEquals("missing Rex identity must publish one command rejection",
+                1L, harness.events.subList(eventCount, harness.events.size()).stream()
+                    .filter(event ->
+                        event.kind == AndroidConnectionServiceEventEnvelope.Kind.COMMAND_REJECTED
+                            && "invalid-expected-session-identity".equals(event.errorCode))
+                    .count());
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityMissingExistingOnlyRejectsBeforeChannelAllocation()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-missing-existing-only");
+        try {
+            JSONObject options = new JSONObject()
+                .put("backend", "rex")
+                .put("expectedSessionIdentity", "rex-block-a");
+            int eventCount = harness.events.size();
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block", options);
+
+            assertFalse("missing existingOnly must not create a desired channel",
+                isChannelDesired(harness.runtime, "channel-rex"));
+            assertTrue("missing existingOnly must not send a channel open",
+                framesOfType(harness.sent, "mux-channel-open").isEmpty());
+            assertEquals("missing existingOnly must publish one command rejection",
+                1L, harness.events.subList(eventCount, harness.events.size()).stream()
+                    .filter(event ->
+                        event.kind == AndroidConnectionServiceEventEnvelope.Kind.COMMAND_REJECTED
+                            && "invalid-expected-session-identity".equals(event.errorCode))
+                    .count());
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityGenericBackendAndLegacyAcknowledgementBothRemainValid()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-generic");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-generic", "generic-block",
+                exactChannelOptions("tmux", "generic-stable"));
+            invokeSendChannelOpen(harness.runtime, "channel-legacy", "legacy-block",
+                new JSONObject().put("backend", "tmux"));
+            sendChannelMessage(harness.runtime, "channel-generic", queuedInput("generic"));
+            sendChannelMessage(harness.runtime, "channel-legacy", queuedInput("legacy"));
+
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-generic", "generic-block", "generic-stable"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-legacy", "legacy-block", null));
+
+            assertEquals(java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-generic"));
+            assertEquals(java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-legacy"));
+            assertEquals(0, pendingFrameCountForTests(harness.runtime));
+            assertTrue(isChannelOpenedForTests(harness.runtime, "channel-generic"));
+            assertTrue(isChannelOpenedForTests(harness.runtime, "channel-legacy"));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityReuseCannotBypassIdentityAdmission()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-reuse");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-a"));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("old-identity"));
+            assertEquals("Rex input must remain held before terminal connected",
+                1, pendingFrameCountForTests(harness.runtime));
+
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-b"));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("new-identity"));
+
+            assertFalse("replacement must await its own acknowledgement",
+                isChannelOpenedForTests(harness.runtime, "channel-rex"));
+            assertEquals("neither old nor new identity input may send before admission",
+                0, messageTypesForChannel(harness.sent, "channel-rex").size());
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-b"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-rex", "connected"));
+
+            assertEquals("only the admitted channel input may send",
+                java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-rex"));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityRexInputRetriesAfterReadinessWithoutResubmittingEarly()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-extry");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-a"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-rex", "connected"));
+
+            List<Runnable> retries = new ArrayList<>();
+            setField(harness.service, "sendRetryScheduler",
+                (java.util.function.BiConsumer<Runnable, Long>) (runnable, delayMillis) ->
+                    retries.add(runnable));
+            int sentCount = harness.sent.size();
+            setField(harness.runtime, "socket", fakeSocketWithSendResults(
+                harness.sent, new boolean[] { false }));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("retry-input"));
+            assertTrue("ready input must enter the retry owner",
+                retries.size() >= 1);
+            assertEquals("failed send must not duplicate the ready input",
+                sentCount + 1, harness.sent.size());
+
+            invokeReplayDesiredChannels(harness.runtime);
+            int heldCount = harness.sent.size();
+            for (Runnable retry : retries) {
+                retry.run();
+            }
+            assertTrue("post-replay retry must not submit stale ready input",
+                harness.sent.size() == heldCount);
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityRexInputHoldsThroughDeferredAndFlowResume()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-resume");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-a"));
+            int openCount = harness.sent.size();
+
+            setField(harness.runtime, "sendRetryPending", true);
+            setField(harness.runtime, "retryPendingLane", "control");
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("resume-input"));
+            assertEquals("deferred ready-gated input must stay out of the wire",
+                openCount, harness.sent.size());
+            assertEquals(1, pendingFrameCountForTests(harness.runtime));
+
+            setField(harness.runtime, "sendRetryPending", false);
+            setField(harness.runtime, "retryPendingLane", null);
+            invokeDrainPendingFrames(harness.runtime, "channel-rex");
+            assertTrue("unready input must remain held through deferred drain",
+                messageTypesForChannel(harness.sent, "channel-rex").isEmpty());
+            assertEquals(1, pendingFrameCountForTests(harness.runtime));
+
+            invokeHandleRtcFlowChanged(harness.runtime, 0L, System.currentTimeMillis());
+            assertTrue("flow resume must not bypass readiness",
+                messageTypesForChannel(harness.sent, "channel-rex").isEmpty());
+            assertEquals(1, pendingFrameCountForTests(harness.runtime));
+
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-rex", "connected"));
+            assertEquals("readiness must release the held input once",
+                java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-rex"));
+            assertEquals(0, pendingFrameCountForTests(harness.runtime));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityNonRexBackendKeepsAcknowledgementTimeInputRelease()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-non-rex");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-generic", "generic-block",
+                exactChannelOptions("tmux", "generic-stable"));
+            sendChannelMessage(harness.runtime, "channel-generic", queuedInput("generic"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-generic", "generic-block", "generic-stable"));
+
+            assertEquals("qualified non-Rex input keeps ACK-time release",
+                java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-generic"));
+            assertEquals(0, pendingFrameCountForTests(harness.runtime));
+            assertTrue(isChannelOpenedForTests(harness.runtime, "channel-generic"));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentitySameNameDifferentStableIdsRemainIsolated()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-siblings");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-a", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeSendChannelOpen(harness.runtime, "channel-b", "rex-block",
+                exactChannelOptions("rex", "rex-block-b"));
+            sendChannelMessage(harness.runtime, "channel-a", queuedInput("a"));
+            sendChannelMessage(harness.runtime, "channel-b", queuedInput("b"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-b", "rex-block", "rex-block-b"));
+
+            assertEquals("same-name exact siblings must not be replaced",
+                2, framesOfType(harness.sent, "mux-channel-open").size());
+            assertEquals(0, framesOfType(harness.sent, "mux-channel-close").size());
+            assertTrue(messageTypesForChannel(harness.sent, "channel-a").isEmpty());
+            assertTrue("B input must wait for B terminal connected",
+                messageTypesForChannel(harness.sent, "channel-b").isEmpty());
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-b", "connected"));
+            assertEquals(java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-b"));
+            assertTrue(isChannelDesired(harness.runtime, "channel-a"));
+            assertTrue(isChannelDesired(harness.runtime, "channel-b"));
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityFailureKeepsSiblingAndSuppressesLateTraffic()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-late");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-sibling", "sibling-block",
+                exactChannelOptions("rex", "sibling-stable"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-sibling", "sibling-block", "sibling-stable"));
+            invokeSendChannelOpen(harness.runtime, "channel-failed", "failed-block",
+                exactChannelOptions("rex", "failed-stable"));
+            sendChannelMessage(harness.runtime, "channel-sibling", queuedInput("sibling"));
+            sendChannelMessage(harness.runtime, "channel-failed", queuedInput("failed"));
+
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-failed", "failed-block", "other-stable"));
+            int eventCount = harness.events.size();
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-failed", "failed-block", "failed-stable"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-failed", "connected"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-failed", "buffer-sync"));
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-failed", "input-ack"));
+
+            assertEquals("late traffic must not publish channel messages",
+                0L, harness.events.subList(eventCount, harness.events.size()).stream()
+                    .filter(event -> event.kind
+                        == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_MESSAGE)
+                    .count());
+            assertEquals("late acknowledgement must not publish a second opened event",
+                0L, harness.events.subList(eventCount, harness.events.size()).stream()
+                    .filter(event -> event.kind
+                        == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED)
+                    .count());
+            assertTrue("sibling input must still wait for its connected",
+                messageTypesForChannel(harness.sent, "channel-sibling").isEmpty());
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-sibling", "connected"));
+            assertEquals("sibling input must still send",
+                java.util.Collections.singletonList("input"),
+                messageTypesForChannel(harness.sent, "channel-sibling"));
+            assertTrue("sibling must remain opened",
+                isChannelOpenedForTests(harness.runtime, "channel-sibling"));
+            AndroidConnectionStateMachine stateMachine =
+                (AndroidConnectionStateMachine) field(harness.runtime, "stateMachine");
+            assertEquals("channel failure must not fail the physical target",
+                AndroidConnectionServiceSnapshot.State.CHANNELS_READY,
+                stateMachine.readSnapshot().state);
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityCancellationAndPeerCloseRejectLateAcknowledgement()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-cancel");
+        try {
+            invokeSendChannelOpen(harness.runtime, "channel-cancel", "cancel-block",
+                exactChannelOptions("rex", "cancel-stable"));
+            Method sendCloseChannel = harness.runtime.getClass().getDeclaredMethod(
+                "sendCloseChannel", AndroidConnectionCommand.class);
+            sendCloseChannel.setAccessible(true);
+            sendCloseChannel.invoke(harness.runtime, AndroidConnectionCommand.closeChannel(
+                "target-exact-cancel", "channel-cancel", "user-close"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-cancel", "cancel-block", "cancel-stable"));
+            assertFalse("cancelled channel must not be recreated by late acknowledgement",
+                isChannelDesired(harness.runtime, "channel-cancel"));
+            assertTrue("cancelled channel must not publish an opened event",
+                harness.events.stream().noneMatch(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_OPENED
+                        && "channel-cancel".equals(event.channelId)));
+
+            invokeSendChannelOpen(harness.runtime, "channel-peer", "peer-block",
+                exactChannelOptions("rex", "peer-stable"));
+            invokeHandleChannelClosed(harness.runtime, new JSONObject()
+                .put("channelId", "channel-peer")
+                .put("reason", "peer-close")
+                .put("code", "closed"));
+            long terminalClosures = harness.events.stream().filter(event ->
+                event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_CLOSED
+                    && "channel-peer".equals(event.channelId)).count();
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-peer", "peer-block", "peer-stable"));
+            invokeHandleChannelClosed(harness.runtime, new JSONObject()
+                .put("channelId", "channel-peer")
+                .put("reason", "duplicate-close")
+                .put("code", "closed"));
+
+            assertFalse("peer-closed channel must not be recreated",
+                isChannelDesired(harness.runtime, "channel-peer"));
+            assertEquals("peer close must publish one terminal closure",
+                terminalClosures, harness.events.stream().filter(event ->
+                    event.kind == AndroidConnectionServiceEventEnvelope.Kind.CHANNEL_CLOSED
+                        && "channel-peer".equals(event.channelId)).count());
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityUnknownPeerCloseDoesNotCreateRetirementState()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-unknown-close");
+        try {
+            int eventCount = harness.events.size();
+            invokeHandleChannelClosed(harness.runtime, new JSONObject()
+                .put("channelId", "unknown-peer-channel")
+                .put("reason", "peer-close")
+                .put("code", "closed"));
+
+            assertEquals("unknown peer close must not advance lifecycle state",
+                java.util.Collections.emptyMap(), field(harness.runtime, "channelLifecycleEpochs"));
+            assertEquals("unknown peer close must not publish a closure",
+                eventCount, harness.events.size());
+        } finally {
+            harness.close();
+        }
+    }
+
+    @Test
+    public void exactIdentityRetiredScheduledSendDoesNotWriteOrRequeue()
+        throws Exception {
+        ExactIdentityHarness harness = new ExactIdentityHarness("target-exact-retired-send");
+        try {
+            List<Runnable> retries = new ArrayList<>();
+            setField(harness.service, "sendRetryScheduler",
+                (java.util.function.BiConsumer<Runnable, Long>) (runnable, delayMillis) ->
+                    retries.add(runnable));
+            invokeSendChannelOpen(harness.runtime, "channel-rex", "rex-block",
+                exactChannelOptions("rex", "rex-block-a"));
+            invokeHandleChannelOpened(harness.runtime,
+                channelOpenedPayload("channel-rex", "rex-block", "rex-block-a"));
+            setField(harness.runtime, "socket", fakeSocketWithSendResults(
+                harness.sent, new boolean[] { false }));
+            sendChannelMessage(harness.runtime, "channel-rex", queuedInput("retired"));
+            assertEquals("unready fixture must not enter the send retry owner",
+                0, retries.size());
+            assertEquals("unready input must remain in the channel queue",
+                1, pendingFrameCountForTests(harness.runtime));
+
+            invokeHandleChannelMessage(harness.runtime,
+                channelMessagePayload("channel-rex", "connected"));
+            assertFalse("connected input must enter the send retry owner",
+                retries.isEmpty());
+
+            Method sendCloseChannel = harness.runtime.getClass().getDeclaredMethod(
+                "sendCloseChannel", AndroidConnectionCommand.class);
+            sendCloseChannel.setAccessible(true);
+            sendCloseChannel.invoke(harness.runtime, AndroidConnectionCommand.closeChannel(
+                "target-exact-retired-send", "channel-rex", "retired"));
+            int sentCount = harness.sent.size();
+            for (Runnable retry : retries) {
+                retry.run();
+            }
+
+            assertEquals("retired callback must not write business input",
+                sentCount, harness.sent.size());
+            assertEquals("retired callback must not repopulate the channel queue",
+                0, pendingFrameCountForTests(harness.runtime));
+            assertFalse("retired callback must not restore desired channel state",
+                isChannelDesired(harness.runtime, "channel-rex"));
+        } finally {
+            harness.close();
+        }
     }
 
     @Test

@@ -38,17 +38,21 @@ public final class AndroidConnectionServiceSnapshot {
         public final String channelId;
         public final State state;
         public final String sessionName;
+        public final String stableId;
 
         public Channel(String channelId, State state) {
-            this.channelId = channelId;
-            this.state = state;
-            this.sessionName = "";
+            this(channelId, state, "", null);
         }
 
         public Channel(String channelId, State state, String sessionName) {
+            this(channelId, state, sessionName, null);
+        }
+
+        public Channel(String channelId, State state, String sessionName, String stableId) {
             this.channelId = channelId;
             this.state = state;
             this.sessionName = sessionName == null ? "" : sessionName;
+            this.stableId = stableId;
         }
 
         public JSONObject toJson() throws JSONException {
@@ -57,6 +61,9 @@ public final class AndroidConnectionServiceSnapshot {
             json.put("state", state.wireName());
             if (!sessionName.isEmpty()) {
                 json.put("sessionName", sessionName);
+            }
+            if (stableId != null && !stableId.isEmpty()) {
+                json.put("stableId", stableId);
             }
             return json;
         }
@@ -295,7 +302,8 @@ public final class AndroidConnectionServiceSnapshot {
         for (int i = 0; i < a.size(); i++) {
             if (!Objects.equals(a.get(i).channelId, b.get(i).channelId)
                 || a.get(i).state != b.get(i).state
-                || !Objects.equals(a.get(i).sessionName, b.get(i).sessionName)) return false;
+                || !Objects.equals(a.get(i).sessionName, b.get(i).sessionName)
+                || !Objects.equals(a.get(i).stableId, b.get(i).stableId)) return false;
         }
         return true;
     }
@@ -303,7 +311,10 @@ public final class AndroidConnectionServiceSnapshot {
     @Override
     public int hashCode() {
         int channelHash = 0;
-        for (Channel channel : channels) channelHash = 31 * channelHash + Objects.hashCode(channel.sessionName);
+        for (Channel channel : channels) {
+            channelHash = 31 * channelHash + Objects.hashCode(channel.sessionName);
+            channelHash = 31 * channelHash + Objects.hashCode(channel.stableId);
+        }
         int routeDiagnosticHash = 0;
         for (RouteDiagnostic diagnostic : routeDiagnostics) routeDiagnosticHash = 31 * routeDiagnosticHash + Objects.hash(
             diagnostic.candidateId, diagnostic.path, diagnostic.endpoint, diagnostic.reason, diagnostic.startedAt,
