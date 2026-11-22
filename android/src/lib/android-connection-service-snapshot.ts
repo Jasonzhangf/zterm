@@ -23,6 +23,7 @@ export interface AndroidConnectionServiceChannelSnapshot {
   channelId: string;
   state: 'opening' | 'open' | 'closing' | 'closed';
   sessionName?: string;
+  stableId?: string;
 }
 
 export interface AndroidConnectionServiceError {
@@ -68,7 +69,13 @@ export type AndroidConnectionServiceEvent =
   | { type: 'release-target'; targetKey: string; reason: string }
   | { type: 'transport-opening'; generation: string }
   | { type: 'mux-ready'; generation: string; muxReadyPayload: Record<string, unknown> }
-  | { type: 'channel-opened'; generation: string; channelId: string }
+  | {
+    type: 'channel-opened';
+    generation: string;
+    channelId: string;
+    sessionName?: string;
+    stableId?: string;
+  }
   | { type: 'channel-closed'; generation: string; channelId: string; reason: string }
   | { type: 'heartbeat-pong'; generation: string; at: number }
   | { type: 'server-activity'; generation: string; at: number }
@@ -235,16 +242,30 @@ export function createAndroidConnectionServiceStateMachine(options: AndroidConne
         consecutiveHeartbeatMisses = 0;
         return true;
       case 'channel-opened':
-        if (snapshot.state !== 'mux-ready' && snapshot.state !== 'channels-ready') {
+        if (snapshot.state !== 'mux-ready'
+          && snapshot.state !== 'channels-ready'
+          && snapshot.state !== 'healthy') {
           return false;
         }
-        if (!snapshot.channels.some((channel) => channel.channelId === event.channelId)) {
-          snapshot.channels.push({ channelId: event.channelId, state: 'open' });
-        }
+        const hasChannel = snapshot.channels.some((channel) => channel.channelId === event.channelId);
+        const nextChannels = hasChannel ? snapshot.channels.map((channel) => (
+          channel.channelId === event.channelId
+            ? {
+              ...channel,
+              ...(event.sessionName ? { sessionName: event.sessionName } : {}),
+              ...(event.stableId ? { stableId: event.stableId } : {}),
+            }
+            : channel
+        )) : [...snapshot.channels, {
+          channelId: event.channelId,
+          state: 'open' as const,
+          ...(event.sessionName ? { sessionName: event.sessionName } : {}),
+          ...(event.stableId ? { stableId: event.stableId } : {}),
+        }];
         snapshot = {
           ...snapshot,
           state: 'channels-ready',
-          channels: [...snapshot.channels],
+          channels: nextChannels,
           lastActivityAt: now(),
           error: null,
         };

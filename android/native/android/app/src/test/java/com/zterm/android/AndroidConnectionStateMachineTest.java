@@ -46,6 +46,24 @@ public class AndroidConnectionStateMachineTest {
     }
 
     @Test
+    public void channelOpenedCommitsAfterHeartbeatPongFromHealthy() {
+        AndroidConnectionStateMachine machine = new AndroidConnectionStateMachine(null);
+        machine.dispatch(AndroidConnectionServiceEvent.bindTarget(target("daemon-a")), 1);
+        machine.dispatch(AndroidConnectionServiceEvent.transportOpening("gen-1"), 2);
+        machine.dispatch(AndroidConnectionServiceEvent.muxReady(
+            "gen-1", "{\"version\":1,\"daemonHostId\":\"daemon-host-exact\"}"), 3);
+        assertTrue(machine.dispatch(AndroidConnectionServiceEvent.heartbeatPong("gen-1", 4), 4));
+
+        assertTrue(machine.dispatch(AndroidConnectionServiceEvent.channelOpened(
+            "gen-1", "channel-after-pong", "shell", 5), 5));
+
+        AndroidConnectionServiceSnapshot snapshot = machine.readSnapshot();
+        assertEquals(AndroidConnectionServiceSnapshot.State.CHANNELS_READY, snapshot.state);
+        assertEquals(1, snapshot.channels.size());
+        assertEquals("channel-after-pong", snapshot.channels.get(0).channelId);
+    }
+
+    @Test
     public void threeMissesRetireExactlyOneGenerationAndStaleEventsCannotMutateSnapshot() {
         AndroidConnectionStateMachine machine = new AndroidConnectionStateMachine(null);
         machine.dispatch(AndroidConnectionServiceEvent.bindTarget(target("daemon-a")), 1);

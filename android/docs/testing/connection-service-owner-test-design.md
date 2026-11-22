@@ -69,6 +69,150 @@ Foreground resume is a data-refresh trigger only. On Android it may refresh the 
 
 `AndroidConnectionServiceTest.java`, `AndroidConnectionServiceTransportTest.java`, and `AndroidConnectionServicePluginTest.java` must use fake clock/handler and fake socket seams to cover heartbeat survival across Activity detach, three-miss retirement, auth stop, backoff scheduling, stale generation rejection, manual route command validation, mux-hello retry before mux-ready, and atomic pending-frame consumption with FIFO continuation.
 
+Exact channel-open admission:
+
+- Rex open qualification happens in `TargetRuntime.sendChannelOpen` before
+  reuse, desired-channel registration, replacement, queue migration, or wire
+  send. The request must carry a nonblank string `expectedSessionIdentity` and
+  literal boolean `existingOnly: true`. Missing or malformed identity uses the
+  existing `command-rejected` result with
+  `invalid-expected-session-identity`. A missing or nonliteral `existingOnly`
+  also ends at `command-rejected` without a desired channel or
+  `mux-channel-open`. There is no name-based fallback for Rex.
+- A `mux-channel-open` that carries `expectedSessionIdentity` is qualified. Its
+  `mux-channel-opened` acknowledgement must carry the same nonblank string
+  `stableId`. Missing, non-string, blank, and unequal values fail with
+  `session_identity_mismatch`. The native owner must not derive identity from
+  the session name.
+- Qualification is triggered by the explicit option, not by backend. Rex and
+  another supported backend must use the same check.
+- No opened state, opened event, input drain, or channel-message publication may
+  happen before admission. An unqualified legacy open keeps its previous
+  acknowledgement behavior.
+- A qualified and an unqualified request are not equivalent. Qualified requests
+  with the same session name and backend but different exact identities remain
+  separate channels.
+- Failure retires only the failed channel's desired intent, queues, and late
+  sends. It sends one channel-local close frame when mux is ready and publishes
+  one typed channel closure. It must not fail, reconnect, or rebuild the target.
+- A sibling channel stays usable. Late opened, `connected`, body, and input-ACK
+  frames on a retired channel do not reach its consumer.
+- Cancellation and peer close retire local channel state before late traffic is
+  processed. A later acknowledgement cannot recreate the channel. A close
+  response to an already retired channel does not publish a second terminal
+  closure.
+- A scheduled callback from a retired lifecycle must not write or repark that
+  channel's business frame. This is lifecycle fencing, not same-identity queue
+  migration.
+
+Required JVM cases:
+
+- A Rex open with no identity, a non-string or blank identity, or without
+  literal `existingOnly: true` publishes one typed command rejection. It sends
+  no `mux-channel-open`, mutates no prior desired channel, and does not replace
+  or reuse an existing channel.
+- Valid Rex fixtures carry `existingOnly: true`; the initial and replay
+  `mux-channel-open` payloads preserve that literal and the original exact
+  identity.
+- Matching exact acknowledgement releases only that channel's queued input.
+- Missing and different exact acknowledgements do not release input and publish
+  one typed closure.
+- Non-string and blank requested identities are rejected rather than treated as
+  legacy opens.
+- A generic backend exact open passes; an unqualified legacy open accepts a
+  legacy acknowledgement.
+- A same-name, different-exact replacement does not reuse or drain the old
+  channel. Same-name exact siblings remain isolated.
+- A failed exact channel does not affect a healthy sibling; late opened,
+  connected, body, and input-ACK traffic is suppressed.
+- Local cancellation and peer close reject a later matching acknowledgement.
+- A retired scheduled send neither writes nor repopulates the channel queue.
+
+The existing same-session replacement queue-migration case remains a separate
+defect. These admission tests must not depend on that migration passing.
+
+Admitted identity projection:
+
+- `open_session_channels` completes only after an admitted `mux-channel-opened`
+  acknowledgement commits into the native channel snapshot. The exact daemon
+  `stableId` string is stored once on the current
+  `AndroidConnectionServiceSnapshot.Channel`. It is not copied from the
+  requested identity, session name, backend, or WebView state.
+- `project_service_snapshot` reads that same channel record for both the
+  immediate opened event and a later snapshot-only reattachment. The opened
+  event does not carry a second top-level identity source.
+- `stableId` is optional. A legacy tmux or Herdr channel with no daemon
+  identity remains open and projects without the field. When present, the
+  exact admitted string survives snapshot serialization, immutable copies,
+  and close-state copies.
+- A heartbeat pong may move the native service to `HEALTHY`. A later admitted
+  channel open must still commit into the snapshot and move the service to
+  `CHANNELS_READY`. Transport and input owners remain unchanged.
+- A valid opened result is scoped to the current target, generation, and exact
+  channel ID. Closed, retired, old-generation, or unknown-channel events do
+  not create an opened projection. Two same-name channels project their own
+  identities and never substitute by session name.
+
+Required projection cases:
+
+- Public socket output carries `stableId` when the current native channel has
+  it.
+- Event-first and snapshot-first emit exactly one opened payload with the same
+  identity.
+- A fresh WebView that receives only the current snapshot replays one opened
+  payload without bind, open, reconnect, close, or release commands. The
+  reattachment test must first execute the real UI detach, then call
+  `reattach()`, assert that it returns true, and assert that the current
+  snapshot is read again.
+- Legacy snapshots without identity still emit their opened payload without
+  `stableId`.
+- Closed, stale-generation, and mismatched-channel events emit no opened
+  payload. A current sibling remains projectable.
+
+Rex native input readiness:
+
+- A matching exact `mux-channel-opened` commits `opened` and its `stableId`
+  projection, but does not release Rex `input`. Only a `connected` message for
+  that current opened channel on the current transport generation sets the
+  internal input-ready fact. Every admitted Rex channel has a valid exact
+  identity by the send-owner invariant, and its input waits for terminal
+  `connected`. The missing-identity readiness bypass is not part of the Rex
+  contract.
+- Readiness is channel-local and internal. It is not copied to the public
+  snapshot and is not derived from session name, target state, `mux-ready`,
+  `buffer-head`, `buffer-sync`, `input-ack`, or the transport state machine.
+- A pre-admission `connected` is discarded and not replayed after admission.
+  Duplicate `connected` does not duplicate a consumed input.
+- Replay or a new transport generation clears readiness before resending the
+  exact open intent. Reopening with the same exact identity and current lifecycle
+  does not clear a readiness already established on that current channel.
+- Final input submission rechecks the current `ChannelIntent` and lifecycle.
+  Immediate send, pending drain, retry, deferred recovery, flow resume, and
+  successful-send FIFO continuation all use that same check.
+- Held Rex input does not block attach control such as body subscription.
+  Input order remains FIFO. A control frame may pass the held head while the
+  input remains queued.
+- A channel-local close, attach failure, cancellation, or identity failure
+  discards that channel's held input and pending deferred callbacks. A sibling
+  channel and the physical target remain usable.
+- Legacy and non-Rex channels keep their existing open and ACK-time release
+  behavior. Explicit exact identity admission still applies to any backend
+  that requests it, while only Rex input waits for terminal `connected`.
+
+Required readiness cases:
+
+- Actual `WebSocketListener.onMessage` ingress for ACK, control progress,
+  same-channel `connected`, and released input; no helper-only readiness call.
+- Two same-name Rex channels with different exact identities remain isolated
+  through ACK and `connected`.
+- Attach failure and local cancellation discard held input; late `connected`
+  cannot revive the retired channel.
+- Replay clears readiness and preserves exact open options; existing exact
+  channel reuse neither drains input nor resets current readiness. Initial and
+  replay Rex frames both preserve `existingOnly: true`.
+- Existing immediate, retry, deferred, flow-resume, and replay owners remain
+  covered by the focused native transport suite.
+
 The native WebRTC backend gate must additionally cover offer/answer, early ICE ordering, direct versus relay ICE policy, ordered reliable DataChannel text/binary frames, exact generation fencing, close/error cleanup, and the negative guarantee that the backend cannot schedule route retry or create mux/channel state itself. The candidate gate must also verify relay signal URLs carry the Relay access token as `signalToken` while non-relay signal URLs keep the daemon `authToken`, and that direct-path `rtc-answer` SDP is stripped of host and Tailscale ICE candidates before `setRemoteDescription`.
 
 ### Existing regression gates

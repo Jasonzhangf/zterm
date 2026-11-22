@@ -428,12 +428,17 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       return;
     }
     this.readySnapshot = event.snapshot;
+    const currentChannel = event.snapshot.channels.find(
+      (channel) => channel.channelId === event.channelId && channel.state === 'open',
+    );
+    if (!currentChannel) return;
     this.readyChannelIds.add(event.channelId);
     this.projectChannelOpened(
       event.generation,
       event.channelId,
-      event.sessionName,
+      currentChannel.sessionName || event.sessionName,
       event.snapshot,
+      currentChannel.stableId,
     );
   }
 
@@ -493,7 +498,13 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       }
     }
     this.readyChannelIds = new Set([
-      ...openChannelIds,
+      ...Array.from(openChannelIds).filter((channelId) => (
+        this.readySnapshot?.channels.some((channel) => (
+          channel.channelId === channelId
+          && channel.state === 'open'
+          && Boolean(channel.sessionName)
+        ))
+      )),
       ...Array.from(this.readyChannelIds).filter((channelId) => this.projectedChannelIds.has(channelId)),
     ]);
     this.scheduleOpenProjection();
@@ -515,6 +526,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
     channelId: string,
     sessionName: string,
     snapshot: AndroidConnectionServiceSnapshot,
+    stableId?: string,
   ) {
     if (!this.onmessage || generation !== this.readyGeneration) return;
     if (this.projectedChannelsGeneration !== generation) {
@@ -529,6 +541,7 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
         payload: {
           channelId,
           sessionName,
+          ...(stableId ? { stableId } : {}),
           snapshot,
         },
       }),
@@ -554,15 +567,16 @@ export class AndroidConnectionServiceTransportSocket implements BridgeTransportS
       }
       if (this.readySnapshot) {
         for (const channelId of this.readyChannelIds) {
-          const channelSessionName = this.readySnapshot.channels.find(
-            (channel) => channel.channelId === channelId,
-          )?.sessionName;
-          if (!channelSessionName) continue;
+          const channel = this.readySnapshot.channels.find(
+            (candidate) => candidate.channelId === channelId && candidate.state === 'open',
+          );
+          if (!channel?.sessionName) continue;
           this.projectChannelOpened(
             generation,
             channelId,
-            channelSessionName,
+            channel.sessionName,
             this.readySnapshot,
+            channel.stableId,
           );
         }
       }
@@ -656,6 +670,8 @@ function mapFrameToCommand(frame: Record<string, unknown>) {
 // with `no_body_demand` and the session never reaches `connected`.
 const MUX_CHANNEL_OPEN_OPTION_KEYS = [
   'backend',
+  'expectedSessionIdentity',
+  'existingOnly',
   'cols',
   'rows',
   'widthMode',
