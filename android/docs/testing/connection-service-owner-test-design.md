@@ -130,7 +130,9 @@ Required JVM cases:
 - Valid Rex fixtures carry `existingOnly: true`; the initial and replay
   `mux-channel-open` payloads preserve that literal and the original exact
   identity.
-- Matching exact acknowledgement releases only that channel's queued input.
+- Matching exact acknowledgement admits and projects only that channel. It may
+  release subscription/control, while queued Rex input waits for that same
+  current channel's `connected` message.
 - Missing and different exact acknowledgements do not release input and publish
   one typed closure.
 - Non-string and blank requested identities are rejected rather than treated as
