@@ -1,0 +1,110 @@
+{
+  "id": "goals.assignment.handoff_query",
+  "version": "0.1",
+  "inputs": [{ "id": "arc.handoff_query_request", "schema": "Object" }],
+  "nodes": [
+    {
+      "id": "规范化显式只读查询请求",
+      "operator": "daemon.assignment.normalize_readonly_query",
+      "operator_version": "0.1",
+      "inputs": ["arc.handoff_query_request"],
+      "output": { "id": "arc.normalized_handoff_query_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "认证调用者并授权读取请求工作区",
+      "operator": "daemon.assignment.authorize_workspace_read",
+      "operator_version": "0.1",
+      "inputs": ["arc.normalized_handoff_query_request"],
+      "output": { "id": "arc.workspace_read_authorization_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "授权失败时发布不读取数据的作用域拒绝结果",
+      "operator": "daemon.assignment.reject_unauthorized_without_data_access",
+      "operator_version": "0.1",
+      "inputs": ["arc.workspace_read_authorization_result"],
+      "output": { "id": "arc.unauthorized_handoff_query_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "authorized", "value": false } },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "按workspaceId、goalId、invitationId解析精确tuple",
+      "operator": "goals.assignment.resolve_exact_invitation",
+      "operator_version": "0.1",
+      "inputs": ["arc.workspace_read_authorization_result"],
+      "output": { "id": "arc.exact_invitation_resolution_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "authorized", "value": true } },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "tuple不匹配时发布无assignment投影的作用域not-found",
+      "operator": "goals.assignment.reject_tuple_mismatch_without_assignment_projection",
+      "operator_version": "0.1",
+      "inputs": ["arc.exact_invitation_resolution_result"],
+      "output": { "id": "arc.scoped_not_found_handoff_query_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "tupleMatched", "value": false } },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "同一store读取原始邀请与当前接受指针",
+      "operator": "goals.assignment.read_original_invitation_and_current_accepted_pointer_once",
+      "operator_version": "0.1",
+      "inputs": ["arc.exact_invitation_resolution_result"],
+      "output": { "id": "arc.original_invitation_and_current_authority", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "tupleMatched", "value": true } },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "投影原始邀请与当前authority并显式保留pending或unknown commit provenance",
+      "operator": "goals.assignment.project_handoff_query_facts_preserving_provenance",
+      "operator_version": "0.1",
+      "inputs": ["arc.original_invitation_and_current_authority"],
+      "output": { "id": "arc.handoff_query_facts_projection", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "汇聚成功、未授权拒绝与作用域not-found为唯一查询结果",
+      "operator": "daemon.assignment.merge_handoff_query_outcomes",
+      "operator_version": "0.1",
+      "inputs": ["arc.unauthorized_handoff_query_result", "arc.scoped_not_found_handoff_query_result", "arc.handoff_query_facts_projection"],
+      "output": { "id": "arc.handoff_query_outcome", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "发布唯一只读响应且重复请求无业务副作用",
+      "operator": "daemon.assignment.publish_readonly_outcome",
+      "operator_version": "0.1",
+      "inputs": ["arc.handoff_query_outcome"],
+      "output": { "id": "arc.handoff_query_response", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "规范化显式只读查询请求", "to": "认证调用者并授权读取请求工作区", "arc_id": "arc.normalized_handoff_query_request" },
+    { "from": "认证调用者并授权读取请求工作区", "to": "授权失败时发布不读取数据的作用域拒绝结果", "arc_id": "arc.workspace_read_authorization_result" },
+    { "from": "认证调用者并授权读取请求工作区", "to": "按workspaceId、goalId、invitationId解析精确tuple", "arc_id": "arc.workspace_read_authorization_result" },
+    { "from": "按workspaceId、goalId、invitationId解析精确tuple", "to": "tuple不匹配时发布无assignment投影的作用域not-found", "arc_id": "arc.exact_invitation_resolution_result" },
+    { "from": "按workspaceId、goalId、invitationId解析精确tuple", "to": "同一store读取原始邀请与当前接受指针", "arc_id": "arc.exact_invitation_resolution_result" },
+    { "from": "同一store读取原始邀请与当前接受指针", "to": "投影原始邀请与当前authority并显式保留pending或unknown commit provenance", "arc_id": "arc.original_invitation_and_current_authority" },
+    { "from": "授权失败时发布不读取数据的作用域拒绝结果", "to": "汇聚成功、未授权拒绝与作用域not-found为唯一查询结果", "arc_id": "arc.unauthorized_handoff_query_result" },
+    { "from": "tuple不匹配时发布无assignment投影的作用域not-found", "to": "汇聚成功、未授权拒绝与作用域not-found为唯一查询结果", "arc_id": "arc.scoped_not_found_handoff_query_result" },
+    { "from": "投影原始邀请与当前authority并显式保留pending或unknown commit provenance", "to": "汇聚成功、未授权拒绝与作用域not-found为唯一查询结果", "arc_id": "arc.handoff_query_facts_projection" },
+    { "from": "汇聚成功、未授权拒绝与作用域not-found为唯一查询结果", "to": "发布唯一只读响应且重复请求无业务副作用", "arc_id": "arc.handoff_query_outcome" }
+  ],
+  "outputs": ["arc.handoff_query_response"]
+}

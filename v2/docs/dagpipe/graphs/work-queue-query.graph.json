@@ -1,0 +1,149 @@
+{
+  "id": "dispatch.work_queue.query",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.queue_query_request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "认证调用者并授权读取指定workspace队列",
+      "operator": "daemon.dispatch.queue.authorize_read",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_request"],
+      "output": { "id": "arc.queue_query_authorization", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "拒绝未授权读取且不访问组织身份或队列状态",
+      "operator": "daemon.dispatch.queue.reject_unauthorized_without_data_access",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_authorization"],
+      "output": { "id": "arc.queue_query_rejection", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "op": "equals", "field": "authorized", "value": false }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "按稳定peer名称与精确group membership解析目标身份",
+      "operator": "organization.membership.resolve_stable_peer_exact_member",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_authorization"],
+      "output": { "id": "arc.queue_query_identity", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "op": "equals", "field": "authorized", "value": true }
+      },
+      "output_selector": {
+        "include": ["identityResolved", "targetPeerId", "targetMemberId", "workspaceId", "workRef"],
+        "exclude": ["sessionId", "endpoint", "deviceId", "bindingId", "bindingGeneration"],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "返回稳定身份未解析或不存在的类型化结果",
+      "operator": "daemon.dispatch.queue.identity_not_found",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_identity"],
+      "output": { "id": "arc.queue_query_identity_not_found", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "op": "equals", "field": "identityResolved", "value": false }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "按稳定成员身份与精确work reference只读匹配队列项",
+      "operator": "dispatch.work_queue.read_exact_stable_member_work_ref",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_identity"],
+      "output": { "id": "arc.queue_query_match", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "op": "equals", "field": "identityResolved", "value": true }
+      },
+      "output_selector": {
+        "include": ["itemMatched", "queueItemId", "workspaceId", "workRef", "targetPeerId", "targetMemberId", "state", "enqueuedAt", "enqueuedBy"],
+        "exclude": ["sessionId", "endpoint", "deviceId", "bindingId", "bindingGeneration"],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "返回类型化队列项未找到结果",
+      "operator": "daemon.dispatch.queue.item_not_found",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_match"],
+      "output": { "id": "arc.queue_query_item_not_found", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "op": "equals", "field": "itemMatched", "value": false }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "投影持久队列项字段并排除连接与绑定字段",
+      "operator": "dispatch.work_queue.project_durable_item",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_match"],
+      "output": { "id": "arc.queue_query_item_projection", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "op": "equals", "field": "itemMatched", "value": true }
+      },
+      "output_selector": {
+        "include": ["queueItemId", "workspaceId", "workRef", "targetPeerId", "targetMemberId", "state", "enqueuedAt", "enqueuedBy"],
+        "exclude": ["sessionId", "endpoint", "deviceId", "bindingId", "bindingGeneration"],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "合并所有只读查询结果为唯一响应",
+      "operator": "daemon.dispatch.queue.merge_read_outcomes",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_rejection", "arc.queue_query_identity_not_found", "arc.queue_query_item_not_found", "arc.queue_query_item_projection"],
+      "output": { "id": "arc.queue_query_outcome", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "发布唯一队列查询响应且不产生队列工作分配或终态副作用",
+      "operator": "daemon.dispatch.queue.read_only_outcome",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_query_outcome"],
+      "output": { "id": "arc.queue_query_response", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "认证调用者并授权读取指定workspace队列", "to": "拒绝未授权读取且不访问组织身份或队列状态", "arc_id": "arc.queue_query_authorization" },
+    { "from": "认证调用者并授权读取指定workspace队列", "to": "按稳定peer名称与精确group membership解析目标身份", "arc_id": "arc.queue_query_authorization" },
+    { "from": "按稳定peer名称与精确group membership解析目标身份", "to": "返回稳定身份未解析或不存在的类型化结果", "arc_id": "arc.queue_query_identity" },
+    { "from": "按稳定peer名称与精确group membership解析目标身份", "to": "按稳定成员身份与精确work reference只读匹配队列项", "arc_id": "arc.queue_query_identity" },
+    { "from": "按稳定成员身份与精确work reference只读匹配队列项", "to": "返回类型化队列项未找到结果", "arc_id": "arc.queue_query_match" },
+    { "from": "按稳定成员身份与精确work reference只读匹配队列项", "to": "投影持久队列项字段并排除连接与绑定字段", "arc_id": "arc.queue_query_match" },
+    { "from": "拒绝未授权读取且不访问组织身份或队列状态", "to": "合并所有只读查询结果为唯一响应", "arc_id": "arc.queue_query_rejection" },
+    { "from": "返回稳定身份未解析或不存在的类型化结果", "to": "合并所有只读查询结果为唯一响应", "arc_id": "arc.queue_query_identity_not_found" },
+    { "from": "返回类型化队列项未找到结果", "to": "合并所有只读查询结果为唯一响应", "arc_id": "arc.queue_query_item_not_found" },
+    { "from": "投影持久队列项字段并排除连接与绑定字段", "to": "合并所有只读查询结果为唯一响应", "arc_id": "arc.queue_query_item_projection" },
+    { "from": "合并所有只读查询结果为唯一响应", "to": "发布唯一队列查询响应且不产生队列工作分配或终态副作用", "arc_id": "arc.queue_query_outcome" }
+  ],
+  "outputs": ["arc.queue_query_response"]
+}

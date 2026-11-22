@@ -1,0 +1,123 @@
+{
+  "id": "dispatch.work_queue.enqueue",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.enqueue_request", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "接收入队请求并确认显式入队操作",
+      "operator": "daemon.dispatch.queue.receive_explicit_enqueue",
+      "operator_version": "0.1",
+      "inputs": ["arc.enqueue_request"],
+      "output": { "id": "arc.explicit_enqueue_request", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "校验当前分发授权",
+      "operator": "daemon.dispatch.queue.authorize_current_dispatch",
+      "operator_version": "0.1",
+      "inputs": ["arc.explicit_enqueue_request"],
+      "output": { "id": "arc.dispatch_authorization_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "解析有效且作用域匹配的工作引用",
+      "operator": "goals.work_reference.resolve_valid_scoped",
+      "operator_version": "0.1",
+      "inputs": ["arc.dispatch_authorization_result"],
+      "output": { "id": "arc.work_reference_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "解析目标成员及匹配职责",
+      "operator": "organization.membership.resolve_target_with_duties",
+      "operator_version": "0.1",
+      "inputs": ["arc.work_reference_result"],
+      "output": { "id": "arc.target_membership_duty_result", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "判断授权工作引用成员与职责是否全部有效",
+      "operator": "daemon.dispatch.queue.evaluate_enqueue_predicates",
+      "operator_version": "0.1",
+      "inputs": ["arc.target_membership_duty_result"],
+      "output": { "id": "arc.enqueue_eligibility", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "仅授权工作引用成员职责全部成立时创建队列项并保持工作owner不变",
+      "operator": "dispatch.work_queue.create_if_eligible_preserve_work_owner",
+      "operator_version": "0.1",
+      "inputs": ["arc.enqueue_eligibility"],
+      "output": { "id": "arc.queue_create_result", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "op": "equals", "field": "eligible", "value": true }
+      },
+      "output_selector": {
+        "include": ["queueItemId", "targetPeerId", "targetMemberId", "workRef"],
+        "exclude": [],
+        "predicate": null
+      },
+      "iterator": "Whole"
+    },
+    {
+      "id": "对未准入请求返回无队列副作用的拒绝结果",
+      "operator": "daemon.dispatch.queue.reject_without_queue_effect",
+      "operator_version": "0.1",
+      "inputs": ["arc.enqueue_eligibility"],
+      "output": { "id": "arc.queue_rejection_result", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "op": "equals", "field": "eligible", "value": false }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "合并入队与拒绝结果为单一操作结果",
+      "operator": "daemon.dispatch.queue.merge_single_outcome",
+      "operator_version": "0.1",
+      "inputs": ["arc.queue_create_result", "arc.queue_rejection_result"],
+      "output": { "id": "arc.enqueue_outcome", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "发布唯一入队结果",
+      "operator": "daemon.control_plane.outcome",
+      "operator_version": "0.1",
+      "inputs": ["arc.enqueue_outcome"],
+      "output": { "id": "arc.enqueue_response", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "接收入队请求并确认显式入队操作", "to": "校验当前分发授权", "arc_id": "arc.explicit_enqueue_request" },
+    { "from": "校验当前分发授权", "to": "解析有效且作用域匹配的工作引用", "arc_id": "arc.dispatch_authorization_result" },
+    { "from": "解析有效且作用域匹配的工作引用", "to": "解析目标成员及匹配职责", "arc_id": "arc.work_reference_result" },
+    { "from": "解析目标成员及匹配职责", "to": "判断授权工作引用成员与职责是否全部有效", "arc_id": "arc.target_membership_duty_result" },
+    { "from": "判断授权工作引用成员与职责是否全部有效", "to": "仅授权工作引用成员职责全部成立时创建队列项并保持工作owner不变", "arc_id": "arc.enqueue_eligibility" },
+    { "from": "判断授权工作引用成员与职责是否全部有效", "to": "对未准入请求返回无队列副作用的拒绝结果", "arc_id": "arc.enqueue_eligibility" },
+    { "from": "仅授权工作引用成员职责全部成立时创建队列项并保持工作owner不变", "to": "合并入队与拒绝结果为单一操作结果", "arc_id": "arc.queue_create_result" },
+    { "from": "对未准入请求返回无队列副作用的拒绝结果", "to": "合并入队与拒绝结果为单一操作结果", "arc_id": "arc.queue_rejection_result" },
+    { "from": "合并入队与拒绝结果为单一操作结果", "to": "发布唯一入队结果", "arc_id": "arc.enqueue_outcome" }
+  ],
+  "outputs": ["arc.enqueue_response"]
+}
