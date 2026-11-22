@@ -1,0 +1,304 @@
+{
+  "id": "reminders.occurrence.settle",
+  "version": "0.1",
+  "inputs": [
+    { "id": "arc.reminder_tick", "schema": "Object" }
+  ],
+  "nodes": [
+    {
+      "id": "按原排期槽位和请求身份读取持久occurrence",
+      "operator": "reminders.occurrence.load_by_original_slot_and_request_identity",
+      "operator_version": "0.1",
+      "inputs": ["arc.reminder_tick"],
+      "output": { "id": "arc.occurrence_resolution", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "已结算occurrence直接重放终端结果",
+      "operator": "reminders.occurrence.replay_settled_without_mutation",
+      "operator_version": "0.1",
+      "inputs": ["arc.occurrence_resolution"],
+      "output": { "id": "arc.settled_replay_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "settled", "value": true }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "未结算occurrence按原投递和请求身份读取派发记录",
+      "operator": "delivery.occurrence.read_dispatch_by_original_identity",
+      "operator_version": "0.1",
+      "inputs": ["arc.occurrence_resolution"],
+      "output": { "id": "arc.existing_dispatch_lookup", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "settled", "value": false }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "投影既有确认发送事实且不结算",
+      "operator": "reminders.occurrence.project_existing_confirmed_send_without_settlement",
+      "operator_version": "0.1",
+      "inputs": ["arc.existing_dispatch_lookup"],
+      "output": { "id": "arc.existing_confirmed_send_fact", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "lookupResult", "value": "existingConfirmed" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "既有未确认投递保持失败或未知且不再派发",
+      "operator": "reminders.occurrence.hold_existing_not_confirmed",
+      "operator_version": "0.1",
+      "inputs": ["arc.existing_dispatch_lookup"],
+      "output": { "id": "arc.existing_not_confirmed_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "lookupResult", "value": "existingNotConfirmed" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "派发记录查找未知时保持未知且不派发不扣次",
+      "operator": "reminders.occurrence.hold_lookup_inconclusive",
+      "operator_version": "0.1",
+      "inputs": ["arc.existing_dispatch_lookup"],
+      "output": { "id": "arc.lookup_inconclusive_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "lookupResult", "value": "lookupInconclusive" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "派发确实不存在时校验登记sender当前权限",
+      "operator": "organization.permission.verify_registered_sender_currently",
+      "operator_version": "0.1",
+      "inputs": ["arc.existing_dispatch_lookup"],
+      "output": { "id": "arc.sender_permission_result", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "lookupResult", "value": "provenAbsent" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "sender被拒绝时发布typed失败且不探测收件人",
+      "operator": "reminders.occurrence.fail_sender_denied_before_recipient_probe",
+      "operator_version": "0.1",
+      "inputs": ["arc.sender_permission_result"],
+      "output": { "id": "arc.sender_denied_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "senderAllowed", "value": false }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "sender允许时探测当前收件人可用性",
+      "operator": "reminders.occurrence.probe_current_recipient_availability",
+      "operator_version": "0.1",
+      "inputs": ["arc.sender_permission_result"],
+      "output": { "id": "arc.recipient_availability_result", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "senderAllowed", "value": true }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "收件人busy时跳过本轮且不发送不扣次不补发",
+      "operator": "reminders.occurrence.skip_busy_without_effect",
+      "operator_version": "0.1",
+      "inputs": ["arc.recipient_availability_result"],
+      "output": { "id": "arc.busy_skip_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "availability", "value": "busy" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "收件人offline时跳过本轮且不发送不扣次不补发",
+      "operator": "reminders.occurrence.skip_offline_without_effect",
+      "operator_version": "0.1",
+      "inputs": ["arc.recipient_availability_result"],
+      "output": { "id": "arc.offline_skip_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "availability", "value": "offline" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "收件人可用性未知时不发送并保持occurrence未知",
+      "operator": "reminders.occurrence.hold_unknown_availability",
+      "operator_version": "0.1",
+      "inputs": ["arc.recipient_availability_result"],
+      "output": { "id": "arc.unknown_availability_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "availability", "value": "unknown" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "收件人idle时执行一次新派发",
+      "operator": "delivery.occurrence.dispatch_once_when_idle",
+      "operator_version": "0.1",
+      "inputs": ["arc.recipient_availability_result"],
+      "output": { "id": "arc.dispatch_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "availability", "value": "idle" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "投影新派发确认发送事实且不结算",
+      "operator": "reminders.occurrence.project_new_confirmed_dispatch_without_settlement",
+      "operator_version": "0.1",
+      "inputs": ["arc.dispatch_outcome"],
+      "output": { "id": "arc.new_confirmed_dispatch_fact", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "dispatchResult", "value": "confirmed" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "对恢复与新确认发送执行唯一结算并只扣原槽位一次",
+      "operator": "reminders.occurrence.settle_confirmed_send_once_for_recovered_and_new",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.existing_confirmed_send_fact",
+        "arc.new_confirmed_dispatch_fact"
+      ],
+      "output": { "id": "arc.confirmed_send_settlement", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "新派发失败时保持failed且不扣次",
+      "operator": "reminders.occurrence.hold_failed_dispatch",
+      "operator_version": "0.1",
+      "inputs": ["arc.dispatch_outcome"],
+      "output": { "id": "arc.failed_dispatch_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "dispatchResult", "value": "failed" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "新派发结果未知时保持unknown且不扣次",
+      "operator": "reminders.occurrence.hold_inconclusive_dispatch",
+      "operator_version": "0.1",
+      "inputs": ["arc.dispatch_outcome"],
+      "output": { "id": "arc.inconclusive_dispatch_outcome", "schema": "Object" },
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": { "tag": "FieldPredicate", "op": "equals", "field": "dispatchResult", "value": "inconclusive" }
+      },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "汇聚所有终端并保留原排期",
+      "operator": "reminders.occurrence.merge_terminal_outcomes_preserving_original_schedule",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.settled_replay_outcome",
+        "arc.existing_not_confirmed_outcome",
+        "arc.lookup_inconclusive_outcome",
+        "arc.sender_denied_outcome",
+        "arc.busy_skip_outcome",
+        "arc.offline_skip_outcome",
+        "arc.unknown_availability_outcome",
+        "arc.confirmed_send_settlement",
+        "arc.failed_dispatch_outcome",
+        "arc.inconclusive_dispatch_outcome"
+      ],
+      "output": { "id": "arc.occurrence_settlement", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    },
+    {
+      "id": "发布唯一occurrence公共响应",
+      "operator": "daemon.reminders.publish_occurrence_response",
+      "operator_version": "0.1",
+      "inputs": ["arc.occurrence_settlement"],
+      "output": { "id": "arc.occurrence_response", "schema": "Object" },
+      "input_selector": { "include": [], "exclude": [], "predicate": null },
+      "output_selector": { "include": [], "exclude": [], "predicate": null },
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    { "from": "按原排期槽位和请求身份读取持久occurrence", "to": "已结算occurrence直接重放终端结果", "arc_id": "arc.occurrence_resolution" },
+    { "from": "按原排期槽位和请求身份读取持久occurrence", "to": "未结算occurrence按原投递和请求身份读取派发记录", "arc_id": "arc.occurrence_resolution" },
+    { "from": "未结算occurrence按原投递和请求身份读取派发记录", "to": "投影既有确认发送事实且不结算", "arc_id": "arc.existing_dispatch_lookup" },
+    { "from": "未结算occurrence按原投递和请求身份读取派发记录", "to": "既有未确认投递保持失败或未知且不再派发", "arc_id": "arc.existing_dispatch_lookup" },
+    { "from": "未结算occurrence按原投递和请求身份读取派发记录", "to": "派发记录查找未知时保持未知且不派发不扣次", "arc_id": "arc.existing_dispatch_lookup" },
+    { "from": "未结算occurrence按原投递和请求身份读取派发记录", "to": "派发确实不存在时校验登记sender当前权限", "arc_id": "arc.existing_dispatch_lookup" },
+    { "from": "派发确实不存在时校验登记sender当前权限", "to": "sender被拒绝时发布typed失败且不探测收件人", "arc_id": "arc.sender_permission_result" },
+    { "from": "派发确实不存在时校验登记sender当前权限", "to": "sender允许时探测当前收件人可用性", "arc_id": "arc.sender_permission_result" },
+    { "from": "sender允许时探测当前收件人可用性", "to": "收件人busy时跳过本轮且不发送不扣次不补发", "arc_id": "arc.recipient_availability_result" },
+    { "from": "sender允许时探测当前收件人可用性", "to": "收件人offline时跳过本轮且不发送不扣次不补发", "arc_id": "arc.recipient_availability_result" },
+    { "from": "sender允许时探测当前收件人可用性", "to": "收件人可用性未知时不发送并保持occurrence未知", "arc_id": "arc.recipient_availability_result" },
+    { "from": "sender允许时探测当前收件人可用性", "to": "收件人idle时执行一次新派发", "arc_id": "arc.recipient_availability_result" },
+    { "from": "收件人idle时执行一次新派发", "to": "投影新派发确认发送事实且不结算", "arc_id": "arc.dispatch_outcome" },
+    { "from": "收件人idle时执行一次新派发", "to": "新派发失败时保持failed且不扣次", "arc_id": "arc.dispatch_outcome" },
+    { "from": "收件人idle时执行一次新派发", "to": "新派发结果未知时保持unknown且不扣次", "arc_id": "arc.dispatch_outcome" },
+    { "from": "已结算occurrence直接重放终端结果", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.settled_replay_outcome" },
+    { "from": "投影既有确认发送事实且不结算", "to": "对恢复与新确认发送执行唯一结算并只扣原槽位一次", "arc_id": "arc.existing_confirmed_send_fact" },
+    { "from": "投影新派发确认发送事实且不结算", "to": "对恢复与新确认发送执行唯一结算并只扣原槽位一次", "arc_id": "arc.new_confirmed_dispatch_fact" },
+    { "from": "对恢复与新确认发送执行唯一结算并只扣原槽位一次", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.confirmed_send_settlement" },
+    { "from": "既有未确认投递保持失败或未知且不再派发", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.existing_not_confirmed_outcome" },
+    { "from": "派发记录查找未知时保持未知且不派发不扣次", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.lookup_inconclusive_outcome" },
+    { "from": "sender被拒绝时发布typed失败且不探测收件人", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.sender_denied_outcome" },
+    { "from": "收件人busy时跳过本轮且不发送不扣次不补发", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.busy_skip_outcome" },
+    { "from": "收件人offline时跳过本轮且不发送不扣次不补发", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.offline_skip_outcome" },
+    { "from": "收件人可用性未知时不发送并保持occurrence未知", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.unknown_availability_outcome" },
+    { "from": "新派发失败时保持failed且不扣次", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.failed_dispatch_outcome" },
+    { "from": "新派发结果未知时保持unknown且不扣次", "to": "汇聚所有终端并保留原排期", "arc_id": "arc.inconclusive_dispatch_outcome" },
+    { "from": "汇聚所有终端并保留原排期", "to": "发布唯一occurrence公共响应", "arc_id": "arc.occurrence_settlement" }
+  ],
+  "outputs": ["arc.occurrence_response"]
+}
