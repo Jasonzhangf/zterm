@@ -1,5 +1,42 @@
 # accounts 模块设计与执行卡
 
+## M1 请求与结果合同
+
+同账号可有多个 canonical machine ID；legacy device ID 只是兼容引用。
+relay 决定 session 和 machine 的当前有效性；本地 issuedAt/expiresAt 只是投影。
+`verifyAuthority` 在现有 session/policy/workspace/generation 检查后，必须读取当前
+relay machine list，精确匹配 ID 和 owner；missing/foreign 返回 MACHINE_NOT_FOUND，
+inactive 返回 MACHINE_REVOKED。读取失败保留原 typed error，不返回 authority。
+relay 读取完成后，authority 返回前必须再读当前 local grant/generation；并发
+Accounts revoke 或 generation 变化返回 typed rejection，不返回旧 authority。
+拒绝不改 Accounts policy 或 canonical machine ownership/status；一次性 challenge
+的消费属于 relay 安全协议，不声称它完全无副作用。
+
+`accounts-authority.graph.json` 是静态请求/结果图，不是新增可执行注册表。
+图把一次公开调用抽象为 `{ operation, input }` 和一个结果；现有 API 仍返回各自的
+typed value 或抛出 AccountsError，不声称已有统一 envelope/dispatcher。operation 为
+register/login/revalidate/logout/list/enroll/possession/machine-revoke/authorize/
+grant/revoke/verify-authority/share。结果分 confirmed、typed rejection、failure、
+unknown；分支按结果判别，不能把传输错误当作没有远端副作用。
+校验节点的 rejected 分支直接进入共享结果；confirmed/rejected/failure/unknown 以
+input predicate 分类同一执行结果。failure 与 unknown 只是 API 结果的分类投影，
+不表示新的运行时 registry、dispatcher 或 operation 状态存储。
+
+| 图 operator | 现有公开 owner | 行为 gate |
+|---|---|---|
+| accounts.request.validate | 各公开 service/runtime 的输入边界 | contract/*.test.ts |
+| accounts.authority.execute | AuthService、MachineService、AccountsAuthorizationAdapter、AccountsAuthorityRuntime | integration/accounts-flow.test.ts（含双 canonical ID、保留 grant 的 relay 撤机拒绝、完整 policy 与目录无修改矩阵） |
+| accounts.outcome.confirm / reject | service/runtime 返回值与 AccountsError | public-runtime.test.ts；真实 relay consumer |
+| accounts.outcome.reject-request | 各公开入口的输入边界；静态图分类，不是运行时 dispatcher | accounts-dag.test.ts；contract/*.test.ts |
+| accounts.outcome.fail / unknown | V1RelayAdapter typed error/cause | v1-relay-errors.test.ts、v1-relay-machine-errors.test.ts；consumer transport failure |
+| accounts.result.project | public/contracts.ts 与 public/index.mjs | 公开 consumer；不新增序列化 owner |
+
+上述 authority 查询只代表查询时刻。M2 Connections/M6 daemon 拥有 live channel
+重验证触发与关闭；Accounts 不存 channel、timer 或 authority cache。
+relay mutation 当前没有通用 operation-ID receipt/query。响应丢失时结果未知，
+不自动重试、不声称 rollback。下游已提交 operation 保留原 ID，等待所属 owner 的
+receipt/query。两 canonical ID 的本机 real-relay 测试不等同两物理主机验收。
+
 状态：2026-11-07 public runtime entry 候选。V2 accounts adapter 已接 V1 relay
 account/machine 正式端点，并新增账号授权策略、workspace/machine 公开适配入口及
 `login/grant/revoke/verifyAuthority` 最小 runtime。当前候选的代码级正反例和
