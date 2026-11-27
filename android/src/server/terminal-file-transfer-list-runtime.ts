@@ -504,7 +504,7 @@ export function createTerminalFileTransferListRuntime(
 
     if (backend === 'rex') {
       deps.sendMessage(session, {
-        type: 'file-list-error',
+        type: 'file-create-directory-error',
         payload: { requestId, error: 'Rex terminal source does not support file browsing in V1' },
       });
       return;

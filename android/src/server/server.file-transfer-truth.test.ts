@@ -89,6 +89,10 @@ describe('server file-transfer truth gates', () => {
     expect(listBlock).toContain('() => deps.readTmuxPaneCurrentPath(session.sessionName, backend)');
     expect(listBlock.indexOf("if (backend === 'rex')")).toBeLessThan(listBlock.indexOf('resolveFileTransferListPath'));
     expect(mkdirBlock).toContain("if (backend === 'rex')");
+    const mkdirGuard = mkdirBlock.slice(0, mkdirBlock.indexOf('resolveFileTransferListPath'));
+    expect(mkdirGuard).toContain("type: 'file-create-directory-error'");
+    expect(mkdirGuard).toContain('payload: { requestId,');
+    expect(mkdirGuard).not.toContain("type: 'file-list-error'");
     expect(mkdirBlock).toContain("error: 'Rex terminal source does not support file browsing in V1'");
     expect(mkdirBlock).toContain('resolveFileTransferListPath');
     expect(mkdirBlock).toContain('() => deps.readTmuxPaneCurrentPath(session.sessionName, backend)');

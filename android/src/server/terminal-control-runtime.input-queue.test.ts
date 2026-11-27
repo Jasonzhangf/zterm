@@ -362,6 +362,34 @@ describe('terminal control runtime input queue', () => {
     expect(rexBackend.readSessionIdentity).not.toHaveBeenCalled();
   });
 
+  it.each(['Rex server unavailable', 'Rex backend supports API revision 24, received 23'])(
+    'preserves healthy tmux and Herdr catalogs when optional Rex fails: %s',
+    (message) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        spawnSyncMock.mockImplementation((_binary: string, args: string[]) => ({
+          status: 0,
+          stdout: args.includes('list-panes') ? 'tmux-demo\t/tmp/tmux\n' : 'tmux-demo\n',
+          stderr: '',
+        }));
+        const { rexBackend } = createRexCombinedRuntime();
+        const { herdrBackend } = createHerdrOnlyRuntime();
+        rexBackend.listSessions = vi.fn(() => { throw new Error(message); });
+        const runtime = createTerminalControlRuntime({
+          tmuxBinary: 'tmux', defaultSessionName: 'demo', defaultBackend: 'tmux',
+          hiddenTmuxSessions: new Set(), sanitizeSessionName: (input) => input || 'demo',
+          backendRuntimes: { rex: rexBackend, herdr: herdrBackend },
+          tmuxSocketPaths: () => ['/socket-test'],
+        });
+        expect(runtime.listTerminalSessionCatalog().map((entry) => entry.name)).toEqual(['herdr-demo', 'tmux-demo']);
+        expect(errorLog).toHaveBeenCalledWith('[terminal-control-runtime] rex catalog discovery failed', expect.objectContaining({ error: message }));
+        expect(() => runtime.listTmuxSessions('rex')).toThrow(message);
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
   it('enumerates each Rex session once so catalog identity cannot drop between discovery reads', () => {
     spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
     const { runtime, rexBackend, stableId } = createRexCombinedRuntime();

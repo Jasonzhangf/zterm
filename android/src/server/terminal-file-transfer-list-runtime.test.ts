@@ -163,6 +163,21 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
     ).toEqual(['fresh.txt', 'old.txt']);
   });
 
+  it('settles Rex mkdir with the matching operation error and requestId', () => {
+    const sentMessages: ServerMessage[] = [];
+    const { runtime } = createRuntime(sentMessages);
+    runtime.handleFileCreateDirectoryRequest(makeSession({ backend: 'rex' }), {
+      requestId: 'rex-mkdir', path: '/unavailable', name: 'child',
+    });
+    expect(sentMessages).toEqual([{
+      type: 'file-create-directory-error',
+      payload: {
+        requestId: 'rex-mkdir',
+        error: 'Rex terminal source does not support file browsing in V1',
+      },
+    }]);
+  });
+
   it('does not retain stale remote directory cache when watcher creation fails', async () => {
     vi.resetModules();
     vi.doMock('fs', async (importOriginal) => {

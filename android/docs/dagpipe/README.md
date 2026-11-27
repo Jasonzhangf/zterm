@@ -365,10 +365,18 @@ client wrapper entries are N/A on the client side by ownership:
   admission execution (`connection-recovery.graph.json` remains a design mapping).
   These are static owner mappings, not new native operator registrations or
   installed acceptance. Rex source implementation lives in `rex-backend.ts`.
+  Rex routing names retain the full native block UUID. Rex enumeration failures
+  are reported at the catalog boundary without discarding healthy backend rows;
+  explicit Rex operations still propagate the source error. Rex capture decodes
+  cursor position, visibility and keyboard modes from the completed VT capture
+  before publishing the existing source snapshot fields.
 - `runDagpipePhase3InputSchedule` -> `daemon.input_queue`
   (`src/server/daemon-input-queue-runtime.ts`).
 - `runDagpipePhase3FileBrowse`, `runDagpipePhase3Download` -> `daemon.file_transfer`
   (`src/server/terminal-file-transfer-list-runtime.ts`).
+  The same runtime settles unsupported Rex mkdir admission with
+  `file-create-directory-error` and the original `requestId`, before cwd or
+  filesystem access.
 - `runDagpipePhase7Release`: `scripts/prepare-global-daemon-release.sh`
   release gate after deterministic archive + sha256 verification.
 - `runDagpipePhase7Debug`: `src/hooks/useRelayDeviceStream.ts` relay debug

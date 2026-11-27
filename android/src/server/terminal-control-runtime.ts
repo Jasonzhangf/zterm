@@ -639,6 +639,7 @@ export function createTerminalControlRuntime(
 
   function buildTerminalSessionCatalog(): TerminalSessionCatalogEntry[] {
     const entries: TerminalSessionCatalogEntry[] = [];
+    let rexDiscoveryError: Error | null = null;
     const selectedBackend = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux');
     if (selectedBackend !== 'herdr') {
       const cwdBySession = new Map<string, string>();
@@ -707,7 +708,17 @@ export function createTerminalControlRuntime(
     for (const backend of ['herdr', 'rex'] as const) {
       const runtime = resolveIdentityRuntime(backend);
       if (!runtime && deps.defaultBackend !== backend) continue;
-      const sessions = runtime?.listSessions() || [];
+      let sessions: ReturnType<TerminalSourceAdapter['listSessions']>;
+      try {
+        sessions = runtime?.listSessions() || [];
+      } catch (error) {
+        if (backend !== 'rex') throw error;
+        rexDiscoveryError = error instanceof Error ? error : new Error(String(error));
+        console.error('[terminal-control-runtime] rex catalog discovery failed', {
+          error: rexDiscoveryError.message,
+        });
+        continue;
+      }
       for (const session of sessions) {
         const parsedStableId = session.stableId
           ? parseTerminalSessionStableId(session.stableId)
@@ -723,6 +734,7 @@ export function createTerminalControlRuntime(
         });
       }
     }
+    if (rexDiscoveryError && entries.length === 0) throw rexDiscoveryError;
     return entries.sort((left, right) => {
       const nameOrder = left.name.localeCompare(right.name);
       const backendOrder = left.backend.localeCompare(right.backend);

@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { WasmBridge } from '@jsonstudio/wtermmod-core';
 import { resolveRexExecutable } from './terminal-backend-selection';
 import { normalizeCapturedLineBlock, trimCanonicalBufferWindow } from './canonical-buffer';
 import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
@@ -134,7 +135,7 @@ function sessionNameForTarget(sessionLabel: string, windowLabel: string, blockLa
     .map(slug)
     .filter(Boolean)
     .join('-') || 'block';
-  const blockSuffix = blockId.replace(/^block:/u, '').slice(0, 8);
+  const blockSuffix = blockId.replace(/^block:/u, '');
   return `rex-${label}-${blockSuffix}`;
 }
 
@@ -263,7 +264,7 @@ export function createRexBackendRuntime(options: RexBackendRuntimeOptions = {}):
     return target;
   }
 
-  function readSnapshot(sessionName: string): Promise<TerminalSourceMirrorSnapshot> {
+  async function readSnapshot(sessionName: string): Promise<TerminalSourceMirrorSnapshot> {
     const target = resolve(sessionName);
     const size = blockCall<{ columns?: unknown; rows?: unknown }>(target, 'size');
     const cols = positiveSize(size.columns, 'size.columns');
@@ -274,6 +275,7 @@ export function createRexBackendRuntime(options: RexBackendRuntimeOptions = {}):
       unwrap: false,
       extra_cursor: true,
       extra_keyboard: true,
+      extra_modes: true,
       max_bytes: 960 * 1024,
     });
     let formattedContent = typeof formatted.content === 'string' ? formatted.content : '';
@@ -314,35 +316,45 @@ export function createRexBackendRuntime(options: RexBackendRuntimeOptions = {}):
       }
     }
     const rawLines = normalizeCapturedLineBlock(formattedContent);
-    return canonicalizeCapturedMirrorLines(rawLines, cols).then((canonicalLines) => {
-      const trimmed = trimCanonicalBufferWindow(0, canonicalLines, maxMirrorLines);
-      const revision = (revisions.get(target.sessionName) || 0) + 1;
-      revisions.set(target.sessionName, revision);
-      const previous = metadata.get(target.blockId);
-      metadata.set(target.blockId, {
-        cols,
-        rows,
-        cwd: previous?.cwd || '',
-      });
-      const availableEndIndex = trimmed.startIndex + trimmed.lines.length;
-      return {
-        revision,
-        bufferStartIndex: trimmed.startIndex,
-        bufferLines: trimmed.lines,
-        cols,
-        rows,
-        cursorKeysApp: false,
-        cursor: null,
-        lastScrollbackCount: Math.max(0, trimmed.lines.length - rows),
-        availableStartIndex: trimmed.startIndex,
-        availableEndIndex,
-        totalAvailableLines: availableEndIndex,
-        visibleTopIndex: Math.max(trimmed.startIndex, availableEndIndex - rows),
-        capturedLineCount: rawLines.length,
-        canonicalLineCount: canonicalLines.length,
-        source: 'rex',
-      };
+    const parser = await WasmBridge.load();
+    const canonicalLines = await canonicalizeCapturedMirrorLines(rawLines, cols, parser);
+    parser.init(cols, rows);
+    parser.writeString(formattedContent);
+    const parsedCursor = parser.getCursor();
+    const trimmed = trimCanonicalBufferWindow(0, canonicalLines, maxMirrorLines);
+    const revision = (revisions.get(target.sessionName) || 0) + 1;
+    revisions.set(target.sessionName, revision);
+    const previous = metadata.get(target.blockId);
+    metadata.set(target.blockId, {
+      cols,
+      rows,
+      cwd: previous?.cwd || '',
     });
+    const availableEndIndex = trimmed.startIndex + trimmed.lines.length;
+    const visibleTopIndex = Math.max(trimmed.startIndex, availableEndIndex - rows);
+    return {
+      revision,
+      bufferStartIndex: trimmed.startIndex,
+      bufferLines: trimmed.lines,
+      cols,
+      rows,
+      cursorKeysApp: parser.cursorKeysApp(),
+      cursor: availableEndIndex === trimmed.startIndex
+        ? null
+        : {
+            rowIndex: Math.max(0, canonicalLines.length - rows) + parsedCursor.row,
+            col: parsedCursor.col,
+            visible: parsedCursor.visible,
+          },
+      lastScrollbackCount: Math.max(0, trimmed.lines.length - rows),
+      availableStartIndex: trimmed.startIndex,
+      availableEndIndex,
+      totalAvailableLines: availableEndIndex,
+      visibleTopIndex,
+      capturedLineCount: rawLines.length,
+      canonicalLineCount: canonicalLines.length,
+      source: 'rex',
+    };
   }
 
   function listSessions(): TerminalSourceSession[] {

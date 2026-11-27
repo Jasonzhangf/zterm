@@ -226,6 +226,45 @@ describe('Rex daemon source adapter', () => {
     ]);
   });
 
+  it('routes identical sibling labels with shared UUID prefixes independently', () => {
+    const runner = new FixtureRunner();
+    const ids = [
+      'block:01a21d09-1111-7111-8111-111111111111',
+      'block:01a21d09-2222-7222-8222-222222222222',
+    ];
+    runner.blocks = ids.map((block_id) => ({ ...runner.blocks[0]!, block_id }));
+    const source = createAdapter(runner);
+    const sessions = source.listSessions();
+    expect(new Set(sessions.map((session) => session.sessionName)).size).toBe(2);
+    expect(new Set(sessions.map((session) => session.stableId)).size).toBe(2);
+    sessions.forEach((session, index) => {
+      source.bindResolvedSession!(source.resolveExistingSession!(session.stableId!)!);
+      source.writeInput(session.sessionName, `target-${index}`);
+    });
+    expect(runner.writes).toEqual(ids.map((blockId, index) => ({ blockId, data: `target-${index}` })));
+  });
+
+  it('preserves paginated source cursor position, visibility and keyboard modes', async () => {
+    const runner = new FixtureRunner();
+    runner.output = 'first\r\nsecond\x1b[?1h\x1b[?25h\x1b[2;7H';
+    runner.maxFormatChunkBytes = 5;
+    const source = createAdapter(runner);
+    const name = source.listSessions()[0]!.sessionName;
+    const snapshot = await source.readSnapshot(name);
+    expect(snapshot.cursor).toEqual({ rowIndex: 1, col: 6, visible: true });
+    expect(snapshot.cursorKeysApp).toBe(true);
+
+    runner.output = 'first\r\nsecond\x1b[?1l\x1b[?25l\x1b[1;3H';
+    const hidden = await source.readSnapshot(name);
+    expect(hidden.cursor).toEqual({ rowIndex: 0, col: 2, visible: false });
+    expect(hidden.cursorKeysApp).toBe(false);
+
+    runner.output = 'short\x1b[?25h\x1b[20;4H';
+    const short = await source.readSnapshot(name);
+    expect(short.cursor).toEqual({ rowIndex: 19, col: 3, visible: true });
+    expect(short.cursorKeysApp).toBe(false);
+  });
+
   it('reads a paginated Rex snapshot through blob_read without dropping bytes', async () => {
     const runner = new FixtureRunner();
     runner.output = '0123456789abcdefghij\n';
@@ -241,6 +280,16 @@ describe('Rex daemon source adapter', () => {
       .map((cell) => String.fromCodePoint(cell.char))
       .join('')
       .trimEnd())).toContain('0123456789abcdefghij');
+  });
+
+  it('keeps source cursor coordinates absolute when the retained body is trimmed', async () => {
+    const runner = new FixtureRunner();
+    runner.output = Array.from({ length: 30 }, (_, index) => `line-${index}`).join('\r\n')
+      + '\x1b[?25h\x1b[24;4H';
+    const source = createRexBackendRuntime({ runner, maxMirrorLines: 24 });
+    const snapshot = await source.readSnapshot(source.listSessions()[0]!.sessionName);
+    expect(snapshot.bufferStartIndex).toBe(6);
+    expect(snapshot.cursor).toEqual({ rowIndex: 29, col: 3, visible: true });
   });
 
   it('binds the same live identity for reconnect and invalidates a deleted block', () => {
@@ -268,9 +317,10 @@ describe('Rex daemon source adapter', () => {
       blockId: blockB,
     }));
     expect(adapter.resolveExistingSession!(session.stableId!)).toBeNull();
-    expect(() => adapter.readSessionIdentity!(recreated.sessionName)).toThrow(
+    expect(() => adapter.readSessionIdentity!(session.sessionName)).toThrow(
       'Rex block identity is no longer present',
     );
+    expect(adapter.readSessionIdentity!(recreated.sessionName)?.stableId).toBe(recreated.stableId);
   });
 
   it('requires Rex API revision 24', () => {
