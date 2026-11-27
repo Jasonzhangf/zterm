@@ -5,6 +5,7 @@ import type {
 } from '../types';
 import type { BridgeTransportSocket } from '../traversal/types';
 import type { SessionTransportResource } from '../session-transport-runtime';
+import { isTerminalChannelInputReady } from '../terminal-channel-mux-runtime';
 import type { ClientDaemonConnection } from '../client-daemon-connection';
 import {
   createReliableInputQueue,
@@ -54,6 +55,8 @@ interface AndroidReliableInputQueue {
   options: SendInputTransportOptions;
   core: ReliableInputQueue;
   headRefreshMarked: boolean;
+  /** Reference to the original gated attempt; never owns channel readiness. */
+  inputChannel: SessionTransportResource['channel'];
 }
 
 const reliableInputQueues = new Map<string, AndroidReliableInputQueue>();
@@ -88,6 +91,14 @@ export function isSessionMessageTransportReady(
 
 export function readSocketReadyState(ws: BridgeTransportSocket | null) {
   return ws ? ws.readyState : null;
+}
+
+export function isSessionInputTransportReady(
+  resource: SessionTransportResource,
+  ws: BridgeTransportSocket | null,
+): ws is BridgeTransportSocket {
+  return isSessionMessageTransportReady(resource, ws)
+    && (!resource.channel || isTerminalChannelInputReady(resource.channel));
 }
 
 export function scheduleInputHeadRefresh(options: {
@@ -225,6 +236,11 @@ function readAndroidTransport(
     };
   }
   const resource = readDaemonConnectionSessionResource(queue.options, queue.sessionId);
+  const inputChannelRetired = Boolean(queue.inputChannel && (
+    resource.channel !== queue.inputChannel
+    || queue.inputChannel.state === 'closing'
+    || queue.inputChannel.state === 'closed'
+  ));
   const ws = readDaemonConnectionSessionSocket(queue.options, queue.sessionId);
   const socketGeneration = readSocketGeneration(ws);
   const targetKey = resource.targetKey || queue.sessionId;
@@ -235,10 +251,11 @@ function readAndroidTransport(
     : 0;
   return {
     available: true,
-    ready: isSessionMessageTransportReady(resource, ws),
+    ready: isSessionInputTransportReady(resource, ws),
     backpressured: bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES,
     channel,
     generation,
+    closed: inputChannelRetired,
   };
 }
 
@@ -322,6 +339,10 @@ function logQueueEvent(
     return;
   }
   if (event.kind === 'settled') {
+    if (queue.inputChannel && queue.core.snapshot().closed && activeQueueDepth(queue) === 0
+      && reliableInputQueues.get(sessionId) === queue) {
+      reliableInputQueues.delete(sessionId);
+    }
     if (event.settlement.outcome === 'accepted') {
       options.runtimeDebug('session.input.reliable-ack', {
         sessionId,
@@ -355,13 +376,14 @@ function createAndroidQueue(
   options: SendInputTransportOptions,
 ): AndroidReliableInputQueue {
   let queue: AndroidReliableInputQueue;
+  const inputChannel = readDaemonConnectionSessionResource(options, sessionId).channel;
   const core = createReliableInputQueue({
     policy: androidExistingPolicy,
     readTransport: () => readAndroidTransport(queue),
     send: (item) => {
       const resource = readDaemonConnectionSessionResource(options, sessionId);
       const ws = readDaemonConnectionSessionSocket(options, sessionId);
-      if (!isSessionMessageTransportReady(resource, ws)) {
+      if (!isSessionInputTransportReady(resource, ws)) {
         throw new Error('reliable input transport is not ready');
       }
       const localRevision = options.readSessionBufferSnapshot(sessionId).revision;
@@ -408,6 +430,7 @@ function createAndroidQueue(
     options,
     core,
     headRefreshMarked: false,
+    inputChannel: inputChannel?.inputReadiness === 'terminal-connected' ? inputChannel : null,
   };
   return queue;
 }
@@ -419,7 +442,9 @@ function getReliableInputQueue(
   const current = reliableInputQueues.get(sessionId);
   if (current) {
     current.options = options;
-    return current;
+    // Settle retired gated attempts before a caller can append new input.
+    if (current.inputChannel && readAndroidTransport(current).closed) current.core.close();
+    if (!current.core.snapshot().closed) return current;
   }
   const next = createAndroidQueue(sessionId, options);
   reliableInputQueues.set(sessionId, next);

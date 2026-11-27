@@ -40,19 +40,19 @@ function createRuntime(overrides: {
   captureMirrorAuthoritativeBufferFromTmux?: (mirror: SessionMirror) => Promise<boolean>;
   normalizeTerminalCols?: (cols?: number) => number;
   normalizeTerminalRows?: (rows?: number) => number;
-  getMirrorKey?: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  getMirrorKey?: (sessionName: string, backend?: import('@zterm/shared/protocol').TerminalSessionBackendKind) => string;
   mirrorBufferChanged?: (mirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => Array<{ startIndex: number; endIndex: number }>;
   waitMs?: (delayMs: number) => Promise<void>;
   adaptiveWidthOwnershipStore?: AdaptiveWidthOwnershipStore;
   resizeBackendSession?: (
     sessionName: string,
     geometry: { cols: number; rows: number },
-    backend: 'tmux' | 'herdr' | undefined,
+    backend: import('@zterm/shared/protocol').TerminalSessionBackendKind | undefined,
     operation: 'apply' | 'release',
   ) => void;
   resolveMirrorSessionProvenance?: (
     sessionName: string,
-    backend: 'tmux' | 'herdr',
+    backend: import('@zterm/shared/protocol').TerminalSessionBackendKind,
   ) => ResolvedTerminalSession | null;
 } = {}) {
   const sessions = new Map<string, TerminalSession>();
@@ -190,7 +190,10 @@ function createOwnershipStore(
 
 describe('terminal mirror runtime lifecycle truth', () => {
   it('keeps same-named tmux and Herdr mirrors independent', async () => {
-    const key = (sessionName: string, backend: 'tmux' | 'herdr' = 'tmux') => `${backend}:${sessionName}`;
+    const key = (
+      sessionName: string,
+      backend: import('@zterm/shared/protocol').TerminalSessionBackendKind = 'tmux',
+    ) => `${backend}:${sessionName}`;
     const { runtime, sessions, mirrors } = createRuntime({ getMirrorKey: key });
     const tmuxSession = createSession('tmux-session');
     const herdrSession = createSession('herdr-session');

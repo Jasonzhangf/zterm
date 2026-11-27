@@ -65,10 +65,13 @@ import {
   createWezTermCommandRunner,
 } from './wezterm-backend';
 import { createHerdrBackendRuntime } from './herdr-backend-runtime';
+import { createRexBackendRuntime } from './rex-backend';
 import {
   isHerdrExecutableAvailable,
+  isRexExecutableAvailable,
   resolveTerminalBackendKind,
   resolveHerdrExecutable,
+  resolveRexExecutable,
   resolveWezTermExecutable,
 } from './terminal-backend-selection';
 import {
@@ -112,6 +115,12 @@ const createConfiguredHerdrBackendRuntime = () => createHerdrBackendRuntime({
   maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
   onLiveActivity: (sessionName) => wakeHerdrMirror(sessionName),
 });
+const createConfiguredRexBackendRuntime = () => createRexBackendRuntime({
+  executable: resolveRexExecutable(),
+  maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
+  defaultCols: DEFAULT_TERMINAL_SESSION_VIEWPORT.cols,
+  defaultRows: DEFAULT_TERMINAL_SESSION_VIEWPORT.rows,
+});
 const TERMINAL_BACKEND_RUNTIME = TERMINAL_BACKEND_KIND === 'wezterm'
   ? createWezTermBackendRuntime({
       runner: createWezTermCommandRunner(resolveWezTermExecutable()),
@@ -119,14 +128,22 @@ const TERMINAL_BACKEND_RUNTIME = TERMINAL_BACKEND_KIND === 'wezterm'
   })
   : TERMINAL_BACKEND_KIND === 'herdr'
     ? createConfiguredHerdrBackendRuntime()
+    : TERMINAL_BACKEND_KIND === 'rex'
+      ? createConfiguredRexBackendRuntime()
     : null;
 const HERDR_BACKEND_RUNTIME = TERMINAL_BACKEND_RUNTIME && TERMINAL_BACKEND_KIND === 'herdr'
   ? TERMINAL_BACKEND_RUNTIME
   : isHerdrExecutableAvailable()
     ? createConfiguredHerdrBackendRuntime()
     : null;
+const REX_BACKEND_RUNTIME = TERMINAL_BACKEND_RUNTIME && TERMINAL_BACKEND_KIND === 'rex'
+  ? TERMINAL_BACKEND_RUNTIME
+  : isRexExecutableAvailable(resolveRexExecutable())
+    ? createConfiguredRexBackendRuntime()
+    : null;
 const TERMINAL_BACKEND_RUNTIMES = {
   ...(HERDR_BACKEND_RUNTIME ? { herdr: HERDR_BACKEND_RUNTIME } : {}),
+  ...(REX_BACKEND_RUNTIME ? { rex: REX_BACKEND_RUNTIME } : {}),
   ...(TERMINAL_BACKEND_KIND === 'wezterm' && TERMINAL_BACKEND_RUNTIME ? { wezterm: TERMINAL_BACKEND_RUNTIME } : {}),
 };
 const DEFAULT_SESSION_NAME = process.env.ZTERM_DEFAULT_SESSION || 'zterm';
@@ -354,14 +371,18 @@ const terminalRuntime = createTerminalRuntime({
       ], sessionName);
       return;
     }
-    const externalBackend = backend === 'herdr' ? HERDR_BACKEND_RUNTIME : TERMINAL_BACKEND_RUNTIMES.wezterm;
+    const externalBackend = backend === 'herdr'
+      ? HERDR_BACKEND_RUNTIME
+      : backend === 'rex'
+        ? REX_BACKEND_RUNTIME
+        : TERMINAL_BACKEND_RUNTIMES.wezterm;
     if (!externalBackend?.resizeSession) {
       throw new Error(`${backend || 'unknown'} backend does not support resize`);
     }
     externalBackend.resizeSession(sessionName, geometry);
   },
   assertTmuxSessionExists: (sessionName, backend, stableId) => {
-    if (stableId && (backend === 'tmux' || backend === 'herdr')) {
+    if (stableId && (backend === 'tmux' || backend === 'herdr' || backend === 'rex')) {
       const resolution = terminalControlRuntime.resolveExistingSession(
         stableId,
         backend,
@@ -378,6 +399,15 @@ const terminalRuntime = createTerminalRuntime({
       }
       if (!HERDR_BACKEND_RUNTIME.listSessions().some((session) => session.sessionName === sessionName)) {
         throw new Error(`herdr session not found: ${sessionName}`);
+      }
+      return;
+    }
+    if (backend === 'rex') {
+      if (!REX_BACKEND_RUNTIME) {
+        throw new Error('rex backend is not available on this daemon');
+      }
+      if (!REX_BACKEND_RUNTIME.listSessions().some((session) => session.sessionName === sessionName)) {
+        throw new Error(`rex session not found: ${sessionName}`);
       }
       return;
     }

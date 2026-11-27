@@ -11,6 +11,7 @@ import type {
   BridgeClientMessage as ClientMessage,
   BridgeServerMessage as ServerMessage,
   HostConfigMessage,
+  TerminalSessionBackendKind,
   TerminalSnapshotRequestPayload,
   TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
@@ -129,7 +130,7 @@ export interface TerminalMessageRuntime {
 
 export function createGuardedBindResolvedSession(deps: {
   mirrors: ReadonlyMap<string, SessionMirror>;
-  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  getMirrorKey: (sessionName: string, backend?: TerminalSessionBackendKind) => string;
   bindResolvedSession: (session: ResolvedTerminalSession) => void;
 }): (session: ResolvedTerminalSession) => void {
   return (session) => {

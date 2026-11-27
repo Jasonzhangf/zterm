@@ -1,7 +1,10 @@
 import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createTerminalControlRuntime } from './terminal-control-runtime';
-import type { TerminalSourceAdapter } from './terminal-source-adapter';
+import {
+  buildRexSessionStableId,
+  type TerminalSourceAdapter,
+} from './terminal-source-adapter';
 
 const spawnMock = vi.fn();
 const spawnSyncMock = vi.fn();
@@ -75,6 +78,43 @@ function createHerdrOnlyRuntime() {
     backendRuntimes: { herdr: herdrBackend },
   });
   return { runtime, herdrBackend };
+}
+
+function createRexCombinedRuntime() {
+  const stableId = buildRexSessionStableId({
+    instanceId: 'rex-instance',
+    sessionId: 'session:rex',
+    blockId: 'block:rex',
+  });
+  const rexBackend: TerminalSourceAdapter = {
+    listSessions: vi.fn(() => [
+      {
+        sessionName: 'rex-demo',
+        paneId: 'block:rex',
+        stableId,
+        workspace: 'zterm-rex',
+        title: 'shell',
+        cwd: '/tmp/rex',
+        cols: 80,
+        rows: 24,
+      },
+    ]),
+    createSession: vi.fn(),
+    readSnapshot: vi.fn(),
+    writeInput: vi.fn(),
+    closeSession: vi.fn(),
+    readCurrentPath: vi.fn(() => '/tmp/rex'),
+  };
+  const runtime = createTerminalControlRuntime({
+    tmuxBinary: 'tmux',
+    defaultSessionName: 'demo',
+    defaultBackend: 'rex',
+    hiddenTmuxSessions: new Set(),
+    sanitizeSessionName: (input) => input?.trim() || 'demo',
+    backendRuntimes: { rex: rexBackend },
+    tmuxSocketPaths: () => ['/socket-test'],
+  });
+  return { runtime, rexBackend, stableId };
 }
 
 describe('terminal control runtime input queue', () => {
@@ -251,12 +291,155 @@ describe('terminal control runtime input queue', () => {
     ]);
   });
 
+  it('keeps the live tmux catalog alongside a Rex-default backend', () => {
+    spawnSyncMock.mockImplementation((_binary: string, args: string[]) => {
+      if (args.includes('list-panes')) {
+        return { status: 0, stdout: 'tmux-demo\t/tmp/tmux\n', stderr: '' };
+      }
+      if (args.includes('-F') && args.includes('#{session_name}\t#{session_id}\t#{session_created}\t#{pid}')) {
+        return { status: 0, stdout: 'tmux-demo\t$1\t1790000000\t4242\n', stderr: '' };
+      }
+      if (args.includes('-F') && args.includes('#S')) {
+        return { status: 0, stdout: 'tmux-demo\n', stderr: '' };
+      }
+      return { status: 0, stdout: '', stderr: '' };
+    });
+    const { runtime, stableId } = createRexCombinedRuntime();
+
+    const catalog = runtime.listTerminalSessionCatalog();
+
+    expect(catalog).toEqual([
+      {
+        name: 'rex-demo',
+        backend: 'rex',
+        stableId,
+        cwd: '/tmp/rex',
+      },
+      {
+        name: 'tmux-demo',
+        backend: 'tmux',
+        stableId: expect.stringMatching(/^tmux:v1:/u),
+        cwd: '/tmp/tmux',
+      },
+    ]);
+    expect(runtime.resolveTerminalSessionBackend('tmux-demo')).toBe('tmux');
+  });
+
+  it('publishes a recreated Rex identity from current discovery despite a stale binding', () => {
+    spawnSyncMock.mockImplementation((_binary: string, args: string[]) => ({
+      status: 0,
+      stdout: args.includes('list-panes') ? 'tmux-demo\t/tmp/tmux\n' : 'tmux-demo\n',
+      stderr: '',
+    }));
+    const { runtime, rexBackend } = createRexCombinedRuntime();
+    const recreatedStableId = buildRexSessionStableId({
+      instanceId: 'rex-instance',
+      sessionId: 'session:rex-recreated',
+      blockId: 'block:recreated',
+    });
+    rexBackend.listSessions = vi.fn(() => [
+      {
+        sessionName: 'rex-demo',
+        paneId: 'block:recreated',
+        stableId: recreatedStableId,
+        workspace: 'zterm-rex',
+        title: 'shell',
+        cwd: '/tmp/rex',
+        cols: 80,
+        rows: 24,
+      },
+    ]);
+    rexBackend.readSessionIdentity = vi.fn(() => {
+      throw new Error('Rex block identity is no longer present: rex-demo');
+    });
+
+    expect(runtime.listTerminalSessionCatalog()).toContainEqual({
+      name: 'rex-demo',
+      backend: 'rex',
+      stableId: recreatedStableId,
+      cwd: '/tmp/rex',
+    });
+    expect(rexBackend.readSessionIdentity).not.toHaveBeenCalled();
+  });
+
+  it.each(['Rex server unavailable', 'Rex backend supports API revision 24, received 23'])(
+    'preserves healthy tmux and Herdr catalogs when optional Rex fails: %s',
+    (message) => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        spawnSyncMock.mockImplementation((_binary: string, args: string[]) => ({
+          status: 0,
+          stdout: args.includes('list-panes') ? 'tmux-demo\t/tmp/tmux\n' : 'tmux-demo\n',
+          stderr: '',
+        }));
+        const { rexBackend } = createRexCombinedRuntime();
+        const { herdrBackend } = createHerdrOnlyRuntime();
+        rexBackend.listSessions = vi.fn(() => { throw new Error(message); });
+        const runtime = createTerminalControlRuntime({
+          tmuxBinary: 'tmux', defaultSessionName: 'demo', defaultBackend: 'tmux',
+          hiddenTmuxSessions: new Set(), sanitizeSessionName: (input) => input || 'demo',
+          backendRuntimes: { rex: rexBackend, herdr: herdrBackend },
+          tmuxSocketPaths: () => ['/socket-test'],
+        });
+        expect(runtime.listTerminalSessionCatalog().map((entry) => entry.name)).toEqual(['herdr-demo', 'tmux-demo']);
+        expect(errorLog).toHaveBeenCalledWith('[terminal-control-runtime] rex catalog discovery failed', expect.objectContaining({ error: message }));
+        expect(() => runtime.listTmuxSessions('rex')).toThrow(message);
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
+  it('enumerates each Rex session once so catalog identity cannot drop between discovery reads', () => {
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+    const { runtime, rexBackend, stableId } = createRexCombinedRuntime();
+    const listSessions = vi.fn()
+      .mockReturnValueOnce([{
+        sessionName: 'rex-demo',
+        paneId: 'block:rex',
+        stableId,
+        workspace: 'zterm-rex',
+        title: 'shell',
+        cwd: '/tmp/rex',
+        cols: 80,
+        rows: 24,
+      }])
+      .mockReturnValue([]);
+    rexBackend.listSessions = listSessions;
+
+    expect(runtime.listTerminalSessionCatalog()).toContainEqual({
+      name: 'rex-demo',
+      backend: 'rex',
+      stableId,
+      cwd: '/tmp/rex',
+    });
+    expect(listSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a Rex catalog row without an exact rex:v1 identity', () => {
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
+    const { runtime, rexBackend } = createRexCombinedRuntime();
+    rexBackend.listSessions = vi.fn(() => [{
+      sessionName: 'rex-demo',
+      paneId: 'block:rex',
+      workspace: 'zterm-rex',
+      title: 'shell',
+      cwd: '/tmp/rex',
+      cols: 80,
+      rows: 24,
+    }]);
+
+    expect(() => runtime.listTerminalSessionCatalog()).toThrow(
+      'rex session rex-demo is missing an exact rex:v1 identity',
+    );
+  });
+
   it('lists and resolves Herdr sessions without probing tmux on a Herdr-only daemon', () => {
     const { runtime, herdrBackend } = createHerdrOnlyRuntime();
 
     expect(runtime.listTerminalSessions()).toEqual(['herdr-demo']);
     expect(runtime.resolveTerminalSessionBackend('herdr-demo')).toBe('herdr');
-    expect(herdrBackend.listSessions).toHaveBeenCalledTimes(3);
+    expect(herdrBackend.listSessions).toHaveBeenCalledTimes(2);
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 

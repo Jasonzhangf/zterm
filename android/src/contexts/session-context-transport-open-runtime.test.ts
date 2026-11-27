@@ -7,9 +7,10 @@ import {
   queueSessionTransportOpenIntentRuntime,
 } from './session-context-transport-open-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
+import type { SessionTransportHost } from '../lib/session-transport-runtime';
 import { createSessionReconnectStore } from '../lib/session-reconnect-store';
 
-function makeHost() {
+function makeHost(): SessionTransportHost {
   return {
     id: 'host-1',
     createdAt: 1,
@@ -188,6 +189,11 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
     }));
     const intent = {
       ...makeIntent('session-1', 'open-1'),
+      host: {
+        ...makeHost(),
+        terminalBackend: 'herdr' as const,
+        autoCommand: 'start-herdr',
+      },
       resolvedSessionName: 'tmux-1',
     };
 
@@ -207,20 +213,125 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
     });
 
     expect(ensureSessionTerminalChannel).toHaveBeenCalledWith('session-1', { bodySubscribed: false });
-    expect(sendSocketPayload).toHaveBeenCalledWith(
-      'session-1',
-      targetSocket,
-      JSON.stringify({
-        type: 'mux-channel-open',
-        payload: {
-          channelId: 'channel-a',
-          sessionName: 'tmux-1',
-          cols: 88,
-          widthMode: 'adaptive-phone',
-          bodySubscribed: false,
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(sendSocketPayload.mock.calls[0][0]).toBe('session-1');
+    expect(sendSocketPayload.mock.calls[0][1]).toBe(targetSocket);
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2] as string)).toEqual({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-a',
+        sessionName: 'tmux-1',
+        backend: 'herdr',
+        autoCommand: 'start-herdr',
+        cols: 88,
+        widthMode: 'adaptive-phone',
+        bodySubscribed: false,
+      },
+    });
+  });
+
+  it('keeps an opaque exact identity on immediate open over an already-ready mux', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const exactIdentity = 'rex:pane/a.b+c 雪';
+
+    openSessionMuxChannelByIntentRuntime({
+      intent: {
+        ...makeIntent('session-exact', 'open-exact'),
+        host: {
+          ...makeHost(),
+          sessionName: 'same-label',
+          terminalBackend: 'herdr',
+          expectedSessionIdentity: exactIdentity,
         },
+        resolvedSessionName: 'same-label',
+      },
+      daemonConnection: makeDaemonConnection({
+        readSessionTargetSocket: () => targetSocket,
       }),
-    );
+      readSessionTargetTerminalSocket: () => targetSocket,
+      isSessionTargetMuxReady: () => true,
+      ensureSessionTerminalChannel: () => ({
+        channelId: 'channel-exact',
+        sessionId: 'session-exact',
+        sessionName: 'same-label',
+        targetKey: 'target-a',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      }),
+      isSessionBodySubscribed: () => true,
+      updateSessionTerminalChannelState: vi.fn(),
+      readRequestedTerminalGeometry: () => ({ cols: 91, rows: 31, widthMode: 'adaptive-phone' }),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-exact',
+        sessionName: 'same-label',
+        backend: 'herdr',
+        expectedSessionIdentity: exactIdentity,
+        existingOnly: true,
+        cols: 91,
+        rows: 31,
+        widthMode: 'adaptive-phone',
+        bodySubscribed: true,
+      },
+    });
+  });
+
+  it.each([
+    ['empty identity', '', 'tmux'],
+    ['blank identity', '   ', 'tmux'],
+    ['missing backend', 'rex:pane/a', undefined],
+  ])('rejects an invalid exact intent locally for %s', (_case, expectedSessionIdentity, terminalBackend) => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const finalizeFailure = vi.fn();
+    const onInvalidOpenIntent = vi.fn();
+
+    openSessionMuxChannelByIntentRuntime({
+      intent: {
+        ...makeIntent('session-invalid', 'open-invalid'),
+        host: {
+          ...makeHost(),
+          expectedSessionIdentity,
+          terminalBackend: terminalBackend as 'tmux' | undefined,
+        },
+        finalizeFailure,
+      },
+      daemonConnection: makeDaemonConnection({
+        readSessionTargetSocket: () => targetSocket,
+      }),
+      readSessionTargetTerminalSocket: () => targetSocket,
+      isSessionTargetMuxReady: () => true,
+      ensureSessionTerminalChannel: () => ({
+        channelId: 'channel-invalid',
+        sessionId: 'session-invalid',
+        sessionName: 'tmux-1',
+        targetKey: 'target-a',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      }),
+      updateSessionTerminalChannelState: vi.fn(),
+      readRequestedTerminalGeometry: () => null,
+      sendSocketPayload,
+      onInvalidOpenIntent,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(finalizeFailure).not.toHaveBeenCalled();
+    expect(onInvalidOpenIntent).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-invalid', channelId: 'channel-invalid',
+      invalidIntent: expect.objectContaining({ message: expect.stringMatching(/exact session (identity|backend)/) }),
+    }));
   });
 
   it('opens one target transport through client.daemon_connection when no reusable target transport exists', () => {

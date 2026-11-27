@@ -48,6 +48,9 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 
 ## Mux 控制线与业务线
 
+- Rex executable 的唯一选择 owner 是 `terminal-backend-selection.ts::resolveRexExecutable`；adapter 显式 options 优先，其余复用该 resolver。非空环境覆盖 > PATH 可执行 Rex > macOS 当前用户标准 `Versions/Current/Rex Server.app/Contents/MacOS/rex` > 原不可用裸命令。显式失败不得改选程序，不修改服务 PATH。安装态验收须保留受限 PATH 下的真实 probe 输出/退出码，并走正式 daemon 的 catalog/exact open/output/input/stale/isolation/reconnect；源码或静态图不能替代该证据。
+- Rex source adapter 当前只接受公开 API revision 24。版本不符时在 `whoami` 准入处显式失败，不得用旧字段解释新 API，也不得通过 fallback 静默忽略目录失败。安装态恢复信号是 daemon 日志不再报告 revision mismatch，真实 app catalog 刷新出现已授权的 exact Rex targets。
+
 - 物理 transport 完成 `mux-hello` 后，wire 上只允许 `TerminalMuxServerFrame` / `TerminalMuxClientFrame`。
 - target 控制事实（例如 `sessions`、`session-activity`、target error/pong）只走 `mux-target-message`；session terminal 业务只走 `mux-channel-message` / `mux-channel-binary`。
 - 已协商 mux 的物理 transport 禁止裸发 `BridgeServerMessage`。唯一物理 sender contract 必须使用 shared protocol 的 wire-frame union，禁止 `as unknown as` 绕过类型锁。

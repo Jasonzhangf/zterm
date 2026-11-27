@@ -36,6 +36,7 @@ public final class AndroidConnectionServiceEvent {
     public final String generation;
     public final String channelId;
     public final String sessionName;
+    public final String stableId;
     public final Long atMillis;
     public final String message;
     public final String muxReadyPayloadJson;
@@ -54,6 +55,7 @@ public final class AndroidConnectionServiceEvent {
         this.generation = b.generation;
         this.channelId = b.channelId;
         this.sessionName = b.sessionName;
+        this.stableId = b.stableId;
         this.atMillis = b.atMillis;
         this.message = b.message;
         this.muxReadyPayloadJson = b.muxReadyPayloadJson;
@@ -121,8 +123,13 @@ public final class AndroidConnectionServiceEvent {
 
     public static AndroidConnectionServiceEvent channelOpened(
         String generation, String channelId, String sessionName, long at) {
+        return channelOpened(generation, channelId, sessionName, null, at);
+    }
+
+    public static AndroidConnectionServiceEvent channelOpened(
+        String generation, String channelId, String sessionName, String stableId, long at) {
         return new Builder(Type.CHANNEL_OPENED).generation(generation).channelId(channelId)
-            .sessionName(sessionName).at(at).build();
+            .sessionName(sessionName).stableId(stableId).at(at).build();
     }
 
     public static AndroidConnectionServiceEvent channelClosed(String generation, String channelId, String reason) {
@@ -175,6 +182,7 @@ public final class AndroidConnectionServiceEvent {
         private String generation;
         private String channelId;
         private String sessionName;
+        private String stableId;
         private Long atMillis;
         private String message;
         private String muxReadyPayloadJson;
@@ -193,6 +201,7 @@ public final class AndroidConnectionServiceEvent {
         public Builder generation(String v) { this.generation = v; return this; }
         public Builder channelId(String v) { this.channelId = v; return this; }
         public Builder sessionName(String v) { this.sessionName = v; return this; }
+        public Builder stableId(String v) { this.stableId = v; return this; }
         public Builder at(long v) { this.atMillis = v; return this; }
         public Builder message(String v) { this.message = v; return this; }
         public Builder muxReadyPayloadJson(String v) { this.muxReadyPayloadJson = v; return this; }

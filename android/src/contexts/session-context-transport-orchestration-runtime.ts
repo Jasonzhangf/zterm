@@ -1,4 +1,5 @@
 import type { Host, ServerMessage, Session, SessionBufferState, SessionScheduleState, TerminalWidthMode } from '../lib/types';
+import type { SessionTransportHost } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
@@ -29,9 +30,12 @@ import {
 import {
   bindTargetMuxTransportSocketLifecycleRuntime,
   handleTargetMuxServerFrameRuntime,
+  type InvalidSessionMuxOpenIntent,
+  type SessionMuxOpenIntentError,
 } from './session-context-transport-runtime';
 import {
   buildTerminalMuxPing,
+  type TerminalMuxClientFrame,
   type TerminalMuxTargetServerMessage,
 } from '@zterm/shared/protocol';
 import type {
@@ -103,6 +107,7 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
   channelId: string;
   reason: string;
   code?: string;
+  expectedSessionIdentity?: string;
   shouldReconnectNow: boolean;
   queryTargetSessions: () => Promise<string[] | null>;
   routeTargetControlUnavailable?: (sessionId: string, message: string) => void;
@@ -147,6 +152,29 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
       sessionId: options.sessionId,
       channelId: options.channelId,
       reason: options.reason,
+    });
+    return;
+  }
+
+  const expectedSessionIdentity = options.expectedSessionIdentity?.trim();
+  if (expectedSessionIdentity) {
+    if (!currentClosedChannel) {
+      return;
+    }
+
+    if (options.shouldReconnectNow) {
+      options.scheduleReconnect(options.sessionId, options.reason, true);
+    } else {
+      options.updateSessionSync(
+        options.sessionId,
+        buildSessionIdleAfterReconnectBlockedUpdates(options.reason),
+      );
+    }
+    options.runtimeDebug('session.mux.channel-closed.exact', {
+      sessionId: options.sessionId,
+      channelId: options.channelId,
+      expectedSessionIdentity,
+      reconnectNow: options.shouldReconnectNow,
     });
     return;
   }
@@ -210,6 +238,78 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
         options.scheduleReconnect(options.sessionId, options.reason, true);
       }
     });
+}
+
+export function retireRejectedExactChannelRuntime(options: {
+  sessionId: string;
+  channelId: string;
+  sessionName?: string;
+  expectedSessionIdentity?: string;
+  invalidIntent?: SessionMuxOpenIntentError;
+  replySessionIdentity?: string;
+  ws: BridgeTransportSocket;
+  readSessionTerminalChannel: (sessionId: string) => {
+    channelId: string;
+    state: 'opening' | 'open' | 'closing' | 'closed';
+  } | null;
+  writeSessionTerminalChannelState: (sessionId: string, state: 'opening' | 'open' | 'closing' | 'closed') => unknown;
+  pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
+  clearSessionHandshakeTimeout: (sessionId: string) => void;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  onSessionTransportTeardown?: (sessionId: string, reason?: string) => void;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+}) {
+  const current = options.readSessionTerminalChannel(options.sessionId);
+  if (
+    !current
+    || current.channelId !== options.channelId
+    || current.state !== 'opening'
+  ) {
+    options.runtimeDebug('session.mux.channel-opened.exact-identity-rejection-stale', {
+      sessionId: options.sessionId,
+      channelId: options.channelId,
+      channelState: current?.state || null,
+    });
+    return;
+  }
+
+  options.writeSessionTerminalChannelState(options.sessionId, 'closed');
+  options.clearSessionHandshakeTimeout(options.sessionId);
+  deletePendingSessionTransportOpenIntent(
+    options.pendingSessionTransportOpenIntentsRef.current,
+    options.sessionId,
+  );
+  const message = options.invalidIntent?.message || (options.replySessionIdentity
+    ? 'terminal mux exact session identity mismatch'
+    : 'terminal mux exact session identity missing');
+  options.onSessionTransportTeardown?.(options.sessionId, options.invalidIntent ? message : 'terminal mux exact identity rejected');
+  if (!options.invalidIntent) try {
+    options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
+      type: 'mux-channel-close',
+      payload: {
+        channelId: options.channelId,
+        reason: 'terminal mux exact identity rejected',
+      },
+    } satisfies TerminalMuxClientFrame));
+  } catch (error) {
+    options.runtimeDebug('session.mux.channel-opened.exact-close-send-failed', {
+      sessionId: options.sessionId,
+      channelId: options.channelId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  options.updateSessionSync(options.sessionId, buildSessionClosedUpdates(message));
+  options.emitSessionStatus(options.sessionId, 'closed', message);
+  options.runtimeDebug('session.mux.channel-opened.exact-identity-rejected', {
+    sessionId: options.sessionId,
+    channelId: options.channelId,
+    sessionName: options.sessionName,
+    expectedSessionIdentity: options.expectedSessionIdentity,
+    replySessionIdentity: options.replySessionIdentity || null,
+  });
 }
 
 export function handleTargetMuxTransportFailureRuntime(options: {
@@ -575,9 +675,9 @@ export function createSessionTransportOrchestrationRuntime(options: {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportToken: (sessionId: string) => string | null;
-  readSessionTransportHost: (sessionId: string) => Host | null;
+  readSessionTransportHost: (sessionId: string) => SessionTransportHost | null;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
-  writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
+  writeSessionTransportHost: (sessionId: string, host: SessionTransportHost) => unknown;
   writeSessionTargetControlSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   writeSessionTargetTerminalSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   writeSessionTargetTerminalMuxReady: (sessionId: string, ready: boolean) => unknown;
@@ -585,7 +685,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   writeTargetTerminalMuxReady: (targetKey: string, ready: boolean) => unknown;
   writeSessionTransportSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   probeReconnectHost?: (bridgeHost: string, bridgePort: number) => Promise<boolean>;
-  refreshHostForReconnect?: (host: Host) => Host;
+  refreshHostForReconnect?: (host: SessionTransportHost) => SessionTransportHost;
   ensureSessionTerminalChannel: (sessionId: string, options?: { channelId?: string; now?: number; bodySubscribed?: boolean }) => {
     channelId: string;
     sessionId: string;
@@ -811,13 +911,15 @@ export function createSessionTransportOrchestrationRuntime(options: {
         if (reason) {
           const channel = options.readSessionTerminalChannel(sessionId);
           const host = options.readSessionTransportHost(sessionId);
-          const sessionName = channel?.sessionName || host?.sessionName || host?.name || sessionId;
           resolveMuxChannelClosedWithControlStatusRuntime({
             sessionId,
-            sessionName,
+            sessionName: channel?.sessionName || host?.sessionName || host?.name || sessionId,
             channelId: channel?.channelId || '',
             reason,
             code,
+            expectedSessionIdentity: host?.terminalBackend
+              ? host.expectedSessionIdentity
+              : undefined,
             onTransportTeardown: options.onSessionTransportTeardown,
             shouldReconnectNow: (
               options.stateRef.current.activeSessionId === sessionId
@@ -904,9 +1006,13 @@ export function createSessionTransportOrchestrationRuntime(options: {
       readTargetTerminalSocket: options.readTargetTerminalSocket,
       readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
       getOpeningTerminalChannelsForTarget: options.readOpeningTerminalChannelsForTarget,
+      readSessionTransportHost: options.readSessionTransportHost,
       readPrioritySessionId: () => options.stateRef.current.activeSessionId,
       setTargetMuxReady: options.writeTargetTerminalMuxReady,
       sendSocketPayload: options.sendSocketPayload,
+      readSessionTerminalChannel: options.readSessionTerminalChannel,
+      writeSessionTerminalChannelState: options.writeSessionTerminalChannelState,
+      onInvalidOpenIntent: settleInvalidOpenIntent,
       applyTransportDiagnostics: options.applyTransportDiagnostics,
       startSocketHeartbeat: options.startSocketHeartbeat,
       recordTargetServerActivity: (heartbeatKey) => {
@@ -933,6 +1039,8 @@ export function createSessionTransportOrchestrationRuntime(options: {
           rawFrameData,
           frame,
           resolveSessionIdForChannel: (channelId) => options.readTargetSessionIdForTerminalChannel(targetKey, channelId),
+          readSessionTransportHost: options.readSessionTransportHost,
+          readSessionTerminalChannel: options.readSessionTerminalChannel,
           readSessionTerminalChannelBodySubscribed: (sessionId) => (
             options.readSessionTerminalChannel(sessionId)?.bodySubscribed ?? null
           ),
@@ -943,6 +1051,21 @@ export function createSessionTransportOrchestrationRuntime(options: {
             options.refs.handleSocketServerMessageRef.current?.(params, msg);
           },
           buildChannelCallbacks: (sessionId) => buildMuxChannelCallbacks(sessionId, bindOptions.ws),
+          onExactChannelRejected: (rejection) => {
+            retireRejectedExactChannelRuntime({
+              ...rejection,
+              ws: bindOptions.ws,
+              readSessionTerminalChannel: options.readSessionTerminalChannel,
+              writeSessionTerminalChannelState: options.writeSessionTerminalChannelState,
+              pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
+              clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
+              sendSocketPayload: options.sendSocketPayload,
+              onSessionTransportTeardown: options.onSessionTransportTeardown,
+              updateSessionSync: options.updateSessionSync,
+              emitSessionStatus,
+              runtimeDebug: options.runtimeDebug,
+            });
+          },
           handleTargetMuxMessage: options.handleTargetMuxMessage,
           recordSessionRx: options.recordSessionRx,
           runtimeDebug: options.runtimeDebug,
@@ -950,6 +1073,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       },
     });
   };
+
 
   const daemonConnection = createClientDaemonConnection({
     readSessionTransportResource: options.readSessionTransportResource,
@@ -1023,6 +1147,23 @@ export function createSessionTransportOrchestrationRuntime(options: {
     }, options.sessionHandshakeTimeoutMs);
   };
 
+  function settleInvalidOpenIntent(
+    details: InvalidSessionMuxOpenIntent,
+  ) {
+    retireRejectedExactChannelRuntime({
+      ...details,
+      readSessionTerminalChannel: options.readSessionTerminalChannel,
+      writeSessionTerminalChannelState: options.writeSessionTerminalChannelState,
+      pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
+      clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
+      sendSocketPayload: options.sendSocketPayload,
+      onSessionTransportTeardown: options.onSessionTransportTeardown,
+      updateSessionSync: options.updateSessionSync,
+      emitSessionStatus,
+      runtimeDebug: options.runtimeDebug,
+    });
+  }
+
   function openSessionMuxChannelByIntent(intent: PendingSessionTransportOpenIntent) {
     // The mux handshake timeout is NOT started here: it would count socket
     // candidate attempts (up to ~13.9s serial) against a 4s budget and cut
@@ -1032,6 +1173,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     options.clearSessionHandshakeTimeout(intent.sessionId);
     openSessionMuxChannelByIntentRuntime({
       intent,
+      onInvalidOpenIntent: settleInvalidOpenIntent,
       readSessionTargetTerminalSocket: options.readSessionTargetTerminalSocket,
       isSessionTargetMuxReady: options.readSessionTargetTerminalMuxReady,
       ensureSessionTerminalChannel: options.ensureSessionTerminalChannel,

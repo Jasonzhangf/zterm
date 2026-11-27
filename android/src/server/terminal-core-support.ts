@@ -3,6 +3,7 @@ import type {
   TerminalCursorState,
 } from '@zterm/shared/types';
 import { sanitizeTmuxSessionName } from '@zterm/shared/tmux-session-name';
+import type { TerminalSessionBackendKind } from '@zterm/shared/protocol';
 import type { TerminalSession } from './terminal-runtime-types';
 
 export interface TerminalCoreSupportDeps {
@@ -13,7 +14,7 @@ export interface TerminalCoreSupportDeps {
 export interface TerminalCoreSupport {
   resolveMirrorCacheLines: (rows: number) => number;
   sanitizeSessionName: (input?: string) => string;
-  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  getMirrorKey: (sessionName: string, backend?: TerminalSessionBackendKind) => string;
   mirrorCursorEqual: (
     left: TerminalCursorState | null | undefined,
     right: TerminalCursorState | null | undefined,
@@ -41,7 +42,7 @@ export function createTerminalCoreSupport(
     return sanitizeTmuxSessionName(input || '', deps.defaultSessionName);
   }
 
-  function getMirrorKey(sessionName: string, backend: 'tmux' | 'herdr' = 'tmux') {
+  function getMirrorKey(sessionName: string, backend: TerminalSessionBackendKind = 'tmux') {
     return `${backend}:${sanitizeSessionName(sessionName)}`;
   }
 

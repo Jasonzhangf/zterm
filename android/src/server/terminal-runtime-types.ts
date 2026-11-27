@@ -2,6 +2,8 @@ import type { WasmBridge } from '@jsonstudio/wtermmod-core';
 import type {
   AttachFileStartPayload,
   PasteImageStartPayload,
+  TerminalBackendKind,
+  TerminalSessionBackendKind,
   TerminalTransportLane,
 } from '@zterm/shared/protocol';
 import type {
@@ -111,7 +113,7 @@ export interface TerminalTransportSubscriber {
   muxChannelId?: string | null;
   muxParentTransportId?: string | null;
   sessionName: string;
-  backend?: 'tmux' | 'herdr';
+  backend?: TerminalBackendKind;
   sessionIdentity?: string;
   sessionTarget?: TerminalSessionNativeTarget;
   mirrorKey: string | null;
@@ -134,7 +136,7 @@ export type TerminalSession = TerminalTransportSubscriber;
 export interface SessionMirror {
   key: string;
   sessionName: string;
-  backend?: 'tmux' | 'herdr';
+  backend?: TerminalBackendKind;
   sessionIdentity?: string;
   sessionTarget?: TerminalSessionNativeTarget;
   scratchBridge: WasmBridge | null;
@@ -204,7 +206,7 @@ export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 
 export interface TerminalAttachPayload {
   sessionName: string;
-  backend?: 'tmux' | 'herdr';
+  backend?: TerminalSessionBackendKind;
   resolvedSession?: ResolvedTerminalSession;
   cols?: number;
   rows?: number;

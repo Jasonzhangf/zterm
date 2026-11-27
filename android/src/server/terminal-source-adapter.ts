@@ -2,9 +2,10 @@ import type {
   TerminalCell,
   TerminalCursorState,
 } from '@zterm/shared/types';
+import type { TerminalSessionBackendKind } from '@zterm/shared/protocol';
 
-export type TerminalSourceKind = 'tmux' | 'herdr' | 'wezterm';
-export type TerminalIdentityBackendKind = 'tmux' | 'herdr';
+export type TerminalSourceKind = 'tmux' | 'herdr' | 'wezterm' | 'rex';
+export type TerminalIdentityBackendKind = TerminalSessionBackendKind;
 
 export interface TerminalSessionIdentity {
   backend: TerminalIdentityBackendKind;
@@ -30,9 +31,19 @@ export interface HerdrTerminalSessionTarget {
   paneId: string;
 }
 
+export interface RexTerminalSessionTarget {
+  backend: 'rex';
+  sessionName: string;
+  stableId: string;
+  instanceId: string;
+  sessionId: string;
+  blockId: string;
+}
+
 export type TerminalSessionNativeTarget =
   | TmuxTerminalSessionTarget
-  | HerdrTerminalSessionTarget;
+  | HerdrTerminalSessionTarget
+  | RexTerminalSessionTarget;
 
 export interface ResolvedTerminalSession {
   identity: TerminalSessionIdentity;
@@ -61,12 +72,21 @@ export type ParsedHerdrSessionStableIdentity = {
   paneId: string;
 };
 
+export type ParsedRexSessionStableIdentity = {
+  backend: 'rex';
+  instanceId: string;
+  sessionId: string;
+  blockId: string;
+};
+
 export type ParsedTerminalSessionStableIdentity =
   | ParsedTmuxSessionStableIdentity
-  | ParsedHerdrSessionStableIdentity;
+  | ParsedHerdrSessionStableIdentity
+  | ParsedRexSessionStableIdentity;
 
 const TMUX_STABLE_ID_PREFIX = 'tmux:v1:';
 const HERDR_STABLE_ID_PREFIX = 'herdr:v1:';
+const REX_STABLE_ID_PREFIX = 'rex:v1:';
 
 function encodeStableIdentity(prefix: string, value: object) {
   return `${prefix}${encodeURIComponent(JSON.stringify(value))}`;
@@ -98,6 +118,22 @@ export function buildHerdrSessionStableId(value: {
   });
 }
 
+export function buildRexSessionStableId(value: {
+  instanceId: string;
+  sessionId: string;
+  blockId: string;
+}) {
+  if (!value.instanceId.trim() || !value.sessionId.trim() || !value.blockId.trim()) {
+    throw new Error('Rex session identity requires instanceId, sessionId, and blockId');
+  }
+  return encodeStableIdentity(REX_STABLE_ID_PREFIX, {
+    backend: 'rex',
+    instanceId: value.instanceId,
+    sessionId: value.sessionId,
+    blockId: value.blockId,
+  });
+}
+
 export function parseTerminalSessionStableId(
   stableId: string,
 ): ParsedTerminalSessionStableIdentity | null {
@@ -105,7 +141,9 @@ export function parseTerminalSessionStableId(
     ? TMUX_STABLE_ID_PREFIX
     : stableId.startsWith(HERDR_STABLE_ID_PREFIX)
       ? HERDR_STABLE_ID_PREFIX
-      : null;
+      : stableId.startsWith(REX_STABLE_ID_PREFIX)
+        ? REX_STABLE_ID_PREFIX
+        : null;
   if (!prefix) {
     return null;
   }
@@ -145,6 +183,23 @@ export function parseTerminalSessionStableId(
         backend: 'herdr',
         terminalId: value.terminalId,
         paneId: value.paneId,
+      };
+    }
+    if (
+      prefix === REX_STABLE_ID_PREFIX
+      && value.backend === 'rex'
+      && typeof value.instanceId === 'string'
+      && value.instanceId
+      && typeof value.sessionId === 'string'
+      && value.sessionId
+      && typeof value.blockId === 'string'
+      && value.blockId
+    ) {
+      return {
+        backend: 'rex',
+        instanceId: value.instanceId,
+        sessionId: value.sessionId,
+        blockId: value.blockId,
       };
     }
   } catch {
@@ -192,6 +247,17 @@ export interface TerminalSourceSession {
   rows: number;
 }
 
+/** Read-only catalog and exact-identity capability required before a backend
+ * can enter the terminal data plane. Source capture/input stay optional so a
+ * catalog-only backend cannot masquerade as a runnable terminal source. */
+export interface TerminalIdentityRuntime {
+  kind?: TerminalIdentityBackendKind;
+  listSessions: () => TerminalSourceSession[];
+  readSessionIdentity?: (sessionName: string) => TerminalSessionIdentity;
+  resolveExistingSession?: (stableId: string) => ResolvedTerminalSession | null;
+  bindResolvedSession?: (session: ResolvedTerminalSession) => void;
+}
+
 export interface TerminalSourceAdapter {
   kind?: TerminalSourceKind;
   listSessions: () => TerminalSourceSession[];
@@ -212,7 +278,7 @@ export function assertSupportedTerminalSourceKind(
   value: string | undefined,
 ): TerminalSourceKind {
   const normalized = (value || '').trim().toLowerCase();
-  if (normalized === 'tmux' || normalized === 'herdr' || normalized === 'wezterm') {
+  if (normalized === 'tmux' || normalized === 'herdr' || normalized === 'wezterm' || normalized === 'rex') {
     return normalized;
   }
   throw new Error(`unsupported terminal source kind: ${normalized || '<empty>'}`);

@@ -15,6 +15,24 @@ import {
 } from './terminal-channel-mux-runtime';
 
 describe('terminal-channel-mux-runtime', () => {
+  it('replaces only a retired record, removes its reverse lookup, and preserves siblings on collision', () => {
+    const store = createTerminalChannelMuxStore();
+    bindTerminalChannelSession(store, 's1', 'target-a', 'one');
+    bindTerminalChannelSession(store, 's2', 'target-a', 'two');
+    const old = ensureSessionTerminalChannel(store, 's1', { channelId: 'old' });
+    const sibling = ensureSessionTerminalChannel(store, 's2', { channelId: 'sibling' });
+    expect(ensureSessionTerminalChannel(store, 's1', { channelId: 'new' })).toBe(old);
+    updateSessionTerminalChannelState(store, 's1', 'closing');
+    expect(ensureSessionTerminalChannel(store, 's1', { channelId: 'new' })).toBe(old);
+    updateSessionTerminalChannelState(store, 's1', 'closed');
+    expect(() => ensureSessionTerminalChannel(store, 's1', { channelId: 'sibling' })).toThrow(/already bound/);
+    expect(getSessionIdForTerminalChannel(store, 'target-a', 'old')).toBe('s1');
+    const fresh = ensureSessionTerminalChannel(store, 's1', { channelId: 'new', now: 99, bodySubscribed: false });
+    expect(fresh).toMatchObject({ channelId: 'new', state: 'opening', openedAt: 99, closedAt: null, bodySubscribed: false });
+    expect(getSessionIdForTerminalChannel(store, 'target-a', 'old')).toBeNull();
+    expect(getSessionIdForTerminalChannel(store, 'target-a', 'new')).toBe('s1');
+    expect(getSessionTerminalChannel(store, 's2')).toBe(sibling);
+  });
   it('owns channel open, name, body subscription, and state for one session', () => {
     const store = createTerminalChannelMuxStore();
     const binding = bindTerminalChannelSession(store, ' session-1 ', 'target-a', ' alpha ');

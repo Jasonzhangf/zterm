@@ -1,6 +1,6 @@
 import type { Host, HostConfigMessage, ServerMessage } from '../lib/types';
 import { buildBodySubscriptionMessage } from './session-wire-helpers';
-import type { SessionTerminalChannelRuntime } from '../lib/terminal-channel-mux-runtime';
+import type { SessionTerminalChannelRuntime, SessionTerminalChannelState } from '../lib/terminal-channel-mux-runtime';
 import {
   ensureSessionTerminalChannel,
   getOpeningSessionTerminalChannelsForTarget,
@@ -9,6 +9,7 @@ import {
   updateSessionTerminalChannelName,
   updateSessionTerminalChannelState,
   TerminalMuxChannelNotOpenError,
+  markTerminalChannelConnected,
 } from '../lib/terminal-channel-mux-runtime';
 import {
   clearSessionSupersededSockets,
@@ -36,6 +37,7 @@ import {
   setSessionTargetControlTransport,
   setSessionTransportSocket,
   upsertSessionTransportRuntime,
+  type SessionTransportHost,
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket, TraversalDiagnostics } from '../lib/traversal/types';
@@ -66,7 +68,7 @@ export interface SessionContextTransportAccessors {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   /** Route and round-trip facts for the session's physical transport (A-2). */
   readSessionTraversalDiagnostics: (sessionId: string) => TraversalDiagnostics | null;
-  readSessionTransportHost: (sessionId: string) => Host | null;
+  readSessionTransportHost: (sessionId: string) => SessionTransportHost | null;
   readSessionTransportRuntime: (sessionId: string) => ReturnType<typeof getSessionTransportRuntime>;
   readSessionTargetRuntime: (sessionId: string) => ReturnType<typeof getSessionTargetTransportRuntime>;
   readSessionTargetKey: (sessionId: string) => string | null;
@@ -82,7 +84,7 @@ export interface SessionContextTransportAccessors {
     prioritySessionId?: string | null,
   ) => ReturnType<typeof getOpeningSessionTerminalChannelsForTarget>;
   readSessionRequestedTerminalGeometry: (sessionId: string) => ReturnType<typeof getSessionRequestedTerminalGeometry>;
-  writeSessionTransportHost: (sessionId: string, host: Host) => ReturnType<typeof upsertSessionTransportRuntime>;
+  writeSessionTransportHost: (sessionId: string, host: SessionTransportHost) => ReturnType<typeof upsertSessionTransportRuntime>;
   writeSessionTransportSocket: (sessionId: string, socket: BridgeTransportSocket | null) => ReturnType<typeof setSessionTransportSocket>;
   writeSessionTargetControlSocket: (sessionId: string, socket: BridgeTransportSocket | null) => ReturnType<typeof setSessionTargetControlTransport>;
   writeSessionTargetTerminalSocket: (sessionId: string, socket: BridgeTransportSocket | null) => ReturnType<typeof setSessionTargetTerminalTransport>;
@@ -91,7 +93,7 @@ export interface SessionContextTransportAccessors {
   writeTargetTerminalMuxReady: (targetKey: string, ready: boolean) => ReturnType<typeof setTargetTerminalMuxReady>;
   ensureSessionTerminalChannel: (sessionId: string, options?: Parameters<typeof ensureSessionTerminalChannel>[2]) => ReturnType<typeof ensureSessionTerminalChannel>;
   writeSessionTerminalChannelName: (sessionId: string, sessionName: string) => ReturnType<typeof updateSessionTerminalChannelName>;
-  writeSessionTerminalChannelState: (sessionId: string, state: Parameters<typeof updateSessionTerminalChannelState>[2]) => ReturnType<typeof updateSessionTerminalChannelState>;
+  writeSessionTerminalChannelState: (sessionId: string, state: SessionTerminalChannelState) => ReturnType<typeof updateSessionTerminalChannelState>;
   writeSessionRequestedTerminalGeometry: (
     sessionId: string,
     geometry: { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null,
@@ -117,13 +119,37 @@ function resolveIncomingMessageTypeFast(data: string): string | null {
   return match[1];
 }
 
+export class SessionMuxOpenIntentError extends Error {
+  constructor(public readonly reason: 'blank-identity' | 'missing-backend') {
+    super(reason === 'blank-identity'
+      ? 'terminal mux exact session identity is required'
+      : 'terminal mux exact session backend is required');
+  }
+}
+
+export interface InvalidSessionMuxOpenIntent {
+  sessionId: string;
+  channelId: string;
+  ws: BridgeTransportSocket;
+  invalidIntent: SessionMuxOpenIntentError;
+}
+
 export function buildSessionMuxChannelOpenFrame(options: {
   channel: Pick<SessionTerminalChannelRuntime, 'channelId' | 'sessionName' | 'bodySubscribed'>;
   sessionName?: string;
-  host?: Pick<Host, 'autoCommand' | 'terminalBackend'>;
+  host?: Pick<SessionTransportHost, 'autoCommand' | 'terminalBackend' | 'expectedSessionIdentity'>;
   geometry?: { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
 }) {
   const geometry = options.geometry || null;
+  const expectedSessionIdentity = options.host?.expectedSessionIdentity;
+  if (typeof expectedSessionIdentity !== 'undefined') {
+    if (!expectedSessionIdentity.trim()) {
+      throw new SessionMuxOpenIntentError('blank-identity');
+    }
+    if (!options.host?.terminalBackend) {
+      throw new SessionMuxOpenIntentError('missing-backend');
+    }
+  }
   return buildTerminalMuxChannelOpen({
     channelId: options.channel.channelId,
     sessionName: options.sessionName || options.channel.sessionName,
@@ -131,6 +157,10 @@ export function buildSessionMuxChannelOpenFrame(options: {
     ...(Number.isFinite(geometry?.rows) ? { rows: Math.max(1, Math.floor(geometry?.rows || 0)) } : {}),
     ...(geometry?.widthMode ? { widthMode: geometry.widthMode } : {}),
     ...(options.host?.terminalBackend ? { backend: options.host.terminalBackend } : {}),
+    ...(typeof expectedSessionIdentity !== 'undefined' ? {
+      expectedSessionIdentity,
+      existingOnly: true as const,
+    } : {}),
     ...(typeof options.host?.autoCommand === 'string' && options.host.autoCommand.trim() ? { autoCommand: options.host.autoCommand.trim() } : {}),
     bodySubscribed: options.channel.bodySubscribed,
   });
@@ -141,20 +171,23 @@ export function sendSessionMuxChannelOpenRuntime(options: {
   ws: BridgeTransportSocket;
   channel: Pick<SessionTerminalChannelRuntime, 'channelId' | 'sessionName' | 'bodySubscribed'>;
   sessionName?: string;
-  host?: Pick<Host, 'autoCommand' | 'terminalBackend'>;
+  host?: Pick<SessionTransportHost, 'autoCommand' | 'terminalBackend' | 'expectedSessionIdentity'>;
   geometry?: { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
+  onInvalidOpenIntent?: (details: InvalidSessionMuxOpenIntent) => void;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
-  options.sendSocketPayload(
-    options.sessionId,
-    options.ws,
-    JSON.stringify(buildSessionMuxChannelOpenFrame({
-      channel: options.channel,
-      sessionName: options.sessionName,
-      host: options.host,
-      geometry: options.geometry,
-    })),
-  );
+  let frame: ReturnType<typeof buildSessionMuxChannelOpenFrame>;
+  try {
+    frame = buildSessionMuxChannelOpenFrame(options);
+  } catch (error) {
+    if (!(error instanceof SessionMuxOpenIntentError) || !options.onInvalidOpenIntent) throw error;
+    options.onInvalidOpenIntent({ sessionId: options.sessionId, channelId: options.channel.channelId, ws: options.ws, invalidIntent: error });
+    return null;
+  }
+  // Sending is outside invalid-intent classification. Transport errors retain
+  // the caller's existing retryable failure owner.
+  options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify(frame));
+  return frame;
 }
 
 export function createSessionContextTransportAccessors(
@@ -232,12 +265,14 @@ export function cleanupControlTransportSocket(options: {
 
 export function handleTargetMuxServerFrameRuntime(options: {
   anchorSessionId: string;
-  host: Host;
+  host: SessionTransportHost;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
   rawFrameBytes?: number;
   frame: TerminalMuxServerFrame;
   resolveSessionIdForChannel: (channelId: string) => string | null;
+  readSessionTransportHost?: (sessionId: string) => Pick<SessionTransportHost, 'expectedSessionIdentity' | 'terminalBackend'> | null;
+  readSessionTerminalChannel?: (sessionId: string) => Pick<SessionTerminalChannelRuntime, 'channelId' | 'state' | 'inputReadiness' | 'terminalConnected'> | null;
   readSessionTerminalChannelBodySubscribed?: (sessionId: string) => boolean | null;
   readRequestedTerminalGeometry?: (
     sessionId: string,
@@ -246,7 +281,7 @@ export function handleTargetMuxServerFrameRuntime(options: {
   sendSocketPayload?: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   handleSocketServerMessage: (params: {
     sessionId: string;
-    host: Host;
+    host: SessionTransportHost;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
     rawFrameBytes?: number;
@@ -260,6 +295,13 @@ export function handleTargetMuxServerFrameRuntime(options: {
     onFailure: (message: string, retryable: boolean) => void;
     onClosed: (reason?: string, code?: string) => void;
   };
+  onExactChannelRejected?: (details: {
+    sessionId: string;
+    channelId: string;
+    sessionName: string;
+    expectedSessionIdentity: string;
+    replySessionIdentity?: string;
+  }) => void;
   handleTargetMuxMessage?: (payload: { requestId?: string; message: TerminalMuxTargetServerMessage }) => boolean;
   recordSessionRx?: (sessionId: string, data: string | ArrayBuffer) => void;
   rawFrameData?: string;
@@ -272,6 +314,31 @@ export function handleTargetMuxServerFrameRuntime(options: {
     );
   };
 
+  const readCurrentChannel = (sessionId: string) => (
+    options.readSessionTerminalChannel?.(sessionId) || null
+  );
+
+  const resolveExactAttempt = (sessionId: string, channelId: string) => {
+    const channel = readCurrentChannel(sessionId);
+    if (!channel || channel.channelId !== channelId || channel.state !== 'opening') {
+      return null;
+    }
+    const expectedSessionIdentity = options.readSessionTransportHost?.(sessionId)?.expectedSessionIdentity;
+    if (typeof expectedSessionIdentity !== 'string') {
+      return null;
+    }
+    return { channel, expectedSessionIdentity };
+  };
+
+  const isCurrentExactChannelActive = (sessionId: string, channelId: string, allowOpening: boolean) => {
+    const channel = readCurrentChannel(sessionId);
+    return Boolean(
+      channel
+      && channel.channelId === channelId
+      && (channel.state === 'open' || (allowOpening && channel.state === 'opening')),
+    );
+  };
+
   const dispatchChannelMessage = (channelId: string, message: ServerMessage) => {
     const sessionId = options.resolveSessionIdForChannel(channelId);
     if (!sessionId) {
@@ -281,6 +348,27 @@ export function handleTargetMuxServerFrameRuntime(options: {
         messageType: message.type,
       });
       return;
+    }
+    const sessionHost = options.readSessionTransportHost?.(sessionId);
+    if (
+      typeof sessionHost?.expectedSessionIdentity === 'string'
+      && sessionHost.terminalBackend
+    ) {
+      const channel = readCurrentChannel(sessionId);
+      if (!isCurrentExactChannelActive(sessionId, channelId, message.type === 'error' || message.type === 'closed')) {
+        options.runtimeDebug('session.mux.channel-message.inactive-exact-channel', {
+          anchorSessionId: options.anchorSessionId,
+          sessionId,
+          channelId,
+          messageType: message.type,
+          channelState: channel?.state || null,
+        });
+        return;
+      }
+    }
+    if (message.type === 'connected') {
+      const channel = readCurrentChannel(sessionId);
+      if (channel?.channelId === channelId) markTerminalChannelConnected(channel);
     }
     if (message.type !== 'pong') {
       recordChannelActivity(sessionId);
@@ -316,6 +404,38 @@ export function handleTargetMuxServerFrameRuntime(options: {
         return;
       }
       recordChannelActivity(sessionId);
+      const exactAttempt = resolveExactAttempt(sessionId, options.frame.payload.channelId);
+      const sessionHost = options.readSessionTransportHost?.(sessionId);
+      const expectedSessionIdentity = sessionHost?.expectedSessionIdentity;
+      if (typeof expectedSessionIdentity === 'string' && sessionHost?.terminalBackend) {
+        if (!exactAttempt) {
+          options.runtimeDebug('session.mux.channel-opened.retired-exact-channel', {
+            anchorSessionId: options.anchorSessionId,
+            sessionId,
+            channelId: options.frame.payload.channelId,
+            expectedSessionIdentity,
+          });
+          return;
+        }
+        if (options.frame.payload.stableId !== expectedSessionIdentity) {
+          const rejection = {
+            sessionId,
+            channelId: options.frame.payload.channelId,
+            sessionName: options.frame.payload.sessionName,
+            expectedSessionIdentity,
+            replySessionIdentity: options.frame.payload.stableId,
+          };
+          options.runtimeDebug('session.mux.channel-opened.exact-identity-mismatch', {
+            anchorSessionId: options.anchorSessionId,
+            sessionId,
+            channelId: options.frame.payload.channelId,
+            expectedSessionIdentity,
+            replySessionIdentity: options.frame.payload.stableId,
+          });
+          options.onExactChannelRejected?.(rejection);
+          return;
+        }
+      }
       options.updateSessionTerminalChannelState(sessionId, 'open');
       options.buildChannelCallbacks(sessionId).onChannelAllocated?.();
       const bodySubscribed = options.readSessionTerminalChannelBodySubscribed?.(sessionId);
@@ -343,6 +463,20 @@ export function handleTargetMuxServerFrameRuntime(options: {
         return;
       }
       recordChannelActivity(sessionId);
+      const sessionHost = options.readSessionTransportHost?.(sessionId);
+      if (
+        typeof sessionHost?.expectedSessionIdentity === 'string'
+        && sessionHost.terminalBackend
+        && !isCurrentExactChannelActive(sessionId, options.frame.payload.channelId, true)
+      ) {
+        options.runtimeDebug('session.mux.channel-closed.retired-exact-channel', {
+          anchorSessionId: options.anchorSessionId,
+          sessionId,
+          channelId: options.frame.payload.channelId,
+          reason: options.frame.payload.reason,
+        });
+        return;
+      }
       options.updateSessionTerminalChannelState(sessionId, 'closed');
       options.buildChannelCallbacks(sessionId).onClosed(
         options.frame.payload.reason,
@@ -389,10 +523,11 @@ export function handleTargetMuxServerFrameRuntime(options: {
 }
 
 export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
+  onInvalidOpenIntent?: (details: InvalidSessionMuxOpenIntent) => void;
   sessionId: string;
   targetKey: string;
   targetHeartbeatKey: string;
-  host: Host;
+  host: SessionTransportHost;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
   /** Relay-assigned device id of this client; lets the daemon match
@@ -406,6 +541,9 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
     targetKey: string,
     prioritySessionId: string,
   ) => SessionTerminalChannelRuntime[];
+  readSessionTransportHost: (sessionId: string) => SessionTransportHost | null;
+  readSessionTerminalChannel: (sessionId: string) => SessionTerminalChannelRuntime | null;
+  writeSessionTerminalChannelState: (sessionId: string, state: SessionTerminalChannelState) => unknown;
   readPrioritySessionId: () => string | null;
   setTargetMuxReady: (targetKey: string, ready: boolean) => unknown;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -515,12 +653,21 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
           prioritySessionId: priorityChannel?.sessionId || openingChannels[0]?.sessionId || null,
         });
         for (const channel of openingChannels) {
+          const host = options.readSessionTransportHost(channel.sessionId);
+          if (!host) {
+            options.runtimeDebug('session.mux.channel-open.missing-session-host', {
+              sessionId: channel.sessionId,
+              channelId: channel.channelId,
+            });
+            continue;
+          }
           sendSessionMuxChannelOpenRuntime({
             sessionId: channel.sessionId,
             ws: options.ws,
             channel,
-            host: options.host,
+            host,
             geometry: options.readRequestedTerminalGeometry(channel.sessionId),
+            onInvalidOpenIntent: options.onInvalidOpenIntent,
             sendSocketPayload: options.sendSocketPayload,
           });
         }
@@ -562,7 +709,7 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
 
 export function openSocketConnectHandshake(options: {
   sessionId: string;
-  host: Host;
+  host: SessionTransportHost;
   resolvedSessionName: string;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
@@ -623,7 +770,7 @@ export function bindSessionTransportSocketLifecycle(options: {
   shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
   handleSocketServerMessage: (params: {
     sessionId: string;
-    host: Host;
+    host: SessionTransportHost;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
     rawFrameBytes?: number;

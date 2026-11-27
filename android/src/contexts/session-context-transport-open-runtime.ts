@@ -2,15 +2,17 @@ import { getResolvedSessionName } from '../lib/connection-target';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTerminalChannelRuntime, SessionTerminalChannelState } from '../lib/terminal-channel-mux-runtime';
-import type { Host, Session, SessionScheduleState } from '../lib/types';
+import type { Session, SessionScheduleState } from '../lib/types';
+import type { SessionTransportHost } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import { sendSessionMuxChannelOpenRuntime } from './session-context-transport-runtime';
+import { sendSessionMuxChannelOpenRuntime, type InvalidSessionMuxOpenIntent } from './session-context-transport-runtime';
 import type {
   QueueSessionTransportOpenIntent,
   QueueSessionTransportOpenIntentOptions,
 } from './session-context-core';
 import {
   buildReconnectHandshakeFailurePlan,
+  buildSessionOpenRequestId,
   buildSessionClosedUpdates,
   buildSessionConnectingLabelUpdates,
   buildSessionErrorUpdates,
@@ -100,6 +102,7 @@ export function cleanupSocketRuntime(options: {
 }
 
 export function openSessionMuxChannelByIntentRuntime(options: {
+  onInvalidOpenIntent?: (details: InvalidSessionMuxOpenIntent) => void;
   intent: PendingSessionTransportOpenIntent;
   daemonConnection: ClientDaemonConnection;
   readSessionTargetTerminalSocket: (sessionId: string) => BridgeTransportSocket | null;
@@ -121,7 +124,12 @@ export function openSessionMuxChannelByIntentRuntime(options: {
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const { sessionId, host, debugScope, finalizeFailure } = options.intent;
+  const currentTargetSocket = options.daemonConnection.readSessionTargetSocket?.(sessionId)
+    || options.readSessionTargetTerminalSocket(sessionId);
   const channel = options.ensureSessionTerminalChannel(sessionId, {
+    ...(currentTargetSocket && currentTargetSocket.transportOwnership !== 'service'
+      && typeof host.expectedSessionIdentity === 'string'
+      ? { channelId: buildSessionOpenRequestId(sessionId) } : {}),
     bodySubscribed: options.isSessionBodySubscribed
       ? options.isSessionBodySubscribed(sessionId)
       : true,
@@ -136,15 +144,22 @@ export function openSessionMuxChannelByIntentRuntime(options: {
   };
 
   const sendChannelOpen = (ws: BridgeTransportSocket) => {
-    sendSessionMuxChannelOpenRuntime({
-      sessionId,
-      ws,
-      channel,
-      sessionName: options.intent.resolvedSessionName,
-      host,
-      geometry: options.readRequestedTerminalGeometry(sessionId),
-      sendSocketPayload: options.sendSocketPayload,
-    });
+    try {
+      const frame = sendSessionMuxChannelOpenRuntime({
+        sessionId,
+        ws,
+        channel,
+        sessionName: options.intent.resolvedSessionName,
+        host,
+        geometry: options.readRequestedTerminalGeometry(sessionId),
+        onInvalidOpenIntent: options.onInvalidOpenIntent,
+        sendSocketPayload: options.sendSocketPayload,
+      });
+      if (!frame) return;
+    } catch (error) {
+      finalizeFailure(error instanceof Error ? error.message : 'terminal mux channel open failed', true);
+      return;
+    }
     options.runtimeDebug(`session.mux.${debugScope}.channel-open-sent`, {
       sessionId,
       channelId: channel.channelId,
@@ -152,8 +167,7 @@ export function openSessionMuxChannelByIntentRuntime(options: {
     });
   };
 
-  const currentTargetSocket = options.daemonConnection.readSessionTargetSocket?.(sessionId)
-    || options.readSessionTargetTerminalSocket(sessionId);
+  if (channel.state === 'closing') return;
   if (currentTargetSocket?.readyState === WebSocket.OPEN) {
     // Socket is already open: the transport onopen (mux-hello) path may have
     // already started the handshake timeout, but starting (or resetting) it
@@ -375,7 +389,7 @@ export function handleReconnectHandshakeFailureRuntime(options: {
 
 export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
   sessionId: string;
-  host: Host;
+  host: SessionTransportHost;
   handleReconnectBeforeConnectSend: (sessionId: string, sessionName: string) => void;
   handleReconnectHandshakeFailure: (options: {
     sessionId: string;
@@ -446,7 +460,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
 
 export function buildConnectTransportOpenIntentOptionsRuntime(options: {
   sessionId: string;
-  host: Host;
+  host: SessionTransportHost;
   applyTransportOpenLiveFailureEffects: (options: {
     sessionId: string;
     debugScope: 'connect' | 'reconnect';
@@ -502,11 +516,11 @@ export function buildConnectTransportOpenIntentOptionsRuntime(options: {
 
 export function queueTransportOpenIntentRuntime(options: {
   sessionId: string;
-  host: Host;
+  host: SessionTransportHost;
   mode: 'connect' | 'reconnect';
   queueSessionTransportOpenIntent: QueueSessionTransportOpenIntent;
-  buildReconnectTransportOpenIntentOptions: (sessionId: string, host: Host) => QueueSessionTransportOpenIntentOptions;
-  buildConnectTransportOpenIntentOptions: (sessionId: string, host: Host) => QueueSessionTransportOpenIntentOptions;
+  buildReconnectTransportOpenIntentOptions: (sessionId: string, host: SessionTransportHost) => QueueSessionTransportOpenIntentOptions;
+  buildConnectTransportOpenIntentOptions: (sessionId: string, host: SessionTransportHost) => QueueSessionTransportOpenIntentOptions;
 }) {
   const intentOptions = options.mode === 'reconnect'
     ? options.buildReconnectTransportOpenIntentOptions(options.sessionId, options.host)

@@ -436,12 +436,21 @@ export function createTerminalFileTransferListRuntime(
 
   function handleFileListRequest(session: TerminalSession, payload: FileListRequestPayload) {
     const { requestId, path: requestedPath, showHidden } = payload;
+    const backend = session.backend;
+
+    if (backend === 'rex') {
+      deps.sendMessage(session, {
+        type: 'file-list-error',
+        payload: { requestId, error: 'Rex terminal source does not support file browsing in V1' },
+      });
+      return;
+    }
 
     let resolvedPath: string;
     try {
       resolvedPath = resolveFileTransferListPath(
         requestedPath,
-        () => deps.readTmuxPaneCurrentPath(session.sessionName, session.backend),
+        () => deps.readTmuxPaneCurrentPath(session.sessionName, backend),
       );
     } catch (error) {
       deps.sendMessage(session, {
@@ -491,11 +500,20 @@ export function createTerminalFileTransferListRuntime(
 
   function handleFileCreateDirectoryRequest(session: TerminalSession, payload: FileCreateDirectoryRequestPayload) {
     const { requestId, path: requestedPath, name: requestedName } = payload;
+    const backend = session.backend;
+
+    if (backend === 'rex') {
+      deps.sendMessage(session, {
+        type: 'file-create-directory-error',
+        payload: { requestId, error: 'Rex terminal source does not support file browsing in V1' },
+      });
+      return;
+    }
 
     try {
       const resolvedPath = resolveFileTransferListPath(
         requestedPath,
-        () => deps.readTmuxPaneCurrentPath(session.sessionName, session.backend),
+        () => deps.readTmuxPaneCurrentPath(session.sessionName, backend),
       );
       const directoryName = requestedName.trim();
       if (!directoryName) {

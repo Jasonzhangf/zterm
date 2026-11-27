@@ -1715,7 +1715,8 @@
       "indirect_relations": [
         "resource.tmux_session",
         "resource.wezterm_pane",
-        "resource.herdr_terminal_session"
+        "resource.herdr_terminal_session",
+        "resource.rex_terminal_session"
       ],
       "via_resources": [
         "resource.backend_session"
@@ -1750,6 +1751,7 @@
         "resource.tmux_session",
         "resource.wezterm_pane",
         "resource.herdr_terminal_session",
+        "resource.rex_terminal_session",
         "resource.daemon_session_catalog"
       ],
       "indirect_relations": [
@@ -1758,7 +1760,8 @@
       "via_resources": [
         "resource.tmux_session",
         "resource.wezterm_pane",
-        "resource.herdr_terminal_session"
+        "resource.herdr_terminal_session",
+        "resource.rex_terminal_session"
       ],
       "forbidden_direct_relations": [
         "resource.open_tab",
@@ -1892,6 +1895,52 @@
       ]
     },
     {
+      "resource_id": "resource.rex_terminal_session",
+      "status": "active",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Rex terminal block identity qualified by Rex instance, session, and block ids",
+      "owner_feature": "daemon.runtime_entry",
+      "truth_store": "daemon.terminal_backend: src/server/rex-backend.ts; exact rex:v1 instance/session/block admission precedes native capture/input",
+      "allowed_operations": [
+        "enumerate_exact_identity",
+        "admit_exact_identity",
+        "reject_stale_identity",
+        "capture_output",
+        "write_connected_input",
+        "reconnect_same_identity"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [
+        "resource.mirror_store"
+      ],
+      "via_resources": [
+        "resource.terminal_backend",
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.tmux_session"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/terminal-source-adapter.test.ts",
+        "src/server/daemon-session-catalog-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/architecture.md",
+        "docs/dagpipe/daemon-connection-channel-catalog.graph.json"
+      ],
+      "capability_gaps": [
+        "Source adapter is implemented; installed restricted-service-PATH catalog/output/input/stale/reconnect acceptance requires separate runtime evidence. No implicit tmux fallback."
+      ]
+    },
+    {
       "resource_id": "resource.mirror_store",
       "resource_type": "daemon_backend_truth",
       "identity": "Daemon canonical terminal mirror rows, cols, buffer, cursor, and absolute indexes",
@@ -1994,7 +2043,8 @@
       ],
       "indirect_relations": [
         "resource.tmux_session",
-        "resource.herdr_terminal_session"
+        "resource.herdr_terminal_session",
+        "resource.rex_terminal_session"
       ],
       "via_resources": [
         "resource.backend_session"

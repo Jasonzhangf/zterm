@@ -1,6 +1,7 @@
 import type {
   TerminalSessionCollabProjection,
   TerminalSessionCatalogEntry,
+  TerminalSessionBackendKind,
   TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import { execFile } from 'node:child_process';
@@ -20,7 +21,7 @@ import {
 import { buildTmuxSessionStableId } from './terminal-source-adapter';
 
 export interface DaemonSessionCatalogDeps {
-  listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
+  listTmuxSessions: (backend?: TerminalSessionBackendKind) => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
   runTmuxAsyncAcrossSockets?: (args: string[]) => Promise<{ ok: true; stdout: string }>;
@@ -49,9 +50,9 @@ export interface DaemonSessionCatalogDeps {
 }
 
 export interface DaemonSessionCatalogRuntime {
-  read: (backend?: 'tmux' | 'herdr') => TerminalSessionCatalogEntry[];
+  read: (backend?: TerminalSessionBackendKind) => TerminalSessionCatalogEntry[];
   refresh: (
-    backend?: 'tmux' | 'herdr',
+    backend?: TerminalSessionBackendKind,
     detectedEntries?: TerminalSessionCatalogEntry[],
   ) => Promise<TerminalSessionCatalogEntry[]>;
   startRefreshLoop: (
@@ -737,7 +738,7 @@ export function createDaemonSessionCatalogRuntime(
   }
 
   function rebuild(
-    backend?: 'tmux' | 'herdr',
+    backend?: TerminalSessionBackendKind,
     detectedEntries?: TerminalSessionCatalogEntry[],
   ): Promise<TerminalSessionCatalogEntry[]> {
     if (refreshInFlight) {
@@ -854,7 +855,7 @@ export function createDaemonSessionCatalogRuntime(
     return true;
   }
 
-  function read(backend?: 'tmux' | 'herdr') {
+  function read(backend?: TerminalSessionBackendKind) {
     if (invalidated) {
       throw new Error('daemon session catalog is stale; explicit refresh required');
     }
@@ -945,7 +946,7 @@ export function createDaemonSessionCatalogRuntime(
 
 export function buildSessionsCatalogPayload(
   deps: DaemonSessionCatalogDeps,
-  backend?: 'tmux' | 'herdr',
+  backend?: TerminalSessionBackendKind,
 ) {
   // Pure read-time projection: the daemon session catalog owner already sampled
   // passive observation into its resident snapshot.
@@ -977,7 +978,7 @@ export function buildSessionsCatalogPayload(
 export function handleListSessionsMessageRuntime(
   deps: DaemonSessionCatalogRuntimeDeps,
   connection: TerminalTransportConnection,
-  message: { type: 'list-sessions'; payload?: { terminalBackend?: 'tmux' | 'herdr' } } = { type: 'list-sessions' },
+  message: { type: 'list-sessions'; payload?: { terminalBackend?: TerminalSessionBackendKind } } = { type: 'list-sessions' },
 ) {
   try {
     const payload = buildSessionsCatalogPayload(deps, message.payload?.terminalBackend);

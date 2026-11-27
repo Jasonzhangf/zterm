@@ -127,6 +127,7 @@
     },
     {
       "id": "emit_input",
+      "notes": "JS reliable queue readiness and final send consume the current channel owner's input readiness. A terminal-connected policy holds input after exact admission until that admitted channel receives terminal connected; controls retain generic transport readiness. Raw, typed and pre-wrapped mux input share the final gate. Held writes are not submitted. Retirement/new physical transport clears readiness; no UI or buffer message creates it. Default tmux/Herdr input behavior is unchanged.",
       "operator": "client.reliable_input.emit",
       "operator_version": "0.1",
       "inputs": [

@@ -15,6 +15,7 @@ import type { BridgeServerMessage as ServerMessage } from '@zterm/shared/protoco
 import type { SessionMirror } from './terminal-runtime-types';
 import type {
   ResolvedTerminalSession,
+  TerminalIdentityBackendKind,
   TerminalSessionIdentityResolution,
 } from './terminal-source-adapter';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
@@ -51,7 +52,7 @@ export interface TerminalMuxChannelRuntimeDeps {
   sanitizeSessionName: (input?: string) => string;
   resolveExistingSession?: (
     stableId: string,
-    backend: 'tmux' | 'herdr',
+    backend: TerminalIdentityBackendKind,
     requestedSessionName?: string,
   ) => TerminalSessionIdentityResolution;
   bindResolvedSession?: (session: ResolvedTerminalSession) => void;
@@ -298,10 +299,11 @@ export function createTerminalMuxChannelRuntime(
           }
           resolvedSession = resolution.session;
         }
+        const requestedBackend = resolvedSession?.identity.backend || frame.payload.backend;
         const subscriber = deps.createMuxChannelSubscriber(connection, frame.payload.channelId);
         subscriber.sessionName = resolvedSession?.identity.sessionName
           || deps.sanitizeSessionName(frame.payload.sessionName);
-        subscriber.backend = resolvedSession?.identity.backend || frame.payload.backend;
+        subscriber.backend = requestedBackend;
         if (resolvedSession) {
           subscriber.sessionIdentity = resolvedSession.identity.stableId;
           subscriber.sessionTarget = resolvedSession.target;

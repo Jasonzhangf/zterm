@@ -29,7 +29,8 @@
         "exclude": [],
         "predicate": null
       },
-      "iterator": "Whole"
+      "iterator": "Whole",
+      "notes": "Exact identity admission and terminal readiness are separate channel facts. Before channel reuse, registration, replacement, or wire send, a Rex demand must carry a nonblank expectedSessionIdentity and literal existingOnly=true. A violation ends at the existing typed command-rejected result with no desired channel or wire side effect; no fallback to a name-based Rex open exists. A matching mux-channel-opened commits the exact stableId and may publish the opened projection, but only a later connected message on that same current opened channel marks Rex input ready. Pre-admission connected is not retained. Body subscription and other existing attach control remain independent from input readiness."
     },
     {
       "id": "dagpipe.extract.arc.connection_policy",
@@ -52,7 +53,8 @@
         "exclude": [],
         "predicate": null
       },
-      "iterator": "Whole"
+      "iterator": "Whole",
+      "notes": "Body subscription may proceed after exact channel admission without waiting for Rex terminal input readiness. It neither derives readiness from mux-channel-opened nor blocks attach control behind held input. Rejection of an invalid Rex intent has no channel result and therefore no body-subscription edge."
     },
     {
       "id": "establish_target_transport",
@@ -128,6 +130,7 @@
       "id": "open_session_channels",
       "operator": "client.session_channel.open_all",
       "operator_version": "0.1",
+      "notes": "Each per-session open demand settles once as admitted, rejected, or cancelled. Construct the mux-channel-open from that session's runtime host. An exact target includes backend, opaque expectedSessionIdentity, and existingOnly=true. Invalid exact intent retires only its current opening row without open/close wire traffic; mux-ready still establishes physical readiness and opens healthy siblings. Cancellation retires the attempt before replacement/removal. A new exact attempt on an existing JS-owned socket uses a fresh routing ID; replacement atomically removes the old reverse lookup. Service-owned replay and legacy IDs remain unchanged. Sending keeps the channel opening. Only a current-channel opened ACK with matching stableId admits allocation and body subscription; admission is not connected/first-body readiness. Missing/mismatched ACK retires only that channel through local failure/close. On a recoverable logical close, first settle any existing pending open. For a settled current exact channel, keep the channelId/state guard and teardown, keep no_body_demand idle, and use the existing per-session host reconnect builder with the unchanged expectedSessionIdentity and existingOnly=true. A valid current exact identity makes the default name catalog irrelevant; only active/live demand schedules that reopen. A rejected original identity settles through the existing pending-intent failure terminal without name fallback, sibling admission, or input transfer. Inactive exact channels stay idle. Legacy/non-exact closes retain the existing control-status catalog branch. Old routing IDs and late closes cannot affect a newer attempt. Physical recovery remains with the target owner and re-enters through the existing open path.",
       "inputs": [
         "arc.bulk_channel_binding",
         "arc.session_demand_set",
@@ -153,6 +156,7 @@
       "id": "subscribe_session_bodies",
       "operator": "client.session_channel.subscribe_bodies",
       "operator_version": "0.1",
+      "notes": "Consume only channels admitted by open_session_channels. A matching exact-channel allocation may send the existing body subscription and control before terminal connected. For the JS owner-local terminal-connected input policy, only that current admitted channel's connected enables input; buffer-head, buffer-sync, UI state and mux-ready do not. New attempts, retirement and physical replacement clear readiness. A rejected, cancelled, retired, or late reply path must not subscribe or dispatch body traffic. Default exact tmux/Herdr input behavior remains unchanged; typed Rex Host wiring belongs to combination.",
       "inputs": [
         "arc.session_channels",
         "arc.session_demand_set"

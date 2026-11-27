@@ -1073,7 +1073,7 @@ export type BridgeClientMessage =
     }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
-  | { type: 'list-sessions'; payload?: { terminalBackend?: TerminalBackendKind } }
+  | { type: 'list-sessions'; payload?: { terminalBackend?: TerminalSessionBackendKind } }
   | { type: 'terminal-snapshot-request'; payload: TerminalSnapshotRequestPayload }
   | { type: 'schedule-list'; payload: { sessionName: string; idempotencyKey?: string } }
   | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft; idempotencyKey?: string } }
@@ -1222,7 +1222,7 @@ export interface SessionActivity {
 
 export interface TerminalSessionCatalogEntry {
   name: string;
-  backend: TerminalBackendKind;
+  backend: TerminalSessionBackendKind;
   stableId?: string;
   /** daemon-owned pane working directory; UI must render, never infer */
   cwd?: string;
@@ -1343,7 +1343,8 @@ export type TerminalMuxTargetClientMessageType =
   | 'attachment-receipt'
   | 'terminal-snapshot-request';
 
-export type TerminalBackendKind = 'tmux' | 'herdr';
+export type TerminalBackendKind = 'tmux' | 'herdr' | 'rex';
+export type TerminalSessionBackendKind = TerminalBackendKind;
 
 export type TerminalSnapshotUnavailableReason = 'mirror_not_ready' | 'mirror_not_present';
 
@@ -1418,7 +1419,7 @@ export type TerminalMuxChannelServerMessage = Exclude<
 export type TerminalMuxClientFrame =
   | { type: 'mux-hello'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; clientInstanceId: string; deviceId?: string } }
   | { type: 'mux-target-message'; payload: { requestId?: string; message: TerminalMuxTargetClientMessage } }
-  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; backend?: TerminalBackendKind; expectedSessionIdentity?: string; existingOnly?: true; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string; bodySubscribed?: boolean } }
+  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; backend?: TerminalSessionBackendKind; expectedSessionIdentity?: string; existingOnly?: true; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string; bodySubscribed?: boolean } }
   | { type: 'mux-channel-message'; payload: { channelId: string; message: TerminalMuxChannelClientMessage } }
   | { type: 'mux-channel-binary'; payload: { channelId: string; dataBase64: string } }
   | { type: 'mux-channel-close'; payload: { channelId: string; reason?: string } }
@@ -1514,7 +1515,11 @@ function hasFiniteNumber(value: unknown) {
 }
 
 function isTerminalBackendKind(value: unknown): value is TerminalBackendKind {
-  return value === 'tmux' || value === 'herdr';
+  return value === 'tmux' || value === 'herdr' || value === 'rex';
+}
+
+function isTerminalSessionBackendKind(value: unknown): value is TerminalSessionBackendKind {
+  return value === 'tmux' || value === 'herdr' || value === 'rex';
 }
 
 function isTerminalSnapshotRequestPayload(value: unknown): value is TerminalSnapshotRequestPayload {
@@ -1862,6 +1867,10 @@ export function isTerminalMuxClientFrame(value: unknown): value is TerminalMuxCl
     case 'mux-channel-open':
       return Boolean(asNonEmptyString(value.payload.channelId))
         && Boolean(asNonEmptyString(value.payload.sessionName))
+        && (
+          typeof value.payload.backend === 'undefined'
+          || isTerminalSessionBackendKind(value.payload.backend)
+        )
         && (
           typeof value.payload.expectedSessionIdentity === 'undefined'
           || Boolean(asNonEmptyString(value.payload.expectedSessionIdentity))

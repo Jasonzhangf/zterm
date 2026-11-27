@@ -37,7 +37,7 @@ export function createTerminalScheduleRuntime(
     sessionName = session.sessionName,
     terminalBackend = session.backend || 'tmux',
   ) {
-    if (!sessionName) {
+    if (!sessionName || terminalBackend === 'rex') {
       return;
     }
     deps.sendMessage(session, {

@@ -40,15 +40,15 @@ export interface TerminalMirrorCaptureDeps {
   buildExactTmuxPaneTarget: (sessionName: string) => string;
   logTimePrefix: () => string;
   wezTermBackend?: TerminalSourceAdapter | null;
-  terminalBackendKind?: 'tmux' | 'wezterm' | 'herdr';
-  backendRuntimes?: Partial<Record<'herdr' | 'wezterm', TerminalSourceAdapter>>;
+  terminalBackendKind?: 'tmux' | 'wezterm' | 'herdr' | 'rex';
+  backendRuntimes?: Partial<Record<'herdr' | 'wezterm' | 'rex', TerminalSourceAdapter>>;
 }
 
 export interface TerminalMirrorCaptureRuntime {
   readTmuxStatusLineCount: () => number;
   resolveRequestedTmuxRows: (contentRows: number) => number;
-  readTmuxPaneMetrics: (sessionName: string, backend?: 'tmux' | 'herdr') => TmuxPaneMetrics;
-  readTmuxPaneCurrentPath: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  readTmuxPaneMetrics: (sessionName: string, backend?: 'tmux' | 'herdr' | 'rex') => TmuxPaneMetrics;
+  readTmuxPaneCurrentPath: (sessionName: string, backend?: 'tmux' | 'herdr' | 'rex') => string;
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
   captureResolvedSessionSnapshot: (
     session: ResolvedTerminalSession,
@@ -295,7 +295,7 @@ export function resolveAuthoritativeMirrorCaptureWindow(options: {
 export function createTerminalMirrorCaptureRuntime(
   deps: TerminalMirrorCaptureDeps,
 ): TerminalMirrorCaptureRuntime {
-  function resolveExternalBackend(backend?: 'tmux' | 'herdr') {
+  function resolveExternalBackend(backend?: 'tmux' | 'herdr' | 'rex') {
     const requestedKind = backend || deps.terminalBackendKind || 'tmux';
     const kind = requestedKind === 'tmux' && deps.terminalBackendKind === 'wezterm' ? 'wezterm' : requestedKind;
     if (kind === 'tmux') {
@@ -331,19 +331,19 @@ export function createTerminalMirrorCaptureRuntime(
     return safeContentRows + readTmuxStatusLineCount();
   }
 
-  function readTmuxPaneMetrics(sessionName: string, backend?: 'tmux' | 'herdr'): TmuxPaneMetrics {
+  function readTmuxPaneMetrics(sessionName: string, backend?: 'tmux' | 'herdr' | 'rex'): TmuxPaneMetrics {
     const externalBackend = resolveExternalBackend(backend);
     if (externalBackend) {
       const session = externalBackend.listSessions().find((entry) => entry.sessionName === sessionName);
       if (!session) {
-        throw new Error(`wezterm session not found: ${sessionName}`);
+        throw new Error(`${backend || 'external'} session not found: ${sessionName}`);
       }
       return {
         paneId: String(session.paneId),
         // Herdr does not expose a tmux history-size equivalent. Its absolute
         // range must come from the canonical snapshot, never from a derived
         // geometry value.
-        tmuxAvailableLineCountHint: backend === 'herdr' ? 0 : session.rows,
+        tmuxAvailableLineCountHint: backend === 'herdr' || backend === 'rex' ? 0 : session.rows,
         paneRows: session.rows,
         paneCols: session.cols,
         alternateOn: false,
@@ -378,7 +378,7 @@ export function createTerminalMirrorCaptureRuntime(
     };
   }
 
-  function readTmuxPaneCurrentPath(sessionName: string, backend?: 'tmux' | 'herdr') {
+  function readTmuxPaneCurrentPath(sessionName: string, backend?: 'tmux' | 'herdr' | 'rex') {
     const externalBackend = resolveExternalBackend(backend);
     if (externalBackend) {
       return externalBackend.readCurrentPath(sessionName);
@@ -592,6 +592,13 @@ export function createTerminalMirrorCaptureRuntime(
   async function captureResolvedSessionSnapshot(
     session: ResolvedTerminalSession,
   ): Promise<TerminalSourceMirrorSnapshot> {
+    if (session.target.backend === 'rex') {
+      const adapter = resolveExternalBackend('rex');
+      if (!adapter) {
+        throw new Error('rex terminal source adapter is not available');
+      }
+      return adapter.readSnapshot(session.identity.sessionName);
+    }
     if (session.target.backend !== 'tmux') {
       throw new Error(
         `terminal snapshot preview exact-target capture is unsupported for backend ${session.target.backend}`,

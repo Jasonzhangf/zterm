@@ -9,6 +9,7 @@ import type {
   ResolvedTerminalSession,
   TerminalSessionIdentityResolution,
 } from './terminal-source-adapter';
+import { buildRexSessionStableId } from './terminal-source-adapter';
 import { createTerminalMuxChannelRuntime } from './terminal-mux-channel-runtime';
 import { createGuardedBindResolvedSession } from './terminal-message-runtime';
 
@@ -50,7 +51,7 @@ function createConnection(): TerminalTransportConnection {
 
 type ExistingSessionResolver = (
   stableId: string,
-  backend: 'tmux' | 'herdr',
+  backend: 'tmux' | 'herdr' | 'rex',
   requestedSessionName?: string,
 ) => TerminalSessionIdentityResolution;
 
@@ -141,6 +142,74 @@ describe('terminal mux exact-existing open', () => {
       payload: expect.objectContaining({
         channelId: 'channel-stale',
         code: 'session_identity_mismatch',
+      }),
+    });
+  });
+
+  it('binds and attaches an exact Rex target through the existing mux path', async () => {
+    const rexStableId = buildRexSessionStableId({
+      instanceId: '80866d32-7d2f-4dfa-a38f-bd531db0e5dc',
+      sessionId: 'session:01a1baae-5766-7724-92d9-59a846daaf02',
+      blockId: 'block:01a1c5ed-34aa-7e5f-9298-708a046ad459',
+    });
+    const resolveExistingSession = vi.fn(() => ({
+      ok: true as const,
+      session: {
+        identity: {
+          backend: 'rex' as const,
+          sessionName: 'rex-session',
+          stableId: rexStableId,
+        },
+        target: {
+          backend: 'rex' as const,
+          sessionName: 'rex-session',
+          stableId: rexStableId,
+          instanceId: '80866d32-7d2f-4dfa-a38f-bd531db0e5dc',
+          sessionId: 'session:01a1baae-5766-7724-92d9-59a846daaf02',
+          blockId: 'block:01a1c5ed-34aa-7e5f-9298-708a046ad459',
+        },
+      },
+    }));
+    const harness = createHarness(resolveExistingSession);
+    const connection = createConnection();
+
+    await harness.runtime.handleMuxFrame(connection as never, {
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-rex',
+        sessionName: 'rex-session',
+        backend: 'rex',
+        expectedSessionIdentity: rexStableId,
+        existingOnly: true,
+      },
+    });
+
+    const subscriber = harness.sessions.get('transport-identity:channel-rex');
+    expect(resolveExistingSession).toHaveBeenCalledWith(rexStableId, 'rex', 'rex-session');
+    expect(harness.bindResolvedSession).toHaveBeenCalledWith(
+      (resolveExistingSession.mock.results[0]?.value as { session: ResolvedTerminalSession }).session,
+    );
+    expect(harness.createMuxChannelSubscriber).toHaveBeenCalledOnce();
+    expect(subscriber).toMatchObject({
+      sessionName: 'rex-session',
+      backend: 'rex',
+      sessionIdentity: rexStableId,
+    });
+    expect(harness.attachTmux).toHaveBeenCalledWith(subscriber, expect.objectContaining({
+      sessionName: 'rex-session',
+      backend: 'rex',
+      resolvedSession: expect.objectContaining({
+        identity: expect.objectContaining({ backend: 'rex', stableId: rexStableId }),
+      }),
+    }));
+    expect(harness.sessions.size).toBe(1);
+    expect(connection.muxChannels?.size).toBe(1);
+    expect(harness.frames).toContainEqual({
+      type: 'mux-channel-opened',
+      payload: expect.objectContaining({
+        channelId: 'channel-rex',
+        sessionName: 'rex-session',
+        stableId: rexStableId,
       }),
     });
   });

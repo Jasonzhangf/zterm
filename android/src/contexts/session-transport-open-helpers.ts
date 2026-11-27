@@ -1,5 +1,6 @@
 import type { Host, Session, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionTransportHost } from '../lib/session-transport-runtime';
 
 export interface SessionReconnectDecisionOptions {
   hasSession: boolean;
@@ -139,7 +140,7 @@ export interface PendingSessionTransportOpenIntent {
   sessionId: string;
   openRequestId: string;
   createdAt: number;
-  host: Host;
+  host: SessionTransportHost;
   resolvedSessionName: string;
   debugScope: SessionTransportOpenDebugScope;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
@@ -152,7 +153,7 @@ export interface PendingSessionTransportOpenIntent {
 export interface QueueSessionTransportOpenIntentOptions {
   sessionId: string;
   openRequestId?: string;
-  host: Host;
+  host: SessionTransportHost;
   resolvedSessionName: string;
   debugScope: SessionTransportOpenDebugScope;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;

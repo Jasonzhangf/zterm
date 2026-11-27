@@ -157,6 +157,47 @@
       "status": "active"
     },
     {
+      "edge_id": "edge.daemon.terminal_backend_to_rex_terminal_session",
+      "from_module": "daemon.terminal_backend",
+      "to_module": "daemon.terminal_backend",
+      "resource_from": "resource.backend_session",
+      "resource_to": "resource.rex_terminal_session",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.runtime_entry",
+      "allowed_callers": [
+        "src/server/terminal-control-runtime.ts",
+        "src/server/rex-backend.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/terminal-mirror-capture.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/components/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RexBackendIn01ExactIdentity",
+        "RexBackendIn02SourceAdapter"
+      ],
+      "response_chain": [
+        "RexBackendOut01ExactTarget"
+      ],
+      "error_chain": [
+        "RexBackendError01SourceUnavailable",
+        "RexBackendError02IdentityMismatch"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Control->SessionCatalog"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/terminal-source-adapter.test.ts",
+        "src/server/daemon-session-catalog-runtime.test.ts",
+        "scripts/validate-dagpipe-graphs.mjs"
+      ],
+      "status": "active"
+    },
+    {
       "edge_id": "edge.daemon.mirror_writer_to_backend_truth",
       "from_module": "daemon.mirror_writer",
       "to_module": "daemon.terminal_backend",
@@ -4723,6 +4764,11 @@
     {
       "from_module": "client.reliable_input",
       "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.reliable_input",
+      "to_module": "client.terminal_channel_mux",
       "status": "active"
     },
     {

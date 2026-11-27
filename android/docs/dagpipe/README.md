@@ -267,6 +267,28 @@ Android client boundaries frozen by these graphs:
   saved direct/Tailscale entries and never owns terminal body truth.
 - One stable daemon target owns one physical transport; terminal sessions are
   logical channels on that transport, not per-session sockets.
+- `open_session_channels` constructs each mux open from its own session demand.
+  An explicit exact target carries its backend, opaque stable identity, and
+  `existingOnly: true`. Only a matching `mux-channel-opened.stableId` admits
+  the current channel for allocation and body subscription. A missing or
+  different identity retires that channel only; it does not fail the physical
+  target or siblings. Legacy opens without an exact identity keep their
+  existing behavior.
+- Invalid exact intent settles only its current opening row, without an open
+  or close frame; the first mux-ready batch continues with healthy siblings.
+  Each open demand settles as admitted, rejected, or cancelled. Cancellation
+  retires the old attempt before replacement. A new exact attempt on an existing
+  JS-owned socket uses a fresh routing ID and removes the retired reverse lookup.
+  Service-owned replay keeps its existing IDs. Admission permits subscription;
+  connected/first body and physical recovery remain with their existing owners.
+- A recoverable logical close first settles any pending open intent. For a
+  settled current exact channel, teardown keeps its current channel/generation
+  guard, and `no_body_demand` remains business idle. Active/live demand uses the
+  existing per-session reconnect builder with the same backend, opaque identity,
+  and `existingOnly: true`; the default name catalog is not queried. Inactive
+  exact channels stay idle. A rejected original identity ends through the
+  existing pending-intent failure terminal without opening or feeding a
+  same-name sibling. Legacy/non-exact closes retain the existing catalog branch.
 - A session channel failure must not close sibling channels on the same target.
 - Physical transport heartbeat/reconnect/backoff belongs to the connection
   owner; foreground/background only changes data-refresh cadence.
@@ -332,10 +354,29 @@ client wrapper entries are N/A on the client side by ownership:
   production `daemon.session_catalog` currently uses
   `src/server/daemon-session-catalog-runtime.ts` directly without this native
   gate. This runtime is not wired as a production daemon session catalog owner.
+  Rex catalog identity is backend-qualified as `rex:v1`. The catalog graph maps
+  capability resolution/probe to `terminal-backend-selection.ts`, exact admission
+  to channel mux, and attach to terminal backend. Capability unavailable,
+  identity mismatch, attach failure, cancellation and normal close settle via
+  channel removal, subscriber release and the single result. Rejection allocates
+  no source subscription; settlement never deletes a native Rex/tmux session.
+  Successful attach feeds `daemon-mirror-publish.graph.json`; connected input
+  feeds `daemon-input-schedule.graph.json`. Client recovery starts a new exact
+  admission execution (`connection-recovery.graph.json` remains a design mapping).
+  These are static owner mappings, not new native operator registrations or
+  installed acceptance. Rex source implementation lives in `rex-backend.ts`.
+  Rex routing names retain the full native block UUID. Rex enumeration failures
+  are reported at the catalog boundary without discarding healthy backend rows;
+  explicit Rex operations still propagate the source error. Rex capture decodes
+  cursor position, visibility and keyboard modes from the completed VT capture
+  before publishing the existing source snapshot fields.
 - `runDagpipePhase3InputSchedule` -> `daemon.input_queue`
   (`src/server/daemon-input-queue-runtime.ts`).
 - `runDagpipePhase3FileBrowse`, `runDagpipePhase3Download` -> `daemon.file_transfer`
   (`src/server/terminal-file-transfer-list-runtime.ts`).
+  The same runtime settles unsupported Rex mkdir admission with
+  `file-create-directory-error` and the original `requestId`, before cwd or
+  filesystem access.
 - `runDagpipePhase7Release`: `scripts/prepare-global-daemon-release.sh`
   release gate after deterministic archive + sha256 verification.
 - `runDagpipePhase7Debug`: `src/hooks/useRelayDeviceStream.ts` relay debug

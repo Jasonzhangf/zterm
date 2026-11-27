@@ -1,6 +1,7 @@
 {
   "id": "daemon.connection_channel_catalog",
   "version": "0.1",
+  "description": "Backend-qualified catalog and channel lifecycle. Rex capability and exact admission are mapped in README and remain in their TypeScript owners; this graph uses the existing registered native operators.",
   "inputs": [
     {
       "id": "arc.request",

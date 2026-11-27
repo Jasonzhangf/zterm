@@ -29,7 +29,8 @@
         "exclude": [],
         "predicate": null
       },
-      "iterator": "Whole"
+      "iterator": "Whole",
+      "notes": "An invalid Rex open command ends at the existing command-rejected result before desired-channel registration or replay. A valid Rex open requires a nonblank expectedSessionIdentity and literal existingOnly=true. Replay uses each desired channel's original backend, expectedSessionIdentity, and existingOnly; it clears prior opened and Rex input-readiness state, so only a fresh matching mux-channel-opened followed by connected on the current transport generation can release held input."
     },
     {
       "id": "dagpipe.extract.arc.service_policy",
@@ -52,7 +53,8 @@
         "exclude": [],
         "predicate": null
       },
-      "iterator": "Whole"
+      "iterator": "Whole",
+      "notes": "Projects the existing channel opened event and snapshot stableId from the admitted ChannelIntent. Rex input readiness is internal send-owner state and adds no public snapshot or wire field. Matching mux-channel-opened remains projectable before terminal connected; it does not itself publish input readiness."
     },
     {
       "id": "dagpipe.extract.arc.network_generation_event",

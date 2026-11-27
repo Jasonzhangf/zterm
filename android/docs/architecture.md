@@ -83,6 +83,7 @@
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护 tmux canonical buffer / mirror / transport connection / daemon 自身文件与调度真源，不持有任何客户端状态机
 - Herdr source adapter 是唯一显式 history/live 分层例外：官方 `pane read recent` 的 tail history 与 canonical frame 的 live visible tail 只在 adapter 内合并成一个 `TerminalSourceMirrorSnapshot`；`daemon.mirror_writer` 通过 `daemon.source_adapter` 消费单一 adapter readback，禁止再拆第二语义或把 1000 行 history 放进 33ms capture loop
+- Rex source adapter 位于 `src/server/rex-backend.ts`，消费 Rex 公开 `session.list`、`session.view`、`session.list_blocks` 与 `block.method`。当前公开 API 契约版本为 24；adapter 在发现和解析 target 前必须拒绝其他版本，避免用旧字段解释新 API。catalog 只投影 adapter 返回的 exact Rex identity，不持有 client session 或 mirror 状态。
 - Daemon Mirror Writer：`daemon.mirror_writer` 是 validated source capture 与 authoritative mirror snapshot commit write 的唯一 owner，位于 `src/server/terminal-mirror-capture.ts`；`daemon.mirror_store` 继续唯一持有 canonical mirror truth、revision 与 runtime scheduling，不得存在第二个 snapshot writer 或让 store 重新实现 capture/commit
 - Server live mirror cadence 只允许由 daemon 物理事实决定：健康 subscriber 存在时保持 active capture cadence；无 subscriber、失败/backoff、capture cost 过高才允许降速。transport backpressure 只由 `daemon.buffer_publisher` 做 per-subscriber pending/flush 处理，不得拖低 mirror capture cadence。daemon 不读取 client active/visible/follow 状态，也不得用“最近无内容变化”把 ready mirror 降到 idle。
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
