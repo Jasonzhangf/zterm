@@ -616,7 +616,7 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "daemon.source_adapter",
-      "responsibility": "Own the terminal source adapter contract shared by tmux, Herdr, and WezTerm backends and by mirror capture readback normalization.",
+      "responsibility": "Own the terminal source adapter contract shared by tmux, Herdr, WezTerm and Rex and by mirror capture readback normalization; backend implementations own native identity and source reads.",
       "owned_resources": [],
       "consumed_resources": [],
       "pending_resources": [],
@@ -697,13 +697,14 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "daemon.runtime_entry",
-      "responsibility": "Own backend session identity for tmux, WezTerm, and official Herdr single-terminal sources.",
+      "responsibility": "Own backend session identity and native source adapters for tmux, WezTerm, official Herdr and Rex. terminal-backend-selection.ts uniquely resolves Rex executable capability; rex-backend.ts owns exact native identity, capture and connected input. Installed acceptance is separate evidence.",
       "owned_resources": [
         "resource.terminal_backend",
         "resource.backend_session",
         "resource.tmux_session",
         "resource.wezterm_pane",
-        "resource.herdr_terminal_session"
+        "resource.herdr_terminal_session",
+        "resource.rex_terminal_session"
       ],
       "consumed_resources": [
         "resource.daemon_process"
@@ -731,6 +732,7 @@
       "owned_paths": [
         "src/server/terminal-backend-selection.ts",
         "src/server/terminal-control-runtime.ts",
+        "src/server/rex-backend.ts",
         "src/server/herdr-backend.ts",
         "src/server/herdr-backend.test.ts",
         "src/server/herdr-backend-runtime.ts",
@@ -923,7 +925,7 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "daemon.session_catalog",
-      "responsibility": "Own the daemon in-memory backend session catalog, explicit event/server-detection refresh, and list-sessions control dispatch, including backend-qualified session rows, without owning client active/session state.",
+      "responsibility": "Own the daemon in-memory backend session catalog, explicit event/server-detection refresh, and list-sessions control dispatch, including backend-qualified session rows such as exact rex:v1 identities, without owning client active/session state.",
       "owned_resources": [
         "resource.daemon_session_catalog"
       ],

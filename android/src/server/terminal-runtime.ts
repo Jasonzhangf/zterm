@@ -7,6 +7,7 @@ import type {
   TerminalAttachPayload,
   TerminalTransportConnection,
 } from './terminal-runtime-types';
+import type { TerminalSessionBackendKind } from '@zterm/shared/protocol';
 
 // Single deps truth: mirror runtime owns the field list; this runtime only adds
 // what the subscriber lifecycle itself needs. closeTransportSubscriber /
@@ -24,7 +25,7 @@ export interface TerminalRuntime {
   mirrors: () => Map<string, SessionMirror>;
   getTransportSubscriber: (subscriberId: string) => TerminalTransportSubscriber | null;
   getMirrorByKey: (mirrorKey: string) => SessionMirror | null;
-  createMirror: (sessionName: string, backend?: 'tmux' | 'herdr') => SessionMirror;
+  createMirror: (sessionName: string, backend?: TerminalSessionBackendKind) => SessionMirror;
   getSubscriberMirror: (subscriber: TerminalTransportSubscriber) => SessionMirror | null;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
   bindConnectionToSubscriber: (
@@ -45,7 +46,7 @@ export interface TerminalRuntime {
     options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
   releaseMirrorIfNoBodyDemand: (mirror: SessionMirror, reason: string) => boolean;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => number;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: TerminalSessionBackendKind) => number;
   ensureSessionReady: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => void;
   enqueueRangeBufferSyncResponse: (

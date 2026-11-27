@@ -7,7 +7,7 @@ import {
   type DaemonSessionCatalogRuntimeDeps,
 } from './daemon-session-catalog-runtime';
 import type { TerminalTransportConnection } from './terminal-runtime-types';
-import { buildTmuxSessionStableId } from './terminal-source-adapter';
+import { buildRexSessionStableId, buildTmuxSessionStableId } from './terminal-source-adapter';
 import type { TerminalSessionCatalogEntry } from '@zterm/shared/protocol';
 
 function makeDeps(
@@ -1427,6 +1427,47 @@ describe('daemon session catalog runtime', () => {
       sessionCatalog: [{ name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' }],
     });
     expect(deps.listTerminalSessionCatalog).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Rex entries backend-qualified and filters them by exact backend', () => {
+    const rexStableId = buildRexSessionStableId({
+      instanceId: '80866d32-7d2f-4dfa-a38f-bd531db0e5dc',
+      sessionId: 'session:01a1baae-5766-7724-92d9-59a846daaf02',
+      blockId: 'block:01a1c5ed-34aa-7e5f-9298-708a046ad459',
+    });
+    const deps = makeDeps({
+      listTerminalSessionCatalog: vi.fn(() => [
+        { name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' },
+        {
+          name: 'rex-session',
+          backend: 'rex',
+          stableId: rexStableId,
+          cwd: '/tmp/rex-session',
+        },
+      ]),
+    });
+
+    expect(buildSessionsCatalogPayload(deps)).toEqual({
+      sessions: ['alpha', 'rex-session'],
+      sessionCatalog: [
+        { name: 'alpha', backend: 'tmux', cwd: '/tmp/alpha' },
+        {
+          name: 'rex-session',
+          backend: 'rex',
+          stableId: rexStableId,
+          cwd: '/tmp/rex-session',
+        },
+      ],
+    });
+    expect(buildSessionsCatalogPayload(deps, 'rex')).toEqual({
+      sessions: ['rex-session'],
+      sessionCatalog: [{
+        name: 'rex-session',
+        backend: 'rex',
+        stableId: rexStableId,
+        cwd: '/tmp/rex-session',
+      }],
+    });
   });
 
   it('falls back to terminal session names only when no catalog is available', () => {

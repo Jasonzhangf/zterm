@@ -89,6 +89,7 @@ export function createTerminalSnapshotReadRuntime(
       }
 
       const session = resolution.session;
+      const snapshotBackend = session.identity.backend;
       const snapshot = copySnapshot(await deps.captureSessionSnapshot(session));
       const postCaptureResolution = deps.resolveExistingSession(request);
       if (!postCaptureResolution.ok) {
@@ -134,7 +135,7 @@ export function createTerminalSnapshotReadRuntime(
       const body = deps.buildRequestedRangeBufferPayload(snapshot, bodyRequest);
       return sendResult(deps, {
         status: 'available',
-        backend: identity.backend,
+        backend: snapshotBackend,
         stableId: identity.stableId,
         head,
         body,

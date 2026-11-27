@@ -342,7 +342,7 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(controlSource).not.toMatch(/set-(?:window-)?option['"][\s\S]*alternate-screen/);
   });
 
-  it('never implicitly creates a missing tmux session during attach; explicit creation stays on tmux-create-session only', () => {
+  it('keeps backend-qualified attach identity and never implicitly creates a missing session', () => {
     const source = readServerSource();
     const mirrorRuntimeSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-mirror-runtime.ts'), 'utf8');
     const controlRuntimeSource = readMessageControlRuntimeSource();
@@ -350,12 +350,15 @@ describe('server transport/session lifecycle truth gates', () => {
     const createBlock = extractBlock(controlRuntimeSource, "case 'tmux-create-session':", 420);
 
     expect(source).toContain(`assertTmuxSessionExists: (sessionName, backend, stableId) => {
-    if (stableId && (backend === 'tmux' || backend === 'herdr')) {
+    if (stableId && (backend === 'tmux' || backend === 'herdr' || backend === 'rex')) {
       const resolution = terminalControlRuntime.resolveExistingSession(
         stableId,
         backend,
         sessionName,
       );`);
+    expect(source).toContain('throw new Error(`${resolution.code}: ${resolution.message}`);');
+    expect(source).toContain("throw new Error('rex backend is not available on this daemon');");
+    expect(source).toContain("throw new Error(`rex session not found: ${sessionName}`);");
     expect(source).toContain("'has-session', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName)");
     expect(source).not.toContain("runTmux(['new-session', '-d', '-s', sessionName");
     expect(startMirrorBlock).toContain(`deps.assertTmuxSessionExists(

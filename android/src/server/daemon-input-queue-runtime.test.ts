@@ -4,7 +4,7 @@ import {
   TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
   getTerminalInputUtf8ByteLength,
 } from '@zterm/shared/terminal/input-chunking';
-import type { SessionMirror } from './terminal-runtime-types';
+import type { SessionMirror, TerminalSession, TerminalTransportConnection } from './terminal-runtime-types';
 import { createDaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import { createTerminalControlRuntime } from './terminal-control-runtime';
 import type { TerminalSourceAdapter } from './terminal-source-adapter';
@@ -130,6 +130,67 @@ describe('daemon input queue runtime', () => {
     spawnSyncMock.mockReturnValue({ status: 0, stdout: '', stderr: '' });
   });
 
+  it.each([false, true])('rejects input before connected without caching acceptance (reliable=%s)', async (reliable) => {
+    const transport = { kind: 'ws' as const, readyState: 1, sendText: vi.fn(), close: vi.fn() };
+    const session: TerminalSession = {
+      id: 'subscriber-1', transportId: 'transport-1', transport,
+      sessionName: 'demo', mirrorKey: 'demo', connectedSent: false,
+      pendingPasteImage: null, pendingAttachFile: null,
+    };
+    const connection: TerminalTransportConnection = {
+      transportId: session.transportId, transport, closeTransport: vi.fn(),
+      requestOrigin: '', role: 'session', boundSubscriberId: session.id,
+    };
+    const sendTransportMessage = vi.fn();
+    const handleInput = vi.fn(async () => true);
+    const queue = createDaemonInputQueueRuntime({
+      sessions: new Map([[session.id, session]]),
+      mirrors: new Map([['demo', createReadyMirror()]]),
+      getMirrorKey: (name) => name, sendTransportMessage, sendMessage: vi.fn(),
+      handleInput, writeBackendInputGroup: vi.fn(),
+      resolveBackendInputMaxChunkBytes: () => TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
+    });
+    const payload = reliable
+      ? { version: 1, seq: 'readiness-seq', data: 'early', sentAt: 1, attempt: 1 }
+      : 'early';
+    const expectRejected = () => {
+      expect(sendTransportMessage).toHaveBeenCalledWith(transport, {
+        type: 'error', payload: {
+          message: 'input requires the current attached session transport', code: 'input_stale_transport',
+        },
+      });
+      if (reliable) {
+        expect(sendTransportMessage).toHaveBeenCalledWith(transport, {
+          type: 'input-ack', payload: {
+            version: 1, seq: 'readiness-seq', accepted: false, bytes: 5, error: 'input_stale_transport',
+          },
+        });
+      }
+    };
+
+    await queue.handleInputMessage(connection, payload);
+    expect(handleInput).not.toHaveBeenCalled();
+    expectRejected();
+
+    session.connectedSent = true;
+    sendTransportMessage.mockClear();
+    await queue.handleInputMessage(connection, payload);
+    expect(handleInput).toHaveBeenCalledTimes(1);
+    expect(handleInput).toHaveBeenCalledWith(session, 'early', expect.any(Function));
+    if (reliable) {
+      expect(sendTransportMessage).toHaveBeenCalledWith(transport, {
+        type: 'input-ack', payload: { version: 1, seq: 'readiness-seq', accepted: true, bytes: 5 },
+      });
+      await queue.handleInputMessage(connection, payload);
+      expect(handleInput).toHaveBeenCalledTimes(1);
+      session.connectedSent = false;
+      sendTransportMessage.mockClear();
+      await queue.handleInputMessage(connection, payload);
+      expectRejected();
+      expect(handleInput).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it('coalesces burst literal input for the same mirror into one tmux write', async () => {
     await runSpawnMockImmediately();
     const { queue } = createRuntime();
@@ -150,6 +211,46 @@ describe('daemon input queue runtime', () => {
       '--',
       'abc',
     ]);
+  });
+
+  it('keys live Rex input by the Rex backend instead of the tmux fallback', async () => {
+    const mirror = {
+      ...createReadyMirror(),
+      key: 'rex:rex-demo',
+      sessionName: 'rex-demo',
+      backend: 'rex' as const,
+    };
+    const mirrors = new Map<string, SessionMirror>([[mirror.key, mirror]]);
+    const getMirrorKey = vi.fn(
+      (sessionName: string, backend = 'tmux') => `${backend}:${sessionName}`,
+    );
+    const writeBackendInputGroup = vi.fn(async () => {});
+    const queue = createDaemonInputQueueRuntime({
+      sessions: new Map(),
+      mirrors,
+      getMirrorKey,
+      sendTransportMessage: vi.fn(),
+      sendMessage: vi.fn(),
+      handleInput: vi.fn(async () => true),
+      writeBackendInputGroup,
+      resolveBackendInputMaxChunkBytes: () => TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
+    });
+
+    await expect(queue.enqueueLiveMirrorInput(
+      'rex-demo',
+      'echo rex',
+      true,
+      () => true,
+      'rex',
+    )).resolves.toBe(true);
+
+    expect(getMirrorKey).toHaveBeenCalledWith('rex-demo', 'rex');
+    expect(writeBackendInputGroup).toHaveBeenCalledWith(
+      'rex-demo',
+      'echo rex',
+      true,
+      'rex',
+    );
   });
 
   it('does not include stale queued input in a coalesced tmux write', async () => {

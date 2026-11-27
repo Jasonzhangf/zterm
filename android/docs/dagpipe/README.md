@@ -354,6 +354,17 @@ client wrapper entries are N/A on the client side by ownership:
   production `daemon.session_catalog` currently uses
   `src/server/daemon-session-catalog-runtime.ts` directly without this native
   gate. This runtime is not wired as a production daemon session catalog owner.
+  Rex catalog identity is backend-qualified as `rex:v1`. The catalog graph maps
+  capability resolution/probe to `terminal-backend-selection.ts`, exact admission
+  to channel mux, and attach to terminal backend. Capability unavailable,
+  identity mismatch, attach failure, cancellation and normal close settle via
+  channel removal, subscriber release and the single result. Rejection allocates
+  no source subscription; settlement never deletes a native Rex/tmux session.
+  Successful attach feeds `daemon-mirror-publish.graph.json`; connected input
+  feeds `daemon-input-schedule.graph.json`. Client recovery starts a new exact
+  admission execution (`connection-recovery.graph.json` remains a design mapping).
+  These are static owner mappings, not new native operator registrations or
+  installed acceptance. Rex source implementation lives in `rex-backend.ts`.
 - `runDagpipePhase3InputSchedule` -> `daemon.input_queue`
   (`src/server/daemon-input-queue-runtime.ts`).
 - `runDagpipePhase3FileBrowse`, `runDagpipePhase3Download` -> `daemon.file_transfer`

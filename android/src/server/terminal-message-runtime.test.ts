@@ -421,7 +421,16 @@ function createRuntime(options?: {
       listTmuxSessions: vi.fn(() => []),
       listTerminalSessions,
       listTerminalSessionCatalog,
-      resolveExistingSession: options?.resolveExistingSession,
+      resolveExistingSession: options?.resolveExistingSession
+        ? ((stableId, backend, requestedSessionName) => {
+            if (backend === 'rex') {
+              throw new Error('rex terminal source adapter is not available');
+            }
+            return requestedSessionName === undefined
+              ? options.resolveExistingSession!(stableId, backend)
+              : options.resolveExistingSession!(stableId, backend, requestedSessionName);
+          })
+        : undefined,
       createDetachedTmuxSession,
       closeDetachedTerminalSession,
       renameTmuxSession,

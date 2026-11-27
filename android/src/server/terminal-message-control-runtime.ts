@@ -6,6 +6,7 @@ import type {
   BridgeServerMessage as ServerMessage,
   HostConfigMessage,
   TerminalSessionCatalogEntry,
+  TerminalSessionBackendKind,
   TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import type {
@@ -45,27 +46,27 @@ export interface TerminalMessageControlRuntimeDeps {
     sessionName?: string,
     backend?: 'tmux' | 'herdr',
   ) => void;
-  listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
+  listTmuxSessions: (backend?: TerminalSessionBackendKind) => string[];
   listTerminalSessions?: () => string[];
   listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
   refreshSessionCatalog?: () => Promise<unknown>;
-  resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
+  resolveTerminalSessionBackend?: (sessionName: string) => TerminalSessionBackendKind;
   resolveExistingSession?: (
     stableId: string,
-    backend: 'tmux' | 'herdr',
+    backend: TerminalSessionBackendKind,
     requestedSessionName?: string,
   ) => TerminalSessionIdentityResolution;
   bindResolvedSession?: (session: ResolvedTerminalSession) => void;
-  createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: 'tmux' | 'herdr') => string;
-  closeDetachedTerminalSession: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
-  renameTmuxSession: (currentName?: string, nextName?: string, backend?: 'tmux' | 'herdr') => string;
+  createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: TerminalSessionBackendKind) => string;
+  closeDetachedTerminalSession: (sessionName: string, backend?: TerminalSessionBackendKind) => void;
+  renameTmuxSession: (currentName?: string, nextName?: string, backend?: TerminalSessionBackendKind) => string;
   sanitizeSessionName: (input?: string) => string;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
   bindConnectionToSubscriber: (
     connection: TerminalTransportConnection,
     subscriber: TerminalTransportSubscriber,
   ) => TerminalTransportSubscriber;
-  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  getMirrorKey: (sessionName: string, backend?: TerminalSessionBackendKind) => string;
   attachTmux: (session: TerminalTransportSubscriber, payload: TerminalAttachPayload) => Promise<void>;
   handleAdaptiveResize?: (
     session: TerminalTransportSubscriber,
@@ -142,8 +143,9 @@ export function handleSessionTransportConnectRuntime(
   console.log(
     `[server] transport-attach-ok transport=${connection.transportId} openRequestId=${payload.openRequestId || 'n/a'} session=${deps.sanitizeSessionName(payload.sessionName)}`,
   );
+  const requestedBackend = payload.backend || deps.resolveTerminalSessionBackend?.(payload.sessionName);
   const subscriber = deps.createTransportSubscriber(connection);
-  subscriber.backend = payload.backend || deps.resolveTerminalSessionBackend?.(payload.sessionName);
+  subscriber.backend = requestedBackend;
   if (!subscriber.backend) {
     throw new Error(`terminal session backend resolver unavailable for ${payload.sessionName}`);
   }
@@ -191,7 +193,14 @@ export async function handleScheduleMessageRuntime(
     return { ok: false, code: 'session_required', message: `${message.type} requires an attached session transport` };
   }
 
-  if (session.backend === 'herdr') {
+  const scheduleBackend = session.backend || 'tmux';
+  if (scheduleBackend === 'herdr' || scheduleBackend === 'rex') {
+    const unsupportedCode = scheduleBackend === 'rex'
+      ? 'rex_schedule_unsupported'
+      : 'herdr_schedule_unsupported';
+    const unsupportedMessage = scheduleBackend === 'rex'
+      ? 'Rex terminal source does not support schedule commands in V1'
+      : 'Herdr single-session backend does not support schedule commands';
     sendScheduleError(session, {
       operation: message.type === 'schedule-list'
         ? 'list'
@@ -207,13 +216,13 @@ export async function handleScheduleMessageRuntime(
         : message.type === 'schedule-delete' || message.type === 'schedule-toggle' || message.type === 'schedule-run-now'
           ? message.payload.jobId
           : undefined,
-      code: 'herdr_schedule_unsupported',
-      message: 'Herdr single-session backend does not support schedule commands',
+      code: unsupportedCode,
+      message: unsupportedMessage,
     });
     return {
       ok: false,
-      code: 'herdr_schedule_unsupported',
-      message: 'Herdr single-session backend does not support schedule commands',
+      code: unsupportedCode,
+      message: unsupportedMessage,
     };
   }
 
@@ -222,7 +231,7 @@ export async function handleScheduleMessageRuntime(
       deps.sendScheduleStateToSession(
         session,
         deps.sanitizeSessionName(message.payload.sessionName || session.sessionName),
-        session.backend || 'tmux',
+        scheduleBackend,
       );
       return { ok: true };
     case 'schedule-upsert':
@@ -237,7 +246,7 @@ export async function handleScheduleMessageRuntime(
             existing: message.payload.job.id
               ? deps.scheduleEngine.listBySession(
                 deps.sanitizeSessionName(message.payload.job.targetSessionName || session.sessionName),
-                session.backend || 'tmux',
+                scheduleBackend,
               ).find((job) => job.id === message.payload.job.id) || null
               : null,
           },
@@ -256,7 +265,7 @@ export async function handleScheduleMessageRuntime(
         }
         deps.scheduleEngine.upsert({
           ...message.payload.job,
-          terminalBackend: session.backend || 'tmux',
+          terminalBackend: scheduleBackend,
           targetSessionName: normalized.targetSessionName,
         });
         return { ok: true };

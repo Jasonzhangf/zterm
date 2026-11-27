@@ -209,6 +209,12 @@ export function createTerminalFileTransferBinaryRuntime(
         });
         return;
       }
+      if (mirror.backend === 'rex') {
+        cleanupClipboardImageFiles(sourcePath, pngPath);
+        cleanupInput?.();
+        sendImagePasteError(session, 'Rex terminal source does not support image paste in V1');
+        return;
+      }
       const pasteSequence = payload.pasteSequence || '\x16';
       void deps.enqueueBackendInput(mirror.sessionName, pasteSequence, false, mirror.backend)
         .then((wrote) => {
@@ -444,6 +450,16 @@ export function createTerminalFileTransferBinaryRuntime(
       deps.sendMessage(session, {
         type: 'error',
         payload: { message: 'Session is not ready for file attach', code: 'session_not_ready' },
+      });
+      return;
+    }
+    if (mirror.backend === 'rex') {
+      deps.sendMessage(session, {
+        type: 'error',
+        payload: {
+          message: 'Rex terminal source does not support file attach in V1',
+          code: 'rex_file_transfer_unsupported',
+        },
       });
       return;
     }

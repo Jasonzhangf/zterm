@@ -19,7 +19,7 @@ import {
   DaemonControlCenter,
   type DaemonControlExecutionRequest,
 } from './daemon-control-center-runtime';
-import type { HostConfigMessage } from '@zterm/shared/protocol';
+import type { HostConfigMessage, TerminalSessionBackendKind } from '@zterm/shared/protocol';
 import type {
   TerminalSession,
   TerminalSessionTransport,
@@ -61,7 +61,7 @@ export interface DaemonControlGatewayRuntime {
   ): TerminalTransportSubscriber | null;
   handleListSessions(
     connection: TerminalTransportConnection,
-    message: { readonly type: 'list-sessions'; readonly payload?: { readonly terminalBackend?: 'tmux' | 'herdr' } },
+    message: { readonly type: 'list-sessions'; readonly payload?: { readonly terminalBackend?: TerminalSessionBackendKind } },
   ): void;
   handleScheduleControl(
     session: TerminalSession | null,

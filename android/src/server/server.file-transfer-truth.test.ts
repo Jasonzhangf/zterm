@@ -78,15 +78,21 @@ describe('server file-transfer truth gates', () => {
     expect(source).not.toContain('function logCleanupFailure(');
   });
 
-  it('keeps remote cwd truth in file runtime via tmux pane current path', () => {
+  it('rejects Rex file browsing and keeps supported-backend cwd truth', () => {
     const source = readFileTransferListRuntimeSource();
     const listBlock = extractBlock(source, 'function handleFileListRequest(');
     const mkdirBlock = extractBlock(source, 'function handleFileCreateDirectoryRequest(');
 
+    expect(listBlock).toContain("if (backend === 'rex')");
+    expect(listBlock).toContain("error: 'Rex terminal source does not support file browsing in V1'");
     expect(listBlock).toContain('resolveFileTransferListPath');
-    expect(listBlock).toContain('deps.readTmuxPaneCurrentPath(session.sessionName, session.backend)');
+    expect(listBlock).toContain('() => deps.readTmuxPaneCurrentPath(session.sessionName, backend)');
+    expect(listBlock.indexOf("if (backend === 'rex')")).toBeLessThan(listBlock.indexOf('resolveFileTransferListPath'));
+    expect(mkdirBlock).toContain("if (backend === 'rex')");
+    expect(mkdirBlock).toContain("error: 'Rex terminal source does not support file browsing in V1'");
     expect(mkdirBlock).toContain('resolveFileTransferListPath');
-    expect(mkdirBlock).toContain('deps.readTmuxPaneCurrentPath(session.sessionName, session.backend)');
+    expect(mkdirBlock).toContain('() => deps.readTmuxPaneCurrentPath(session.sessionName, backend)');
+    expect(mkdirBlock.indexOf("if (backend === 'rex')")).toBeLessThan(mkdirBlock.indexOf('resolveFileTransferListPath'));
     expect(source).toContain("logFileTransferRuntimeError('stat entry failed'");
     expect(source).toContain('function getDirectoryCache(');
     expect(source).toContain('function watchDirectoryCache(');

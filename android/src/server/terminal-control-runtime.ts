@@ -11,6 +11,8 @@ import { resolveStandardTmuxRunRoot } from '@zterm/shared/terminal/tmux-socket-p
 import type {
   ResolvedTerminalSession,
   TerminalSourceAdapter,
+  TerminalIdentityBackendKind,
+  TerminalIdentityRuntime,
   TerminalSessionIdentity,
   TerminalSessionIdentityResolution,
   TerminalSourceKind,
@@ -25,11 +27,11 @@ const DEFAULT_MANUAL_TERMINAL_COLS = 80;
 const DEFAULT_MANUAL_TERMINAL_ROWS = 80;
 const DEFAULT_TMUX_COMMAND_TIMEOUT_MS = 10_000;
 
-export type TerminalControlBackendKind = TerminalSourceKind;
+export type TerminalControlBackendKind = TerminalSourceKind | 'rex';
 
 export interface TerminalSessionCatalogEntry {
   name: string;
-  backend: 'tmux' | 'herdr';
+  backend: 'tmux' | 'herdr' | 'rex';
   stableId?: string;
   cwd?: string;
 }
@@ -43,7 +45,8 @@ export interface TerminalControlRuntimeDeps {
   sanitizeSessionName: (input?: string) => string;
   daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
   wezTermBackend?: TerminalSourceAdapter | null;
-  backendRuntimes?: Partial<Record<'herdr' | 'wezterm', TerminalSourceAdapter>>;
+  backendRuntimes?: Partial<Record<'herdr' | 'wezterm' | 'rex', TerminalSourceAdapter>>;
+  identityRuntimes?: Partial<Record<'herdr' | 'rex', TerminalIdentityRuntime>>;
   defaultBackend?: TerminalControlBackendKind;
   tmuxCommandTimeoutMs?: number;
 }
@@ -108,16 +111,16 @@ export interface TerminalControlRuntime {
     backend?: TerminalControlBackendKind,
   ) => Promise<void>;
   resolveBackendInputMaxChunkBytes: () => number;
-  listTmuxSessions: (backend?: TerminalControlBackendKind) => string[];
+  listTmuxSessions: (backend?: TerminalIdentityBackendKind) => string[];
   listTerminalSessions: () => string[];
   listTerminalSessionCatalog: () => TerminalSessionCatalogEntry[];
   readSessionIdentity: (target: {
-    backend: 'tmux' | 'herdr';
+    backend: TerminalIdentityBackendKind;
     sessionName: string;
   }) => TerminalSessionIdentity | null;
   resolveExistingSession: (
     stableId: string,
-    backend: 'tmux' | 'herdr',
+    backend: TerminalIdentityBackendKind,
     requestedSessionName?: string,
   ) => TerminalSessionIdentityResolution;
   bindResolvedSession: (session: ResolvedTerminalSession) => void;
@@ -399,6 +402,12 @@ export function createTerminalControlRuntime(
     return backend;
   }
 
+  function resolveIdentityRuntime(backend: Exclude<TerminalIdentityBackendKind, 'tmux'>) {
+    const identityRuntime = deps.identityRuntimes?.[backend];
+    if (identityRuntime) return identityRuntime;
+    return deps.backendRuntimes?.[backend] || null;
+  }
+
   function cleanEnv(socketMode: TmuxSocketMode = tmuxSocketMode): Record<string, string> {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
@@ -585,7 +594,17 @@ export function createTerminalControlRuntime(
       : TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES;
   }
 
-  function listTmuxSessions(backendKind?: TerminalControlBackendKind) {
+  function listTmuxSessions(backendKind?: TerminalIdentityBackendKind) {
+    if (backendKind && backendKind !== 'tmux') {
+      const runtime = resolveIdentityRuntime(backendKind);
+      if (!runtime) {
+        if (backendKind === 'rex') {
+          return [];
+        }
+        throw new Error(`${backendKind} backend is not available`);
+      }
+      return runtime.listSessions().map((session) => session.sessionName);
+    }
     const externalBackend = resolveExternalBackend(backendKind);
     if (externalBackend) {
       return externalBackend.listSessions().map((session) => session.sessionName);
@@ -621,9 +640,9 @@ export function createTerminalControlRuntime(
   function buildTerminalSessionCatalog(): TerminalSessionCatalogEntry[] {
     const entries: TerminalSessionCatalogEntry[] = [];
     const selectedBackend = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux');
-    if (selectedBackend === 'tmux' || selectedBackend === 'wezterm') {
+    if (selectedBackend !== 'herdr') {
       const cwdBySession = new Map<string, string>();
-      const tmuxTargets = selectedBackend === 'tmux'
+      const tmuxTargets = selectedBackend === 'tmux' || selectedBackend === 'rex'
         ? (() => {
             try {
               return readTmuxSessionTargets();
@@ -632,7 +651,7 @@ export function createTerminalControlRuntime(
             }
           })()
         : [];
-      if (selectedBackend === 'tmux') {
+      if (selectedBackend === 'tmux' || selectedBackend === 'rex') {
         try {
           const paneResult = runTmuxAcrossSockets(['list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}']);
           for (const line of paneResult.stdout.split('\n')) {
@@ -685,16 +704,22 @@ export function createTerminalControlRuntime(
         }
       }
     }
-    if (deps.backendRuntimes?.herdr || deps.defaultBackend === 'herdr') {
-      for (const sessionName of listTmuxSessions('herdr')) {
-        const session = deps.backendRuntimes?.herdr?.listSessions().find((item) => item.sessionName === sessionName);
-        const stableId = deps.backendRuntimes?.herdr?.readSessionIdentity?.(sessionName)?.stableId
-          || session?.stableId;
+    for (const backend of ['herdr', 'rex'] as const) {
+      const runtime = resolveIdentityRuntime(backend);
+      if (!runtime && deps.defaultBackend !== backend) continue;
+      const sessions = runtime?.listSessions() || [];
+      for (const session of sessions) {
+        const parsedStableId = session.stableId
+          ? parseTerminalSessionStableId(session.stableId)
+          : null;
+        if (backend === 'rex' && parsedStableId?.backend !== 'rex') {
+          throw new Error(`rex session ${session.sessionName} is missing an exact rex:v1 identity`);
+        }
         entries.push({
-          name: sessionName,
-          backend: 'herdr',
-          ...(stableId ? { stableId } : {}),
-          ...(session?.cwd ? { cwd: session.cwd } : {}),
+          name: session.sessionName,
+          backend,
+          ...(session.stableId ? { stableId: session.stableId } : {}),
+          ...(session.cwd ? { cwd: session.cwd } : {}),
         });
       }
     }
@@ -727,8 +752,11 @@ export function createTerminalControlRuntime(
     if (deps.defaultBackend !== 'herdr' && listTmuxSessions('tmux').includes(normalized)) {
       matches.push('tmux');
     }
-    if (deps.backendRuntimes?.herdr || deps.defaultBackend === 'herdr') {
+    if (resolveIdentityRuntime('herdr') || deps.defaultBackend === 'herdr') {
       if (listTmuxSessions('herdr').includes(normalized)) matches.push('herdr');
+    }
+    if (resolveIdentityRuntime('rex') || deps.defaultBackend === 'rex') {
+      if (listTmuxSessions('rex').includes(normalized)) matches.push('rex');
     }
     if (matches.length !== 1) {
       throw new Error(matches.length === 0
@@ -739,13 +767,13 @@ export function createTerminalControlRuntime(
   }
 
   function readSessionIdentity(target: {
-    backend: 'tmux' | 'herdr';
+    backend: TerminalIdentityBackendKind;
     sessionName: string;
   }): TerminalSessionIdentity | null {
     const sessionName = deps.sanitizeSessionName(target.sessionName);
-    if (target.backend === 'herdr') {
-      const herdr = deps.backendRuntimes?.herdr;
-      return herdr?.readSessionIdentity?.(sessionName) || null;
+    if (target.backend !== 'tmux') {
+      const runtime = resolveIdentityRuntime(target.backend);
+      return runtime?.readSessionIdentity?.(sessionName) || null;
     }
 
     const targets = readTmuxSessionTargets();
@@ -774,7 +802,7 @@ export function createTerminalControlRuntime(
 
   function resolveExistingSession(
     stableId: string,
-    backend: 'tmux' | 'herdr',
+    backend: TerminalIdentityBackendKind,
     requestedSessionName?: string,
   ): TerminalSessionIdentityResolution {
     const parsed = parseTerminalSessionStableId(stableId);
@@ -800,7 +828,7 @@ export function createTerminalControlRuntime(
         };
       }
     } else {
-      resolved = deps.backendRuntimes?.herdr?.resolveExistingSession?.(stableId) || null;
+      resolved = resolveIdentityRuntime(backend)?.resolveExistingSession?.(stableId) || null;
     }
     if (resolved?.identity.stableId === stableId) {
       return { ok: true, session: resolved };
@@ -835,8 +863,8 @@ export function createTerminalControlRuntime(
   }
 
   function bindResolvedSession(session: ResolvedTerminalSession) {
-    if (session.target.backend === 'herdr') {
-      deps.backendRuntimes?.herdr?.bindResolvedSession?.(session);
+    if (session.target.backend !== 'tmux') {
+      resolveIdentityRuntime(session.target.backend)?.bindResolvedSession?.(session);
       return;
     }
     const existing = sessionNativeTargets.get(session.target.sessionName);

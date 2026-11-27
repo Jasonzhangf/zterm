@@ -6,6 +6,7 @@ import {
 } from '@zterm/shared/terminal/input-chunking';
 import type {
   BridgeServerMessage as ServerMessage,
+  TerminalSessionBackendKind,
   TerminalInputAckPayload,
   TerminalReliableInputPayload,
   TerminalTransportServerFrame,
@@ -19,12 +20,12 @@ import type {
 import { createReliableInputAckCache } from './terminal-reliable-input-ack';
 import { runPhase3InputSchedule } from './dagpipe-bridge';
 
-export type DaemonInputBackendKind = 'tmux' | 'herdr' | 'wezterm';
+export type DaemonInputBackendKind = 'tmux' | 'herdr' | 'wezterm' | 'rex';
 
 export interface DaemonInputQueueDeps {
   sessions: Map<string, TerminalSession>;
   mirrors: Map<string, SessionMirror>;
-  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  getMirrorKey: (sessionName: string, backend?: TerminalSessionBackendKind) => string;
   sendTransportMessage: (
     transport: TerminalSessionTransport | null | undefined,
     message: TerminalTransportServerFrame,
@@ -226,6 +227,10 @@ export function createDaemonInputQueueRuntime(
       );
       return;
     }
+    if (inputSession.connectedSent === false) {
+      reportInputDrop(connection, 'input_stale_transport', bytes, ackSeq);
+      return;
+    }
     if (ackSeq) {
       const existingAck = reliableInputAckCache.read(inputSession.id, ackSeq);
       if (existingAck) {
@@ -370,7 +375,9 @@ export function createDaemonInputQueueRuntime(
   }
 
   function normalizeBackendKind(backendKind?: DaemonInputBackendKind): DaemonInputBackendKind {
-    return backendKind === 'herdr' || backendKind === 'wezterm' ? backendKind : 'tmux';
+    return backendKind === 'herdr' || backendKind === 'wezterm' || backendKind === 'rex'
+      ? backendKind
+      : 'tmux';
   }
 
   function buildLiveMirrorInputGroups(items: LiveMirrorInputItem[]): LiveMirrorInputGroup[] {
@@ -584,7 +591,10 @@ export function createDaemonInputQueueRuntime(
     backendKind?: DaemonInputBackendKind,
   ) {
     const normalizedBackend = normalizeBackendKind(backendKind);
-    const mirrorKey = deps.getMirrorKey(sessionName, normalizedBackend === 'herdr' ? 'herdr' : 'tmux');
+    const mirrorKey = deps.getMirrorKey(
+      sessionName,
+      normalizedBackend === 'wezterm' ? 'tmux' : normalizedBackend,
+    );
     return enqueueInputItem(mirrorKey, {
       sessionName,
       payload,
@@ -602,7 +612,10 @@ export function createDaemonInputQueueRuntime(
     backendKind?: DaemonInputBackendKind,
   ) {
     const normalizedBackend = normalizeBackendKind(backendKind);
-    const mirrorKey = deps.getMirrorKey(sessionName, normalizedBackend === 'herdr' ? 'herdr' : 'tmux');
+    const mirrorKey = deps.getMirrorKey(
+      sessionName,
+      normalizedBackend === 'wezterm' ? 'tmux' : normalizedBackend,
+    );
     return enqueueInputItem(mirrorKey, {
       sessionName,
       payload,
@@ -640,7 +653,11 @@ export function createDaemonInputQueueRuntime(
     reason: string,
     backendKind?: DaemonInputBackendKind,
   ) {
-    const mirrorKey = deps.getMirrorKey(sessionName, backendKind === 'herdr' ? 'herdr' : 'tmux');
+    const normalizedBackend = normalizeBackendKind(backendKind);
+    const mirrorKey = deps.getMirrorKey(
+      sessionName,
+      normalizedBackend === 'wezterm' ? 'tmux' : normalizedBackend,
+    );
     const pending = liveMirrorInputBatches.get(mirrorKey);
     if (!pending) {
       return 0;

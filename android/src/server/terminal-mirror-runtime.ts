@@ -3,6 +3,7 @@ import type {
 } from '@zterm/shared/terminal/performance-trace';
 import type {
   BridgeServerMessage as ServerMessage,
+  TerminalSessionBackendKind,
   TerminalTransportLane,
 } from '@zterm/shared/protocol';
 import type {
@@ -51,10 +52,10 @@ export interface TerminalMirrorRuntimeDeps {
     changedRanges: Array<{ startIndex: number; endIndex: number }>,
   ) => Extract<ServerMessage, { type: 'buffer-sync' }>['payload'] | null;
   sanitizeSessionName: (input?: string) => string;
-  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
+  getMirrorKey: (sessionName: string, backend?: TerminalSessionBackendKind) => string;
   resolveMirrorSessionProvenance?: (
     sessionName: string,
-    backend: 'tmux' | 'herdr',
+    backend: TerminalSessionBackendKind,
   ) => ResolvedTerminalSession | null;
   normalizeTerminalCols: (cols: number | undefined) => number;
   normalizeTerminalRows: (rows: number | undefined) => number;
@@ -64,19 +65,19 @@ export interface TerminalMirrorRuntimeDeps {
     existingTmuxGeometry: TerminalGeometry | null;
     previousSessionGeometry: TerminalGeometry;
   }) => TerminalGeometry;
-  readTmuxPaneMetrics: (sessionName: string, backend?: 'tmux' | 'herdr') => TmuxPaneMetrics;
+  readTmuxPaneMetrics: (sessionName: string, backend?: TerminalSessionBackendKind) => TmuxPaneMetrics;
   resizeBackendSession?: (
     sessionName: string,
     geometry: TerminalGeometry,
-    backend: 'tmux' | 'herdr' | undefined,
+    backend: TerminalSessionBackendKind | undefined,
     operation: 'apply' | 'release',
   ) => void;
   assertTmuxSessionExists: (
     sessionName: string,
-    backend?: 'tmux' | 'herdr',
+    backend?: TerminalSessionBackendKind,
     stableId?: string,
   ) => void;
-  resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
+  resolveTerminalSessionBackend?: (sessionName: string) => TerminalSessionBackendKind;
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
   mirrorBufferChanged: (
     mirror: SessionMirror,
@@ -151,7 +152,7 @@ export interface TerminalMirrorRuntime {
   refreshAdaptiveWidthLeaseHeartbeat: (session: TerminalSession) => void;
   releaseAdaptiveWidthLease: (session: TerminalSession, reason: string) => void;
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => number;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: TerminalSessionBackendKind) => number;
 }
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
@@ -223,7 +224,7 @@ const ADAPTIVE_WIDTH_LEASE_TTL_MS = 65000;
 interface PendingAdaptiveWidthCleanup {
   key: string;
   sessionName: string;
-  backend: 'tmux' | 'herdr';
+  backend: TerminalSessionBackendKind;
   paneId: string | null;
   baseline: TerminalGeometry | null;
   appliedCols: number | null;
@@ -301,7 +302,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     return count;
   }
 
-  function createMirror(sessionName: string, backend: 'tmux' | 'herdr' = 'tmux'): SessionMirror {
+  function createMirror(sessionName: string, backend: TerminalSessionBackendKind = 'tmux'): SessionMirror {
     const nextKey = deps.getMirrorKey(sessionName, backend);
     if (!attemptPendingAdaptiveWidthCleanup(nextKey)) {
       throw new Error(`adaptive width cleanup pending for ${sessionName}; refusing to create mirror until cleanup succeeds`);
@@ -925,7 +926,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     return true;
   }
 
-  function readCurrentTmuxGeometry(sessionName: string, backend: 'tmux' | 'herdr' = 'tmux'): TerminalGeometry | null {
+  function readCurrentTmuxGeometry(sessionName: string, backend: TerminalSessionBackendKind = 'tmux'): TerminalGeometry | null {
     try {
       const metrics = deps.readTmuxPaneMetrics(sessionName, backend);
       return {
