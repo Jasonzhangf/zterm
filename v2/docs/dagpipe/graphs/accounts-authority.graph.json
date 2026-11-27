@@ -1,0 +1,131 @@
+{
+  "id": "accounts.authority",
+  "version": "0.2",
+  "inputs": [{"id": "arc.accounts_request", "schema": "Object"}],
+  "nodes": [
+    {
+      "id": "校验账号权限请求",
+      "operator": "accounts.request.validate",
+      "operator_version": "0.1",
+      "inputs": ["arc.accounts_request"],
+      "output": {"id": "arc.accounts_validated", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole"
+    },
+    {
+      "id": "复核权威并执行账号操作",
+      "operator": "accounts.authority.execute",
+      "operator_version": "0.1",
+      "inputs": ["arc.accounts_validated"],
+      "output": {"id": "arc.accounts_outcome", "schema": "Object"},
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": {"op": "equals", "field": "status", "value": "valid"}
+      },
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole"
+    },
+    {
+      "id": "拒绝格式错误请求",
+      "operator": "accounts.outcome.reject-request",
+      "operator_version": "0.1",
+      "inputs": ["arc.accounts_validated"],
+      "output": {"id": "arc.accounts_request_rejected", "schema": "Object"},
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": {"op": "equals", "field": "status", "value": "rejected"}
+      },
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole"
+    },
+    {
+      "id": "确认操作成功",
+      "operator": "accounts.outcome.confirm",
+      "operator_version": "0.1",
+      "inputs": ["arc.accounts_outcome"],
+      "output": {"id": "arc.accounts_confirmed", "schema": "Object"},
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": {"op": "equals", "field": "outcome", "value": "confirmed"}
+      },
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole"
+    },
+    {
+      "id": "返回类型化拒绝",
+      "operator": "accounts.outcome.reject",
+      "operator_version": "0.1",
+      "inputs": ["arc.accounts_outcome"],
+      "output": {"id": "arc.accounts_rejected", "schema": "Object"},
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": {"op": "equals", "field": "outcome", "value": "rejected"}
+      },
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole"
+    },
+    {
+      "id": "保留操作失败",
+      "operator": "accounts.outcome.fail",
+      "operator_version": "0.1",
+      "inputs": ["arc.accounts_outcome"],
+      "output": {"id": "arc.accounts_failed", "schema": "Object"},
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": {"op": "equals", "field": "outcome", "value": "failure"}
+      },
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole"
+    },
+    {
+      "id": "保留结果未知",
+      "operator": "accounts.outcome.unknown",
+      "operator_version": "0.1",
+      "inputs": ["arc.accounts_outcome"],
+      "output": {"id": "arc.accounts_unknown", "schema": "Object"},
+      "input_selector": {
+        "include": [],
+        "exclude": [],
+        "predicate": {"op": "equals", "field": "outcome", "value": "unknown"}
+      },
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole"
+    },
+    {
+      "id": "返回账号权限结果",
+      "operator": "accounts.result.project",
+      "operator_version": "0.1",
+      "inputs": [
+        "arc.accounts_request_rejected",
+        "arc.accounts_confirmed",
+        "arc.accounts_rejected",
+        "arc.accounts_failed",
+        "arc.accounts_unknown"
+      ],
+      "output": {"id": "arc.accounts_result", "schema": "Object"},
+      "input_selector": {"include": [], "exclude": [], "predicate": null},
+      "output_selector": {"include": [], "exclude": [], "predicate": null},
+      "iterator": "Whole"
+    }
+  ],
+  "edges": [
+    {"from": "校验账号权限请求", "to": "拒绝格式错误请求", "arc_id": "arc.accounts_validated"},
+    {"from": "校验账号权限请求", "to": "复核权威并执行账号操作", "arc_id": "arc.accounts_validated"},
+    {"from": "复核权威并执行账号操作", "to": "确认操作成功", "arc_id": "arc.accounts_outcome"},
+    {"from": "复核权威并执行账号操作", "to": "返回类型化拒绝", "arc_id": "arc.accounts_outcome"},
+    {"from": "复核权威并执行账号操作", "to": "保留操作失败", "arc_id": "arc.accounts_outcome"},
+    {"from": "复核权威并执行账号操作", "to": "保留结果未知", "arc_id": "arc.accounts_outcome"},
+    {"from": "拒绝格式错误请求", "to": "返回账号权限结果", "arc_id": "arc.accounts_request_rejected"},
+    {"from": "确认操作成功", "to": "返回账号权限结果", "arc_id": "arc.accounts_confirmed"},
+    {"from": "返回类型化拒绝", "to": "返回账号权限结果", "arc_id": "arc.accounts_rejected"},
+    {"from": "保留操作失败", "to": "返回账号权限结果", "arc_id": "arc.accounts_failed"},
+    {"from": "保留结果未知", "to": "返回账号权限结果", "arc_id": "arc.accounts_unknown"}
+  ],
+  "outputs": ["arc.accounts_result"]
+}

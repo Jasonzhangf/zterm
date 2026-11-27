@@ -305,3 +305,16 @@ test('logout revokes the relay bearer session', async () => {
   const stillValid = await adapter.validateSession(token).then(() => null, (error) => error)
   assert.equal(stillValid.code, 'AUTHENTICATION_REQUIRED')
 })
+
+test('local clock expiry is only a projection; relay validity wins in both directions', async () => {
+  const { adapter } = createHarness()
+  let now = NOW
+  const auth = new AuthService({ authority: adapter, now: () => now, sessionTtlMs: TTL })
+  const login = await auth.login({ loginName: 'alice', credential: 'secret-a' })
+  now = login.authContext.expiresAt + TTL
+  assert.equal((await auth.verifySession(login.token)).credentialState, 'active')
+  now = NOW - TTL
+  await auth.logout(login.token)
+  assert.ok(login.authContext.expiresAt > now)
+  await assert.rejects(auth.verifySession(login.token), expectError('AUTHENTICATION_REQUIRED', 401))
+})

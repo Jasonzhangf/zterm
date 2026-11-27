@@ -279,13 +279,69 @@ export function createAccountsAuthorityRuntime(options: {
         { machineId },
       )
     }
+    const machines = await relay.listMachines(authContext.sessionId)
+    // A revoke can commit while the relay read is pending. Re-read the local
+    // policy after that await so authority is never returned for a grant that
+    // no longer exists or a generation that changed during the query.
+    const currentGrant = await store.getGrant(authContext.accountId)
+    if (!currentGrant) {
+      throw new AccountsError(
+        'WORKSPACE_AUTHORIZATION_REQUIRED',
+        403,
+        'The workspace authorization grant was revoked during the authority check.',
+      )
+    }
+    if (currentGrant.authorizationGeneration !== normalized.authorizationGeneration) {
+      throw new AccountsError(
+        'AUTHORIZATION_GENERATION_STALE',
+        409,
+        'The workspace authorization generation changed during the authority check.',
+        {
+          accountId: authContext.accountId,
+          expectedGeneration: normalized.authorizationGeneration,
+          currentGeneration: currentGrant.authorizationGeneration,
+        },
+      )
+    }
+    const effective = normalizeAccountAuthorizationGrant(currentGrant)
+    if (!effective.allWorkspaces && !effective.workspaceIds.includes(workspaceId)) {
+      throw new AccountsError(
+        'WORKSPACE_FORBIDDEN',
+        403,
+        'The workspace authorization was removed during the authority check.',
+        { workspaceId },
+      )
+    }
+    if (!effective.machineIds.includes(machineId)) {
+      throw new AccountsError(
+        'MACHINE_NOT_OWNED',
+        403,
+        'The machine authorization was removed during the authority check.',
+        { machineId },
+      )
+    }
+    const machine = machines.find((candidate) => candidate.machineId === machineId)
+    if (!machine || machine.ownerAccountId !== authContext.accountId) {
+      throw new AccountsError(
+        'MACHINE_NOT_FOUND', 404,
+        'The requested machine is not a relay-verified machine for this account.',
+        { machineId },
+      )
+    }
+    if (machine.status !== 'active') {
+      throw new AccountsError(
+        'MACHINE_REVOKED', 403,
+        'The requested machine is revoked at the relay.',
+        { machineId },
+      )
+    }
     return {
-      accountId: normalized.accountId,
+      accountId: effective.accountId,
       workspaceId,
       machineId,
-      scopes: [...normalized.scopes],
-      authorizationGeneration: normalized.authorizationGeneration,
-      bindingGeneration: normalized.authorizationGeneration,
+      scopes: [...effective.scopes],
+      authorizationGeneration: effective.authorizationGeneration,
+      bindingGeneration: effective.authorizationGeneration,
     }
   }
 
