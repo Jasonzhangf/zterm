@@ -2,11 +2,11 @@ import type { TraversalResolvedPath } from './types';
 
 export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalResolvedPath[] = [
   'lan',
-  'ipv6',
-  'ipv4',
   'rtc-direct',
   'tailscale',
   'rtc-relay',
+  'ipv6',
+  'ipv4',
 ];
 
 export function normalizeTraversalPathPriority(input: unknown): TraversalResolvedPath[] {

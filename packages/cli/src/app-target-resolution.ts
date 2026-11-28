@@ -10,6 +10,7 @@ import type {
   RelayEndpointCandidate,
 } from '../../shared/src/connection/relay-directory.js';
 import { DEFAULT_BRIDGE_PORT } from '../../shared/src/connection/mobile-config.js';
+import { isLoopbackHost, isPrivateLanIpv4Host } from '../../shared/src/connection/traversal/endpoint-host.js';
 import type {
   AppTarget,
   AppTargetDirectEndpointKind,
@@ -160,10 +161,25 @@ function exactDevice(directory: RelayAccountDirectory, peerDeviceId: string): Re
 
 const DIRECT_APP_ENDPOINT_PRIORITY: Readonly<Record<AppTargetDirectEndpointKind, number>> = {
   lan: 0,
-  ipv6: 1,
-  ipv4: 2,
-  tailscale: 3,
+  tailscale: 1,
+  ipv6: 2,
+  ipv4: 3,
 };
+
+function isAllowedAppEndpointUrl(kind: AppTargetDirectEndpointKind, wsUrl: string): boolean {
+  if (kind === 'lan' || kind === 'tailscale') {
+    return true;
+  }
+  try {
+    const parsed = new URL(wsUrl);
+    if (parsed.protocol === 'wss:') {
+      return true;
+    }
+    return isPrivateLanIpv4Host(parsed.hostname) || isLoopbackHost(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
 
 function directEndpointKind(kind: RelayEndpointCandidate['kind']): AppTargetDirectEndpointKind | undefined {
   switch (kind) {
@@ -194,6 +210,7 @@ function directEndpoints(daemon: RelayDirectoryDaemon): AppTargetEndpoint[] {
     const kind = directEndpointKind(candidate.kind);
     if (!kind) continue;
     const wsUrl = endpointUrl(candidate);
+    if (!isAllowedAppEndpointUrl(kind, wsUrl)) continue;
     if (seen.has(wsUrl)) continue;
     seen.add(wsUrl);
     endpoints.push({ kind, wsUrl, authToken: candidate.authToken ?? '' });
@@ -226,7 +243,7 @@ export function resolveAppTargetFromDirectory(input: {
   }
   const endpoints = directEndpoints(device.daemon);
   if (endpoints.length === 0) {
-    throw new AppCliError('no_direct_endpoint', `peer daemon has no LAN, Tailscale, IPv4, or IPv6 /app endpoint: ${input.peerDeviceId}`);
+    throw new AppCliError('no_direct_endpoint', `peer daemon has no LAN, Tailscale, loopback, or wss:// /app endpoint: ${input.peerDeviceId}`);
   }
   return {
     deviceId: device.deviceId,

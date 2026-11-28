@@ -47,14 +47,14 @@ const candidates = [
 ] satisfies TraversalPlanCandidate[];
 
 describe('selectBestTraversalRoute', () => {
-  it('orders default Auto route priority as LAN -> IPv6 -> IPv4 -> rtc-direct -> Tailscale -> rtc-relay', () => {
+  it('orders default Auto route priority as LAN -> rtc-direct -> Tailscale -> rtc-relay -> IPv6 -> IPv4', () => {
     expect(DEFAULT_TRAVERSAL_PATH_PRIORITY).toEqual([
       'lan',
-      'ipv6',
-      'ipv4',
       'rtc-direct',
       'tailscale',
       'rtc-relay',
+      'ipv6',
+      'ipv4',
     ]);
 
     const selection = selectBestTraversalRoute({
@@ -113,13 +113,13 @@ describe('selectBestTraversalRoute', () => {
     });
   });
 
-  it('selects public IPv4 before UDP direct, Tailscale, and Relay by default', () => {
+  it('selects rtc-direct before Tailscale, Relay, and IPv4 by default', () => {
     const selection = selectBestTraversalRoute({
       candidates: candidates.filter((candidate) => candidate.id !== 'direct:lan'),
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:ipv4', path: 'ipv4' });
-    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:ipv4')?.reasons).toContain('health:unknown');
+    expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
+    expect(selection.diagnostics.find((item) => item.candidateId === 'rtc-direct:daemon-a')?.reasons).toContain('health:unknown');
   });
 
   it('uses a recent successful rtc-direct lease before probing healthy Tailscale', () => {
