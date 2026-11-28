@@ -655,7 +655,7 @@ semantics.
 |---|---|---|
 | `invalid_slot` | A slot number is not an integer from 1 through 20. | Use `zterm slot set 1` through `20`. |
 | `slot_not_found` | The requested slot has no saved binding. | Configure that slot first. |
-| `no_slots` | No slot bindings exist for no-argument selection. | Run `zterm slot set <1..20>`. |
+| `no_slots` | No slot bindings exist for no-argument selection. | Run `zterm slot set <slot>`. |
 | `auth_required` or `auth_invalid` | No usable CLI login exists, or the server rejected it. | Run `zterm login` and select the slot again only if its identity changed. |
 | `slot_changed` | Another process changed the same slot during configuration. | Re-run `zterm slot set` and review the newer binding. |
 | `session_not_found` or `session_identity_mismatch` | The saved stable session no longer matches the daemon catalog. | Reconfigure the slot explicitly. The CLI does not create or rename a replacement session. |

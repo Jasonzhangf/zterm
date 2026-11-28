@@ -271,11 +271,11 @@ describe('parseSyncedSlot', () => {
     expect(input).toEqual({ slot: 20, ...binding });
   });
 
-  it('requires an integer slot from 1 through 20', () => {
-    for (const slot of [1, 20]) {
+  it('requires a positive integer slot (>= 1)', () => {
+    for (const slot of [1, 20, 21, 100]) {
       expect(parseSyncedSlot({ slot, ...makeBinding() }).slot).toBe(slot);
     }
-    for (const slot of [0, 21, 1.5, '1', Number.NaN]) {
+    for (const slot of [0, -1, 1.5, '1', Number.NaN]) {
       expectValidationField(
         () => parseSyncedSlot({ slot, ...makeBinding() }),
         'slot',
@@ -322,16 +322,14 @@ describe('parseSyncedSlots', () => {
     expect(error.message).toContain('duplicate');
   });
 
-  it('rejects more than 20 records before applying duplicates', () => {
-    const input = Array.from({ length: 21 }, (_, index) => ({
-      slot: (index % 20) + 1,
+  it('accepts more than 20 unique slot records', () => {
+    const input = Array.from({ length: 25 }, (_, index) => ({
+      slot: index + 1,
       ...makeBinding(),
     }));
-    const error = expectValidationField(
-      () => parseSyncedSlots(input),
-      'slots',
-    );
-    expect(error.message).toContain('at most 20');
+    const result = parseSyncedSlots(input);
+    expect(result).toHaveLength(25);
+    expect(result[24]?.slot).toBe(25);
   });
 
   it('rejects the whole payload when one record is invalid', () => {

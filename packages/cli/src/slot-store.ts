@@ -57,10 +57,10 @@ function isJsonObject(value: unknown): value is JsonObject {
 }
 
 function assertSlot(slot: number, path: string) {
-  if (!Number.isInteger(slot) || slot < 1 || slot > 20) {
+  if (!Number.isInteger(slot) || slot < 1) {
     throw new ConfigStoreError(
       'invalid_config',
-      `slot must be an integer from 1 through 20: ${slot}`,
+      `slot must be a positive integer: ${slot}`,
       path,
     );
   }
@@ -131,9 +131,13 @@ function writeSlots(config: JsonObject, path: string) {
 
 function slotEntries(slots: JsonObject): SlotListEntry[] {
   const entries: SlotListEntry[] = [];
-  for (let slot = 1; slot <= 20; slot += 1) {
-    const binding = slots[String(slot)];
-    if (binding !== undefined) {
+  const keys = Object.keys(slots)
+    .filter((key) => /^[1-9]\d*$/.test(key))
+    .sort((a, b) => Number(a) - Number(b));
+  for (const key of keys) {
+    const slot = Number(key);
+    const binding = slots[key];
+    if (Number.isSafeInteger(slot) && slot >= 1 && binding !== undefined) {
       entries.push({ slot, binding: binding as CliSlotBinding });
     }
   }

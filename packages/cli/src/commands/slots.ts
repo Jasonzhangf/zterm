@@ -170,8 +170,8 @@ function invalidSlot(slot: number): CommandFailed {
     stage: 'validate',
     error: {
       code: 'invalid_slot',
-      message: `槽位编号必须是 1 到 20 的整数：${String(slot)}`,
-      action: '请使用 zterm slot set <1..20>。',
+      message: `槽位编号必须是大于等于 1 的整数：${String(slot)}`,
+      action: '请使用 zterm slot set <slot>。',
     },
   };
 }
@@ -183,7 +183,7 @@ function noSlotsFailure(): CommandFailed {
     error: {
       code: 'no_slots',
       message: '没有已配置的槽位。',
-      action: '请先运行 zterm slot set <1..20>。',
+      action: '请先运行 zterm slot set <slot>。',
     },
   };
 }
@@ -274,7 +274,7 @@ export async function slotListCommand(
 export async function slotRenameCommand(
   options: SlotRenameCommandOptions,
 ): Promise<SlotRenameCommandResult> {
-  if (!Number.isInteger(options.slot) || options.slot < 1 || options.slot > 20) {
+  if (!Number.isInteger(options.slot) || options.slot < 1) {
     return invalidSlot(options.slot);
   }
 
@@ -310,7 +310,7 @@ export async function slotRenameCommand(
       error: {
         code: 'slot_not_found',
         message: `槽位 ${options.slot} 未配置。`,
-        action: '请先运行 zterm slot set <1..20>。',
+        action: '请先运行 zterm slot set <slot>。',
       },
     };
   }
@@ -329,7 +329,7 @@ export async function slotRenameCommand(
         error: {
           code: 'slot_not_found',
           message: `槽位 ${options.slot} 未配置。`,
-          action: '请先运行 zterm slot set <1..20>。',
+          action: '请先运行 zterm slot set <slot>。',
         },
       };
     }
@@ -402,7 +402,7 @@ export async function selectSlotCommand(
 export async function resolveSlotCommand(
   options: ResolveSlotCommandOptions,
 ): Promise<ResolveSlotCommandResult> {
-  if (!Number.isInteger(options.slot) || options.slot < 1 || options.slot > 20) {
+  if (!Number.isInteger(options.slot) || options.slot < 1) {
     return invalidSlot(options.slot);
   }
   try {
@@ -414,7 +414,7 @@ export async function resolveSlotCommand(
         error: {
           code: 'slot_not_found',
           message: `槽位 ${options.slot} 未配置。`,
-          action: '请先运行 zterm slot set <1..20>。',
+          action: '请先运行 zterm slot set <slot>。',
         },
       };
     }
@@ -426,7 +426,7 @@ export async function resolveSlotCommand(
 }
 
 export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetResult> {
-  if (!Number.isInteger(options.slot) || options.slot < 1 || options.slot > 20) {
+  if (!Number.isInteger(options.slot) || options.slot < 1) {
     return invalidSlot(options.slot);
   }
 

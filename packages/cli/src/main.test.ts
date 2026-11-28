@@ -279,7 +279,8 @@ describe('zterm public main contract', () => {
       stderr: stderr.stream,
       signal: new AbortController().signal,
     })).resolves.toBe(0);
-    expect(stdout.read()).toContain('zterm <1..20>');
+    expect(stdout.read()).toContain('zterm <slot>');
+    expect(stdout.read()).toContain('zterm list');
     expect(stdout.read()).toContain('zterm daemon install');
     expect(stderr.read()).toBe('');
 
@@ -295,11 +296,11 @@ describe('zterm public main contract', () => {
   });
 
   it('rejects an invalid numbered slot with usage exit code 2', async () => {
-    const { homeDir, store } = testStore();
+    const { store } = testStore();
     const stdout = outputCapture();
     const stderr = outputCapture();
 
-    const exitCode = await runMain(['21'], {
+    const exitCode = await runMain(['0'], {
       store,
       stdout: stdout.stream,
       stderr: stderr.stream,
@@ -308,7 +309,67 @@ describe('zterm public main contract', () => {
 
     expect(exitCode).toBe(2);
     expect(stdout.read()).toBe('');
-    expect(stderr.read()).toContain('槽位编号必须是 1 到 20 的整数');
+    expect(stderr.read()).toContain('槽位编号必须是大于等于 1 的整数');
+  });
+
+  it('lists slots and Relay devices with IPs and bindings via zterm list', async () => {
+    const { store } = testStore();
+    await seedSlots(store, {
+      '21': slotFor(21, { alias: 'router' }),
+    });
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      user: { id: 'user-1', username: 'jason' },
+      directory: {
+        schemaVersion: 1,
+        user: { id: 'user-1', username: 'jason' },
+        updatedAt: '2026-10-20T00:00:00.000Z',
+        devices: [
+          {
+            deviceId: 'device-21',
+            deviceName: 'coder2 | Ubuntu 22.04 x64 | tmux | 0.1.6',
+            platform: 'linux',
+            appVersion: '0.1.6',
+            client: { connected: false, lastSeenAt: '2026-10-20T00:00:00.000Z' },
+            daemon: {
+              hostId: 'daemon-21',
+              version: '0.1.6',
+              presence: { connected: true, lastSeenAt: '2026-10-20T00:00:00.000Z' },
+              endpoints: [
+                {
+                  id: 'ts',
+                  kind: 'tailscale',
+                  host: '100.77.236.86',
+                  port: 4312,
+                  authRequired: true,
+                  lastSeenAt: '2026-10-20T00:00:00.000Z',
+                },
+              ],
+              sessions: [{ name: 'main', updatedAt: '2026-10-20T00:00:00.000Z' }],
+              lastPublishedAt: '2026-10-20T00:00:00.000Z',
+            },
+          },
+        ],
+      },
+    }));
+    const stdout = outputCapture();
+    const stderr = outputCapture();
+
+    const exitCode = await runMain(['list'], {
+      store,
+      accountClient: new AccountClient(fetchImpl),
+      stdout: stdout.stream,
+      stderr: stderr.stream,
+      signal: new AbortController().signal,
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stderr.read()).toBe('');
+    const out = stdout.read();
+    expect(out).toContain('槽位 21 · router');
+    expect(out).toContain('online | tailscale:100.77.236.86:4312');
+    expect(out).toContain('coder2 | Ubuntu 22.04 x64 | tmux | 0.1.6');
+    expect(out).toContain('slots: 21(router)');
+    expect(out).toContain('sessions: main');
   });
 
   it('lists an empty local slot store without login or a config write', async () => {
@@ -840,9 +901,9 @@ describe('zterm public main contract', () => {
       throw new Error('unexpected network request');
     });
     const cases: Array<[string[], RegExp]> = [
-      [['slot', '--help'], /zterm slot rename <1\.\.20> <name>/],
+      [['slot', '--help'], /zterm slot rename <slot> <name>/],
       [['slot', 'list', '--help'], /zterm slot list/],
-      [['slot', 'rename', '--help'], /zterm slot rename <1\.\.20> <name>/],
+      [['slot', 'rename', '--help'], /zterm slot rename <slot> <name>/],
       [['slot', 'pull', '--help'], /zterm slot pull --all/],
       [['slot', 'push', '--help'], /zterm slot push --all/],
     ];
@@ -961,7 +1022,7 @@ describe('zterm public main contract', () => {
     for (const args of [
       ['slot', 'rename'],
       ['slot', 'rename', '1'],
-      ['slot', 'rename', '21', 'x'],
+      ['slot', 'rename', '0', 'x'],
       ['slot', 'rename', '1', 'two', 'words'],
     ]) {
       const stdout = outputCapture();
@@ -1160,7 +1221,7 @@ describe('zterm public main contract', () => {
       ['slot', 'push', '--all', '--all'],
       ['slot', 'pull', '1', '2'],
       ['slot', 'pull', '0'],
-      ['slot', 'push', '21'],
+      ['slot', 'push', '0'],
       ['slot', 'pull', '1.5'],
       ['slot', 'push', 'abc'],
       ['slot', 'pull', '1', 'extra'],
