@@ -3,6 +3,7 @@ mod protocol;
 mod pty;
 mod relay;
 mod webrtc;
+mod ws;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -74,6 +75,12 @@ async fn main() -> Result<()> {
                 cfg.daemon_host_id,
                 pty.list_sessions().len()
             );
+
+            let ws_cfg = cfg.clone();
+            let ws_pty = Arc::clone(&pty);
+            tokio::spawn(async move {
+                ws::run_ws_server(ws_cfg, ws_pty).await;
+            });
 
             relay::run_relay_loop(cfg, pty).await;
             Ok(())
