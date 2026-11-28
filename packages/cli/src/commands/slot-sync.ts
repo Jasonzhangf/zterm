@@ -56,7 +56,7 @@ export async function slotSyncCommand(
     return failure('validate', {
       code: 'invalid_scope',
       message: '槽位同步范围无效。',
-      action: '请使用 1 到 20 的槽位号或 --all。',
+      action: '请使用大于等于 1 的槽位号或 --all。',
     });
   }
 
@@ -78,7 +78,6 @@ function normalizeScope(scope: unknown): SlotSyncScope | undefined {
     && typeof value.slot === 'number'
     && Number.isInteger(value.slot)
     && value.slot >= 1
-    && value.slot <= 20
   ) {
     return { kind: 'one', slot: value.slot };
   }
@@ -122,7 +121,7 @@ async function pull(
     return failure('read', {
       code: 'cloud_config_missing',
       message: '云端尚未配置槽位，本地槽位未修改。',
-      action: '请先运行 zterm slot push <1..20> 或 zterm slot push --all 创建云端配置。',
+      action: '请先运行 zterm slot push <slot> 或 zterm slot push --all 创建云端配置。',
     });
   }
 
@@ -204,7 +203,7 @@ async function push(
       return failure('select', {
         code: 'slot_missing',
         message: `本地槽位 ${scope.slot} 未配置，未推送。`,
-        action: '请先运行 zterm slot set <1..20> 配置槽位。',
+        action: '请先运行 zterm slot set <slot> 配置槽位。',
       });
     }
     if (!sameAccount(entry.binding, auth)) {

@@ -463,7 +463,7 @@ describe('CLI slot rename command and label projection', () => {
 });
 
 describe('CLI slot set command', () => {
-  it('validates 1 through 20 before account or connection work', async () => {
+  it('validates slot >= 1 before account or connection work', async () => {
     const { store } = await createStore();
     let factoryCalls = 0;
     const factory: SlotConnectionFactory = async () => {
@@ -472,7 +472,7 @@ describe('CLI slot set command', () => {
     };
 
     const result = await slotSetCommand(
-      slotSetOptions(store, new ControlledPrompts(), factory, { slot: 21 }),
+      slotSetOptions(store, new ControlledPrompts(), factory, { slot: 0 }),
     );
 
     expect(result).toMatchObject({

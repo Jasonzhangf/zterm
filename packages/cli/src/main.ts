@@ -47,6 +47,10 @@ import type {
 } from './slot-store.js';
 import { runTerminalSession } from './terminal-session.js';
 import type {
+  RelayAccountDirectory,
+  RelayEndpointCandidate,
+} from '../../shared/src/connection/relay-directory.js';
+import type {
   TerminalSessionCatalog,
   TerminalSnapshotResultPayload,
 } from '../../shared/src/connection/protocol.js';
@@ -60,17 +64,18 @@ const CLI_VERSION = typeof __ZTERM_CLI_VERSION__ === 'string'
   : '0.0.0';
 
 const HELP = `用法：
-  zterm <1..20>
+  zterm <slot>
   zterm
+  zterm list
   zterm login [--from-config]
   zterm logout
   zterm slot list
-  zterm slot rename <1..20> <name>
-  zterm slot pull <1..20>
+  zterm slot rename <slot> <name>
+  zterm slot pull <slot>
   zterm slot pull --all
-  zterm slot push <1..20>
+  zterm slot push <slot>
   zterm slot push --all
-  zterm slot set <1..20> [--width-mode adaptive-phone|mirror-fixed]
+  zterm slot set <slot> [--width-mode adaptive-phone|mirror-fixed]
   zterm upgrade [--registry <url>]
   zterm daemon install [--version <version>] [--registry <url>]
   zterm daemon status
@@ -82,48 +87,49 @@ const HELP = `用法：
 
 const SLOT_HELP = `用法：
   zterm slot list
-  zterm slot rename <1..20> <name>
-  zterm slot pull <1..20>
+  zterm slot rename <slot> <name>
+  zterm slot pull <slot>
   zterm slot pull --all
-  zterm slot push <1..20>
+  zterm slot push <slot>
   zterm slot push --all
-  zterm slot set <1..20> [--width-mode adaptive-phone|mirror-fixed]
+  zterm slot set <slot> [--width-mode adaptive-phone|mirror-fixed]
   zterm slot --help
 `;
 
 const SLOT_LIST_HELP = `用法：
+  zterm list
   zterm slot list
 
-列出本地已配置的槽位。每行显示槽位号、可选别名，以及机器 / session。
-槽位号即为启动值，backend、宽度和精确身份保存在绑定中，不重复显示。
+列出本地已配置的槽位（slot >= 1，无上限）；已登录时同时显示 Relay 上所有设备的在线状态、IP/endpoint、session 以及槽位绑定关系。
+可用 zterm slot rename <slot> <name> 为槽位设置或修改本地别名。
 `;
 
 const SLOT_RENAME_HELP = `用法：
-  zterm slot rename <1..20> <name>
+  zterm slot rename <slot> <name>
 
 只修改本地槽位别名，不修改绑定的机器或 session，也不需要登录。
 名称包含空格时请使用引号，例如：zterm slot rename 1 "工作台"。
 `;
 
 const SLOT_PULL_HELP = `用法：
-  zterm slot pull <1..20>
+  zterm slot pull <slot>
   zterm slot pull --all
 
-pull <1..20>  用云端槽位 N 替换本地槽位 N。
-pull --all    用当前账号的云端配置替换该账号的本地槽位；
-              删除该账号在云端不存在的本地槽位。
-              已配置的空云端列表会清空该账号的本地槽位。
+pull <slot>  用云端槽位 N 替换本地槽位 N。
+pull --all   用当前账号的云端配置替换该账号的本地槽位；
+             删除该账号在云端不存在的本地槽位。
+             已配置的空云端列表会清空该账号的本地槽位。
 尚未配置云端列表时，pull 不修改本地配置。
 同步只复制别名、绑定和宽度设置，不复制登录信息，也不连接或创建 session。
 `;
 
 const SLOT_PUSH_HELP = `用法：
-  zterm slot push <1..20>
+  zterm slot push <slot>
   zterm slot push --all
 
-push <1..20>  用本地槽位 N 替换当前账号的云端槽位 N，保留其他云端槽位。
-push --all    用当前账号的本地槽位替换该账号全部云端槽位；
-              空本地列表会清空该账号的云端槽位。
+push <slot>  用本地槽位 N 替换当前账号的云端槽位 N，保留其他云端槽位。
+push --all   用当前账号的本地槽位替换该账号全部云端槽位；
+             空本地列表会清空该账号的云端槽位。
 同步只复制别名、绑定和宽度设置，不复制登录信息，也不连接或创建 session。
 `;
 
@@ -207,7 +213,7 @@ function isUsageError(value: unknown): value is UsageError {
 function parseSlot(value: string | undefined): number | undefined {
   if (!value || !/^\d+$/.test(value)) return undefined;
   const parsed = Number(value);
-  return Number.isSafeInteger(parsed) ? parsed : undefined;
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : undefined;
 }
 
 function optionValue(args: string[], name: string): string | undefined | UsageError {
@@ -313,7 +319,7 @@ function exactServer(
     throw new MainCommandError(
       'server_identity_changed',
       '槽位绑定的服务器已变化或不再可从当前账号访问。',
-      '请重新运行 zterm slot set <1..20>。',
+      '请重新运行 zterm slot set <slot>。',
     );
   }
   return device;
@@ -333,7 +339,7 @@ function validateBinding(binding: CliSlotBinding) {
     throw new MainCommandError(
       'slot_invalid',
       '槽位绑定缺少完整的账号、服务器或 session 身份。',
-      '请重新运行 zterm slot set <1..20>。',
+      '请重新运行 zterm slot set <slot>。',
     );
   }
 }
@@ -549,17 +555,119 @@ async function runLogout(args: string[], context: MainContext): Promise<number> 
   return commandExitCode(result);
 }
 
+function formatDeviceEndpoints(endpoints: readonly RelayEndpointCandidate[]): string {
+  const formatted: string[] = [];
+  const seen = new Set<string>();
+  for (const endpoint of endpoints) {
+    let label: string = endpoint.kind;
+    if (endpoint.host) {
+      label = `${endpoint.kind}:${endpoint.host}${endpoint.port ? `:${endpoint.port}` : ''}`;
+    } else if (endpoint.wsUrl) {
+      label = `${endpoint.kind}:${endpoint.wsUrl}`;
+    }
+    if (!seen.has(label)) {
+      seen.add(label);
+      formatted.push(label);
+    }
+  }
+  return formatted.length > 0 ? formatted.join(', ') : '-';
+}
+
+async function loadBestEffortDirectory(
+  context: MainContext,
+): Promise<RelayAccountDirectory | undefined> {
+  try {
+    const auth = await readStoredCliAuth(context.store, context.signal);
+    if (!auth) return undefined;
+    return await context.accountClient.directory(
+      { relayBaseUrl: auth.relayBaseUrl, accessToken: auth.accessToken },
+      context.signal,
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function findDeviceForSlot(
+  entry: SlotListEntry,
+  directory: RelayAccountDirectory,
+) {
+  return directory.devices.find(
+    (device) =>
+      device.deviceId === entry.binding.server.deviceId ||
+      (device.daemon !== null &&
+        device.daemon.hostId === entry.binding.server.daemonHostId),
+  );
+}
+
 function printSlotList(
   slots: readonly SlotListEntry[],
   stdout: Writable,
+  directory?: RelayAccountDirectory,
 ) {
-  if (slots.length === 0) {
-    writeLine(stdout, '没有已配置的槽位。');
-    writeLine(stdout, '请运行 zterm slot set <1..20> 配置槽位。');
+  if (!directory) {
+    if (slots.length === 0) {
+      writeLine(stdout, '没有已配置的槽位。');
+      writeLine(stdout, '请运行 zterm slot set <slot> 配置槽位。');
+      return;
+    }
+    for (const entry of slots) {
+      writeLine(stdout, slotDisplayLabel(entry));
+    }
     return;
   }
-  for (const entry of slots) {
-    writeLine(stdout, slotDisplayLabel(entry));
+
+  writeLine(stdout, '已配置槽位：');
+  if (slots.length === 0) {
+    writeLine(stdout, '  （无，可运行 zterm slot set <slot> 配置槽位）');
+  } else {
+    for (const entry of slots) {
+      const device = findDeviceForSlot(entry, directory);
+      if (!device) {
+        writeLine(stdout, `  ${slotDisplayLabel(entry)} [未在 Relay 目录中找到]`);
+        continue;
+      }
+      const status = device.daemon
+        ? (device.daemon.presence.connected ? 'online' : 'offline')
+        : 'no-daemon';
+      const ips = device.daemon ? formatDeviceEndpoints(device.daemon.endpoints) : '-';
+      writeLine(stdout, `  ${slotDisplayLabel(entry)} [${status} | ${ips}]`);
+    }
+  }
+
+  writeLine(stdout, '');
+  writeLine(stdout, `Relay 设备 (${directory.user.username})：`);
+  if (directory.devices.length === 0) {
+    writeLine(stdout, '  （暂无已注册设备）');
+    return;
+  }
+  for (const device of directory.devices) {
+    const daemonStatus = device.daemon
+      ? (device.daemon.presence.connected ? 'daemon:online' : 'daemon:offline')
+      : 'daemon:none';
+    const clientStatus = device.client.connected ? 'client:online' : 'client:offline';
+    const ips = device.daemon ? formatDeviceEndpoints(device.daemon.endpoints) : '-';
+    const boundSlots = slots.filter(
+      (entry) =>
+        entry.binding.server.deviceId === device.deviceId ||
+        (device.daemon !== null &&
+          entry.binding.server.daemonHostId === device.daemon.hostId),
+    );
+    const slotSummary = boundSlots.length > 0
+      ? boundSlots
+          .map((entry) =>
+            entry.binding.alias ? `${entry.slot}(${entry.binding.alias})` : `${entry.slot}`,
+          )
+          .join(', ')
+      : '未绑定';
+    const sessions =
+      device.daemon && device.daemon.sessions.length > 0
+        ? device.daemon.sessions.map((session) => session.name).join(', ')
+        : '-';
+    writeLine(
+      stdout,
+      `  - ${device.deviceName} (${device.deviceId}) | ${daemonStatus}, ${clientStatus} | ip: ${ips} | slots: ${slotSummary} | sessions: ${sessions}`,
+    );
   }
 }
 
@@ -572,13 +680,13 @@ function syncScopeFromArgs(
   args: readonly string[],
 ): SlotSyncScope | UsageError {
   const usageMessage = direction === 'pull'
-    ? 'zterm slot pull <1..20> 或 zterm slot pull --all'
-    : 'zterm slot push <1..20> 或 zterm slot push --all';
+    ? 'zterm slot pull <slot> 或 zterm slot pull --all'
+    : 'zterm slot push <slot> 或 zterm slot push --all';
   if (args.length === 1 && args[0] === '--all') return { kind: 'all' };
   if (args.length !== 1) return usageFailure(usageMessage);
   const slot = parseSlot(args[0]);
-  if (slot === undefined || slot < 1 || slot > 20) {
-    return usageFailure('槽位编号必须是 1 到 20 的整数。');
+  if (slot === undefined || slot < 1) {
+    return usageFailure('槽位编号必须是大于等于 1 的整数。');
   }
   return { kind: 'one', slot };
 }
@@ -658,11 +766,11 @@ async function runSlotRename(
   context: MainContext,
 ): Promise<number> {
   const slot = parseSlot(args[0]);
-  if (slot === undefined || slot < 1 || slot > 20) {
-    return usage(context.stderr, 'zterm slot rename <1..20> <name>');
+  if (slot === undefined || slot < 1) {
+    return usage(context.stderr, 'zterm slot rename <slot> <name>');
   }
   if (args.length !== 2) {
-    return usage(context.stderr, 'zterm slot rename <1..20> <name>');
+    return usage(context.stderr, 'zterm slot rename <slot> <name>');
   }
   const result = await slotRenameCommand({
     store: context.store,
@@ -686,6 +794,32 @@ async function runSlotRename(
   return commandExitCode(result);
 }
 
+async function runSlotList(
+  args: readonly string[],
+  context: MainContext,
+): Promise<number> {
+  if (hasHelp(args)) {
+    write(context.stdout, SLOT_LIST_HELP);
+    return 0;
+  }
+  if (args.length !== 0) return usage(context.stderr, 'zterm slot list');
+  const result = await slotListCommand({
+    store: context.store,
+    signal: context.signal,
+  });
+  if (result.kind === 'ok') {
+    const directory = await loadBestEffortDirectory(context);
+    printSlotList(result.value.slots, context.stdout, directory);
+    return 0;
+  }
+  if (result.kind === 'cancelled') {
+    writeLine(context.stderr, '读取槽位已取消。');
+    return 130;
+  }
+  printCommandFailure(result, context.stderr);
+  return commandExitCode(result);
+}
+
 async function runSlot(args: string[], context: MainContext): Promise<number> {
   const [subcommand, ...rest] = args;
   if (subcommand === undefined) {
@@ -699,25 +833,7 @@ async function runSlot(args: string[], context: MainContext): Promise<number> {
   }
 
   if (subcommand === 'list') {
-    if (hasHelp(rest)) {
-      write(context.stdout, SLOT_LIST_HELP);
-      return 0;
-    }
-    if (rest.length !== 0) return usage(context.stderr, 'zterm slot list');
-    const result = await slotListCommand({
-      store: context.store,
-      signal: context.signal,
-    });
-    if (result.kind === 'ok') {
-      printSlotList(result.value.slots, context.stdout);
-      return 0;
-    }
-    if (result.kind === 'cancelled') {
-      writeLine(context.stderr, '读取槽位已取消。');
-      return 130;
-    }
-    printCommandFailure(result, context.stderr);
-    return commandExitCode(result);
+    return runSlotList(rest, context);
   }
 
   if (subcommand === 'rename') {
@@ -746,7 +862,7 @@ async function runSlot(args: string[], context: MainContext): Promise<number> {
   }
   const slot = parseSlot(rest[0]);
   if (slot === undefined) {
-    return usage(context.stderr, '槽位编号必须是 1 到 20 的整数。');
+    return usage(context.stderr, '槽位编号必须是大于等于 1 的整数。');
   }
   const widthValue = optionValue(rest.slice(1), '--width-mode');
   if (isUsageError(widthValue)) {
@@ -761,7 +877,7 @@ async function runSlot(args: string[], context: MainContext): Promise<number> {
   }
   const optionArgs = rest.slice(1);
   if (optionArgs.length !== (widthValue === undefined ? 0 : 2)) {
-    return usage(context.stderr, 'zterm slot set <1..20> [--width-mode adaptive-phone|mirror-fixed]');
+    return usage(context.stderr, 'zterm slot set <slot> [--width-mode adaptive-phone|mirror-fixed]');
   }
 
   const result = await slotSetCommand({
@@ -920,10 +1036,10 @@ async function dispatch(argv: string[], context: MainContext): Promise<number> {
   }
 
   if (/^\d+$/.test(command)) {
-    if (args.length > 0) return usage(context.stderr, 'zterm <1..20>');
+    if (args.length > 0) return usage(context.stderr, 'zterm <slot>');
     const slot = parseSlot(command);
     if (slot === undefined) {
-      return usage(context.stderr, '槽位编号必须是 1 到 20 的整数。');
+      return usage(context.stderr, '槽位编号必须是大于等于 1 的整数。');
     }
     const resolved = await resolveSlotCommand({
       store: context.store,
@@ -942,6 +1058,8 @@ async function dispatch(argv: string[], context: MainContext): Promise<number> {
   }
 
   switch (command) {
+    case 'list':
+      return runSlotList(args, context);
     case 'login':
       return runLogin(args, context);
     case 'logout':

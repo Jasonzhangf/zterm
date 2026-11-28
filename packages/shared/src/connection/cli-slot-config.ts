@@ -127,12 +127,11 @@ function parseSlotNumber(value: unknown, field: string): number {
   if (
     typeof value !== 'number' ||
     !Number.isInteger(value) ||
-    value < 1 ||
-    value > 20
+    value < 1
   ) {
     throw new SlotConfigValidationError(
       field,
-      'must be an integer from 1 to 20',
+      'must be a positive integer',
     );
   }
   return value;
@@ -262,12 +261,6 @@ export function parseSyncedSlot(input: unknown): SyncedSlot {
 function parseSyncedSlotsAt(input: unknown, field: string): SyncedSlot[] {
   if (!Array.isArray(input)) {
     throw new SlotConfigValidationError(field, 'must be an array');
-  }
-  if (input.length > 20) {
-    throw new SlotConfigValidationError(
-      field,
-      'must contain at most 20 records',
-    );
   }
   const entries = input as unknown[];
   const slots = Array.from(entries, (entry, index) =>

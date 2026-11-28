@@ -149,8 +149,8 @@ function validateOutboundBinding(binding: SyncedSlotBinding): SyncedSlotBinding 
 }
 
 function requireSlotNumber(slot: number): number {
-  if (!Number.isInteger(slot) || slot < 1 || slot > 20) {
-    throw invalidRequestError('slot-write', '槽位号必须是 1 到 20 的整数。', false);
+  if (!Number.isInteger(slot) || slot < 1) {
+    throw invalidRequestError('slot-write', '槽位号必须是大于等于 1 的整数。', false);
   }
   return slot;
 }

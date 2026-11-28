@@ -178,12 +178,20 @@ test('conditional save commits one binding and preserves unrelated configuration
   }
 });
 
-test('slot numbers are limited to 1 through 20', async () => {
+test('slot numbers require positive integers and support slots above 20', async () => {
   const homeDir = mkdtempSync(join(tmpdir(), 'zterm-cli-slots-'));
   try {
     const slots = new SlotStore(new SharedConfigStore({ homeDir }));
     await assert.rejects(slots.read(0, signal), /slot/i);
-    await assert.rejects(slots.read(21, signal), /slot/i);
+    const saveResult = await slots.saveIfUnchanged({
+      slot: 21,
+      expected: undefined,
+      binding: binding('slot21', 'slot21-id'),
+      signal,
+    });
+    assert.equal(saveResult.kind, 'saved');
+    const saved = await slots.read(21, signal);
+    assert.equal(saved?.session.name, 'slot21');
   } finally {
     rmSync(homeDir, { recursive: true, force: true });
   }
