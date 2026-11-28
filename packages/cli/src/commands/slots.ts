@@ -1,6 +1,5 @@
 import type { AccountClient } from '../account-client.js';
 import type {
-  TerminalBackendKind,
   TerminalSessionCatalog,
   TerminalSnapshotResultPayload,
 } from '../../../shared/src/connection/protocol.js';
@@ -39,7 +38,7 @@ export type SlotWidthMode = CliSlotBinding['widthMode'];
 
 export interface SlotSessionTarget {
   name: string;
-  backend: TerminalBackendKind;
+  backend: CliSlotBinding['session']['backend'];
   stableId: string;
 }
 
