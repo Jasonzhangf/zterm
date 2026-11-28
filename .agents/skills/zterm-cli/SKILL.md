@@ -36,7 +36,7 @@ description: 使用本地已登录的 zterm CLI 非交互式执行远端命令�
 
 ## 2. 非交互式执行命令（`zterm exec`，推荐给 Agent）
 
-不需要本地 `tmux`，直接获取干净输出和退出码（默认超时 30000ms，超时退出码 `124`）：
+不需要本地 `tmux`，直接获取干净输出和退出码（默认超时 `30000` ms，超时退出码 `124`）：
 
 ```sh
 # 按槽位执行
@@ -45,9 +45,14 @@ zterm exec 2 -- uname -a
 # 按设备名直连（无需预先绑定槽位），并指定目标 session
 zterm exec --device coder2 --session main --timeout 15000 -- "ls -la /tmp"
 
+# 长耗时命令（构建、包安装、下载、跨区探测等预计 >30s）务必显式加大 --timeout（单位毫秒）
+zterm exec 3 --timeout 120000 -- "apt-get update && systemctl restart xray"
+
 # Windows PowerShell 设备自动适配 PowerShell 退出码包裹
 zterm exec --device jason-hw-desktop -- "Get-Service ZTermDaemon"
 ```
+- **长耗时命令策略**：若命令可能超过 `30s`，**必须**主动传入 `--timeout 60000` / `120000`（或更高）；若属于更长任务（数分钟以上），建议在支持 `tmux` 的机器上用 `zterm session create` 建独立后台 session 执行，再用 `zterm exec` 轮询结果。
+- **跨区直连抖动兜底**：若本机直连某节点（如 DERP 抖动）失败，可通过 `coder2` 或 `hk-vps` 的 `zterm exec` 跳板访问。
 
 ## 3. 完整 CRUD 管理远端 Sessions（避免多任务串流）
 
@@ -99,6 +104,7 @@ tmux send-keys -t zterm-remote C-] q
 - **OpenWrt / 轻量 Linux x86_64（`zterm-daemon-lite` 0.1.6，纯 Rust 静态二进制）**：
   - `~/Documents/server/zterm-releases/daemon-lite-0.1.6/zterm-daemon-lite-0.1.6-linux-x86_64-musl`
   - 拷贝到 `/usr/bin/zterm-daemon-lite` 并 `chmod +x`，通过 `procd` 或 `systemd` 常驻运行。
+  - **OpenWrt 防火墙注意**：`daemon-lite` 会在 `:3333` 提供 Tailscale/LAN WebSocket mux；若 OpenWrt 的 `tailscale` zone 默认 `input='REJECT'`，需放行 `100.64.0.0/10`（及 `fd7a:115c:a1e0::/48`）到本机 TCP `3333`。
 - **传输加密**：`zterm` 与 `zterm-daemon` / `zterm-daemon-lite` 默认走 WebRTC DTLS-SCTP 端到端加密通道（`lan -> rtc-direct -> tailscale -> rtc-relay`），不走明文公网 `ws://`。
 
 ## 7. 结构化跨机消息/文件通道（大文件传输推荐）
