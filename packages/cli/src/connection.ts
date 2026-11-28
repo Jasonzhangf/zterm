@@ -59,6 +59,7 @@ export type SessionConnectionStage =
   | 'mux-ready'
   | 'list-sessions'
   | 'create-session'
+  | 'rename-session'
   | 'kill-session'
   | 'snapshot'
   | 'channel-open'
@@ -245,8 +246,8 @@ export type SessionConnectionEvent =
   | { type: 'error'; error: SessionConnectionError };
 
 interface PendingTargetRequest {
-  kind: 'list-sessions' | 'create-session' | 'kill-session' | 'snapshot';
-  stage: 'list-sessions' | 'create-session' | 'kill-session' | 'snapshot';
+  kind: 'list-sessions' | 'create-session' | 'rename-session' | 'kill-session' | 'snapshot';
+  stage: 'list-sessions' | 'create-session' | 'rename-session' | 'kill-session' | 'snapshot';
   expectedStableId?: string;
   expectedBackend?: TerminalBackendKind;
   timer: TraversalTimerHandle;
@@ -547,6 +548,30 @@ export class SessionConnection {
       'create-session',
       message,
       { stage: 'create-session', signal },
+    ) as SessionListResult;
+  }
+
+  public async renameSession(
+    input: { sessionName: string; nextSessionName: string },
+    signal?: AbortSignal,
+  ): Promise<SessionListResult> {
+    const sessionName = asNonEmptyString(input.sessionName);
+    const nextSessionName = asNonEmptyString(input.nextSessionName);
+    if (!sessionName || !nextSessionName) {
+      throw new SessionConnectionError('sessionName and nextSessionName are required', {
+        stage: 'rename-session',
+        code: 'invalid_input',
+      });
+    }
+    await this.waitForReady('rename-session', signal);
+    const message = {
+      type: 'tmux-rename-session' as const,
+      payload: { sessionName, nextSessionName },
+    };
+    return await this.requestTarget(
+      'rename-session',
+      message,
+      { stage: 'rename-session', signal },
     ) as SessionListResult;
   }
 
@@ -1054,6 +1079,7 @@ export class SessionConnection {
         (
           pending.kind === 'list-sessions'
           || pending.kind === 'create-session'
+          || pending.kind === 'rename-session'
           || pending.kind === 'kill-session'
         )
         && frame.payload.message.type === 'sessions'

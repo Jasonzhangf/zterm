@@ -1,7 +1,39 @@
 # ZTerm CLI
 
-`@jsonstudio/zterm-cli` provides the `zterm` command for connecting to an existing
-ZTerm daemon session and managing the local daemon installation.
+`@jsonstudio/zterm-cli` provides the `zterm` command for connecting to remote ZTerm
+daemon sessions, executing non-interactive commands, managing remote tmux sessions,
+and installing the bundled Agent Skill (`zterm-cli`).
+
+## Quick Start (Installed Package)
+
+```sh
+# 1. Install bundled zterm-cli Agent Skill (for Antigravity / Codex / ~/.agents)
+zterm skill install
+
+# 2. Login to Relay & inspect online machines, IPs, OS/terminal capabilities, and slots
+zterm login
+zterm list
+
+# 3. Non-interactive slot binding (unlimited slots >= 1)
+zterm slot set 2 --device opwrt-1 --session main --alias opwrt-1
+
+# 4. Non-interactive remote command execution (returns stdout + real exit code)
+zterm exec 2 -- uname -a
+zterm exec --device coder2 --session main --timeout 15000 -- "hostname && ls -la"
+
+# 5. Remote tmux session CRUD
+zterm session list --device coder2
+zterm session create --device coder2 work-tab --cwd ~/code
+zterm session rename --device coder2 work-tab work-v2
+zterm session delete --device coder2 work-v2
+```
+
+For offline installation from a packed tarball:
+
+```sh
+npm install -g ./jsonstudio-zterm-cli-0.1.6.tgz
+zterm skill install
+```
 
 ## Current status
 

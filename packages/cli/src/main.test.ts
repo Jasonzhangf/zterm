@@ -1494,6 +1494,13 @@ describe('zterm public main contract', () => {
         sessions: ['main'],
         sessionCatalog: [{ name: 'main', backend: 'tmux', stableId: 's-main' }],
       })),
+      renameSession: vi.fn(async () => ({
+        sessions: ['main', 'work-v2'],
+        sessionCatalog: [
+          { name: 'main', backend: 'tmux', stableId: 's-main' },
+          { name: 'work-v2', backend: 'tmux', stableId: 's-work' },
+        ],
+      })),
       close: vi.fn(),
     };
 
@@ -1511,6 +1518,21 @@ describe('zterm public main contract', () => {
       expect.any(AbortSignal),
     );
     expect(createOut.read()).toContain('已创建 session：work');
+
+    const renameOut = outputCapture();
+    await expect(runMain(['session', 'rename', '--device', 'coder2', 'work', 'work-v2'], {
+      store,
+      accountClient: new AccountClient(fetchImpl),
+      connectionFactory: (async () => fakeConn as unknown as Awaited<ReturnType<typeof import('./application-connection.js').createApplicationConnection>>),
+      stdout: renameOut.stream,
+      stderr: outputCapture().stream,
+      signal: new AbortController().signal,
+    })).resolves.toBe(0);
+    expect(fakeConn.renameSession).toHaveBeenCalledWith(
+      { sessionName: 'work', nextSessionName: 'work-v2' },
+      expect.any(AbortSignal),
+    );
+    expect(renameOut.read()).toContain('已重命名 session：work -> work-v2');
 
     const delOut = outputCapture();
     await expect(runMain(['session', 'delete', '--device', 'coder2', 'work'], {
@@ -1549,5 +1571,28 @@ describe('zterm public main contract', () => {
       }),
     }));
     expect(execOut.read()).toBe('ok\n');
+  });
+
+  it('shows and installs the bundled zterm-cli skill into a project directory', async () => {
+    const { homeDir, store } = testStore();
+    const showOut = outputCapture();
+    await expect(runMain(['skill', 'show'], {
+      store,
+      stdout: showOut.stream,
+      stderr: outputCapture().stream,
+      signal: new AbortController().signal,
+    })).resolves.toBe(0);
+    expect(showOut.read()).toContain('name: zterm-cli');
+
+    const installOut = outputCapture();
+    await expect(runMain(['skill', 'install', '--target', 'project', '--dir', homeDir], {
+      store,
+      stdout: installOut.stream,
+      stderr: outputCapture().stream,
+      signal: new AbortController().signal,
+    })).resolves.toBe(0);
+    expect(installOut.read()).toContain('已安装 zterm-cli skill');
+    const installed = readFileSync(`${homeDir}/.agents/skills/zterm-cli/SKILL.md`, 'utf8');
+    expect(installed).toContain('zterm session rename');
   });
 });
