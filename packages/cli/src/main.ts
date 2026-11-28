@@ -44,6 +44,11 @@ import {
 import { createNodePrompts, type PromptPort } from './prompts.js';
 import { createRendererWindow } from './renderer-window.js';
 import { runExecSession } from './exec-session.js';
+import {
+  installSkill,
+  readBundledSkill,
+  type SkillInstallTarget,
+} from './commands/skill.js';
 import { upgradeCli } from './release.js';
 import { APP_HELP, runAppCommand } from './commands/app-messaging.js';
 import type {
@@ -76,7 +81,10 @@ const HELP = `用法：
   zterm exec <slot|--device <nameOrId>> [--session <name>] [--timeout <ms>] [--] <command...>
   zterm session list <slot|--device <nameOrId>>
   zterm session create <slot|--device <nameOrId>> <sessionName> [--cwd <path>]
+  zterm session rename <slot|--device <nameOrId>> <sessionName> <nextSessionName>
   zterm session delete <slot|--device <nameOrId>> <sessionName>
+  zterm skill install [--target all|agents|gemini|codex|project] [--dir <path>]
+  zterm skill show
   zterm login [--from-config]
   zterm logout
   zterm slot list
@@ -116,9 +124,18 @@ const EXEC_HELP = `用法：
 const SESSION_HELP = `用法：
   zterm session list <slot|--device <nameOrId>>
   zterm session create <slot|--device <nameOrId>> <sessionName> [--cwd <path>]
+  zterm session rename <slot|--device <nameOrId>> <sessionName> <nextSessionName>
   zterm session delete <slot|--device <nameOrId>> <sessionName>
 
-在远端机器上查看、创建或删除 session（tmux）。
+在远端机器上查看、创建、重命名或删除 session（tmux）。
+`;
+
+const SKILL_HELP = `用法：
+  zterm skill install [--target all|agents|gemini|codex|project] [--dir <path>]
+  zterm skill show
+
+安装或查看随 @jsonstudio/zterm-cli 自带的 zterm-cli Agent Skill。
+默认 --target all 会写入 ~/.agents/skills/zterm-cli/、~/.gemini/config/skills/zterm-cli/ 与 ~/.codex/skills/zterm-cli/。
 `;
 
 const SLOT_LIST_HELP = `用法：
@@ -1051,6 +1068,56 @@ async function runDaemon(args: string[], context: MainContext): Promise<number> 
   return usage(context.stderr, 'zterm daemon install|status|config');
 }
 
+function runSkill(args: string[], context: MainContext): number {
+  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+    write(context.stdout, SKILL_HELP);
+    return 0;
+  }
+  const [subcommand, ...rest] = args;
+  if (subcommand === 'show') {
+    if (rest.length !== 0) return usage(context.stderr, 'zterm skill show');
+    write(context.stdout, readBundledSkill());
+    return 0;
+  }
+  if (subcommand !== 'install') {
+    return usage(context.stderr, 'zterm skill install|show');
+  }
+  if (hasHelp(rest)) {
+    write(context.stdout, SKILL_HELP);
+    return 0;
+  }
+  const targetValue = optionValue(rest, '--target');
+  if (isUsageError(targetValue)) return usage(context.stderr, targetValue.usageMessage);
+  if (
+    targetValue !== undefined
+    && targetValue !== 'all'
+    && targetValue !== 'agents'
+    && targetValue !== 'gemini'
+    && targetValue !== 'codex'
+    && targetValue !== 'project'
+  ) {
+    return usage(context.stderr, '--target 仅支持 all|agents|gemini|codex|project。');
+  }
+  const dirValue = optionValue(rest, '--dir');
+  if (isUsageError(dirValue)) return usage(context.stderr, dirValue.usageMessage);
+  const expectedLen = (targetValue === undefined ? 0 : 2) + (dirValue === undefined ? 0 : 2);
+  if (rest.length !== expectedLen) {
+    return usage(context.stderr, 'zterm skill install [--target all|agents|gemini|codex|project] [--dir <path>]');
+  }
+
+  const result = installSkill({
+    ...(targetValue === undefined ? {} : { target: targetValue as SkillInstallTarget }),
+    ...(dirValue === undefined ? {} : { projectDir: dirValue }),
+  });
+  for (const path of result.installedPaths) {
+    writeLine(context.stdout, `已安装 zterm-cli skill：${path}`);
+  }
+  for (const path of result.skippedSymlinks) {
+    writeLine(context.stdout, `已跳过符号链接目录（与主目录共用）：${path}`);
+  }
+  return 0;
+}
+
 function usage(stderr: Writable, detail: string): number {
   writeLine(stderr, `用法错误：${detail}`);
   writeLine(stderr, '运行 zterm --help 查看完整命令。');
@@ -1142,8 +1209,8 @@ async function runSession(args: string[], context: MainContext): Promise<number>
   }
   const [subcommand, ...rest] = args;
   const action = subcommand === 'rm' || subcommand === 'kill' ? 'delete' : subcommand;
-  if (action !== 'list' && action !== 'create' && action !== 'delete') {
-    return usage(context.stderr, 'zterm session list|create|delete ...');
+  if (action !== 'list' && action !== 'create' && action !== 'rename' && action !== 'delete') {
+    return usage(context.stderr, 'zterm session list|create|rename|delete ...');
   }
   if (hasHelp(rest)) {
     write(context.stdout, SESSION_HELP);
@@ -1152,11 +1219,18 @@ async function runSession(args: string[], context: MainContext): Promise<number>
 
   const parsedTarget = splitTargetArgs(
     rest,
-    `zterm session ${action} <slot|--device <nameOrId>>${action === 'list' ? '' : ' <sessionName>'}`,
+    `zterm session ${action} <slot|--device <nameOrId>>${
+      action === 'list'
+        ? ''
+        : action === 'rename'
+          ? ' <sessionName> <nextSessionName>'
+          : ' <sessionName>'
+    }`,
   );
   if (isUsageError(parsedTarget)) return usage(context.stderr, parsedTarget.usageMessage);
 
   let sessionName: string | undefined;
+  let nextSessionName: string | undefined;
   let cwd: string | undefined;
   if (action === 'list') {
     if (parsedTarget.rest.length !== 0) {
@@ -1172,6 +1246,21 @@ async function runSession(args: string[], context: MainContext): Promise<number>
     cwd = cwdOption;
     if (parsedTarget.rest.slice(1).length !== (cwd === undefined ? 0 : 2)) {
       return usage(context.stderr, 'zterm session create <slot|--device <nameOrId>> <sessionName> [--cwd <path>]');
+    }
+  } else if (action === 'rename') {
+    sessionName = parsedTarget.rest[0];
+    nextSessionName = parsedTarget.rest[1];
+    if (
+      !sessionName
+      || sessionName.startsWith('--')
+      || !nextSessionName
+      || nextSessionName.startsWith('--')
+      || parsedTarget.rest.length !== 2
+    ) {
+      return usage(
+        context.stderr,
+        'zterm session rename <slot|--device <nameOrId>> <sessionName> <nextSessionName>',
+      );
     }
   } else {
     sessionName = parsedTarget.rest[0];
@@ -1197,10 +1286,17 @@ async function runSession(args: string[], context: MainContext): Promise<number>
       ? await connection.listSessions({}, context.signal)
       : action === 'create'
         ? await connection.createSession({ sessionName: sessionName!, ...(cwd ? { cwd } : {}) }, context.signal)
-        : await connection.killSession({ sessionName: sessionName! }, context.signal);
+        : action === 'rename'
+          ? await connection.renameSession(
+              { sessionName: sessionName!, nextSessionName: nextSessionName! },
+              context.signal,
+            )
+          : await connection.killSession({ sessionName: sessionName! }, context.signal);
 
     if (action === 'create') {
       writeLine(context.stdout, `已创建 session：${sessionName}`);
+    } else if (action === 'rename') {
+      writeLine(context.stdout, `已重命名 session：${sessionName} -> ${nextSessionName}`);
     } else if (action === 'delete') {
       writeLine(context.stdout, `已删除 session：${sessionName}`);
     }
@@ -1437,6 +1533,8 @@ async function dispatch(argv: string[], context: MainContext): Promise<number> {
       return runExec(args, context);
     case 'session':
       return runSession(args, context);
+    case 'skill':
+      return runSkill(args, context);
     case 'login':
       return runLogin(args, context);
     case 'logout':

@@ -10,6 +10,7 @@
   "files": [
     "bin",
     "dist/main.mjs",
+    "skills",
     "README.md",
     "LICENSE"
   ],
