@@ -100,9 +100,7 @@ fn discover_local_ipv4s() -> Vec<IpAddr> {
             for token in line.split_whitespace() {
                 if let Some((ip_part, _prefix)) = token.split_once('/') {
                     if let Ok(ip) = ip_part.parse::<Ipv4Addr>() {
-                        let octets = ip.octets();
-                        let is_tailscale = octets[0] == 100 && (octets[1] >= 64 && octets[1] <= 127);
-                        if !ip.is_loopback() && !is_tailscale {
+                        if !ip.is_loopback() && !ip.is_unspecified() && !ip.is_link_local() {
                             let addr = IpAddr::V4(ip);
                             if !addrs.contains(&addr) {
                                 addrs.push(addr);
@@ -113,13 +111,20 @@ fn discover_local_ipv4s() -> Vec<IpAddr> {
             }
         }
     }
-    if addrs.is_empty() {
-        if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
-            if sock.connect("1.1.1.1:80").is_ok() {
-                if let Ok(local) = sock.local_addr() {
-                    if !local.ip().is_loopback() {
-                        addrs.push(local.ip());
-                    }
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if sock.connect("100.100.100.100:80").is_ok() {
+            if let Ok(local) = sock.local_addr() {
+                let ip = local.ip();
+                if !ip.is_loopback() && !ip.is_unspecified() && !addrs.contains(&ip) {
+                    addrs.push(ip);
+                }
+            }
+        }
+        if sock.connect("1.1.1.1:80").is_ok() {
+            if let Ok(local) = sock.local_addr() {
+                let ip = local.ip();
+                if !ip.is_loopback() && !ip.is_unspecified() && !addrs.contains(&ip) {
+                    addrs.push(ip);
                 }
             }
         }
@@ -128,6 +133,86 @@ fn discover_local_ipv4s() -> Vec<IpAddr> {
         addrs.push(IpAddr::V4(Ipv4Addr::LOCALHOST));
     }
     addrs
+}
+
+fn parse_stun_xor_mapped_ipv4(packet: &[u8], txn_id: &[u8; 12]) -> Option<SocketAddr> {
+    if packet.len() < 20 {
+        return None;
+    }
+    // STUN Binding Success Response (0x0101) + Magic Cookie (0x2112A442)
+    if packet[0] != 0x01 || packet[1] != 0x01 {
+        return None;
+    }
+    if packet[4..8] != [0x21, 0x12, 0xA4, 0x42] || &packet[8..20] != txn_id {
+        return None;
+    }
+    let msg_len = u16::from_be_bytes([packet[2], packet[3]]) as usize;
+    let end = (20 + msg_len).min(packet.len());
+    let mut pos = 20;
+    while pos + 4 <= end {
+        let attr_type = u16::from_be_bytes([packet[pos], packet[pos + 1]]);
+        let attr_len = u16::from_be_bytes([packet[pos + 2], packet[pos + 3]]) as usize;
+        pos += 4;
+        if pos + attr_len > end {
+            break;
+        }
+        // XOR-MAPPED-ADDRESS (0x0020), IPv4 family (0x01)
+        if attr_type == 0x0020 && attr_len >= 8 && packet[pos + 1] == 0x01 {
+            let port = u16::from_be_bytes([packet[pos + 2], packet[pos + 3]]) ^ 0x2112;
+            let ip = Ipv4Addr::new(
+                packet[pos + 4] ^ 0x21,
+                packet[pos + 5] ^ 0x12,
+                packet[pos + 6] ^ 0xA4,
+                packet[pos + 7] ^ 0x42,
+            );
+            return Some(SocketAddr::new(IpAddr::V4(ip), port));
+        }
+        // MAPPED-ADDRESS (0x0001), IPv4 family (0x01)
+        if attr_type == 0x0001 && attr_len >= 8 && packet[pos + 1] == 0x01 {
+            let port = u16::from_be_bytes([packet[pos + 2], packet[pos + 3]]);
+            let ip = Ipv4Addr::new(packet[pos + 4], packet[pos + 5], packet[pos + 6], packet[pos + 7]);
+            return Some(SocketAddr::new(IpAddr::V4(ip), port));
+        }
+        pos += (attr_len + 3) & !3;
+    }
+    None
+}
+
+async fn gather_stun_srflx(sock: &UdpSocket) -> Option<SocketAddr> {
+    let txn_id: [u8; 12] = rand_txn_id();
+    let mut req = [0u8; 20];
+    req[0] = 0x00;
+    req[1] = 0x01; // Binding Request
+    req[4..8].copy_from_slice(&[0x21, 0x12, 0xA4, 0x42]);
+    req[8..20].copy_from_slice(&txn_id);
+
+    for host in ["stun.cloudflare.com:3478", "stun.l.google.com:19302"] {
+        if let Ok(mut addrs) = tokio::net::lookup_host(host).await {
+            if let Some(target) = addrs.find(|a| a.is_ipv4()) {
+                let _ = sock.send_to(&req, target).await;
+                let mut buf = [0u8; 512];
+                if let Ok(Ok((n, _))) =
+                    tokio::time::timeout(Duration::from_millis(450), sock.recv_from(&mut buf)).await
+                {
+                    if let Some(mapped) = parse_stun_xor_mapped_ipv4(&buf[..n], &txn_id) {
+                        return Some(mapped);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn rand_txn_id() -> [u8; 12] {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut id = [0u8; 12];
+    id[..8].copy_from_slice(&nanos.to_le_bytes()[..8]);
+    id[8..12].copy_from_slice(&std::process::id().to_le_bytes());
+    id
 }
 
 async fn run_peer_loop(
@@ -149,6 +234,30 @@ async fn run_peer_loop(
                     sockets.push((local_addr, Arc::new(sock)));
                 }
             }
+        }
+    }
+    // Bind one wildcard UDP socket for STUN srflx discovery and outbound TURN/NAT traffic.
+    if let Ok(wan_sock) = UdpSocket::bind("0.0.0.0:0").await {
+        if let Ok(wan_local) = wan_sock.local_addr() {
+            let base_ip = local_ips
+                .iter()
+                .find(|ip| {
+                    if let IpAddr::V4(v4) = ip {
+                        let o = v4.octets();
+                        !(o[0] == 100 && o[1] >= 64 && o[1] <= 127)
+                    } else {
+                        false
+                    }
+                })
+                .copied()
+                .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+            let base_addr = SocketAddr::new(base_ip, wan_local.port());
+            if let Some(srflx_addr) = gather_stun_srflx(&wan_sock).await {
+                if let Ok(cand) = Candidate::server_reflexive(srflx_addr, base_addr, Protocol::Udp) {
+                    rtc.add_local_candidate(cand);
+                }
+            }
+            sockets.push((base_addr, Arc::new(wan_sock)));
         }
     }
     if sockets.is_empty() {
@@ -336,5 +445,39 @@ fn send_mux_frames(
                 let _ = ch.write(false, frame.text.as_bytes());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_stun_xor_mapped_ipv4_response() {
+        let txn_id = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        // XOR port 45678 ^ 0x2112, IP 38.76.197.22 ^ [0x21, 0x12, 0xA4, 0x42]
+        let xport = (45678u16 ^ 0x2112).to_be_bytes();
+        let xip = [38 ^ 0x21, 76 ^ 0x12, 197 ^ 0xA4, 22 ^ 0x42];
+        let mut pkt = vec![
+            0x01, 0x01, 0x00, 12, // Binding Success Response, len 12
+            0x21, 0x12, 0xA4, 0x42, // Magic Cookie
+        ];
+        pkt.extend_from_slice(&txn_id);
+        pkt.extend_from_slice(&[0x00, 0x20, 0x00, 0x08, 0x00, 0x01]); // XOR-MAPPED-ADDRESS, len 8, IPv4
+        pkt.extend_from_slice(&xport);
+        pkt.extend_from_slice(&xip);
+
+        assert_eq!(
+            parse_stun_xor_mapped_ipv4(&pkt, &txn_id),
+            Some(SocketAddr::new(IpAddr::V4(Ipv4Addr::new(38, 76, 197, 22)), 45678))
+        );
+    }
+
+    #[test]
+    fn rejects_mismatched_stun_txn_id() {
+        let txn_id = [1u8; 12];
+        let mut pkt = vec![0x01, 0x01, 0x00, 0x00, 0x21, 0x12, 0xA4, 0x42];
+        pkt.extend_from_slice(&[2u8; 12]);
+        assert_eq!(parse_stun_xor_mapped_ipv4(&pkt, &txn_id), None);
     }
 }
