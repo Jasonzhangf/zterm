@@ -68,24 +68,61 @@ async fn login_relay(base: &str, username: &str, password: &str) -> Result<Strin
     Ok(token)
 }
 
+fn detect_lan_ip() -> Option<String> {
+    if let Ok(sock) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if sock.connect("1.1.1.1:80").is_ok() {
+            if let Ok(local) = sock.local_addr() {
+                if let std::net::IpAddr::V4(v4) = local.ip() {
+                    if v4.is_private() {
+                        return Some(v4.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
 fn build_directory_update(cfg: &DaemonConfig, pty: &PtyManager) -> Value {
     let now_iso = chrono::Utc::now().to_rfc3339();
-    let endpoints = vec![
-        json!({
-            "id": format!("rtc-direct:{}", cfg.daemon_host_id),
-            "kind": "rtc-direct",
-            "relayHostId": cfg.daemon_host_id,
-            "authRequired": !cfg.auth_token.is_empty(),
+    let auth_required = !cfg.auth_token.is_empty();
+    let mut endpoints = Vec::new();
+    if let Some(lan_ip) = detect_lan_ip() {
+        endpoints.push(json!({
+            "id": format!("lan:{lan_ip}:{}", cfg.port),
+            "kind": "lan",
+            "host": lan_ip,
+            "port": cfg.port,
+            "wsUrl": format!("ws://{lan_ip}:{}", cfg.port),
+            "authRequired": auth_required,
             "lastSeenAt": now_iso,
-        }),
-        json!({
-            "id": format!("relay-rtc:{}", cfg.daemon_host_id),
-            "kind": "relay-rtc",
-            "relayHostId": cfg.daemon_host_id,
-            "authRequired": !cfg.auth_token.is_empty(),
+        }));
+    }
+    if let Some(ts_ip) = detect_tailscale_ip() {
+        endpoints.push(json!({
+            "id": format!("tailscale:{ts_ip}:{}", cfg.port),
+            "kind": "tailscale",
+            "host": ts_ip,
+            "port": cfg.port,
+            "wsUrl": format!("ws://{ts_ip}:{}", cfg.port),
+            "authRequired": auth_required,
             "lastSeenAt": now_iso,
-        }),
-    ];
+        }));
+    }
+    endpoints.push(json!({
+        "id": format!("rtc-direct:{}", cfg.daemon_host_id),
+        "kind": "rtc-direct",
+        "relayHostId": cfg.daemon_host_id,
+        "authRequired": auth_required,
+        "lastSeenAt": now_iso,
+    }));
+    endpoints.push(json!({
+        "id": format!("relay-rtc:{}", cfg.daemon_host_id),
+        "kind": "relay-rtc",
+        "relayHostId": cfg.daemon_host_id,
+        "authRequired": auth_required,
+        "lastSeenAt": now_iso,
+    }));
 
     let sessions: Vec<Value> = pty
         .list_sessions()

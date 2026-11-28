@@ -480,4 +480,12 @@ mod tests {
         pkt.extend_from_slice(&[2u8; 12]);
         assert_eq!(parse_stun_xor_mapped_ipv4(&pkt, &txn_id), None);
     }
+
+    #[test]
+    fn parses_wrtc_relay_candidate() {
+        let s = "candidate:1255221804 1 udp 41885439 159.75.134.56 49219 typ relay raddr 0.0.0.0 rport 0 generation 0 ufrag JrUT network-id 1 network-cost 50";
+        let res = Candidate::from_sdp_string(s);
+        println!("PARSED: {res:?}");
+        assert!(res.is_ok(), "failed: {res:?}");
+    }
 }
