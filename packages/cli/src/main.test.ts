@@ -1370,4 +1370,184 @@ describe('zterm public main contract', () => {
       expect(stderr.read()).toContain('云端没有槽位 1');
     }
   });
+
+  it('supports non-interactive zterm slot set with --device, --session, and --alias', async () => {
+    const { homeDir, store } = testStore();
+    await seedSlots(store, {});
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/me')) {
+        return jsonResponse({ user: { id: 'user-1', username: 'jason' } });
+      }
+      return jsonResponse({
+        user: { id: 'user-1', username: 'jason' },
+        directory: {
+          schemaVersion: 1,
+          user: { id: 'user-1', username: 'jason' },
+          updatedAt: '2026-10-20T00:00:00.000Z',
+          devices: [
+            {
+              deviceId: 'opwrt-1',
+              deviceName: 'opwrt-1 | OpenWrt x86_64 | ash | lite-0.1.6',
+              platform: 'linux',
+              appVersion: '0.1.6',
+              client: { connected: false, lastSeenAt: '2026-10-20T00:00:00.000Z' },
+              daemon: {
+                hostId: 'opwrt-1',
+                version: '0.1.6',
+                presence: { connected: true, lastSeenAt: '2026-10-20T00:00:00.000Z' },
+                endpoints: [],
+                sessions: [{ name: 'main', updatedAt: '2026-10-20T00:00:00.000Z' }],
+                lastPublishedAt: '2026-10-20T00:00:00.000Z',
+              },
+            },
+          ],
+        },
+      });
+    });
+    const fakeConnection = {
+      listSessions: vi.fn(async () => ({
+        sessions: ['main'],
+        sessionCatalog: [{ name: 'main', backend: 'tmux', stableId: 'stable-opwrt-main' }],
+      })),
+      readSnapshot: vi.fn(),
+      close: vi.fn(),
+    };
+    const stdout = outputCapture();
+    const stderr = outputCapture();
+
+    const exitCode = await runMain(
+      ['slot', 'set', '2', '--device', 'opwrt-1', '--session', 'main', '--alias', 'opwrt-1'],
+      {
+        store,
+        accountClient: new AccountClient(fetchImpl),
+        connectionFactory: (async () => fakeConnection as unknown as Awaited<ReturnType<typeof import('./application-connection.js').createApplicationConnection>>),
+        stdout: stdout.stream,
+        stderr: stderr.stream,
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr.read()).toBe('');
+    expect(stdout.read()).toContain('已保存槽位 2');
+    expect(configSlots(homeDir)['2']).toMatchObject({
+      alias: 'opwrt-1',
+      server: { deviceId: 'opwrt-1', daemonHostId: 'opwrt-1' },
+      session: { backend: 'tmux', stableId: 'stable-opwrt-main', name: 'main' },
+    });
+  });
+
+  it('supports zterm session list, create, delete and zterm exec', async () => {
+    const { store } = testStore();
+    await seedSlots(store, {
+      '2': {
+        ...slotFor(2, { alias: 'coder2', name: 'main' }),
+        server: {
+          deviceId: 'coder2',
+          daemonHostId: 'coder2',
+          displayName: 'coder2 | Ubuntu 22.04 x64 | tmux | 0.1.6',
+        },
+      },
+    });
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      user: { id: 'user-1', username: 'jason' },
+      directory: {
+        schemaVersion: 1,
+        user: { id: 'user-1', username: 'jason' },
+        updatedAt: '2026-10-20T00:00:00.000Z',
+        devices: [
+          {
+            deviceId: 'coder2',
+            deviceName: 'coder2 | Ubuntu 22.04 x64 | tmux | 0.1.6',
+            platform: 'linux',
+            appVersion: '0.1.6',
+            client: { connected: false, lastSeenAt: '2026-10-20T00:00:00.000Z' },
+            daemon: {
+              hostId: 'coder2',
+              version: '0.1.6',
+              presence: { connected: true, lastSeenAt: '2026-10-20T00:00:00.000Z' },
+              endpoints: [],
+              sessions: [{ name: 'main', updatedAt: '2026-10-20T00:00:00.000Z' }],
+              lastPublishedAt: '2026-10-20T00:00:00.000Z',
+            },
+          },
+        ],
+      },
+    }));
+    const fakeConn = {
+      listSessions: vi.fn(async () => ({
+        sessions: ['main', 'work'],
+        sessionCatalog: [
+          { name: 'main', backend: 'tmux', stableId: 's-main' },
+          { name: 'work', backend: 'tmux', stableId: 's-work' },
+        ],
+      })),
+      createSession: vi.fn(async () => ({
+        sessions: ['main', 'work'],
+        sessionCatalog: [
+          { name: 'main', backend: 'tmux', stableId: 's-main' },
+          { name: 'work', backend: 'tmux', stableId: 's-work' },
+        ],
+      })),
+      killSession: vi.fn(async () => ({
+        sessions: ['main'],
+        sessionCatalog: [{ name: 'main', backend: 'tmux', stableId: 's-main' }],
+      })),
+      close: vi.fn(),
+    };
+
+    const createOut = outputCapture();
+    await expect(runMain(['session', 'create', '--device', 'coder2', 'work', '--cwd', '/tmp'], {
+      store,
+      accountClient: new AccountClient(fetchImpl),
+      connectionFactory: (async () => fakeConn as unknown as Awaited<ReturnType<typeof import('./application-connection.js').createApplicationConnection>>),
+      stdout: createOut.stream,
+      stderr: outputCapture().stream,
+      signal: new AbortController().signal,
+    })).resolves.toBe(0);
+    expect(fakeConn.createSession).toHaveBeenCalledWith(
+      { sessionName: 'work', cwd: '/tmp' },
+      expect.any(AbortSignal),
+    );
+    expect(createOut.read()).toContain('已创建 session：work');
+
+    const delOut = outputCapture();
+    await expect(runMain(['session', 'delete', '--device', 'coder2', 'work'], {
+      store,
+      accountClient: new AccountClient(fetchImpl),
+      connectionFactory: (async () => fakeConn as unknown as Awaited<ReturnType<typeof import('./application-connection.js').createApplicationConnection>>),
+      stdout: delOut.stream,
+      stderr: outputCapture().stream,
+      signal: new AbortController().signal,
+    })).resolves.toBe(0);
+    expect(fakeConn.killSession).toHaveBeenCalledWith(
+      { sessionName: 'work' },
+      expect.any(AbortSignal),
+    );
+    expect(delOut.read()).toContain('已删除 session：work');
+
+    const runExecMock = vi.fn(async (opts: Parameters<typeof import('./exec-session.js').runExecSession>[0]) => {
+      opts.stdout.write('ok\n');
+      return { exitCode: 0 };
+    });
+    const execOut = outputCapture();
+    await expect(runMain(['exec', '2', '--session', 'work', '--timeout', '5000', '--', 'echo', 'ok'], {
+      store,
+      accountClient: new AccountClient(fetchImpl),
+      connectionFactory: (async () => fakeConn as unknown as Awaited<ReturnType<typeof import('./application-connection.js').createApplicationConnection>>),
+      runExec: runExecMock,
+      stdout: execOut.stream,
+      stderr: outputCapture().stream,
+      signal: new AbortController().signal,
+    })).resolves.toBe(0);
+    expect(runExecMock).toHaveBeenCalledWith(expect.objectContaining({
+      command: 'echo ok',
+      timeoutMs: 5000,
+      binding: expect.objectContaining({
+        session: { backend: 'tmux', stableId: 's-work', name: 'work' },
+      }),
+    }));
+    expect(execOut.read()).toBe('ok\n');
+  });
 });

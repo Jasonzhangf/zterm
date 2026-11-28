@@ -144,9 +144,72 @@ export interface SlotSetOptions {
   connectionFactory: SlotConnectionFactory;
   renderPreview: SlotPreviewRenderer;
   slot: number;
+  device?: string;
+  session?: string;
+  alias?: string;
   widthMode?: SlotWidthMode;
   maxLines?: number;
   signal?: AbortSignal;
+}
+
+export function matchServerChoice(
+  servers: readonly SlotServerChoice[],
+  query: string,
+): { kind: 'ok'; index: number; server: SlotServerChoice } | { kind: 'error'; code: string; message: string } {
+  const trimmed = query.trim();
+  const exactId = servers.findIndex((s) => s.deviceId === trimmed);
+  if (exactId >= 0) return { kind: 'ok', index: exactId, server: servers[exactId]! };
+
+  const exactName = servers.findIndex((s) => s.displayName === trimmed);
+  if (exactName >= 0) return { kind: 'ok', index: exactName, server: servers[exactName]! };
+
+  const lower = trimmed.toLowerCase();
+  const prefixMatches = servers
+    .map((server, index) => ({ server, index }))
+    .filter(({ server }) => {
+      const head = server.displayName.split('|')[0]?.trim().toLowerCase() ?? '';
+      return head === lower;
+    });
+  if (prefixMatches.length === 1) {
+    return { kind: 'ok', index: prefixMatches[0]!.index, server: prefixMatches[0]!.server };
+  }
+  if (prefixMatches.length > 1) {
+    return {
+      kind: 'error',
+      code: 'server_ambiguous',
+      message: `匹配到多个名为 "${trimmed}" 的服务器，请使用完整 deviceId。`,
+    };
+  }
+  return {
+    kind: 'error',
+    code: 'server_not_found',
+    message: `未在账号目录中找到在线/已注册的服务器 "${trimmed}"。`,
+  };
+}
+
+export function matchSessionChoice(
+  sessions: readonly SlotSessionTarget[],
+  query: string,
+): { kind: 'ok'; index: number; session: SlotSessionTarget } | { kind: 'error'; code: string; message: string } {
+  const trimmed = query.trim();
+  const matches = sessions
+    .map((session, index) => ({ session, index }))
+    .filter(({ session }) => session.name === trimmed || session.stableId === trimmed);
+  if (matches.length === 1) {
+    return { kind: 'ok', index: matches[0]!.index, session: matches[0]!.session };
+  }
+  if (matches.length > 1) {
+    return {
+      kind: 'error',
+      code: 'session_ambiguous',
+      message: `匹配到多个名为 "${trimmed}" 的 session，请使用 stableId。`,
+    };
+  }
+  return {
+    kind: 'error',
+    code: 'session_not_found',
+    message: `未找到名为 "${trimmed}" 的 session。`,
+  };
 }
 
 export type SlotSetResult =
@@ -194,7 +257,7 @@ function isCancellation(error: unknown) {
     || (error instanceof Error && error.name === 'AbortError');
 }
 
-function serverChoices(directory: RelayAccountDirectory): SlotServerChoice[] {
+export function serverChoices(directory: RelayAccountDirectory): SlotServerChoice[] {
   const choices: SlotServerChoice[] = [];
   const identities = new Set<string>();
   for (const device of directory.devices) {
@@ -221,7 +284,7 @@ function serverLabel(server: SlotServerChoice) {
   return `${server.displayName} · ${server.platform} · ${state} · ${server.deviceId}`;
 }
 
-function sessionChoices(catalog: TerminalSessionCatalog): SlotSessionTarget[] {
+export function sessionChoices(catalog: TerminalSessionCatalog): SlotSessionTarget[] {
   const choices: SlotSessionTarget[] = [];
   const identities = new Set<string>();
   for (const entry of catalog.sessionCatalog) {
@@ -516,14 +579,30 @@ export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetRe
 
   while (true) {
     let serverIndex: number;
-    try {
-      serverIndex = await options.prompts.select(
-        '选择服务器',
-        servers.map((server, index) => ({ label: serverLabel(server), value: index })),
-      );
-    } catch (error) {
-      if (isCancellation(error)) return { kind: 'cancelled', stage: 'server' };
-      return mapFailure('server', error, 'server_select_failed', '无法选择服务器。');
+    if (options.device !== undefined) {
+      const matched = matchServerChoice(servers, options.device);
+      if (matched.kind === 'error') {
+        return {
+          kind: 'failed',
+          stage: 'server',
+          error: {
+            code: matched.code,
+            message: matched.message,
+            action: '请运行 zterm list 查看可用设备名称或 deviceId。',
+          },
+        };
+      }
+      serverIndex = matched.index;
+    } else {
+      try {
+        serverIndex = await options.prompts.select(
+          '选择服务器',
+          servers.map((server, index) => ({ label: serverLabel(server), value: index })),
+        );
+      } catch (error) {
+        if (isCancellation(error)) return { kind: 'cancelled', stage: 'server' };
+        return mapFailure('server', error, 'server_select_failed', '无法选择服务器。');
+      }
     }
     const server = servers[serverIndex];
     if (!server) {
@@ -588,20 +667,38 @@ export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetRe
         }
 
         let sessionIndex: number;
-        try {
-          sessionIndex = await options.prompts.select(
-            '选择 session',
-            sessions.map((session, index) => ({
-              label: sessionLabel(session),
-              value: index,
-            })),
-          );
-        } catch (error) {
-          return await finish(
-            isCancellation(error)
-              ? { kind: 'cancelled', stage: 'session' }
-              : mapFailure('session', error, 'session_select_failed', '无法选择 session。'),
-          );
+        if (options.session !== undefined) {
+          const matchedSession = matchSessionChoice(sessions, options.session);
+          if (matchedSession.kind === 'error') {
+            return await finish({
+              kind: 'failed',
+              stage: 'session',
+              error: {
+                code: matchedSession.code,
+                message: matchedSession.message,
+                action: '请运行 zterm session list 查看可用 session。',
+              },
+            });
+          }
+          sessionIndex = matchedSession.index;
+        } else if (options.device !== undefined && sessions.length === 1) {
+          sessionIndex = 0;
+        } else {
+          try {
+            sessionIndex = await options.prompts.select(
+              '选择 session',
+              sessions.map((session, index) => ({
+                label: sessionLabel(session),
+                value: index,
+              })),
+            );
+          } catch (error) {
+            return await finish(
+              isCancellation(error)
+                ? { kind: 'cancelled', stage: 'session' }
+                : mapFailure('session', error, 'session_select_failed', '无法选择 session。'),
+            );
+          }
         }
         const session = sessions[sessionIndex];
         if (!session) {
@@ -613,27 +710,32 @@ export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetRe
           ));
         }
 
+        const nonInteractiveSave = options.device !== undefined;
         while (true) {
           let action: 'save' | 'preview' | 'sessions' | 'servers' | 'exit';
-          try {
-            action = await options.prompts.select<
-              'save' | 'preview' | 'sessions' | 'servers' | 'exit'
-            >(
-              `配置槽位 ${options.slot}`,
-              [
-                { label: `保存到槽位 ${options.slot}`, value: 'save' },
-                { label: '预览 snapshot', value: 'preview' },
-                { label: '重新选择 session', value: 'sessions' },
-                { label: '返回服务器选择', value: 'servers' },
-                { label: '退出配置', value: 'exit' },
-              ],
-            );
-          } catch (error) {
-            return await finish(
-              isCancellation(error)
-                ? { kind: 'cancelled', stage: 'action' }
-                : mapFailure('action', error, 'action_select_failed', '无法选择下一步操作。'),
-            );
+          if (nonInteractiveSave) {
+            action = 'save';
+          } else {
+            try {
+              action = await options.prompts.select<
+                'save' | 'preview' | 'sessions' | 'servers' | 'exit'
+              >(
+                `配置槽位 ${options.slot}`,
+                [
+                  { label: `保存到槽位 ${options.slot}`, value: 'save' },
+                  { label: '预览 snapshot', value: 'preview' },
+                  { label: '重新选择 session', value: 'sessions' },
+                  { label: '返回服务器选择', value: 'servers' },
+                  { label: '退出配置', value: 'exit' },
+                ],
+              );
+            } catch (error) {
+              return await finish(
+                isCancellation(error)
+                  ? { kind: 'cancelled', stage: 'action' }
+                  : mapFailure('action', error, 'action_select_failed', '无法选择下一步操作。'),
+              );
+            }
           }
 
           if (action === 'preview') {
@@ -697,8 +799,18 @@ export async function slotSetCommand(options: SlotSetOptions): Promise<SlotSetRe
             return await finish({ kind: 'cancelled', stage: 'exit' });
           }
 
+          let resolvedAlias = original?.alias;
+          if (options.alias !== undefined) {
+            try {
+              resolvedAlias = normalizeSlotAlias(options.alias);
+            } catch (error) {
+              return await finish(
+                mapFailure('validate', error, 'invalid_alias', '槽位别名无效。'),
+              );
+            }
+          }
           const binding: CliSlotBinding = {
-            ...(original?.alias === undefined ? {} : { alias: original.alias }),
+            ...(resolvedAlias === undefined ? {} : { alias: resolvedAlias }),
             account: {
               relayBaseUrl: auth.relayBaseUrl,
               userId: auth.userId,

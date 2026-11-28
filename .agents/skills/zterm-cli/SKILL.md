@@ -1,11 +1,16 @@
 ---
 name: zterm-cli
-description: 使用本地已登录的 zterm CLI 直接打开远端主机终端会话（slot，无数量上限），查看设备/IP/OS/终端能力（zterm list），向远端 command CLI 发送输入、读取输出并安全退出；包含离线包备份部署（~/Documents/server/zterm-releases/）与 zterm app 跨机消息通道。
+description: 使用本地已登录的 zterm CLI 非交互式执行远端命令（zterm exec）、增删远端 session（zterm session）、非交互式绑定槽位（zterm slot set --device）、查看设备/IP/OS/终端能力（zterm list），以及通过 PTY 打开交互式会话；包含离线包备份部署（~/Documents/server/zterm-releases/）与 zterm app 跨机消息通道。
 ---
 
-# zterm CLI 远程会话、设备查询与部署指南
+# zterm CLI 远程会话、非交互执行与部署指南
 
-使用本机已安装的 `zterm`（`@jsonstudio/zterm-cli`）连接已登录账号下的远端 `zterm-daemon` / `zterm-daemon-lite` 会话，在本地 PTY 中直接向远端 command CLI 发送输入、读取回显与安全退出；也可通过 `zterm list` 一览所有机器的在线状态、IP/endpoint、操作系统/终端/版本以及槽位绑定。
+使用本机已安装的 `zterm`（`@jsonstudio/zterm-cli`）连接已登录账号下的远端 `zterm-daemon` / `zterm-daemon-lite`，支持：
+- `zterm list`：查看所有机器在线状态、IP/endpoint、操作系统/终端/版本及槽位绑定；
+- `zterm exec`：无需本地 `tmux`，直接非交互式在远端会话执行命令并返回 stdout 与真实退出码；
+- `zterm session`：在远端创建/查看/删除独立 tmux session（避免多任务共享 `main` 串流）；
+- `zterm slot set --device ...`：按主机名/ID 非交互式绑定槽位；
+- `zterm <slot>`：在本地 PTY 中打开交互式远端终端。
 
 ## 1. 登录与设备/槽位总览
 
@@ -19,74 +24,72 @@ description: 使用本地已登录的 zterm CLI 直接打开远端主机终端�
   ```sh
   zterm list        # 等价于 zterm slot list
   ```
-  `zterm list` 会输出：
-  1. **已配置槽位**（`slot >= 1`，无 20 个上限）：槽位号、本地别名、绑定的设备/session、在线状态与可用 IP/endpoint。
-  2. **Relay 设备目录**：每台机器的 `deviceName`（按 `<hostname> | <OS> | <terminal> | <version>` 规范命名，可直接判断目标机器能力与可用 shell/tmux）、`deviceId`、daemon/client 在线状态、IP/endpoint、已绑定槽位和活跃 sessions。
-- **管理槽位（无数量上限）**：
+  `deviceName` 按 `<hostname> | <OS> | <terminal> | <version>` 规范命名，可直接判断目标机器能力与可用 shell（例如 `tmux`、OpenWrt `ash`、Windows `PowerShell`）。
+- **非交互式管理槽位（无数量上限，`slot >= 1`）**：
   ```sh
-  zterm slot set <slot> [--width-mode adaptive-phone|mirror-fixed]
+  zterm slot set <slot> --device <nameOrId> [--session <name>] [--alias <name>] [--width-mode adaptive-phone|mirror-fixed]
   zterm slot rename <slot> <name>
   zterm slot pull <slot> | --all
   zterm slot push <slot> | --all
   ```
 
-## 2. 打开远端 Command CLI 并输入（标准 PTY 方式）
+## 2. 非交互式执行命令（`zterm exec`，推荐给 Agent）
 
-`zterm <slot>` 会进入终端 raw mode 与 alternate screen，**必须在真实 PTY 中运行**（不可用无 TTY 的普通管道 stdin）。推荐使用独立 `tmux` 会话或 `rex` pane 托管 `zterm <slot>`：
+不需要本地 `tmux`，直接获取干净输出和退出码（默认超时 30000ms，超时退出码 `124`）：
 
-1. **查看可用槽位与机器能力**
-   ```sh
-   zterm list
-   ```
-   根据 `deviceName` 中的终端类型选择命令语法（例如 `tmux` / Linux bash、OpenWrt `ash`、Windows `PowerShell`）。
+```sh
+# 按槽位执行
+zterm exec 2 -- uname -a
 
-2. **在独立本地 PTY（tmux）中打开远端槽位**
-   ```sh
-   tmux new-session -d -s zterm-remote -x 120 -y 36 "zterm <slot>"
-   ```
-   等待片刻后检查远端 mirror 是否已渲染就绪：
-   ```sh
-   tmux capture-pane -t zterm-remote -p
-   ```
+# 按设备名直连（无需预先绑定槽位），并指定目标 session
+zterm exec --device coder2 --session main --timeout 15000 -- "ls -la /tmp"
 
-3. **向远端 Command CLI 发送输入**
-   使用 `tmux send-keys` 向本地 PTY 写入命令并回车（`zterm` 会将按键转发到远端 session）：
-   ```sh
-   tmux send-keys -t zterm-remote -l "<command>"
-   tmux send-keys -t zterm-remote Enter
-   ```
-   等待命令执行后读取输出：
-   ```sh
-   tmux capture-pane -t zterm-remote -p -S -100
-   ```
-   - 其他交互快捷键：`Ctrl+]` 后按 `k/j/u/d/h/l/f` 可在本地翻页、横向平移或回到 follow 模式。
-   - 不要在普通文本中误发 `Ctrl+] q`。
+# Windows PowerShell 设备自动适配 PowerShell 退出码包裹
+zterm exec --device jason-hw-desktop -- "Get-Service ZTermDaemon"
+```
 
-4. **本地安全退出（不关闭远端会话）**
-   ```sh
-   tmux send-keys -t zterm-remote C-] q
-   ```
-   `Ctrl+] q` 只断开本地 `zterm` 连接并恢复本地终端状态，不会停止或删除远端 session。
+## 3. 增删远端 Sessions（避免多任务串流）
 
-## 3. 新机器部署 Daemon（离线 Release 备份）
+在支持 `tmux` 的机器（如 `coder2`、`macbookair`）上，可按任务新建独立 session 执行，互不干扰：
+
+```sh
+zterm session list --device coder2
+zterm session create --device coder2 patrol-task --cwd ~/code
+zterm exec --device coder2 --session patrol-task -- "git status"
+zterm session delete --device coder2 patrol-task
+```
+- 也可传 `<slot>` 替代 `--device <nameOrId>`（例如 `zterm session list 2`）。
+- 注：OpenWrt 上的 `zterm-daemon-lite` 默认提供单个 `main` `ash` 会话，不支持动态增删 tmux session，对同一路由器执行命令请串行调用 `zterm exec`。
+
+## 4. 交互式打开远端 Command CLI（标准 PTY 方式）
+
+需要长时间交互式操作（如 `top`、`vim`）时，`zterm <slot>` 必须在真实 PTY 中运行（推荐用 `tmux` 或 `rex` pane 托管）：
+
+```sh
+tmux new-session -d -s zterm-remote -x 120 -y 36 "zterm <slot>"
+tmux capture-pane -t zterm-remote -p
+tmux send-keys -t zterm-remote -l "<command>"
+tmux send-keys -t zterm-remote Enter
+tmux capture-pane -t zterm-remote -p -S -100
+# 安全断开本地连接（不关闭远端会话）：
+tmux send-keys -t zterm-remote C-] q
+```
+
+## 5. 新机器部署 Daemon（离线 Release 备份）
 
 所有 release 产物统一备份在 `~/Documents/server/zterm-releases/`（详见 `~/Documents/server/zterm-releases/README.md`）：
 
 - **macOS / Linux / Windows（完整版 `zterm-daemon` 0.1.6，需 Node.js 22+）**：
-  - 备份路径：`~/Documents/server/zterm-releases/daemon-0.1.6/`
-    - `jsonstudio-zterm-daemon-0.1.6.tgz`
-    - `jsonstudio-zterm-daemon-darwin-arm64-0.1.6.tgz`
-    - `jsonstudio-zterm-daemon-linux-x64-0.1.6.tgz`
-    - `jsonstudio-zterm-daemon-win32-x64-0.1.6.tgz`
-  - 部署步骤：将主包与对应平台包拷贝到目标机后离线安装（`npm install -g <main.tgz> <platform.tgz>`），在 `~/.zterm/config.json` 中设置能体现系统/终端/版本的 `deviceName`（例如 `"<host> | Ubuntu 22.04 x64 | tmux | 0.1.6"`）和 Relay 登录凭据，启动 daemon 服务。
-- **OpenWrt / 轻量 Linux x86_64（`zterm-daemon-lite` 0.1.6，纯 Rust 静态二进制，无需 Node.js / tmux）**：
-  - 备份路径：`~/Documents/server/zterm-releases/daemon-lite-0.1.6/zterm-daemon-lite-0.1.6-linux-x86_64-musl`
-  - 部署步骤：拷贝到目标机 `/usr/bin/zterm-daemon-lite` 并 `chmod +x`，写入 `~/.zterm/config.json`（含 `deviceName` 如 `"<host> | OpenWrt x86_64 | ash | lite-0.1.6"`），通过 `procd` 或 `systemd` 常驻运行。
-- **路由传输说明**：`zterm` 与 `zterm-daemon` / `zterm-daemon-lite` 默认使用 WebRTC DTLS-SCTP 端到端加密通道（`lan -> rtc-direct -> tailscale -> rtc-relay`），不走明文公网 `ws://`。
+  - `~/Documents/server/zterm-releases/daemon-0.1.6/`（主包 + `darwin-arm64` / `linux-x64` / `win32-x64`）
+  - 离线安装：`npm install -g <main.tgz> <platform.tgz>`，配置 `~/.zterm/config.json` 与 `<hostname> | <OS> | <terminal> | <version>` 格式的 `deviceName`。
+- **OpenWrt / 轻量 Linux x86_64（`zterm-daemon-lite` 0.1.6，纯 Rust 静态二进制）**：
+  - `~/Documents/server/zterm-releases/daemon-lite-0.1.6/zterm-daemon-lite-0.1.6-linux-x86_64-musl`
+  - 拷贝到 `/usr/bin/zterm-daemon-lite` 并 `chmod +x`，通过 `procd` 或 `systemd` 常驻运行。
+- **传输加密**：`zterm` 与 `zterm-daemon` / `zterm-daemon-lite` 默认走 WebRTC DTLS-SCTP 端到端加密通道（`lan -> rtc-direct -> tailscale -> rtc-relay`），不走明文公网 `ws://`。
 
-## 4. 结构化跨机消息/文件通道（无需 PTY）
+## 6. 结构化跨机消息/文件通道（大文件传输推荐）
 
-若只需向远端机器投递结构化消息或文件（无需交互式 shell）：
+大配置文件/脚本建议用 `zterm app send-file`，避免在终端里粘贴超长文本：
 ```sh
 zterm app stream --json
 zterm app send --peer <deviceId> [--daemon-host-id <hostId>] --subject <text> --body <text>
@@ -94,4 +97,3 @@ zterm app send-file --peer <deviceId> [--daemon-host-id <hostId>] --file <path>
 zterm app ack --message-id <id>
 zterm app consume --message-id <id>
 ```
-- 外部 app 建议常驻运行 `zterm app stream --json`，从 stdout 读取 NDJSON 事件，向 stdin 写入 NDJSON 指令，避免高频调用短命令重复握手。
