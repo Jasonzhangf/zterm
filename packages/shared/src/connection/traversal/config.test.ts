@@ -98,11 +98,16 @@ afterEach(() => {
 });
 
 describe('buildTraversalPlan candidate scope', () => {
-  it('keeps the mode-default auto plan WebSocket-only when a WS candidate exists', () => {
-    const plan = buildTraversalPlan(targetWithRtcDirectory, settingsWithRtc);
+  it('falls back to rtc-relay when only plaintext public ipv4 exists, and keeps mode-default WebSocket-only when tailscale exists', () => {
+    const publicOnlyPlan = buildTraversalPlan(targetWithRtcDirectory, settingsWithRtc);
+    expect(publicOnlyPlan.candidates.map((candidate) => candidate.path)).toEqual(['rtc-relay']);
 
-    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['ipv4']);
-    expect(plan.candidates.every((candidate) => candidate.kind === 'ws')).toBe(true);
+    const tailscalePlan = buildTraversalPlan(
+      { ...targetWithRtcDirectory, tailscaleHost: '100.66.1.82' },
+      settingsWithRtc,
+    );
+    expect(tailscalePlan.candidates.map((candidate) => candidate.path)).toEqual(['tailscale']);
+    expect(tailscalePlan.candidates.every((candidate) => candidate.kind === 'ws')).toBe(true);
   });
 
   it('adds all legal directory RTC candidates for bound-initial without changing policy order', () => {
@@ -114,7 +119,6 @@ describe('buildTraversalPlan candidate scope', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv4',
       'rtc-direct',
       'rtc-relay',
     ]);
@@ -152,7 +156,6 @@ describe('buildTraversalPlan candidate scope', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv4',
       'rtc-direct',
       'rtc-relay',
     ]);
@@ -183,14 +186,8 @@ describe('buildTraversalPlan candidate scope', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv4',
       'rtc-relay',
     ]);
-    expect(plan.candidates[0]).toMatchObject({
-      kind: 'ws',
-      path: 'ipv4',
-      url: 'ws://203.0.113.10:3333/?token=daemon-token',
-    });
     expect(plan.candidates.some((candidate) => candidate.path === 'rtc-direct')).toBe(false);
 
     const relay = plan.candidates.find(
@@ -224,7 +221,6 @@ describe('buildTraversalPlan candidate scope', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv4',
       'rtc-relay',
     ]);
     expect(plan.candidates.some((candidate) => candidate.kind === 'rtc' && candidate.path === 'rtc-direct')).toBe(false);
@@ -243,8 +239,7 @@ describe('buildTraversalPlan candidate scope', () => {
       BOUND_INITIAL,
     );
 
-    expect(plan.candidates.map((candidate) => candidate.path)).toEqual(['ipv4']);
-    expect(plan.candidates.every((candidate) => candidate.kind === 'ws')).toBe(true);
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual([]);
   });
 
   it('keeps cached mode-default and bound-initial plans separate', () => {
@@ -257,9 +252,8 @@ describe('buildTraversalPlan candidate scope', () => {
     );
 
     expect(boundPlan).not.toBe(defaultPlan);
-    expect(defaultPlan.candidates.map((candidate) => candidate.path)).toEqual(['ipv4']);
+    expect(defaultPlan.candidates.map((candidate) => candidate.path)).toEqual(['rtc-relay']);
     expect(boundPlan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv4',
       'rtc-direct',
       'rtc-relay',
     ]);
@@ -315,7 +309,7 @@ describe('buildTraversalPlan candidate scope', () => {
       undefined,
       BOUND_INITIAL,
     );
-    expect(noRtcInputs.candidates.map((candidate) => candidate.path)).toEqual(['ipv4']);
+    expect(noRtcInputs.candidates.map((candidate) => candidate.path)).toEqual([]);
 
     const crossDaemon = buildTraversalPlan(
       {

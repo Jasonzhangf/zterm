@@ -250,8 +250,6 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv6',
-      'ipv4',
       'tailscale',
     ]);
     expect(plan.candidates.map((candidate) => candidate.path)).not.toContain('rtc-direct');
@@ -344,9 +342,59 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv6',
-      'ipv4',
       'tailscale',
+    ]);
+  });
+
+  it('drops plaintext public ws:// in auto mode and keeps wss://, loopback, and tailscale', () => {
+    const publicOnly = buildTraversalPlan(
+      {
+        bridgeHost: '203.0.113.10',
+        bridgePort: 3333,
+        authToken: 'token',
+        ipv6Host: '240e:1234::10',
+        ipv4Host: '203.0.113.10',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'auto',
+      },
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        transportMode: 'auto',
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'tablet-1',
+          deviceName: 'Jason Tablet',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:turn.example.com:3478?transport=udp',
+          turnUsername: 'alice',
+          turnCredential: 'secret',
+          updatedAt: 1,
+        },
+      },
+    );
+    expect(publicOnly.candidates.map((candidate) => candidate.path)).toEqual(['rtc-relay']);
+
+    const tlsAndLoopback = buildTraversalPlan(
+      {
+        bridgeHost: 'wss://public.example.test:8443',
+        bridgePort: 3333,
+        authToken: 'token',
+        ipv4Host: 'localhost',
+        ipv6Host: '[::1]',
+        transportMode: 'auto',
+      },
+      { ...DEFAULT_BRIDGE_SETTINGS, transportMode: 'auto' },
+    );
+    expect(tlsAndLoopback.candidates.map((candidate) => (candidate.kind === 'ws' ? candidate.url : candidate.signalUrl))).toEqual([
+      'ws://[::1]:3333/?token=token',
+      'ws://localhost:3333/?token=token',
+      'wss://public.example.test:8443/?token=token',
     ]);
   });
 

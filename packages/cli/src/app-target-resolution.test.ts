@@ -191,11 +191,31 @@ describe('resolveAppTargetFromDirectory multi-endpoint resolution', () => {
 
     const target = resolveAppTargetFromDirectory({ directory, peerDeviceId: 'device-1' });
 
-    expect(target.endpoints?.map((candidate) => candidate.kind)).toEqual(['lan', 'ipv4', 'tailscale']);
+    expect(target.endpoints?.map((candidate) => candidate.kind)).toEqual(['lan', 'tailscale', 'ipv4']);
     expect(target.endpoints?.map((candidate) => candidate.wsUrl)).toEqual([
       'ws://192.168.1.10:3333/app',
-      'ws://10.0.0.5:3333/app',
       'ws://100.86.84.63:3333/app',
+      'ws://10.0.0.5:3333/app',
+    ]);
+  });
+
+  it('rejects plaintext public ws:// endpoints and accepts wss:// and loopback', () => {
+    const publicOnly = directoryFixture([
+      endpoint('pub4', 'ipv4', { wsUrl: 'ws://203.0.113.10:3333/app' }),
+      endpoint('pub6', 'ipv6', { wsUrl: 'ws://[240e:1234::10]:3333/app' }),
+    ]);
+    const err = thrownError(() => resolveAppTargetFromDirectory({ directory: publicOnly, peerDeviceId: 'device-1' }));
+    expect(err).toBeInstanceOf(AppCliError);
+    expect((err as AppCliError).code).toBe('no_direct_endpoint');
+
+    const secureOnly = directoryFixture([
+      endpoint('wss4', 'ipv4', { wsUrl: 'wss://public.example.test:8443/app' }),
+      endpoint('loop', 'ipv6', { wsUrl: 'ws://[::1]:3333/app' }),
+    ]);
+    const target = resolveAppTargetFromDirectory({ directory: secureOnly, peerDeviceId: 'device-1' });
+    expect(target.endpoints?.map((c) => c.wsUrl)).toEqual([
+      'ws://[::1]:3333/app',
+      'wss://public.example.test:8443/app',
     ]);
   });
 

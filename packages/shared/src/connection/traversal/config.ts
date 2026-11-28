@@ -2,7 +2,7 @@ import type { BridgeSettings } from '../bridge-settings';
 import { resolveBridgeEndpoint } from '../bridge-endpoint.ts';
 import { buildBridgeUrlFromTarget } from '../bridge-url.ts';
 import { isLikelyTailscaleHost } from '../network-target.ts';
-import { isPrivateLanIpv4Host, parseEndpointHost } from './endpoint-host.ts';
+import { isLoopbackHost, isPrivateLanIpv4Host, parseEndpointHost } from './endpoint-host.ts';
 import { DEFAULT_TRAVERSAL_PATH_PRIORITY, normalizeTraversalPathPriority } from './policy.ts';
 import type { Host } from '../types';
 import type { RelayEndpointCandidate } from '../relay-directory';
@@ -20,8 +20,6 @@ import type {
 
 export const AUTO_TRIAL_WEBSOCKET_PATH_PRIORITY: TraversalResolvedPath[] = [
   'lan',
-  'ipv6',
-  'ipv4',
   'tailscale',
 ];
 
@@ -63,7 +61,7 @@ function inferDirectPath(host?: string | null): 'lan' | 'tailscale' | 'ipv6' | '
   if (isLikelyTailscaleHost(value)) {
     return 'tailscale';
   }
-  if (isPrivateLanIpv4Host(parseEndpointHost(value))) {
+  if (isPrivateLanIpv4Host(parseEndpointHost(value)) || isLoopbackHost(value)) {
     return 'lan';
   }
   if (isLikelyIpv6Host(value)) {
@@ -142,6 +140,22 @@ function buildDirectIceServers(settings: TraversalSettingsSource): TraversalIceS
     servers.push({ urls: url });
   }
   return servers;
+}
+
+function isAllowedAutoWebSocketCandidate(path: TraversalResolvedPath, url: string) {
+  if (path === 'lan' || path === 'tailscale') {
+    return true;
+  }
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === 'wss:') {
+      return true;
+    }
+    const hostname = parsed.hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
+    return isPrivateLanIpv4Host(hostname) || isLoopbackHost(hostname);
+  } catch {
+    return false;
+  }
 }
 
 function addDirectCandidate(
@@ -336,8 +350,16 @@ export function buildTraversalPlan(
       addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, path, directCandidates[path as keyof typeof directCandidates] || '', target.bridgePort, target.authToken);
     }
     const legacyPath = inferDirectPath(target.bridgeHost);
-    if (mode !== 'auto' && legacyPath) {
+    if (legacyPath && (mode !== 'auto' || target.bridgeHost.trim().toLowerCase().startsWith('wss://'))) {
       addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, legacyPath, target.bridgeHost, target.bridgePort, target.authToken);
+    }
+    if (mode === 'auto') {
+      for (let i = wsCandidates.length - 1; i >= 0; i -= 1) {
+        const candidate = wsCandidates[i]!;
+        if (!isAllowedAutoWebSocketCandidate(candidate.path, candidate.url)) {
+          wsCandidates.splice(i, 1);
+        }
+      }
     }
   }
 

@@ -43,30 +43,11 @@ export {
   canonicalizeBridgeServerPresets,
 };
 export type { BridgeServerPreset, BridgeSettings, SessionDrawerFilterSettings, TerminalFontSize, TerminalShellSkin, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
-export type TraversalPath = 'lan' | 'tailscale' | 'ipv4' | 'ipv6' | 'rtc-direct' | 'rtc-relay';
-
-export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['lan', 'ipv6', 'ipv4', 'rtc-direct', 'tailscale', 'rtc-relay'];
-
-export function normalizeTraversalPathPriority(input: unknown): TraversalPath[] {
-  const seen = new Set<TraversalPath>();
-  const next: TraversalPath[] = [];
-  if (Array.isArray(input)) {
-    for (const item of input) {
-      if (item === 'lan' || item === 'tailscale' || item === 'ipv4' || item === 'ipv6' || item === 'rtc-direct' || item === 'rtc-relay') {
-        if (!seen.has(item)) {
-          seen.add(item);
-          next.push(item);
-        }
-      }
-    }
-  }
-  for (const item of DEFAULT_TRAVERSAL_PATH_PRIORITY) {
-    if (!seen.has(item)) {
-      next.push(item);
-    }
-  }
-  return next;
-}
+export {
+  DEFAULT_TRAVERSAL_PATH_PRIORITY,
+  normalizeTraversalPathPriority,
+} from '../../../packages/shared/src/connection/traversal/policy';
+export type { TraversalResolvedPath as TraversalPath } from '../../../packages/shared/src/connection/traversal/types';
 
 export function removeBridgeServer(settings: BridgeSettings, serverId: string): BridgeSettings {
   const servers = sortBridgeServers(settings.servers.filter((server) => server.id !== serverId));
