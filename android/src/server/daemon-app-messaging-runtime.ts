@@ -10,10 +10,7 @@ import {
   APP_PROTOCOL_VERSION,
   AppProtocolError,
   appErrorPayload,
-  validateAppFileMetadata,
   validateAppServerFrame,
-  validateAppTarget,
-  validateMessageBody,
   validateSafeFileName,
   type AppClientFrame,
   type AppErrorCode,
@@ -696,8 +693,14 @@ export function createDaemonAppMessagingRuntime(
     };
   }
 
-  async function prepareMessageOutbox(payload: AppSendMessagePayload): Promise<AppOutboxRecord> {
-    const target = validateAppTarget(payload.target, 'send-message');
+  function requireAppTarget(target: AppTarget | undefined, stage: string): AppTarget {
+    if (!target) {
+      throw new AppProtocolError({ code: 'invalid_frame', message: 'target must be an object', stage });
+    }
+    return target;
+  }
+
+  async function prepareMessageOutbox(payload: AppSendMessagePayload, target: AppTarget): Promise<AppOutboxRecord> {
     const record: AppOutboxRecord = {
       schemaVersion: 1,
       targetDeviceId: target.deviceId,
@@ -723,8 +726,7 @@ export function createDaemonAppMessagingRuntime(
     return store.readOutboxRecord(target.daemonHostId, payload.messageId) as Promise<AppOutboxRecord>;
   }
 
-  async function prepareFileOutbox(payload: AppSendFileStartPayload): Promise<AppOutboxRecord> {
-    const target = validateAppTarget(payload.target, 'file-start');
+  async function prepareFileOutbox(payload: AppSendFileStartPayload, target: AppTarget): Promise<AppOutboxRecord> {
     const record: AppOutboxRecord = {
       schemaVersion: 1,
       targetDeviceId: target.deviceId,
@@ -769,9 +771,9 @@ export function createDaemonAppMessagingRuntime(
   }
 
   async function sendMessageFromLocal(link: AppLink, payload: AppSendMessagePayload) {
-    const target = validateAppTarget(payload.target, 'send-message');
-    const body = validateMessageBody(payload.body);
-    await prepareMessageOutbox({ ...payload, target, body });
+    const target = requireAppTarget(payload.target, 'send-message');
+    const body = payload.body;
+    await prepareMessageOutbox(payload, target);
     const outbox = await store.readOutboxRecord(target.daemonHostId, payload.messageId);
     if (outbox?.state === 'received') {
       link.send(peerResultFrame(payload.requestId, payload.messageId, 'received', 'received'));
@@ -832,9 +834,9 @@ export function createDaemonAppMessagingRuntime(
   }
 
   async function sendFileStartFromLocal(link: AppLink, payload: AppSendFileStartPayload) {
-    const target = validateAppTarget(payload.target, 'file-start');
-    const file = validateAppFileMetadata(payload.file, 'file-start');
-    await prepareFileOutbox({ ...payload, target, file });
+    const target = requireAppTarget(payload.target, 'file-start');
+    const file = payload.file;
+    await prepareFileOutbox(payload, target);
     const outbox = await store.readOutboxRecord(target.daemonHostId, payload.messageId);
     if (outbox?.state === 'received') {
       link.send(peerResultFrame(payload.requestId, payload.messageId, 'received', 'received', { transferId: file.transferId }));
@@ -980,7 +982,7 @@ export function createDaemonAppMessagingRuntime(
     sender: { deviceId: string; daemonHostId: string },
     payload: AppSendMessagePayload,
   ): Promise<AppRecordState> {
-    const body = validateMessageBody(payload.body);
+    const body = payload.body;
     return store.runExclusive(async () => {
       const existing = await store.readInboxRecord(sender.daemonHostId, payload.messageId);
       if (existing) {
@@ -1025,7 +1027,7 @@ export function createDaemonAppMessagingRuntime(
     sender: { deviceId: string; daemonHostId: string },
     payload: AppSendFileStartPayload,
   ): Promise<AppServerFrame> {
-    const file = validateAppFileMetadata(payload.file, 'file-start');
+    const file = payload.file;
     return store.runExclusive(async () => {
       const existingRecord = await store.readInboxRecord(sender.daemonHostId, payload.messageId);
       if (existingRecord) {
@@ -1491,7 +1493,7 @@ export function createDaemonAppMessagingRuntime(
               return { settled: false };
             }
             if (frame.payload.remote) {
-              const target = validateAppTarget(frame.payload.target, 'status');
+              const target = requireAppTarget(frame.payload.target, 'status');
               await remoteStatus(link, frame.payload.requestId, frame.payload.messageId, target);
               return { settled: false };
             }
