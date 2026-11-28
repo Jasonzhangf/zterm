@@ -58,6 +58,8 @@ export type SessionConnectionStage =
   | 'socket-connect'
   | 'mux-ready'
   | 'list-sessions'
+  | 'create-session'
+  | 'kill-session'
   | 'snapshot'
   | 'channel-open'
   | 'channel-send'
@@ -243,8 +245,8 @@ export type SessionConnectionEvent =
   | { type: 'error'; error: SessionConnectionError };
 
 interface PendingTargetRequest {
-  kind: 'list-sessions' | 'snapshot';
-  stage: 'list-sessions' | 'snapshot';
+  kind: 'list-sessions' | 'create-session' | 'kill-session' | 'snapshot';
+  stage: 'list-sessions' | 'create-session' | 'kill-session' | 'snapshot';
   expectedStableId?: string;
   expectedBackend?: TerminalBackendKind;
   timer: TraversalTimerHandle;
@@ -519,6 +521,55 @@ export class SessionConnection {
       'list-sessions',
       message,
       { stage: 'list-sessions', signal },
+    ) as SessionListResult;
+  }
+
+  public async createSession(
+    input: { sessionName: string; cwd?: string },
+    signal?: AbortSignal,
+  ): Promise<SessionListResult> {
+    const sessionName = asNonEmptyString(input.sessionName);
+    if (!sessionName) {
+      throw new SessionConnectionError('sessionName is required', {
+        stage: 'create-session',
+        code: 'invalid_input',
+      });
+    }
+    await this.waitForReady('create-session', signal);
+    const message = {
+      type: 'tmux-create-session' as const,
+      payload: {
+        sessionName,
+        ...(input.cwd ? { cwd: input.cwd } : {}),
+      },
+    };
+    return await this.requestTarget(
+      'create-session',
+      message,
+      { stage: 'create-session', signal },
+    ) as SessionListResult;
+  }
+
+  public async killSession(
+    input: { sessionName: string },
+    signal?: AbortSignal,
+  ): Promise<SessionListResult> {
+    const sessionName = asNonEmptyString(input.sessionName);
+    if (!sessionName) {
+      throw new SessionConnectionError('sessionName is required', {
+        stage: 'kill-session',
+        code: 'invalid_input',
+      });
+    }
+    await this.waitForReady('kill-session', signal);
+    const message = {
+      type: 'tmux-kill-session' as const,
+      payload: { sessionName },
+    };
+    return await this.requestTarget(
+      'kill-session',
+      message,
+      { stage: 'kill-session', signal },
     ) as SessionListResult;
   }
 
@@ -1000,7 +1051,11 @@ export class SessionConnection {
           },
         ));
       } else if (
-        pending.kind === 'list-sessions'
+        (
+          pending.kind === 'list-sessions'
+          || pending.kind === 'create-session'
+          || pending.kind === 'kill-session'
+        )
         && frame.payload.message.type === 'sessions'
       ) {
         this.settlePendingRequest(requestId, pending);

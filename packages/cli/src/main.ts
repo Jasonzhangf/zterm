@@ -16,8 +16,12 @@ import {
   type StoredCliAuth,
 } from './commands/auth.js';
 import {
+  matchServerChoice,
+  matchSessionChoice,
   resolveSlotCommand,
   selectSlotCommand,
+  serverChoices,
+  sessionChoices,
   slotDisplayLabel,
   slotListCommand,
   slotRenameCommand,
@@ -25,6 +29,7 @@ import {
   type SlotConnection,
   type SlotConnectionFactory,
   type SlotPreviewRenderer,
+  type SlotServerChoice,
   type SlotSessionTarget,
 } from './commands/slots.js';
 import {
@@ -38,6 +43,7 @@ import {
 } from './daemon-management.js';
 import { createNodePrompts, type PromptPort } from './prompts.js';
 import { createRendererWindow } from './renderer-window.js';
+import { runExecSession } from './exec-session.js';
 import { upgradeCli } from './release.js';
 import { APP_HELP, runAppCommand } from './commands/app-messaging.js';
 import type {
@@ -67,6 +73,10 @@ const HELP = `用法：
   zterm <slot>
   zterm
   zterm list
+  zterm exec <slot|--device <nameOrId>> [--session <name>] [--timeout <ms>] [--] <command...>
+  zterm session list <slot|--device <nameOrId>>
+  zterm session create <slot|--device <nameOrId>> <sessionName> [--cwd <path>]
+  zterm session delete <slot|--device <nameOrId>> <sessionName>
   zterm login [--from-config]
   zterm logout
   zterm slot list
@@ -75,7 +85,7 @@ const HELP = `用法：
   zterm slot pull --all
   zterm slot push <slot>
   zterm slot push --all
-  zterm slot set <slot> [--width-mode adaptive-phone|mirror-fixed]
+  zterm slot set <slot> [--device <nameOrId>] [--session <name>] [--alias <name>] [--width-mode adaptive-phone|mirror-fixed]
   zterm upgrade [--registry <url>]
   zterm daemon install [--version <version>] [--registry <url>]
   zterm daemon status
@@ -92,8 +102,23 @@ const SLOT_HELP = `用法：
   zterm slot pull --all
   zterm slot push <slot>
   zterm slot push --all
-  zterm slot set <slot> [--width-mode adaptive-phone|mirror-fixed]
+  zterm slot set <slot> [--device <nameOrId>] [--session <name>] [--alias <name>] [--width-mode adaptive-phone|mirror-fixed]
   zterm slot --help
+`;
+
+const EXEC_HELP = `用法：
+  zterm exec <slot> [--session <name>] [--timeout <ms>] [--] <command...>
+  zterm exec --device <nameOrId> [--session <name>] [--timeout <ms>] [--] <command...>
+
+非交互式在远端会话执行命令，输出 stdout 并返回命令真实退出码（超时默认 30000ms，返回 124）。
+`;
+
+const SESSION_HELP = `用法：
+  zterm session list <slot|--device <nameOrId>>
+  zterm session create <slot|--device <nameOrId>> <sessionName> [--cwd <path>]
+  zterm session delete <slot|--device <nameOrId>> <sessionName>
+
+在远端机器上查看、创建或删除 session（tmux）。
 `;
 
 const SLOT_LIST_HELP = `用法：
@@ -156,6 +181,7 @@ export interface MainOptions {
   daemonStatus?: typeof getDaemonStatus;
   daemonConfig?: typeof getDaemonConfig;
   runTerminal?: typeof runTerminalSession;
+  runExec?: typeof runExecSession;
 }
 
 interface MainContext {
@@ -172,6 +198,7 @@ interface MainContext {
   daemonStatus: typeof getDaemonStatus;
   daemonConfig: typeof getDaemonConfig;
   runTerminal: typeof runTerminalSession;
+  runExec: typeof runExecSession;
 }
 
 interface UsageError {
@@ -864,7 +891,8 @@ async function runSlot(args: string[], context: MainContext): Promise<number> {
   if (slot === undefined) {
     return usage(context.stderr, '槽位编号必须是大于等于 1 的整数。');
   }
-  const widthValue = optionValue(rest.slice(1), '--width-mode');
+  const optionArgs = rest.slice(1);
+  const widthValue = optionValue(optionArgs, '--width-mode');
   if (isUsageError(widthValue)) {
     return usage(context.stderr, widthValue.usageMessage);
   }
@@ -875,9 +903,28 @@ async function runSlot(args: string[], context: MainContext): Promise<number> {
   ) {
     return usage(context.stderr, '--width-mode 仅支持 adaptive-phone 或 mirror-fixed。');
   }
-  const optionArgs = rest.slice(1);
-  if (optionArgs.length !== (widthValue === undefined ? 0 : 2)) {
-    return usage(context.stderr, 'zterm slot set <slot> [--width-mode adaptive-phone|mirror-fixed]');
+  const deviceValue = optionValue(optionArgs, '--device');
+  if (isUsageError(deviceValue)) {
+    return usage(context.stderr, deviceValue.usageMessage);
+  }
+  const sessionValue = optionValue(optionArgs, '--session');
+  if (isUsageError(sessionValue)) {
+    return usage(context.stderr, sessionValue.usageMessage);
+  }
+  const aliasValue = optionValue(optionArgs, '--alias');
+  if (isUsageError(aliasValue)) {
+    return usage(context.stderr, aliasValue.usageMessage);
+  }
+  const expectedLength =
+    (widthValue === undefined ? 0 : 2)
+    + (deviceValue === undefined ? 0 : 2)
+    + (sessionValue === undefined ? 0 : 2)
+    + (aliasValue === undefined ? 0 : 2);
+  if (optionArgs.length !== expectedLength) {
+    return usage(
+      context.stderr,
+      'zterm slot set <slot> [--device <nameOrId>] [--session <name>] [--alias <name>] [--width-mode adaptive-phone|mirror-fixed]',
+    );
   }
 
   const result = await slotSetCommand({
@@ -891,6 +938,9 @@ async function runSlot(args: string[], context: MainContext): Promise<number> {
     renderPreview: (snapshot, target) =>
       renderSnapshotPreview(snapshot, target, context.stdout),
     slot,
+    ...(deviceValue === undefined ? {} : { device: deviceValue }),
+    ...(sessionValue === undefined ? {} : { session: sessionValue }),
+    ...(aliasValue === undefined ? {} : { alias: aliasValue }),
     ...(widthValue === undefined ? {} : { widthMode: widthValue }),
     signal: context.signal,
   });
@@ -1007,6 +1057,329 @@ function usage(stderr: Writable, detail: string): number {
   return 2;
 }
 
+async function resolveRemoteTarget(
+  target: { slot?: number; device?: string },
+  context: MainContext,
+): Promise<{
+  account: AuthenticatedAccount;
+  server: SlotServerChoice;
+  boundBinding?: CliSlotBinding;
+} | { errorExitCode: number }> {
+  let boundBinding: CliSlotBinding | undefined;
+  if (target.slot !== undefined) {
+    const resolved = await resolveSlotCommand({
+      store: context.store,
+      slot: target.slot,
+      signal: context.signal,
+    });
+    if (resolved.kind !== 'ok') {
+      if (resolved.kind === 'cancelled') {
+        writeLine(context.stderr, '读取槽位已取消。');
+        return { errorExitCode: 130 };
+      }
+      printCommandFailure(resolved, context.stderr);
+      return { errorExitCode: commandExitCode(resolved) };
+    }
+    boundBinding = resolved.value.binding;
+  }
+
+  const auth = await readStoredCliAuth(context.store, context.signal);
+  if (!auth) {
+    writeLine(context.stderr, '尚未登录或本机登录态缺少服务器配置。');
+    writeLine(context.stderr, '请先运行 zterm login。');
+    return { errorExitCode: 1 };
+  }
+
+  const account = await refreshAuthenticatedAccount(auth, context.accountClient, context.signal);
+  const servers = serverChoices(account.directory);
+
+  if (target.device !== undefined) {
+    const matched = matchServerChoice(servers, target.device);
+    if (matched.kind === 'error') {
+      writeLine(context.stderr, matched.message);
+      writeLine(context.stderr, '请运行 zterm list 查看可用设备名称或 deviceId。');
+      return { errorExitCode: 1 };
+    }
+    return { account, server: matched.server, boundBinding };
+  }
+
+  if (boundBinding) {
+    const matchedById = servers.find(
+      (s) =>
+        s.deviceId === boundBinding.server.deviceId
+        && s.daemonHostId === boundBinding.server.daemonHostId,
+    );
+    if (!matchedById) {
+      writeLine(context.stderr, '槽位绑定的服务器已变化或当前不可从账号访问。');
+      writeLine(context.stderr, '请运行 zterm list 或重新运行 zterm slot set <slot>。');
+      return { errorExitCode: 1 };
+    }
+    return { account, server: matchedById, boundBinding };
+  }
+
+  writeLine(context.stderr, '请指定 <slot> 或 --device <nameOrId>。');
+  return { errorExitCode: 2 };
+}
+
+function splitTargetArgs(
+  args: readonly string[],
+  usageText: string,
+): { slot?: number; device?: string; rest: string[] } | UsageError {
+  if (args.length === 0) return usageFailure(usageText);
+  if (args[0] === '--device') {
+    if (!args[1] || args[1].startsWith('--')) return usageFailure(usageText);
+    return { device: args[1], rest: args.slice(2) };
+  }
+  const slot = parseSlot(args[0]);
+  if (slot === undefined) return usageFailure(usageText);
+  return { slot, rest: args.slice(1) };
+}
+
+async function runSession(args: string[], context: MainContext): Promise<number> {
+  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') {
+    write(context.stdout, SESSION_HELP);
+    return 0;
+  }
+  const [subcommand, ...rest] = args;
+  const action = subcommand === 'rm' || subcommand === 'kill' ? 'delete' : subcommand;
+  if (action !== 'list' && action !== 'create' && action !== 'delete') {
+    return usage(context.stderr, 'zterm session list|create|delete ...');
+  }
+  if (hasHelp(rest)) {
+    write(context.stdout, SESSION_HELP);
+    return 0;
+  }
+
+  const parsedTarget = splitTargetArgs(
+    rest,
+    `zterm session ${action} <slot|--device <nameOrId>>${action === 'list' ? '' : ' <sessionName>'}`,
+  );
+  if (isUsageError(parsedTarget)) return usage(context.stderr, parsedTarget.usageMessage);
+
+  let sessionName: string | undefined;
+  let cwd: string | undefined;
+  if (action === 'list') {
+    if (parsedTarget.rest.length !== 0) {
+      return usage(context.stderr, 'zterm session list <slot|--device <nameOrId>>');
+    }
+  } else if (action === 'create') {
+    sessionName = parsedTarget.rest[0];
+    if (!sessionName || sessionName.startsWith('--')) {
+      return usage(context.stderr, 'zterm session create <slot|--device <nameOrId>> <sessionName> [--cwd <path>]');
+    }
+    const cwdOption = optionValue(parsedTarget.rest.slice(1), '--cwd');
+    if (isUsageError(cwdOption)) return usage(context.stderr, cwdOption.usageMessage);
+    cwd = cwdOption;
+    if (parsedTarget.rest.slice(1).length !== (cwd === undefined ? 0 : 2)) {
+      return usage(context.stderr, 'zterm session create <slot|--device <nameOrId>> <sessionName> [--cwd <path>]');
+    }
+  } else {
+    sessionName = parsedTarget.rest[0];
+    if (!sessionName || sessionName.startsWith('--') || parsedTarget.rest.length !== 1) {
+      return usage(context.stderr, 'zterm session delete <slot|--device <nameOrId>> <sessionName>');
+    }
+  }
+
+  const resolved = await resolveRemoteTarget(parsedTarget, context);
+  if ('errorExitCode' in resolved) return resolved.errorExitCode;
+
+  const connection = await context.connectionFactory(
+    resolved.account,
+    {
+      deviceId: resolved.server.deviceId,
+      daemonHostId: resolved.server.daemonHostId,
+    },
+    context.signal,
+  );
+
+  try {
+    const result = action === 'list'
+      ? await connection.listSessions({}, context.signal)
+      : action === 'create'
+        ? await connection.createSession({ sessionName: sessionName!, ...(cwd ? { cwd } : {}) }, context.signal)
+        : await connection.killSession({ sessionName: sessionName! }, context.signal);
+
+    if (action === 'create') {
+      writeLine(context.stdout, `已创建 session：${sessionName}`);
+    } else if (action === 'delete') {
+      writeLine(context.stdout, `已删除 session：${sessionName}`);
+    }
+    const catalog = sessionChoices(sessionCatalog(result));
+    if (catalog.length === 0) {
+      if (result.sessions.length === 0) {
+        writeLine(context.stdout, '（无活跃 session）');
+      } else {
+        for (const name of result.sessions) {
+          writeLine(context.stdout, `  - ${name}`);
+        }
+      }
+    } else {
+      for (const session of catalog) {
+        writeLine(context.stdout, `  - ${session.name} (${session.backend}, ${session.stableId})`);
+      }
+    }
+    return 0;
+  } finally {
+    try {
+      await connection.close('session-command-complete');
+    } catch {
+      // Best-effort close.
+    }
+  }
+}
+
+async function runExec(args: string[], context: MainContext): Promise<number> {
+  if (args.length === 0 || hasHelp(args)) {
+    write(context.stdout, EXEC_HELP);
+    return 0;
+  }
+
+  let slot: number | undefined;
+  let device: string | undefined;
+  let sessionQuery: string | undefined;
+  let timeoutMs: number | undefined;
+  const commandParts: string[] = [];
+
+  let i = 0;
+  while (i < args.length) {
+    const arg = args[i]!;
+    if (arg === '--') {
+      commandParts.push(...args.slice(i + 1));
+      break;
+    }
+    if (arg === '--device') {
+      const next = args[i + 1];
+      if (!next) return usage(context.stderr, 'zterm exec --device <nameOrId> ...');
+      device = next;
+      i += 2;
+      continue;
+    }
+    if (arg === '--session') {
+      const next = args[i + 1];
+      if (!next) return usage(context.stderr, 'zterm exec ... --session <name> ...');
+      sessionQuery = next;
+      i += 2;
+      continue;
+    }
+    if (arg === '--timeout') {
+      const next = args[i + 1];
+      const parsed = next ? Number(next) : Number.NaN;
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        return usage(context.stderr, '--timeout 必须是正整数（毫秒）。');
+      }
+      timeoutMs = parsed;
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--')) {
+      return usage(context.stderr, `未知选项：${arg}`);
+    }
+    if (slot === undefined && device === undefined && /^\d+$/.test(arg)) {
+      const parsedSlot = parseSlot(arg);
+      if (parsedSlot === undefined) {
+        return usage(context.stderr, '槽位编号必须是大于等于 1 的整数。');
+      }
+      slot = parsedSlot;
+      i += 1;
+      continue;
+    }
+    commandParts.push(...args.slice(i));
+    break;
+  }
+
+  const command = commandParts.join(' ').trim();
+  if ((slot === undefined && device === undefined) || !command) {
+    return usage(
+      context.stderr,
+      'zterm exec <slot|--device <nameOrId>> [--session <name>] [--timeout <ms>] [--] <command...>',
+    );
+  }
+
+  const resolved = await resolveRemoteTarget({ slot, device }, context);
+  if ('errorExitCode' in resolved) return resolved.errorExitCode;
+
+  const connection = await context.connectionFactory(
+    resolved.account,
+    {
+      deviceId: resolved.server.deviceId,
+      daemonHostId: resolved.server.daemonHostId,
+    },
+    context.signal,
+  );
+
+  let selectedSession: CliSlotBinding['session'];
+  if (sessionQuery !== undefined || resolved.boundBinding === undefined) {
+    let sessions: SlotSessionTarget[];
+    try {
+      sessions = sessionChoices(sessionCatalog(await connection.listSessions({}, context.signal)));
+    } catch (error) {
+      try {
+        await connection.close('exec-list-failed');
+      } catch {}
+      throw error;
+    }
+    if (sessions.length === 0) {
+      try {
+        await connection.close('exec-no-sessions');
+      } catch {}
+      writeLine(context.stderr, '目标机器没有可用 session，请先用 zterm session create 创建。');
+      return 1;
+    }
+    if (sessionQuery !== undefined) {
+      const matched = matchSessionChoice(sessions, sessionQuery);
+      if (matched.kind === 'error') {
+        try {
+          await connection.close('exec-session-not-found');
+        } catch {}
+        writeLine(context.stderr, matched.message);
+        return 1;
+      }
+      selectedSession = matched.session;
+    } else if (sessions.length === 1) {
+      selectedSession = sessions[0]!;
+    } else {
+      try {
+        await connection.close('exec-session-ambiguous');
+      } catch {}
+      writeLine(
+        context.stderr,
+        `目标机器存在多个 session（${sessions.map((s) => s.name).join(', ')}），请使用 --session <name> 指定。`,
+      );
+      return 2;
+    }
+  } else {
+    selectedSession = resolved.boundBinding.session;
+  }
+
+  const execBinding: CliSlotBinding = {
+    account: {
+      relayBaseUrl: resolved.account.relayBaseUrl,
+      userId: resolved.account.user.id,
+    },
+    server: {
+      deviceId: resolved.server.deviceId,
+      daemonHostId: resolved.server.daemonHostId,
+      displayName: resolved.server.displayName,
+    },
+    session: selectedSession,
+    widthMode: 'mirror-fixed',
+  };
+
+  const result = await context.runExec({
+    binding: execBinding,
+    connection,
+    command,
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    stdout: context.stdout,
+    stderr: context.stderr,
+    signal: context.signal,
+  });
+  if (result.message) {
+    writeLine(context.stderr, result.message);
+  }
+  return result.exitCode;
+}
+
 async function dispatch(argv: string[], context: MainContext): Promise<number> {
   if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
     write(context.stdout, HELP);
@@ -1060,6 +1433,10 @@ async function dispatch(argv: string[], context: MainContext): Promise<number> {
   switch (command) {
     case 'list':
       return runSlotList(args, context);
+    case 'exec':
+      return runExec(args, context);
+    case 'session':
+      return runSession(args, context);
     case 'login':
       return runLogin(args, context);
     case 'logout':
@@ -1102,6 +1479,7 @@ export async function runMain(
     daemonStatus: options.daemonStatus ?? getDaemonStatus,
     daemonConfig: options.daemonConfig ?? getDaemonConfig,
     runTerminal: options.runTerminal ?? runTerminalSession,
+    runExec: options.runExec ?? runExecSession,
   };
 
   try {
